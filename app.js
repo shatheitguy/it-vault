@@ -1258,6 +1258,21 @@ document.getElementById('modCatAdd').onclick=async()=>{
   const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,manufacturer_id:mid})});
   if(r&&r.ok){el.value='';loadCatModels();}
 };
+document.getElementById('catImportBtn').onclick=()=>document.getElementById('catImportFile').click();
+document.getElementById('catImportFile').onchange=async()=>{
+  const inp=document.getElementById('catImportFile');
+  const file=inp.files[0]; if(!file)return;
+  const fd=new FormData(); fd.append('file',file);
+  const r=await api('/api/catalog/import',{method:'POST',body:fd});
+  inp.value='';
+  const j=r?await r.json().catch(()=>({})):{};
+  if(r&&r.ok){
+    toast(`✓ imported: ${j.categories||0} categories, ${j.manufacturers||0} manufacturers, ${j.models||0} models`);
+    loadCatalog();
+  } else {
+    toast('✕ '+(j.error||'import failed'));
+  }
+};
 
 // ---------- Tickets (osTicket-style) ----------
 let _usersCache=null;

@@ -934,6 +934,66 @@ def import_excel():
     c.commit(); c.close()
     return jsonify({"ok": True, "added": added, "updated": updated})
 
+@app.route("/api/catalog/import", methods=["POST"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def import_catalog():
+    """Bulk-add Item Categories / Manufacturers / Models from an uploaded
+    .xlsx/.xls/.csv sheet with Category / Manufacturer / Model columns (any
+    subset -- a row can fill in just one of them, or a Manufacturer+Model
+    pair). Existing entries are skipped, not duplicated."""
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    f = request.files["file"]
+    fname = (f.filename or "").lower()
+    raw = f.read()
+    if fname.endswith(".csv"):
+        import csv as _csv, io as _io
+        text = raw.decode("utf-8-sig", errors="replace")
+        rows = list(_csv.reader(_io.StringIO(text)))
+    else:
+        wb = load_workbook(io.BytesIO(raw), data_only=True); ws = wb.active
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    if not rows:
+        return jsonify({"error": "empty file"}), 400
+    header = [str(h).strip() if h else "" for h in rows[0]]
+    def hidx(*names):
+        for n in names:
+            for i, h in enumerate(header):
+                if h.lower() == n.lower():
+                    return i
+        return -1
+    ci, mi, di = hidx("Category", "Item Category", "Type"), hidx("Manufacturer", "Brand"), hidx("Model")
+    if ci < 0 and mi < 0 and di < 0:
+        return jsonify({"error": "no Category / Manufacturer / Model column found in the header row"}), 400
+    def gv(row, idx):
+        if idx < 0 or idx >= len(row) or row[idx] is None:
+            return ""
+        return str(row[idx]).strip()
+    c = conn(); cur = c.cursor()
+    added_cat = added_mfr = added_mod = 0
+    mfr_id_cache = {}
+    for row in rows[1:]:
+        if row is None or all(v is None or str(v).strip() == "" for v in row):
+            continue
+        cat, mfr, mod = gv(row, ci), gv(row, mi), gv(row, di)
+        if cat:
+            cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [cat])
+            if cur.rowcount: added_cat += 1
+        mfr_id = None
+        if mfr:
+            if mfr not in mfr_id_cache:
+                cur.execute("INSERT IGNORE INTO Manufacturers (name) VALUES (%s)", [mfr])
+                if cur.rowcount: added_mfr += 1
+                cur.execute("SELECT id FROM Manufacturers WHERE name=%s", [mfr])
+                mrow = cur.fetchone()
+                mfr_id_cache[mfr] = mrow["id"] if mrow else None
+            mfr_id = mfr_id_cache[mfr]
+        if mod:
+            cur.execute("INSERT IGNORE INTO Models (name, manufacturer_id) VALUES (%s, %s)", [mod, mfr_id])
+            if cur.rowcount: added_mod += 1
+    c.commit(); c.close()
+    return jsonify({"ok": True, "categories": added_cat, "manufacturers": added_mfr, "models": added_mod})
+
 @app.route("/api/export")
 @auth_required()
 def export_excel():

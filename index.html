@@ -126,8 +126,11 @@
     <div id="page-catalog" style="display:none">
       <div class="topbar">
         <div><div class="crumb">IT GUY / PRODUCT CATALOG</div><h2>Product Catalog</h2></div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="catImportBtn">⬆ IMPORT EXCEL/CSV</button>
+        <input type="file" id="catImportFile" accept=".xlsx,.xls,.csv" style="display:none">
       </div>
-      <p class="sec-hint">Reference lists used on the Add Asset form -- item categories, manufacturers, and models. Add everything here in bulk, then just pick it from a dropdown when adding an asset.</p>
+      <p class="sec-hint">Reference lists used on the Add Asset form -- item categories, manufacturers, and models. Add everything here in bulk, then just pick it from a dropdown when adding an asset. Import an .xlsx/.xls/.csv with any of these column headers: <b>Category</b>, <b>Manufacturer</b>, <b>Model</b> -- a row can fill in just one, or a Manufacturer+Model pair.</p>
       <div class="grid2 catalog-grid">
         <div class="invbox">
           <label>ITEM CATEGORIES <span id="catCount" class="cat-count"></span></label>
