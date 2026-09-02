@@ -7,6 +7,7 @@ nexus_config.json
 backups/
 invoices/
 logo.png
+logs/
 
 # Real / non-generic sample data
 sample-assets.xlsx

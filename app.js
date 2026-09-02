@@ -139,6 +139,11 @@ function printSelected(){
   </style></head><body><h2>Selected Assets</h2><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);
   win.document.close(); win.print();
 }
+function printQRSelected(){
+  const ids=[...document.querySelectorAll('.row-chk:checked')].map(cb=>cb.dataset.id);
+  if(!ids.length){toast('No assets selected');return;}
+  window.open('/labels?ids='+ids.map(encodeURIComponent).join(','),'_blank');
+}
 function printGroup(safeKey){
   if(!window.__groups)return;
   const k=window.__groupKeys.find(x=>x.replace(/[^a-zA-Z0-9_-]/g,'_')===safeKey);
@@ -377,6 +382,7 @@ function render(){
   const na=document.getElementById('navAdd'); if(na) na.style.display=canEdit()?'':'none';
   const ni=document.getElementById('navImport'); if(ni) ni.style.display=canEdit()?'':'none';
   const pb=document.getElementById('printSelBtn'); if(pb) pb.onclick=printSelected;
+  const qb=document.getElementById('qrSelBtn'); if(qb) qb.onclick=printQRSelected;
   const dsb=document.getElementById('delSelBtn'); if(dsb) dsb.onclick=deleteSelected;
   updateSelBtns();
   // ---- column visibility popover ----

@@ -301,7 +301,7 @@ Themes apply to:
 | GET/PUT | `/api/settings` | admin | read / update system settings |
 | GET | `/api/branding` | public | theme/logo for login+sign |
 | POST | `/api/logo` | admin | upload logo |
-| POST | `/api/settings/test-email` | admin | test SMTP |
+| POST | `/api/settings/smtp-test` | admin | test SMTP |
 | GET/POST | `/api/import` / `/api/export` | rw+ | Excel |
 | GET | `/api/scan` | admin | network scan |
 | GET/POST | `/api/backup` / `/api/backups` / `/api/restore` | admin | backup/restore |

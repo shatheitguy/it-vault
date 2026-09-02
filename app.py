@@ -1598,14 +1598,49 @@ def notify_ticket_assigned(ticket, assignee_user):
     except Exception as e:
         print("assign notify error:", e); return False
 
-@app.route("/api/settings/test-email", methods=["POST"])
+@app.route("/api/settings/smtp-test", methods=["POST"])
 @auth_required([ROLE_ADMIN])
 def test_email():
+    import smtplib
+    from email.message import EmailMessage
     d = request.get_json(force=True) or {}
-    ok = send_notification("IT Guy test", "This is a test notification from IT Guy - The Assets Manager.")
-    if not ok:
-        return jsonify({"ok": False, "error": "SMTP not configured or no user emails set"}), 400
-    return jsonify({"ok": True})
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, app_name FROM Settings WHERE id=1")
+    cur0 = cur.fetchone() or {}
+    cur.execute("SELECT email FROM Users WHERE username=%s", [session.get("user")])
+    ur = cur.fetchone() or {}
+    c.close()
+    def gv(k, fb=""):
+        v = d.get(k)
+        return v if v not in (None, "") else cur0.get(k, fb)
+    host = (gv("smtp_host") or "").strip()
+    if not host:
+        return jsonify({"ok": False, "error": "SMTP host not set"}), 400
+    port = int(gv("smtp_port", 587) or 587)
+    user = (gv("smtp_user") or "").strip()
+    pw = gv("smtp_pass")
+    frm = (gv("smtp_from") or user).strip()
+    to = (ur.get("email") or "").strip() or frm
+    if not to:
+        return jsonify({"ok": False, "msg": "No address to send the test to -- set your own email on your profile, or an SMTP From address"}), 400
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = "IT Guy Assets Manager · SMTP check ✅"
+        msg["From"] = frm
+        msg["To"] = to
+        msg.set_content(
+            "Yo — this is your SMTP test email from IT Guy Assets Manager.\n\n"
+            "If it landed in your inbox, your setup is locked in and ready to send "
+            "real notifications. No cap. \U0001F680\n\n"
+            "Nothing else to do here — you're good to go."
+        )
+        with smtplib.SMTP(host, port, timeout=10) as sv:
+            if user:
+                sv.starttls(); sv.login(user, pw or "")
+            sv.send_message(msg)
+        return jsonify({"ok": True, "msg": f"Sent to {to}"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
 
 # ---------- audit helper ----------
 def audit(actor, action, asset_id, detail):
@@ -1889,6 +1924,143 @@ def label_page(a_id):
 </div></div>
 <div class="no-print" style="text-align:center;margin-top:10px"><button onclick="window.print()">🖨 PRINT LABEL</button></div>
 <script>new QRCode(document.getElementById('qr'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});</script>
+</body></html>"""
+
+@app.route("/labels")
+def labels_page():
+    # Batch version of /label/<id> -- prints one QR label per selected asset on a
+    # single page (?ids=a,b,c), in the order the caller passed them.
+    ids = [i.strip() for i in (request.args.get("ids") or "").split(",") if i.strip()]
+    if not ids:
+        return "No assets specified", 400
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
+    except Exception:
+        lan_ip = "127.0.0.1"
+    base = f"http://{lan_ip}:5000/"
+    c = conn(); cur = c.cursor()
+    placeholders = ",".join(["%s"] * len(ids))
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + f", InvoiceFile FROM Assets WHERE _id IN ({placeholders})", ids)
+    rows = cur.fetchall(); c.close()
+    if not rows:
+        return "No matching assets found", 404
+    by_id = {r["_id"]: row_to_dict(r) for r in rows}
+    ordered = [by_id[i] for i in ids if i in by_id]
+    # QR / label config from Settings (shared by every label on this sheet)
+    try:
+        sc = conn(); scur = sc.cursor()
+        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, logo_text FROM Settings WHERE id=1")
+        srow = scur.fetchone(); sc.close()
+        qr_size = int(srow.get("qr_size") or 160) if srow else 160
+        label_size = (srow.get("label_size") or "50.8x50.8")
+        show_logo = bool(srow.get("label_logo", 1)) if srow else True
+        app_name = (srow.get("app_name") or "Sha The IT Guy") if srow else "Sha The IT Guy"
+    except Exception:
+        qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "Sha The IT Guy"
+    try:
+        lw, lh = label_size.lower().split("x")
+        lw_mm, lh_mm = float(lw), float(lh)
+    except Exception:
+        lw_mm, lh_mm = 50.8, 50.8
+    compact = lh_mm < 35.0
+    pad_mm = 1.5 if compact else 2.5
+    head_mm = 0.0 if compact else 5.5
+    name_mm = 2.6 if compact else 4.0
+    gap_mm = 0.5 if compact else 1.0
+    reserved_mm = pad_mm * 2 + head_mm + name_mm + gap_mm * (1 if compact else 2)
+    avail_h_mm = max(6.0, lh_mm - reserved_mm)
+    qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
+    qr_px = int(qr_mm * 3.78)
+    logo_uri = ""
+    try:
+        lc = conn(); lcur = lc.cursor()
+        lcur.execute("SELECT logo FROM Settings WHERE id=1"); lr = lcur.fetchone(); lc.close()
+        if lr and lr.get("logo"):
+            import base64
+            logo_uri = "data:image/png;base64," + base64.b64encode(lr["logo"]).decode("ascii")
+    except Exception:
+        logo_uri = ""
+    if not logo_uri:
+        try:
+            with open(os.path.join(BASE, "logo.png"), "rb") as fp:
+                import base64
+                logo_uri = "data:image/png;base64," + base64.b64encode(fp.read()).decode("ascii")
+        except Exception:
+            logo_uri = ""
+    chosen = [f.strip() for f in (srow.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location").split(",") if f.strip()] if srow else ["Name","AssetID","Type","Serial","Status","Location"]
+    for forced in ["Type", "AssetID"]:
+        if forced not in chosen:
+            chosen.insert(1 if forced == "Type" else len(chosen), forced)
+    logo_html = f'<img class=logo src="{logo_uri}" alt="">' if (show_logo and logo_uri) else ""
+    boxes_html = ""
+    scripts = ""
+    for idx, asset in enumerate(ordered):
+        field_defs = {
+            "Name": ("Asset", asset.get("Name")),
+            "AssetID": ("Asset ID", asset["_id"][:12]),
+            "Type": ("Category", asset.get("Type")),
+            "Serial": ("Serial", asset.get("Serial")),
+            "Status": ("Status", asset.get("Status")),
+            "Location": ("Location", asset.get("Location")),
+            "ReceivedBy": ("Received By", asset.get("ReceivedBy")),
+            "ReceiverDate": ("Receiver Date", asset.get("NotesReceived")),
+            "EmployeeID": ("Employee ID", asset.get("EmployeeID")),
+            "Department": ("Department", asset.get("Department")),
+            "Warranty": ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"),
+            "PurchaseDate": ("Purchase", asset.get("PurchaseDate")),
+            "Note": ("Note", asset.get("Note")),
+        }
+        rows_html = ""
+        for key in chosen:
+            if key == "Name" or key not in field_defs: continue
+            lbl, val = field_defs[key]
+            if val is None or val == "": continue
+            if compact:
+                rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
+            else:
+                rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
+        head_block = (f'<div class=name>{logo_html}{asset["Name"]}</div>' if compact
+                      else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
+        qr_id = f"qr{idx}"
+        boxes_html += f"""<div class=box>
+ {head_block}
+ <div class=top>
+   <div class=meta>{rows_html}</div>
+   <div id={qr_id} class=qr></div>
+ </div>
+</div>"""
+        scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});"
+    return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
+<style>
+ body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff}}
+ .sheet{{display:flex;flex-wrap:wrap;gap:3mm;padding:20px}}
+ .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
+ .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
+ .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
+ .name .logo{{margin-right:1mm;vertical-align:middle}}
+ .brand{{font-weight:800;font-size:3mm;letter-spacing:0.3mm;text-transform:uppercase}}
+ .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
+ .meta{{flex:1;min-width:0;overflow:hidden}}
+ .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
+ .k{{color:#555;font-size:1.9mm;line-height:1.05}}
+ .v{{font-size:2.4mm;line-height:1.1;margin-bottom:0.5mm;word-break:break-word}}
+ .kv{{font-size:1.7mm;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#333}}
+ .kv b{{color:#555;font-weight:600}}
+ .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ @media print{{
+   @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
+   body{{background:#fff}}
+   .sheet{{padding:0;gap:0}}
+   .box{{border:1px solid #222;page-break-after:always}}
+   .no-print{{display:none}}
+ }}
+</style></head><body>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<div class="no-print" style="text-align:center;margin:10px"><button onclick="window.print()">🖨 PRINT {len(ordered)} LABELS</button></div>
+<div class=sheet>{boxes_html}</div>
+<script>{scripts}</script>
 </body></html>"""
 
 @app.route("/asset/<a_id>")
