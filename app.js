@@ -61,17 +61,24 @@ const TICKET_CATEGORIES=['Hardware','Software','Network','Access/Permissions','E
 let assets=[],sortCol='',sortDir=1,groupBy='',expTimer=null,MY_ROLE=ROLE_VIEW;
 
 const TIMEOUT_MS=5*60*1000;
+let sessEnd=0;
+function resetSessTimer(){ sessEnd=Date.now()+TIMEOUT_MS; }
 function startSessBar(){
   clearInterval(expTimer);
   const bar=document.getElementById('sessBar');
-  const end=Date.now()+TIMEOUT_MS;
+  resetSessTimer();
   const tick=()=>{
-    const left=end-Date.now();
+    const left=sessEnd-Date.now();
     if(left<=0){location.href='/';return;}
     bar.style.width=(left/TIMEOUT_MS*100)+'%';
-    if(left<60000) bar.style.background='linear-gradient(90deg,#ff3860,#ff2bd6)';
+    bar.style.background = left<60000 ? 'linear-gradient(90deg,#ff3860,#ff2bd6)' : '';
   };
   tick(); expTimer=setInterval(tick,1000);
+  // Any real interaction resets the idle clock, so an active user is never
+  // logged out mid-task -- only genuine inactivity triggers the auto-logout.
+  ['mousemove','keydown','click','scroll','touchstart'].forEach(ev=>
+    document.addEventListener(ev, resetSessTimer, {passive:true})
+  );
 }
 
 const cv=document.getElementById('bgCanvas'),ctx=cv.getContext('2d');let W,H,cols,drops;
