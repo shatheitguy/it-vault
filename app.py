@@ -1542,6 +1542,19 @@ def tickets_api():
         return jsonify([dict(r) for r in rows])
     # POST: create ticket
     d = request.get_json(force=True)
+    subject = d.get("subject","").strip()
+    requester = d.get("requester","")
+    description = d.get("description","")
+    # guard against accidental double-submit (e.g. a fast double-click) --
+    # if the exact same ticket was just created seconds ago, return it
+    # instead of inserting a duplicate
+    cur.execute("""SELECT id, code FROM Tickets WHERE subject=%s AND requester=%s AND description=%s
+                   AND created_at > NOW() - INTERVAL 15 SECOND ORDER BY id DESC LIMIT 1""",
+                (subject, requester, description))
+    dup = cur.fetchone()
+    if dup:
+        c.close()
+        return jsonify({"ok": True, "id": dup["id"], "code": dup["code"]})
     code = ticket_code()
     priority = d.get("priority","Normal") or "Normal"
     category = d.get("category","") or ""
@@ -1557,8 +1570,8 @@ def tickets_api():
         due_date = (datetime.now() + timedelta(hours=sla_hours)).strftime("%Y-%m-%d %H:%M:%S")
     cur.execute("""INSERT INTO Tickets (code, subject, description, priority, status, requester, requester_email, assignee, asset_id, due_date, sla_hours, category, source, created_by)
                    VALUES (%s,%s,%s,%s,'Open',%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (code, d.get("subject","").strip(), d.get("description",""), priority,
-                 d.get("requester",""), d.get("requester_email",""), assignee, d.get("asset_id") or None,
+                (code, subject, description, priority,
+                 requester, d.get("requester_email",""), assignee, d.get("asset_id") or None,
                  due_date, sla_hours, category, d.get("source","Web"), session.get("user","?")))
     tid = cur.lastrowid
     c.commit(); c.close()
@@ -1582,6 +1595,14 @@ def portal_create_ticket():
     token = (d.get("token") or "").strip()
     if srow.get("portal_token") and token != srow["portal_token"]:
         c.close(); return jsonify({"error": "invalid or missing token"}), 403
+    requester = (d.get("requester") or "").strip()
+    cur.execute("""SELECT id, code FROM Tickets WHERE subject=%s AND requester=%s AND description=%s
+                   AND created_at > NOW() - INTERVAL 15 SECOND ORDER BY id DESC LIMIT 1""",
+                (subject, requester, description))
+    dup = cur.fetchone()
+    if dup:
+        c.close()
+        return jsonify({"ok": True, "id": dup["id"], "code": dup["code"]})
     code = ticket_code()
     priority = (d.get("priority") or "Normal") or "Normal"
     category = d.get("category","") or ""
@@ -1592,7 +1613,7 @@ def portal_create_ticket():
     cur.execute("""INSERT INTO Tickets (code, subject, description, priority, status, requester, requester_email, assignee, due_date, sla_hours, category, source, created_by)
                    VALUES (%s,%s,%s,%s,'Open',%s,%s,%s,%s,%s,%s,'Portal','portal')""",
                 (code, subject, description, priority,
-                 (d.get("requester") or "").strip(), (d.get("requester_email") or "").strip(),
+                 requester, (d.get("requester_email") or "").strip(),
                  assignee, due_date, sla_hours, category))
     tid = cur.lastrowid
     c.commit(); c.close()

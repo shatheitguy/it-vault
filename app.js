@@ -1494,9 +1494,13 @@ async function openNewTicket(){
      <div class="invbox"><label>LINKED ASSET ID (optional)</label><input id="t_asset" placeholder="e.g. a1b2c3... (leave blank if none)"></div>`;
   document.getElementById('tkFormModal').classList.add('show');
 }
+let savingTicket=false;
 async function saveNewTicket(){
+  if(savingTicket)return;
   const subject=document.getElementById('t_subject').value.trim();
   if(!subject){toast('✕ subject required');return;}
+  const btn=document.getElementById('tkFormSave');
+  savingTicket=true; if(btn){btn.disabled=true;btn.textContent='CREATING…';}
   const body={
     subject,
     description:document.getElementById('t_desc').value.trim(),
@@ -1508,9 +1512,13 @@ async function saveNewTicket(){
     asset_id:document.getElementById('t_asset').value.trim()||null,
     source:'Web'
   };
-  const r=await api('/api/tickets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){document.getElementById('tkFormModal').classList.remove('show');toast('✓ TICKET CREATED');loadTickets();}
-  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+  try{
+    const r=await api('/api/tickets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r&&r.ok){document.getElementById('tkFormModal').classList.remove('show');toast('✓ TICKET CREATED');loadTickets();}
+    else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+  } finally {
+    savingTicket=false; if(btn){btn.disabled=false;btn.textContent='CREATE TICKET';}
+  }
 }
 window.openNewTicket=openNewTicket;
 window.openTicket=openTicket;
