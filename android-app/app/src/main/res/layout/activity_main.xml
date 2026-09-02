@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <!-- ===== Server setup screen (shown until a server is configured, same idea as Nextcloud's) ===== -->
+    <LinearLayout
+        android:id="@+id/setupGroup"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:padding="32dp"
+        android:visibility="visible">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/app_name"
+            android:textColor="@color/accent"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/setup_title"
+            android:textColor="@color/text"
+            android:textSize="16sp"
+            android:layout_marginBottom="10dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/setup_hint"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:layout_marginBottom="24dp" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/server_address_label"
+            app:boxBackgroundColor="@color/surface"
+            app:hintTextColor="@color/muted"
+            app:boxStrokeColor="@color/accent">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/serverInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="textUri"
+                android:imeOptions="actionGo"
+                android:textColor="@color/text"
+                android:textColorHint="@color/muted"
+                android:hint="@string/server_address_placeholder" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:id="@+id/setupError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/accent"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/connectBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:backgroundTint="@color/accent"
+            android:text="@string/connect_button" />
+
+        <ProgressBar
+            android:id="@+id/setupProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:visibility="gone"
+            android:indeterminateTint="@color/accent" />
+    </LinearLayout>
+
+    <!-- ===== Main app (WebView pointed at the configured server) ===== -->
+    <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+        android:id="@+id/swipeRefresh"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:visibility="gone">
+
+        <WebView
+            android:id="@+id/webView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+    <ProgressBar
+        android:id="@+id/pageProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:layout_gravity="top"
+        android:max="100"
+        android:progressTint="@color/accent"
+        android:visibility="gone" />
+</FrameLayout>
