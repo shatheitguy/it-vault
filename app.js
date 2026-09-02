@@ -1218,18 +1218,21 @@ async function loadCatalog(){
 }
 async function loadCatCategories(){
   const r=await api('/api/categories'); const list=r?await r.json():[];
-  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td><button class="btn sm danger" onclick="delCatalogItem('categories','${c.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('categories','${c.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('catCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatManufacturers(){
   const r=await api('/api/manufacturers'); const list=r?await r.json():[];
-  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td><button class="btn sm danger" onclick="delCatalogItem('manufacturers','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('manufacturers','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('mfrCatCount').textContent=list.length?`(${list.length})`:'';
   const sel=document.getElementById('modMfrSelect');
   const cur=sel.value;
   sel.innerHTML='<option value="">-- choose manufacturer --</option>'+list.map(m=>`<option value="${m.id}" ${String(m.id)===cur?'selected':''}>${esc(m.name)}</option>`).join('');
 }
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
-  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.manufacturer||'—')}</td><td><button class="btn sm danger" onclick="delCatalogItem('models','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.manufacturer||'—')}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('models','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  document.getElementById('modCatCount').textContent=list.length?`(${list.length})`:'';
 }
 async function delCatalogItem(kind,id){
   if(!confirm('Delete this '+kind.slice(0,-1)+'? Assets already using it keep their saved value.'))return;

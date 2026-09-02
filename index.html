@@ -128,26 +128,26 @@
         <div><div class="crumb">IT GUY / PRODUCT CATALOG</div><h2>Product Catalog</h2></div>
       </div>
       <p class="sec-hint">Reference lists used on the Add Asset form -- item categories, manufacturers, and models. Add everything here in bulk, then just pick it from a dropdown when adding an asset.</p>
-      <div class="grid2" style="align-items:start">
+      <div class="grid2 catalog-grid">
         <div class="invbox">
-          <label>ITEM CATEGORIES</label>
-          <div class="invrow"><input id="catInput" placeholder="e.g. Laptop"><button class="btn sm" id="catAdd">＋ ADD</button></div>
-          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th></th></tr></thead><tbody id="catBody"></tbody></table></div>
+          <label>ITEM CATEGORIES <span id="catCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="catInput" placeholder="e.g. Mobile, Network, CCTV"><button class="btn sm" id="catAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="catBody"></tbody></table></div>
         </div>
         <div class="invbox">
-          <label>MANUFACTURERS</label>
-          <div class="invrow"><input id="mfrCatInput" placeholder="e.g. Dell"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
-          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
+          <label>MANUFACTURERS <span id="mfrCatCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="mfrCatInput" placeholder="e.g. Apple, Dell, HP"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
         </div>
       </div>
       <div class="invbox" style="margin-top:14px">
-        <label>MODELS</label>
-        <div class="invrow">
-          <select id="modMfrSelect" style="max-width:240px"><option value="">-- choose manufacturer --</option></select>
-          <input id="modCatInput" placeholder="e.g. Latitude 5420">
+        <label>MODELS <span id="modCatCount" class="cat-count"></span></label>
+        <div class="catrow">
+          <select id="modMfrSelect"><option value="">-- choose manufacturer --</option></select>
+          <input id="modCatInput" placeholder="e.g. iPhone 13 Pro Max">
           <button class="btn sm" id="modCatAdd">＋ ADD</button>
         </div>
-        <div class="tablewrap"><table class="dtable"><thead><tr><th>Model</th><th>Manufacturer</th><th></th></tr></thead><tbody id="modCatBody"></tbody></table></div>
+        <div class="tablewrap"><table class="dtable"><thead><tr><th>Model</th><th>Manufacturer</th><th class="col-del"></th></tr></thead><tbody id="modCatBody"></tbody></table></div>
       </div>
     </div>
 

@@ -203,6 +203,15 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .scan-hint{margin:8px 0 0;font-size:12px}
 .scan-status{min-height:16px;margin:10px 0 8px}
 
+/* Product Catalog page */
+.catalog-grid{gap:14px}
+.cat-count{color:var(--muted);font-size:11px;font-weight:500;text-transform:none;letter-spacing:0;margin-left:4px}
+.catrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:10px}
+.catrow input{flex:1 1 160px;min-width:120px;width:auto}
+.catrow select{flex:1 1 180px;min-width:160px}
+.catrow button{flex:0 0 auto}
+.dtable .col-del{width:1%;white-space:nowrap}
+
 /* compact data tables inside modals (audit, maintenance, scan, backups) */
 .modal-box .tablewrap{border-radius:var(--radius);max-height:min(46vh,380px);box-shadow:none;max-width:100%}
 .muted{color:var(--muted)}
