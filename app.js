@@ -170,13 +170,21 @@ let employees=[];
 async function loadEmployees(){
   const r=await api('/api/employees'); employees=r?await r.json():[];
   const q=(document.getElementById('empSearch').value||'').trim().toLowerCase();
-  const list=(employees||[]).filter(e=>[e.EmployeeName,e.EmployeeID,e.Department,e.Designation,e.Email].some(v=>(v||'').toLowerCase().includes(q)));
+  const list=(employees||[]).filter(e=>[e.EmployeeName,e.EmployeeID,e.EmpCode,e.Department,e.Designation,e.Email].some(v=>(v||'').toLowerCase().includes(q)));
   renderEmployees(list);
+}
+function tempEmpId(e){
+  // No real HR-assigned employee number is synced from AD (EmployeeID there is
+  // just the AD username) -- derive a stable placeholder ID from the row's
+  // internal _id so it stays put across searches/re-renders/sort order.
+  const h=(e._id||'').replace(/-/g,'').slice(-6).toUpperCase()||'000000';
+  return 'EMP-'+h;
 }
 function renderEmployees(list){
   const tbody=document.getElementById('empBody');
   document.getElementById('empEmpty').style.display=list.length?'none':'block';
   tbody.innerHTML=list.map(e=>`<tr>
+    <td class="${e.EmpCode?'':'muted'} mono">${esc(e.EmpCode)||tempEmpId(e)}</td>
     <td>${esc(e.EmployeeID)}</td>
     <td>${esc(e.EmployeeName)}</td>
     <td>${esc(e.Department)}</td>
@@ -201,6 +209,9 @@ let editingEmpId=null;
 function openEmpModal(id){
   editingEmpId=id; const e=(id?employees.find(x=>x._id===id):{})||{};
   document.getElementById('empModalTitle').textContent=id?'EDIT EMPLOYEE':'ADD EMPLOYEE';
+  const empIdEl=document.getElementById('e_EmpCode');
+  empIdEl.value=e.EmpCode||'';
+  empIdEl.placeholder=id?('auto: '+tempEmpId(e)):'auto-generated if left blank';
   document.getElementById('e_EmployeeID').value=e.EmployeeID||'';
   document.getElementById('e_EmployeeName').value=e.EmployeeName||'';
   document.getElementById('e_Department').value=e.Department||'';
@@ -211,6 +222,7 @@ function openEmpModal(id){
 async function saveEmployee(){
   const body={
     EmployeeID:document.getElementById('e_EmployeeID').value.trim(),
+    EmpCode:document.getElementById('e_EmpCode').value.trim(),
     EmployeeName:document.getElementById('e_EmployeeName').value.trim(),
     Department:document.getElementById('e_Department').value.trim(),
     Designation:document.getElementById('e_Designation').value.trim(),

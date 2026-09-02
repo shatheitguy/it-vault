@@ -58,7 +58,7 @@
         <input id="empSearch" placeholder="Search name, ID, department…">
       </div>
       <div class="tablewrap">
-        <table id="empGrid"><thead><tr><th>EMP ID</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
+        <table id="empGrid"><thead><tr><th>EMP ID</th><th>USERNAME</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
         <div class="empty" id="empEmpty" style="display:none">NO EMPLOYEES // add manually or pull from LDAP</div>
       </div>
     </div>
@@ -526,7 +526,8 @@
 <div class="modal" id="empModal"><div class="modal-box">
   <h3 id="empModalTitle">ADD EMPLOYEE</h3>
   <div class="grid2">
-    <div class="field2"><label>Employee ID</label><input id="e_EmployeeID"></div>
+    <div class="field2"><label>Emp ID</label><input id="e_EmpCode" placeholder="e.g. 1024 or STAFF-045"></div>
+    <div class="field2"><label>Username</label><input id="e_EmployeeID" placeholder="AD/login username, or any unique ID"></div>
     <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
     <div class="field2"><label>Department</label><input id="e_Department"></div>
     <div class="field2"><label>Designation</label><input id="e_Designation"></div>

@@ -350,6 +350,12 @@ def migrate_schema():
         cur.execute("ALTER TABLE Assets ADD COLUMN Price DECIMAL(12,2) DEFAULT 0")
     except Exception:
         pass
+    # Employees: real editable staff/HR ID, separate from EmployeeID (which
+    # holds the AD/login username for LDAP-synced staff)
+    try:
+        cur.execute("ALTER TABLE Employees ADD COLUMN EmpCode VARCHAR(64) DEFAULT ''")
+    except Exception:
+        pass
     # avatar column may be too small for base64 photos -> enlarge if needed
     try:
         cur.execute("SELECT avatar FROM Users LIMIT 1")
@@ -522,6 +528,7 @@ def create_employee():
     emp = {
         "_id": uuid.uuid4().hex,
         "EmployeeID": data.get("EmployeeID") or "",
+        "EmpCode": data.get("EmpCode") or "",
         "EmployeeName": data.get("EmployeeName") or "",
         "Designation": data.get("Designation") or "",
         "Department": data.get("Department") or "",
@@ -529,9 +536,9 @@ def create_employee():
         "source": "manual"
     }
     c = conn(); cur = c.cursor()
-    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmployeeName, Designation, Department, Email, source)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                (emp["_id"], emp["EmployeeID"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["source"]))
+    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+                (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["source"]))
     c.commit(); c.close()
     return jsonify(emp)
 
@@ -543,9 +550,9 @@ def update_employee(e_id):
     cur.execute("SELECT _id FROM Employees WHERE _id=%s", [e_id])
     if not cur.fetchone():
         c.close(); return jsonify({"error": "not found"}), 404
-    cur.execute("""UPDATE Employees SET EmployeeID=%s, EmployeeName=%s, Designation=%s, Department=%s, Email=%s
+    cur.execute("""UPDATE Employees SET EmployeeID=%s, EmpCode=%s, EmployeeName=%s, Designation=%s, Department=%s, Email=%s
                    WHERE _id=%s""",
-                (data.get("EmployeeID") or "", data.get("EmployeeName") or "", data.get("Designation") or "",
+                (data.get("EmployeeID") or "", data.get("EmpCode") or "", data.get("EmployeeName") or "", data.get("Designation") or "",
                  data.get("Department") or "", data.get("Email") or "", e_id))
     c.commit(); c.close()
     return jsonify({"ok": True})
