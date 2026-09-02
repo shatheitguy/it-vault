@@ -1,6 +1,6 @@
 const APP_VERSION='20260828c';
 const COLUMNS=['Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
-const LABELS={'ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address'};
+const LABELS={'ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
 
 // --- currency: stored base = AED; display converts via rate and shows symbol ---
 const MONEY={AED:{s:'﷼',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
@@ -556,14 +556,14 @@ async function openModal(id,prefill){
   };
   const groups=[
     {label:'IDENTITY',cols:['Name','Type','Serial','MacAddress','Location']},
-    {label:'STATUS &amp; ASSIGNMENT',cols:['Status','ReceivedBy','NotesReceived','EmployeeID']},
     {label:'PURCHASE &amp; WARRANTY',cols:['PurchaseDate','WarrantyMonths','Price']},
+    {label:'STATUS &amp; ASSIGNMENT',cols:['Status','ReceivedBy','NotesReceived','EmployeeID']},
   ];
   document.getElementById('formFields').innerHTML=
-    groups.map(g=>`<div class="invbox">
-      <label>${g.label}</label>
-      <div class="grid2">${g.cols.map(renderField).join('')}</div>
-    </div>`).join('')+
+    `<div class="invbox">
+      <label>IDENTITY</label>
+      <div class="grid2">${groups[0].cols.map(renderField).join('')}</div>
+    </div>`+
     `<div class="invbox refbox">
        <label>MANUFACTURER &amp; MODEL <a class="mlink" onclick="openRef()">manage ↗</a></label>
        <div class="ref2">
@@ -571,6 +571,10 @@ async function openModal(id,prefill){
          <div><select id="f_Model"><option value="">-- choose model --</option></select></div>
        </div>
      </div>`+
+    groups.slice(1).map(g=>`<div class="invbox">
+      <label>${g.label}</label>
+      <div class="grid2">${g.cols.map(renderField).join('')}</div>
+    </div>`).join('')+
     `<div class="invbox">
       <label>NOTE (optional internal note)</label>
       <textarea id="f_Note" rows="3" placeholder="e.g. bought from X, handed to Y...">${esc(a?a.Note||'':'')}</textarea>
