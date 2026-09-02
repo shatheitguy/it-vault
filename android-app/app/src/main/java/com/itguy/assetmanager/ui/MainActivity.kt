@@ -49,6 +49,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             (f as? Refreshable)?.refresh()
             b.swipeRefresh.isRefreshing = false
         }
+        // Without this, SwipeRefreshLayout only knows how to check its direct child
+        // (a plain FrameLayout, which is never "scrolled"), so it treats every
+        // downward drag anywhere on screen as a pull-to-refresh -- including normal
+        // scrolling inside a fragment's own list/ScrollView. This makes it check the
+        // fragment's *actual* scrollable content instead.
+        b.swipeRefresh.setOnChildScrollUpCallback { _, _ -> canCurrentFragmentScrollUp() }
 
         supportFragmentManager.addOnBackStackChangedListener { updateDrawerLockState() }
 
@@ -56,6 +62,26 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             showFragment(DashboardFragment(), "Dashboard")
             b.navView.setCheckedItem(com.itguy.assetmanager.R.id.nav_dashboard)
         }
+    }
+
+    /** Finds the actual scrollable view inside whichever fragment is showing
+     * (a RecyclerView or a Scroll/NestedScrollView) and asks IT whether it's
+     * scrolled away from the top, instead of asking the FrameLayout wrapper. */
+    private fun canCurrentFragmentScrollUp(): Boolean {
+        val scrollable = findScrollable(b.fragmentContainer) ?: return false
+        return scrollable.canScrollVertically(-1)
+    }
+
+    private fun findScrollable(view: android.view.View): android.view.View? {
+        if (view is androidx.recyclerview.widget.RecyclerView) return view
+        if (view is android.widget.ScrollView) return view
+        if (view is androidx.core.widget.NestedScrollView) return view
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) {
+                findScrollable(view.getChildAt(i))?.let { return it }
+            }
+        }
+        return null
     }
 
     private fun updateDrawerLockState() {
