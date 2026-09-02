@@ -1,0 +1,35 @@
+# --- runtime data / secrets: never commit real org data or credentials ---
+nexus_config.json
+.env
+*.env
+backups/
+invoices/
+logo.png
+
+# --- real / non-generic sample data ---
+sample-assets.xlsx
+screenshots/
+legacy/
+ui_backup_20260901/
+
+# --- local-machine dev tooling (Windows-path-specific, not portable) ---
+run_server.bat
+start-nexus.bat
+start_all.bat
+nexus_spawn.py
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# --- node (test deps only, no package.json tracked) ---
+node_modules/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

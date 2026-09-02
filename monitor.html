@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ticket Monitor</title>
+<style>
+  :root{ --bg:#0a0d13; --comp:#121826; --comp2:#0f1620; --line:#222c3d;
+         --acc:#3b9eff; --acc2:#7c5cff; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
+         --grn:#3ddc97; --red:#ff6b6b; --amber:#ffb454;
+         --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif; }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden}
+  body{font-family:var(--font);background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;transition:background .3s,color .3s}
+  .wrap{display:flex;flex-direction:column;height:100vh;padding:22px 30px 16px}
+  .header{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex:0 0 auto}
+  .header img{height:40px;width:auto;object-fit:contain;border-radius:8px}
+  .header .brand{font-size:22px;font-weight:800;letter-spacing:-.01em}
+  .header .sub{font-size:13px;color:var(--mut);margin-top:1px}
+  .header .spacer{flex:1}
+  .live{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--grn)}
+  .live-dot{width:9px;height:9px;border-radius:50%;background:var(--grn);animation:pulse 1.6s ease-in-out infinite;box-shadow:0 0 0 0 rgba(61,220,151,.5)}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.45;transform:scale(.7)}}
+  .clock{font-family:'Share Tech Mono',monospace;font-size:20px;font-weight:600;margin-left:22px;color:var(--txt);min-width:150px;text-align:right}
+  .clock .date{display:block;font-size:11px;color:var(--mut);font-weight:500;text-align:right;margin-top:1px;font-family:var(--font)}
+
+  .kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;flex:0 0 auto;margin-bottom:18px}
+  .kpi{background:var(--comp);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:4px}
+  .kpi .v{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .kpi .k{font-size:11.5px;color:var(--mut);font-weight:600;letter-spacing:.5px;text-transform:uppercase}
+  .kpi.warn .v{color:var(--amber)}
+  .kpi.crit .v{color:var(--red)}
+  .kpi.ok .v{color:var(--grn)}
+
+  .board{flex:1 1 auto;background:var(--comp);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;min-height:0}
+  .board-head{display:flex;align-items:center;font-size:13px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--mut);margin-bottom:10px;flex:0 0 auto}
+  .board-head .n{margin-left:8px;color:var(--txt)}
+  .board-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+  .trow{display:grid;grid-template-columns:150px 1fr 100px 120px 130px 150px;gap:14px;align-items:center;
+    background:var(--comp2);border:1px solid var(--line);border-left:4px solid var(--line);border-radius:10px;padding:12px 14px;font-size:14.5px}
+  .trow.overdue{border-left-color:var(--red)}
+  .trow.soon{border-left-color:var(--amber)}
+  .trow .code{font-family:'Share Tech Mono',monospace;color:var(--mut);font-size:13px}
+  .trow .subj{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .prio{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-align:center}
+  .prio.Low{background:rgba(138,152,176,.16);color:var(--mut)}
+  .prio.Normal{background:rgba(59,158,255,.16);color:#7cc0ff}
+  .prio.High{background:rgba(255,180,84,.16);color:#ffc879}
+  .prio.Urgent{background:rgba(255,107,107,.16);color:#ff9b9b}
+  .prio.Emergency{background:rgba(255,107,107,.3);color:#ff8585}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;text-align:center}
+  .badge.s_Open{background:rgba(59,158,255,.16);color:#7cc0ff}
+  .badge.s_InProgress{background:rgba(255,180,84,.16);color:#ffc879}
+  .badge.s_Pending{background:rgba(138,152,176,.16);color:var(--mut)}
+  .assignee{color:var(--mut);font-size:13px}
+  .due{font-size:13px;font-variant-numeric:tabular-nums}
+  .due.overdue{color:var(--red);font-weight:700}
+  .due.soon{color:var(--amber);font-weight:600}
+  .empty{color:var(--mut);text-align:center;padding:40px;font-size:15px}
+  .err-banner{background:rgba(255,107,107,.12);border:1px solid var(--red);color:var(--red);padding:10px 14px;border-radius:8px;margin-bottom:14px;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'">
+    <div>
+      <div class="brand" id="brandName">Sha The IT Guy</div>
+      <div class="sub">Ticket Monitor</div>
+    </div>
+    <div class="spacer"></div>
+    <div class="live"><span class="live-dot"></span>Live</div>
+    <div class="clock" id="clock">--:--:--<span class="date" id="clockDate"></span></div>
+  </div>
+
+  <div class="err-banner" id="errBanner"></div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="kOpen">0</div><div class="k">Open</div></div>
+    <div class="kpi crit"><div class="v" id="kUrgent">0</div><div class="k">Urgent</div></div>
+    <div class="kpi crit"><div class="v" id="kOverdue">0</div><div class="k">Overdue</div></div>
+    <div class="kpi warn"><div class="v" id="kUnassigned">0</div><div class="k">Unassigned</div></div>
+    <div class="kpi ok"><div class="v" id="kResolvedToday">0</div><div class="k">Resolved Today</div></div>
+  </div>
+
+  <div class="board">
+    <div class="board-head">Active Tickets <span class="n" id="boardCount"></span></div>
+    <div class="board-body" id="ticketList"></div>
+  </div>
+</div>
+
+<script>
+/* ---- theme (same color math as the rest of the app, so the wallboard matches
+   whatever Customization is configured instead of a hardcoded palette) ---- */
+function hex6(v, fb){
+  var s=String(v==null?'':v).trim();
+  if(/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
+  if(/^#[0-9a-fA-F]{3}$/.test(s)) return ('#'+s[1]+s[1]+s[2]+s[2]+s[3]+s[3]).toLowerCase();
+  return fb;
+}
+function hexRgb(h){ var s=hex6(h,'#000000'); return [parseInt(s.slice(1,3),16),parseInt(s.slice(3,5),16),parseInt(s.slice(5,7),16)]; }
+function shade(h,amt){ var c=hexRgb(h); function f(n){var v=Math.max(0,Math.min(255,Math.round(n+255*amt)));return v.toString(16).padStart(2,'0');} return '#'+f(c[0])+f(c[1])+f(c[2]); }
+function isLightHex(h){ var c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.114)>150; }
+function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
+function muteFor(bgHex,k){ var light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
+function contrastRatio(a,b){ function L(h){var c=hexRgb(h).map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];} var la=L(a),lb=L(b); var hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
+function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; var a=hexRgb(accent),s=hexRgb(surface); var mix=a.map(function(v,i){return Math.round(v*0.65+s[i]*0.35);}); return '#'+mix.map(function(v){return v.toString(16).padStart(2,'0');}).join(''); }
+function applyTheme(b){
+  try{
+    var bgType = b.bg_type==='gradient' ? 'gradient' : 'solid';
+    var bgRaw = String(b.bg||'').trim();
+    var bgA='#0a0d13', bgB='#121826';
+    if(bgType==='gradient'){
+      var found = bgRaw.match(/#[0-9a-fA-F]{3,6}/g) || [];
+      bgA = hex6(found[0],'#0a0d13'); bgB = hex6(found[1],'#121826');
+    }
+    var baseHex = bgType==='gradient' ? bgA : hex6(bgRaw,'#0a0d13');
+    var bgValue = bgType==='gradient' ? ('linear-gradient(135deg, '+bgA+', '+bgB+')') : baseHex;
+    var surface = hex6(b.comp_bg,'#121826');
+    var surfaceLight = isLightHex(surface);
+    var accent = ensureAccentVisible(hex6(b.accent,'#3b9eff'), surface);
+    var accent2 = ensureAccentVisible(hex6(b.accent2,'#7c5cff'), surface);
+    var r = document.documentElement.style;
+    r.setProperty('--bg', bgValue);
+    r.setProperty('--comp', surface);
+    r.setProperty('--comp2', surfaceLight?shade(surface,-0.04):shade(surface,-0.02));
+    r.setProperty('--line', surfaceLight?shade(surface,-0.14):shade(surface,0.10));
+    r.setProperty('--txt', onBg(baseHex));
+    r.setProperty('--mut', muteFor(baseHex,'muted'));
+    r.setProperty('--mut2', muteFor(baseHex,'muted2'));
+    r.setProperty('--acc', accent);
+    r.setProperty('--acc2', accent2);
+  }catch(e){}
+}
+
+function esc(s){ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function parseDT(s){
+  if(!s) return null;
+  var iso = String(s).indexOf('T')>=0 ? s : String(s).replace(' ','T');
+  var d = new Date(iso);
+  return isNaN(d.getTime()) ? null : d;
+}
+function fmtDue(d){
+  if(!d) return '—';
+  return d.toLocaleString(undefined,{month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+function isToday(d){
+  if(!d) return false;
+  var now=new Date();
+  return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
+}
+
+function tick(){
+  var now=new Date();
+  document.getElementById('clock').firstChild.textContent = now.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  document.getElementById('clockDate').textContent = now.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'2-digit'});
+}
+setInterval(tick, 1000); tick();
+
+function render(list){
+  var now = new Date();
+  var active = list.filter(function(t){ return t.status!=='Resolved' && t.status!=='Closed'; });
+  var urgent = active.filter(function(t){ return t.priority==='Urgent' || t.priority==='Emergency'; });
+  var overdue = active.filter(function(t){ var d=parseDT(t.due_date); return d && d<now; });
+  var unassigned = active.filter(function(t){ return !t.assignee; });
+  var resolvedToday = list.filter(function(t){ return (t.status==='Resolved'||t.status==='Closed') && isToday(parseDT(t.updated_at)); });
+
+  document.getElementById('kOpen').textContent = active.length;
+  document.getElementById('kUrgent').textContent = urgent.length;
+  document.getElementById('kOverdue').textContent = overdue.length;
+  document.getElementById('kUnassigned').textContent = unassigned.length;
+  document.getElementById('kResolvedToday').textContent = resolvedToday.length;
+  document.getElementById('boardCount').textContent = active.length ? '('+active.length+')' : '';
+
+  var prioRank = {Emergency:0, Urgent:1, High:2, Normal:3, Low:4};
+  active.sort(function(a,b){
+    var da=parseDT(a.due_date), db=parseDT(b.due_date);
+    var aOver = da && da<now, bOver = db && db<now;
+    if(aOver !== bOver) return aOver ? -1 : 1;
+    var pr = (prioRank[a.priority]||9) - (prioRank[b.priority]||9);
+    if(pr) return pr;
+    if(da && db) return da-db;
+    if(da) return -1;
+    if(db) return 1;
+    return 0;
+  });
+
+  var listEl = document.getElementById('ticketList');
+  if(!active.length){ listEl.innerHTML = '<div class="empty">✓ No active tickets — inbox zero.</div>'; return; }
+  listEl.innerHTML = active.map(function(t){
+    var d = parseDT(t.due_date);
+    var isOver = d && d<now;
+    var isSoon = d && !isOver && (d-now) < 1000*60*60*4;
+    var rowClass = isOver ? 'overdue' : (isSoon ? 'soon' : '');
+    var dueClass = isOver ? 'overdue' : (isSoon ? 'soon' : '');
+    var statusClass = 's_' + (t.status||'').replace(' ','');
+    return '<div class="trow '+rowClass+'">' +
+      '<div class="code">'+esc(t.code)+'</div>' +
+      '<div class="subj" title="'+esc(t.subject)+'">'+esc(t.subject||'')+'</div>' +
+      '<div><span class="prio '+esc(t.priority||'Normal')+'">'+esc(t.priority||'Normal')+'</span></div>' +
+      '<div><span class="badge '+statusClass+'">'+esc(t.status||'')+'</span></div>' +
+      '<div class="assignee">'+esc(t.assignee||'Unassigned')+'</div>' +
+      '<div class="due '+dueClass+'">'+(isOver?'⚠ ':'')+fmtDue(d)+'</div>' +
+    '</div>';
+  }).join('');
+}
+
+var pollTimer=null;
+function loadTickets(){
+  fetch('/api/tickets').then(function(r){
+    if(r.status===401){ document.body.innerHTML='<div class="wrap"><div class="empty" style="margin-top:40vh">Session expired — reopen this page from a signed-in tab.</div></div>'; if(pollTimer)clearInterval(pollTimer); return null; }
+    return r.json();
+  }).then(function(list){
+    if(!list) return;
+    document.getElementById('errBanner').style.display='none';
+    render(list);
+  }).catch(function(){
+    var b=document.getElementById('errBanner'); b.style.display='block'; b.textContent='⚠ Connection lost — retrying…';
+  });
+}
+
+fetch('/api/branding').then(function(r){return r.json()}).then(function(b){
+  var name = b.app_name || 'Sha The IT Guy';
+  document.getElementById('brandName').textContent = name;
+  document.title = name + ' — Ticket Monitor';
+  if(b.logo){ document.getElementById('logo').src='/logo.png?t='+Date.now(); }
+  applyTheme(b);
+}).catch(function(){});
+
+loadTickets();
+pollTimer = setInterval(loadTickets, 10000);
+</script>
+</body>
+</html>

@@ -1,0 +1,43 @@
+# Runtime data / secrets — never bake these into the image. nexus_config.json
+# in particular would override the DB_HOST env var and break DB connectivity
+# inside the container (it would try 127.0.0.1 instead of the db service).
+nexus_config.json
+.env
+*.env
+backups/
+invoices/
+logo.png
+
+# Real / non-generic sample data
+sample-assets.xlsx
+screenshots/
+legacy/
+ui_backup_20260901/
+
+# Local-machine dev tooling, not needed inside the container
+run_server.bat
+start-nexus.bat
+start_all.bat
+nexus_spawn.py
+
+# VCS / editor / OS
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python / node artifacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+node_modules/
+
+# Tests and docs aren't needed at runtime
+docs/
+test_smoke.py
+widget_test.js
+zorder_test.js

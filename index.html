@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IT Guy - The Assets Manager</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css?v=20260901pro">
+</head>
+<body>
+<canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
+<canvas id="sessBar"></canvas>
+<div class="row-menu" id="rowMenu" style="display:none"></div>
+
+<div id="app">
+  <aside class="side">
+    <div class="logo"><img id="sideLogo" src="/logo.png" alt="" onerror="this.style.display='none'"><span id="sideName">IT Guy</span></div>
+    <nav class="nav">
+      <div class="nav-grp">Main</div>
+      <a id="navHome" class="active"><span class="ni">🏠</span>Dashboard</a>
+      <a id="navAssets" data-i18n="Assets"><span class="ni">💻</span>Assets</a>
+      <a id="navEmployees" style="display:none" data-i18n="Employees"><span class="ni">👥</span>Employees</a>
+      <a id="navTickets" data-i18n="Tickets"><span class="ni">🎫</span>Tickets</a>
+
+      <div class="nav-grp">Records</div>
+      <a id="navContracts" data-i18n="Contracts"><span class="ni">📄</span>Contracts</a>
+      <a id="navLocations" data-i18n="Locations"><span class="ni">📍</span>Locations</a>
+      <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Audit Log</a>
+      <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
+
+      <div class="nav-grp">Tools</div>
+      <a id="navScan" style="display:none" data-i18n="NetworkScan"><span class="ni">📡</span>Network Scan</a>
+      <a id="navBackup" style="display:none" data-i18n="BackupRestore"><span class="ni">💾</span>Backup / Restore</a>
+
+      <div class="nav-grp">System</div>
+      <a id="navSettings" data-i18n="Settings"><span class="ni">⚙️</span>Settings</a>
+    </nav>
+    <div class="side-foot">
+      <div class="userbox">
+        <div class="avatar" id="av">A</div>
+        <div><div id="uname">admin</div><div class="mono" style="color:var(--muted);font-size:11px"><span id="roleBadge">ADMIN</span> · ONLINE</div></div>
+      </div>
+      <button class="logout" id="logoutBtn">⏻ LOGOUT</button>
+    </div>
+  </aside>
+
+  <section class="main">
+    <div id="page-employees" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb" id="crumbText">Employees</div><h2 id="dashTitle">Employees</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="addEmpBtn">＋ ADD EMPLOYEE</button>
+        <button class="btn ghost" id="importLdapBtn">⬇ PULL FROM LDAP</button>
+      </div>
+      <p class="sec-hint">Staff records — added manually or synced from Active Directory. Employees are the people assets are issued to; they do not have logins. Sign-in accounts live under Settings &rsaquo; System users.</p>
+      <div class="toolbar">
+        <input id="empSearch" placeholder="Search name, ID, department…">
+      </div>
+      <div class="tablewrap">
+        <table id="empGrid"><thead><tr><th>EMP ID</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
+        <div class="empty" id="empEmpty" style="display:none">NO EMPLOYEES // add manually or pull from LDAP</div>
+      </div>
+    </div>
+
+    <div id="page-trash" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / TRASH (DELETED ASSETS)</div><h2>Recycle Bin</h2></div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="trashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
+        <button class="btn danger" id="trashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
+        <button class="btn danger" id="trashEmptyBtn">🗑 EMPTY TRASH</button>
+      </div>
+      <div class="tablewrap">
+        <table id="trashGrid"><thead><tr><th><input type="checkbox" id="trashChkAll"></th><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th><th></th></tr></thead><tbody id="trashBody"></tbody></table>
+        <div class="empty" id="trashEmpty" style="display:none">TRASH IS EMPTY</div>
+      </div>
+    </div>
+
+    <div id="page-tickets" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / HELPDESK TICKETS</div><h2>Ticket Desk</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="newTicketBtn">＋ NEW TICKET</button>
+        <button class="btn ghost" id="openMonitorBtn">🖥 OPEN MONITOR</button>
+        <button class="btn ghost" id="sharePortalBtn">🔗 SHARE PORTAL LINK</button>
+      </div>
+      <div class="toolbar">
+        <input id="tkSearch" placeholder="⌕ search subject, code, requester…">
+        <select id="tkStatus"><option value="">ALL STATUS</option><option>Open</option><option>In Progress</option><option>Pending</option><option>Resolved</option><option>Closed</option></select>
+      </div>
+      <div class="secthead">ACTIVE TICKETS <span id="tkActiveCount" class="muted mono" style="text-transform:none;font-weight:500"></span></div>
+      <div class="tablewrap">
+        <table id="tkGrid"><thead><tr><th>CODE</th><th>SUBJECT</th><th>PRIORITY</th><th>STATUS</th><th>CATEGORY</th><th>REQUESTER</th><th>ASSIGNEE</th><th>DUE</th><th>REPLIES</th></tr></thead><tbody id="tkBody"></tbody></table>
+        <div class="empty" id="tkEmpty" style="display:none">NO ACTIVE TICKETS</div>
+      </div>
+      <div class="secthead" style="margin-top:22px">TICKET HISTORY <span class="muted" style="text-transform:none;font-weight:500">(Resolved / Closed)</span> <span id="tkClosedCount" class="muted mono" style="text-transform:none;font-weight:500"></span></div>
+      <div class="tablewrap">
+        <table id="tkGridClosed"><thead><tr><th>CODE</th><th>SUBJECT</th><th>PRIORITY</th><th>STATUS</th><th>CATEGORY</th><th>REQUESTER</th><th>ASSIGNEE</th><th>DUE</th><th>REPLIES</th></tr></thead><tbody id="tkBodyClosed"></tbody></table>
+        <div class="empty" id="tkEmptyClosed" style="display:none">NO CLOSED TICKETS</div>
+      </div>
+    </div>
+
+    <div id="page-contracts" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / CONTRACTS (GLPI)</div><h2>Contracts &amp; Warranties</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="newContractBtn">＋ NEW CONTRACT</button>
+      </div>
+      <div class="tablewrap">
+        <table id="ctGrid"><thead><tr><th>NAME</th><th>VENDOR</th><th>TYPE</th><th>START</th><th>END</th><th>COST</th><th>ASSET</th></tr></thead><tbody id="ctBody"></tbody></table>
+        <div class="empty" id="ctEmpty" style="display:none">NO CONTRACTS</div>
+      </div>
+    </div>
+
+    <div id="page-locations" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / LOCATIONS (GLPI)</div><h2>Location Tree</h2></div>
+        <div class="spacer"></div>
+        <input id="locInput" placeholder="New location name"><button class="btn mag" id="newLocBtn">＋ ADD</button>
+      </div>
+      <ul id="locList" class="loclist"></ul>
+    </div>
+
+    <!-- Ticket detail modal -->
+    <!-- New Ticket modal (styled like Add Asset) -->
+    <div class="modal" id="tkFormModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
+      <h3 id="tkFormTitle">NEW TICKET</h3>
+      <div id="tkFormFields"></div>
+      <div class="m-actions"><button class="btn ghost" id="tkFormCancel">CANCEL</button><button class="btn" id="tkFormSave">CREATE TICKET</button></div>
+    </div></div>
+
+    <div class="modal" id="tkModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+      <h3 id="tkModalTitle">TICKET</h3>
+      <div class="assignbar">
+        <label>ASSIGN TO IT</label>
+        <select id="tkAssignee"><option value="">— Unassigned —</option></select>
+        <button class="btn sm" id="tkAssignBtn">ASSIGN</button>
+        <span id="tkAssignMsg" class="muted" style="margin-left:6px"></span>
+      </div>
+      <div id="tkDetail"></div>
+      <div class="replybox">
+        <label>REPLY / UPDATE</label>
+        <textarea id="tkReply" rows="3" placeholder="Type a reply…"></textarea>
+        <button class="btn" id="tkReplyBtn">SEND REPLY</button>
+      </div>
+      <div class="m-actions"><button class="btn ghost" id="tkModalClose">CLOSE</button></div>
+    </div></div>
+
+    <!-- ===================== DASHBOARD (Home) UNIQUEMARKER20260827 ===================== -->
+    <div id="page-dashboard" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / DASHBOARD</div><h2 id="dashTitle">Dashboard</h2></div>
+        <div class="spacer"></div>
+      </div>
+
+      <div class="kpis" id="kpiRow">
+        <div class="kpi c1"><div class="kpi-ico">▣</div><div class="kpi-body"><div class="kpi-v" id="kTotal">0</div><div class="kpi-k">Total Assets</div></div></div>
+        <div class="kpi c2"><div class="kpi-ico">⇄</div><div class="kpi-body"><div class="kpi-v" id="kOut">0</div><div class="kpi-k">Checked Out</div></div></div>
+        <div class="kpi c3"><div class="kpi-ico">🔧</div><div class="kpi-body"><div class="kpi-v" id="kMaint">0</div><div class="kpi-k">Under Maint.</div></div></div>
+        <div class="kpi c4"><div class="kpi-ico">⏳</div><div class="kpi-body"><div class="kpi-v" id="kDue">0</div><div class="kpi-k">Due Soon</div></div></div>
+        <div class="kpi c5"><div class="kpi-ico">🛡</div><div class="kpi-body"><div class="kpi-v" id="kWarr">0</div><div class="kpi-k">Warranty ≤30d</div></div></div>
+      </div>
+
+      <div class="dash-tools" id="dashTools">
+        <button class="btn ghost" id="dashEditLayout">✎ EDIT LAYOUT</button>
+        <button class="btn" id="dashSaveLayout" style="display:none">💾 SAVE LAYOUT</button>
+        <button class="btn ghost" id="dashResetLayout" style="display:none">↺ RESET</button>
+        <span id="dashLayoutMsg" class="muted"></span>
+      </div>
+
+      <div id="dashWidgets">
+        <div class="panel widget" data-wkey="status"><div class="secthead">ASSET STATUS</div><div class="bars" id="statusBars"></div></div>
+        <div class="panel widget" data-wkey="type"><div class="secthead">TOP ASSET TYPES</div><div class="bars" id="typeBars"></div></div>
+        <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
+        <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
+        <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>
+      </div>
+    </div>
+
+    <!-- ===================== ASSET REGISTRY (Assets) ===================== -->
+    <div id="page-assets" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb" id="crumbText">Assets</div><h2 id="dashTitle">Asset Registry</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="addBtn2">+ Add asset</button>
+        <button class="btn ghost" id="importBtn2">Import</button>
+        <button class="btn ghost" id="exportBtn2">Export</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat c1"><div class="k">Total Assets</div><div class="v" id="stTotal">0</div></div>
+        <div class="stat c2"><div class="k">Checked Out</div><div class="v" id="stOut">0</div></div>
+        <div class="stat c3"><div class="k">Under Maint.</div><div class="v" id="stMaint">0</div></div>
+        <div class="stat c4"><div class="k">Due Soon</div><div class="v" id="stDue">0</div></div>
+        <div class="stat c5"><div class="k">Warranty ≤30d</div><div class="v" id="stWarr">0</div></div>
+      </div>
+
+      <div class="toolbar">
+        <input id="search" placeholder="Search name, serial, location, type…">
+        <select id="statusFilter"><option value="">All statuses</option><option>New</option><option>Active</option><option>In Use</option><option>Available</option><option>Checked-Out</option><option>Under-Maintenance</option><option>Storage</option><option>Worn</option><option>Retired</option><option>Out of Service</option></select>
+        <select id="groupBy"><option value="">No grouping</option><option value="ReceivedBy">Received by (employee)</option><option value="EmployeeID">Employee ID</option><option value="Type">Item category (type)</option><option value="Status">Status</option><option value="Location">Location</option></select>
+        <span class="tb-spacer"></span>
+        <div class="count" id="count"></div>
+        <button class="btn sm ghost" id="colToggleBtn">Columns</button>
+        <button class="btn sm ghost" id="printSelBtn">Print selected</button>
+        <button class="btn sm danger" id="delSelBtn" style="display:none">Delete selected</button>
+        <div class="colpop" id="colPop" style="display:none"></div>
+      </div>
+      <div id="undoBar" class="undobar" style="display:none"></div>
+      <div class="hscroll" id="hscroll"><div class="hscroll-in" id="hscrollIn"></div></div>
+      <div class="tablewrap" id="tablewrap">
+        <table id="grid"><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+        <div class="empty" id="empty" style="display:none">No assets yet — import an Excel file or add one manually.</div>
+      </div>
+    </div>
+
+
+    <!-- ===================== USER SETTINGS ===================== -->
+    <div id="page-usettings" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">Settings</div><h2>Settings</h2></div>
+      </div>
+      <div class="cfgwrap">
+        <nav class="cfgnav" id="cfgNav">
+          <button class="cfgitem active" data-sec="general">⚙ General</button>
+          <button class="cfgitem" data-sec="account">🧑 My Account</button>
+          <button class="cfgitem" data-sec="users">👤 Users</button>
+          <button class="cfgitem" data-sec="notif">🔔 Notifications</button>
+          <button class="cfgitem" data-sec="sla">⏱ SLA & Automation</button>
+          <button class="cfgitem" data-sec="database">🗄 Database</button>
+          <button class="cfgitem" data-sec="ldap">🛡 LDAP / AD</button>
+          <button class="cfgitem" data-sec="branding">🏢 Branding</button>
+          <button class="cfgitem" data-sec="custom">🎨 Customization</button>
+          <button class="cfgitem" data-sec="label">🏷 Asset Label</button>
+        </nav>
+        <div class="cfgcontent">
+          <!-- GENERAL -->
+          <section class="cfg-sec" data-sec="general">
+            <div class="panel"><div class="secthead">GENERAL</div><div class="grid2">
+              <div class="field2"><label>Language</label><select id="uLang"><option value="en">English</option><option value="ar">العربية (Arabic)</option><option value="ta">தமிழ் (Tamil)</option><option value="fr">Français</option></select></div>
+              <div class="field2"><label>Currency</label><select id="uCur"><option value="AED">AED — UAE Dirham</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option><option value="INR">INR — Indian Rupee</option></select></div>
+              <div class="field2"><label>Region</label><select id="uRegion"><option value="UAE">United Arab Emirates</option><option value="US">United States</option><option value="GB">United Kingdom</option><option value="IN">India</option><option value="FR">France</option></select></div>
+            </div></div>
+            <div class="panel"><div class="secthead">INTERFACE</div><div class="grid2">
+              <label class="chk"><input type="checkbox" id="uNew"> Notify on new asset created</label>
+              <label class="chk"><input type="checkbox" id="uDel"> Notify on asset deletion</label>
+            </div></div>
+            <div class="m-actions"><button class="btn mag" id="saveUsetBtn">✓ SAVE GENERAL</button></div>
+          </section>
+          <!-- MY ACCOUNT -->
+          <section class="cfg-sec" data-sec="account" style="display:none">
+            <div class="panel"><div class="secthead">MY ACCOUNT</div>
+<div id="profileInfo" class="mono" style="color:var(--muted);margin-bottom:10px"></div>
+    <div class="secthead">AVATAR</div>
+    <div class="refcard" style="margin-bottom:12px">
+      <div class="rc-left"><div id="avatarPrev" class="avatar-prev">A</div></div>
+      <div class="rc-info" id="avatarHint">PNG / JPG — square images look best.</div>
+      <div class="spacer"></div>
+      <input type="file" id="avatarFile" accept="image/*">
+      <button class="btn sm" id="avatarSave">⇪ UPLOAD</button>
+    </div>
+    <div class="field2"><label>Display name</label><input id="pDisplay" placeholder="Full name"></div>
+    <div class="field2"><label>Email (for notifications)</label><input id="p_email" placeholder="you@company.com"></div>
+    <div class="secthead">API KEY</div>
+    <div class="refcard" style="margin-bottom:12px">
+      <input id="pApiKey" class="mono" readonly style="flex:1;min-width:0">
+      <button class="btn sm ghost" id="copyKey">⧉ COPY</button>
+      <button class="btn sm" id="regenKey">↻ REGENERATE</button>
+    </div>
+    <div class="field2"><label>Old password</label><input id="p_old" type="password"></div>
+    <div class="field2"><label>New password</label><input id="p_new" type="password"></div>
+    <div class="field2"><label>Confirm new</label><input id="p_new2" type="password"></div>
+    <div class="m-actions">
+      <button class="btn ghost" id="pPassSave">✓ UPDATE PASSWORD</button>
+      <button class="btn" id="accSave">SAVE ACCOUNT</button>
+    </div>
+    <div class="secthead">SESSION TRACKING</div>
+    <ul class="sesslist" id="pSessions"></ul>
+            </div>
+          </section>
+          <!-- USERS -->
+          <section class="cfg-sec" data-sec="users" style="display:none">
+            <div class="panel"><div class="secthead">SYSTEM USERS</div>
+              <p class="sec-hint">Login accounts for this system — Admin, Editor and Read-only. These are the people who sign in to this app. Staff imported from Active Directory are <b>Employees</b>, not system users, and are managed on the Employees page.</p>
+              <div class="m-actions" style="justify-content:flex-start;margin-bottom:10px"><button class="btn" id="cfgAddUser">＋ ADD USER</button></div>
+              <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Display name</th><th>Email</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
+            </div>
+          </section>
+          <!-- NOTIFICATIONS -->
+          <section class="cfg-sec" data-sec="notif" style="display:none">
+            <div class="panel"><div class="secthead">EMAIL NOTIFICATIONS (SMTP)</div><div class="grid2">
+              <div class="field2"><label>SMTP Host</label><input id="s_host" placeholder="smtp.gmail.com"></div>
+              <div class="field2"><label>Port</label><input id="s_port" value="587"></div>
+              <div class="field2"><label>SMTP User</label><input id="s_user"></div>
+              <div class="field2"><label>SMTP Password / App pw</label><input id="s_pass" type="password"></div>
+              <div class="field2" style="grid-column:1/-1"><label>From</label><input id="s_from"></div>
+            </div>
+            <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="saveSettings">Save notifications</button><button class="btn ghost" id="smtpTestBtn">⚡ TEST EMAIL</button><span id="smtpTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">TICKET EVENT NOTIFICATIONS</div>
+              <label class="toggle"><input type="checkbox" id="notify_on_create"><span>New ticket created</span></label>
+              <label class="toggle"><input type="checkbox" id="notify_on_resolve"><span>Ticket resolved/closed</span></label>
+              <label class="toggle"><input type="checkbox" id="notify_on_reply"><span>Reply added (email requester)</span></label>
+              <p class="muted" style="margin:12px 0 0">All emails sent from the SMTP above. Recipients = users with emails set in their profile.</p>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveNotifBtn">✓ SAVE NOTIFICATIONS</button></div>
+          </section>
+          <!-- SLA & AUTOMATION -->
+          <section class="cfg-sec" data-sec="sla" style="display:none">
+            <div class="panel"><div class="secthead">SLA POLICIES (hours)</div><div class="grid2">
+              <div class="field2"><label>Low Priority (hrs)</label><input id="sla_low" type="number" value="72" min="1"></div>
+              <div class="field2"><label>Normal Priority (hrs)</label><input id="sla_normal" type="number" value="24" min="1"></div>
+              <div class="field2"><label>High Priority (hrs)</label><input id="sla_high" type="number" value="8" min="1"></div>
+              <div class="field2"><label>Urgent Priority (hrs)</label><input id="sla_urgent" type="number" value="4" min="1"></div>
+            </div>
+            <p class="muted" style="margin:12px 0 0">Due date auto-calculated from priority. Overdue tickets highlighted red.</p>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">AUTOMATION</div>
+              <label class="toggle"><input type="checkbox" id="sla_breach_notify"><span>Email alert on SLA breach</span></label>
+              <label class="toggle"><input type="checkbox" id="auto_assign_roundrobin"><span>Auto-assign new tickets (round-robin)</span></label>
+              <p class="muted" style="margin:12px 0 0">Round-robin assigns to admin/editor with fewest open tickets.</p>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveSlaBtn">✓ SAVE SLA SETTINGS</button></div>
+          </section>
+          <!-- DATABASE -->
+          <section class="cfg-sec" data-sec="database" style="display:none">
+            <div class="panel"><div class="secthead">DATABASE (MariaDB)</div>
+              <p class="muted" style="margin:0 0 12px">Point the app at a different MariaDB server / container. Use <b>Test</b> before saving.</p>
+              <div class="grid2">
+                <div class="field2"><label>Host / IP</label><input id="db_host" placeholder="127.0.0.1"></div>
+                <div class="field2"><label>Port</label><input id="db_port" type="number" value="3306"></div>
+                <div class="field2"><label>Database name</label><input id="db_name" placeholder="itguy_assets"></div>
+                <div class="field2"><label>Username</label><input id="db_user" placeholder="itguy"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Password</label><input id="db_pass" type="password" placeholder="leave blank to keep current"></div>
+              </div>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="dbTestBtn" type="button">⚡ TEST CONNECTION</button><span id="dbTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveDbBtn">✓ SAVE DATABASE</button></div>
+          </section>
+          <!-- LDAP -->
+          <section class="cfg-sec" data-sec="ldap" style="display:none">
+            <div class="panel"><div class="secthead">LDAP / ACTIVE DIRECTORY</div>
+              <p class="muted" style="margin:0 0 12px">Connect to your Domain Controller to sync employees. Use <b>Test</b> before saving.</p>
+              <div class="grid2">
+                <div class="field2"><label>LDAP Server (host or ldap://host:389)</label><input id="ldap_server" placeholder="dc01.company.local or ldap://10.0.0.5:389"></div>
+                <div class="field2"><label>Domain</label><input id="ldap_domain" placeholder="company.local"></div>
+                <div class="field2"><label>Bind User</label><input id="ldap_bind_user" placeholder="company\\svc_ldap"></div>
+                <div class="field2"><label>Bind Password</label><input id="ldap_bind_pass" type="password" placeholder="leave blank to keep current"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Base DN</label><input id="ldap_base_dn" placeholder="DC=company,DC=local"></div>
+              </div>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="ldapTestBtn2" type="button">⚡ TEST LDAP</button><button class="btn ghost" id="ldapSyncBtn2" type="button">⇩ SYNC FROM AD NOW</button><span id="ldapTestMsg2" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveLdapBtn">✓ SAVE LDAP</button></div>
+          </section>
+          <!-- BRANDING -->
+          <section class="cfg-sec" data-sec="branding" style="display:none">
+            <div class="panel"><div class="secthead">BRANDING</div>
+            <p class="sec-hint">Your organization's identity across the app — name, logo, and what shows in the sidebar and browser tab. Label printing and appearance/theme have their own sections.</p>
+            <div class="grid2">
+              <div class="field2"><label>App / Company Name</label><input id="b_name" placeholder="Sha The IT Guy"></div>
+              <div class="field2"><label>Logo Text (sidebar)</label><input id="b_logoText" placeholder="Sha"></div>
+              <div class="field2" style="grid-column:1/-1"><label>Logo (PNG, max 500KB)</label><input type="file" id="b_logo" accept="image/png"></div>
+            </div>
+            <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="pm_saveBrand">✓ SAVE BRANDING</button><button class="btn danger" id="removeLogoBtn" type="button">🗑 REMOVE LOGO</button><img id="b_logoPrev" src="/logo.png?t=1" style="height:34px;margin-left:10px"></div>
+<div class="refcard">
+      <div>
+        <div style="font-family:var(--font);font-weight:650;color:var(--txt);letter-spacing:-.01em;font-size:14px">Manufacturers / Models</div>
+        <div class="rc-info">Manage structured reference data used in the Add Asset form</div>
+      </div>
+      <button class="btn ghost" id="openRefBtn" type="button">🏷 MANAGE</button>
+    </div>
+            </div>
+          </section>
+          <!-- CUSTOMIZATION (appearance + theme, single unified section) -->
+          <section class="cfg-sec" id="cfgCustomSec" data-sec="custom" style="display:none">
+            <div class="panel">
+              <div class="secthead">PRESET THEMES</div>
+              <div class="preset-grid" id="presetGrid">
+                <button type="button" class="preset-card" data-preset="deepdark">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#0a0d13,#121826)"></span>
+                  <span class="pc-name">Deep Dark</span>
+                  <span class="pc-sub">Professional / default</span>
+                </button>
+                <button type="button" class="preset-card" data-preset="cleanlight">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#eef1f6,#ffffff)"></span>
+                  <span class="pc-name">Clean Light</span>
+                  <span class="pc-sub">Bright / office</span>
+                </button>
+                <button type="button" class="preset-card" data-preset="graphite">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#16181d,#4c8dff)"></span>
+                  <span class="pc-name">Graphite</span>
+                  <span class="pc-sub">Neutral / low glare</span>
+                </button>
+                <button type="button" class="preset-card" data-preset="minimalist">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#f7f7f8,#111111)"></span>
+                  <span class="pc-name">Minimalist</span>
+                  <span class="pc-sub">Flat / mono</span>
+                </button>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">FULL CUSTOMIZE</div>
+              <div class="grid2">
+                <div class="field2">
+                  <label>Background type</label>
+                  <select id="bgType"><option value="solid">Solid</option><option value="gradient">Gradient</option></select>
+                </div>
+                <div class="field2">
+                  <label>Background color</label>
+                  <input type="color" id="bg" value="#0a0d13">
+                </div>
+                <div class="field2" id="bgGradWrapA" style="display:none">
+                  <label>Gradient color A</label>
+                  <input type="color" id="bgA" value="#0a0d13">
+                </div>
+                <div class="field2" id="bgGradWrapB" style="display:none">
+                  <label>Gradient color B</label>
+                  <input type="color" id="bgB" value="#121826">
+                </div>
+                <div class="field2">
+                  <label>Component background</label>
+                  <input type="color" id="compBg" value="#121826">
+                </div>
+                <div class="field2">
+                  <label>Border radius — <span id="radiusVal" class="mono">12</span>px</label>
+                  <input type="range" id="radius" min="0" max="24" step="1" value="12">
+                </div>
+                <div class="field2">
+                  <label>Font family</label>
+                  <select id="font">
+                    <option value="Inter">Inter</option>
+                    <option value="Segoe UI">Segoe UI</option>
+                    <option value="System">System default</option>
+                  </select>
+                </div>
+                <div class="field2">
+                  <label>Primary accent</label>
+                  <input type="color" id="accent" value="#3b9eff">
+                </div>
+                <div class="field2">
+                  <label>Secondary accent</label>
+                  <input type="color" id="accent2" value="#7c5cff">
+                </div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">LIVE PREVIEW</div>
+              <div class="preview-box" id="previewBox">
+                <div class="pv-card">
+                  <div class="pv-title">Sample Component</div>
+                  <div class="pv-text">This card renders with your current theme variables — surface, radius, font and accent colours.</div>
+                  <div class="pv-row">
+                    <button type="button" class="btn" id="pvBtn1">PRIMARY</button>
+                    <button type="button" class="btn ghost" id="pvBtn2">GHOST</button>
+                    <span class="pv-chip">ACTIVE</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="m-actions"><button class="btn ghost" id="resetCustomBtn">↺ RESET</button><button class="btn mag" id="saveCustomBtn">✓ SAVE THEME</button></div>
+          </section>
+          <!-- ASSET LABEL (QR / print label — separate from Branding) -->
+          <section class="cfg-sec" data-sec="label" style="display:none">
+            <div class="panel">
+              <div class="secthead">LABEL SIZE</div>
+              <p class="sec-hint">Two independent sizes: the QR code's own image resolution, and the physical label it gets printed onto. Pick the physical size to match your label stock, and a QR resolution that stays sharp at that size.</p>
+              <div class="grid2">
+                <div class="field2"><label>QR code resolution (image)</label>
+                  <select id="qr_size">
+                    <option value="120">Small — 120 × 120 px</option>
+                    <option value="160" selected>Default — 160 × 160 px</option>
+                    <option value="240">Large — 240 × 240 px</option>
+                    <option value="320">Extra large — 320 × 320 px</option>
+                  </select>
+                </div>
+                <div class="field2"><label>Physical label size (printed)</label>
+                  <select id="label_size">
+                    <option value="50.8x50.8">Square — 5.08 × 5.08 cm</option>
+                    <option value="50.8x25.4">Rectangle — 5.08 × 2.54 cm</option>
+                  </select>
+                </div>
+              </div>
+              <label class="toggle" style="margin-top:6px"><input type="checkbox" id="label_logo" checked><span>Show company logo on label</span></label>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">FIELDS SHOWN ON LABEL</div>
+              <p class="sec-hint">Choose exactly what prints on the label. <b>Category</b> and <b>Asset ID</b> always show — they're needed to identify a scanned item.</p>
+              <div class="label-fields-grid" id="lblFieldsGrid">
+                <label class="toggle"><input type="checkbox" id="lf_Name" value="Name" checked><span>Asset Name</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Type" value="Type" checked disabled><span>Category (always shown)</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_AssetID" value="AssetID" checked disabled><span>Asset ID (always shown)</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Serial" value="Serial" checked><span>Serial</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Status" value="Status" checked><span>Status</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Location" value="Location" checked><span>Location</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_ReceivedBy" value="ReceivedBy"><span>Received By</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_ReceiverDate" value="ReceiverDate"><span>Receiver Date</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_EmployeeID" value="EmployeeID"><span>Employee ID</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Department" value="Department"><span>Department</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Warranty" value="Warranty"><span>Warranty</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_PurchaseDate" value="PurchaseDate"><span>Purchase Date</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Note" value="Note"><span>Note</span></label>
+              </div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveLabelBtn">✓ SAVE LABEL SETTINGS</button></div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<input type="file" id="file" accept=".xlsx,.xls,.csv" style="display:none">
+
+<!-- Asset modal -->
+<div class="modal" id="modal"><div class="modal-box">
+  <h3 id="modalTitle">ADD ASSET</h3>
+  <div class="modal-scroll">
+    <div id="formFields"></div>
+    <div class="invbox" id="histWrap"><label>CHANGE HISTORY</label><div id="histBox" class="histbox"></div></div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="cancelBtn">CANCEL</button><button class="btn" id="saveBtn">COMMIT</button></div>
+</div></div>
+
+<!-- Employee modal -->
+<div class="modal" id="empModal"><div class="modal-box">
+  <h3 id="empModalTitle">ADD EMPLOYEE</h3>
+  <div class="grid2">
+    <div class="field2"><label>Employee ID</label><input id="e_EmployeeID"></div>
+    <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
+    <div class="field2"><label>Department</label><input id="e_Department"></div>
+    <div class="field2"><label>Designation</label><input id="e_Designation"></div>
+    <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="empCancel">CANCEL</button><button class="btn" id="empSave">SAVE</button></div>
+</div></div>
+
+<!-- Manufacturers / Models management modal -->
+<div class="modal" id="refModal"><div class="modal-box" style="width:min(560px,94vw);max-width:560px">
+  <h3>MANUFACTURERS &amp; MODELS</h3>
+  <div class="grid2">
+    <div class="field2"><label>Manufacturer</label>
+      <div class="invrow"><input id="mfrInput" placeholder="e.g. Dell"><button class="btn sm" id="mfrAdd">＋</button></div>
+      <select id="mfrList" size="5" style="width:100%"></select>
+    </div>
+    <div class="field2"><label>Model (of selected manufacturer)</label>
+      <div class="invrow"><input id="modInput" placeholder="e.g. Latitude 5420"><button class="btn sm" id="modAdd">＋</button></div>
+      <select id="modList" size="5" style="width:100%"></select>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="refClose">CLOSE</button></div>
+</div></div>
+
+<!-- LDAP import modal -->
+<div class="modal" id="ldapModal"><div class="modal-box" style="width:min(520px,94vw);max-width:520px">
+  <h3>SYNC EMPLOYEES FROM ACTIVE DIRECTORY</h3>
+  <p class="muted" style="margin-top:0">Pulls all users from your Domain Controller and keeps the employee list in sync automatically (every 30 min).</p>
+  <div class="m-actions" style="justify-content:flex-start">
+    <button class="btn" id="ldapSyncBtn">⇩ SYNC FROM AD NOW</button>
+    <button class="btn ghost" id="ldapCancel">CLOSE</button>
+  </div>
+  <div class="muted" id="ldapStatus" style="margin-top:8px"></div>
+</div></div>
+
+<!-- Users modal -->
+<div class="modal" id="usersModal"><div class="modal-box">
+  <h3>USER MANAGEMENT</h3>
+  <div class="toolbar" style="padding:0 0 12px">
+    <button class="btn" id="addUserBtn">＋ ADD USER</button>
+  </div>
+  <table id="usersGrid" style="font-size:13px"><thead><tr><th>USER</th><th>ROLE</th><th>DISPLAY</th><th>ACTIONS</th></tr></thead><tbody id="usersBody"></tbody></table>
+  <div class="m-actions"><button class="btn ghost" id="usersClose">CLOSE</button></div>
+</div></div>
+
+<!-- User edit modal -->
+<div class="modal" id="userModal"><div class="modal-box">
+  <h3 id="userModalTitle">ADD USER</h3>
+  <div class="grid2">
+    <div class="field2"><label>Username</label><input id="u_username"></div>
+    <div class="field2"><label>Display name</label><input id="u_display"></div>
+    <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com"></div>
+    <div class="field2"><label>Role</label><select id="u_role"><option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option></select></div>
+    <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="set / change"></div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="userCancel">CANCEL</button><button class="btn" id="userSave">SAVE</button></div>
+</div></div>
+
+<!-- Settings modal (Profile) -->
+<footer class="brandfoot">Powered by <b>Sha The IT Guy</b> &nbsp;·&nbsp; build <span id="appVer">…</span></footer>
+
+<!-- Checkout modal -->
+<div class="modal" id="checkoutModal"><div class="modal-box">
+  <h3>CHECK OUT ASSET</h3>
+  <div class="field2"><label>Assign to user</label><select id="coUser"></select></div>
+  <div class="field2"><label>Expected return</label><input id="coExpected" type="date"></div>
+  <div class="field2"><label>Note</label><input id="coNote" placeholder="e.g. event loan"></div>
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('checkoutModal').classList.remove('show')">CANCEL</button><button class="btn" id="coSave">CHECK OUT</button></div>
+</div></div>
+
+<!-- Maintenance modal -->
+<div class="modal" id="maintModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
+  <h3>MAINTENANCE / REPAIR LOG</h3>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Note</th><th></th></tr></thead><tbody id="maintList"></tbody></table></div>
+  <div class="grid2" style="margin-top:12px">
+    <div class="field2"><label>Date</label><input id="mDate" type="date"></div>
+    <div class="field2"><label>Type</label><input id="mType" placeholder="Repair / Upgrade"></div>
+    <div class="field2"><label>Cost</label><input id="mCost" type="number" step="0.01" placeholder="0.00"></div>
+    <div class="field2"><label>Note</label><input id="mNote" placeholder="what was done"></div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('maintModal').classList.remove('show')">CLOSE</button><button class="btn" id="mAdd">ADD RECORD</button></div>
+</div></div>
+
+<!-- Audit modal -->
+<div class="modal" id="auditModal"><div class="modal-box" style="width:min(760px,94vw);max-width:760px">
+  <h3>AUDIT LOG</h3>
+  <div class="modal-scroll">
+  <div class="toolbar" style="margin-bottom:12px">
+    <input id="auditSearch" placeholder="⌕ search actor, action, detail…">
+    <span class="tb-spacer"></span>
+    <span id="auditCount" class="muted"></span>
+  </div>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead><tbody id="auditBody"></tbody></table></div>
+  </div>
+  <div class="m-actions">
+    <button class="btn danger" id="auditClearBtn" style="margin-right:auto">🗑 CLEAR LOG</button>
+    <button class="btn ghost" onclick="document.getElementById('auditModal').classList.remove('show')">Close</button>
+  </div>
+</div></div>
+
+<!-- Network scan modal -->
+<div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+  <h3>Network scan — local devices</h3>
+  <div class="invrow" style="margin-bottom:10px">
+    <input id="scanPrefix" placeholder="subnet prefix e.g. 192.168.0" style="flex:1">
+    <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="scanDeep"> Deep scan (ping /24)</label>
+    <button class="btn" id="scanBtn">Scan</button>
+  </div>
+  <div id="scanStatus" class="muted" style="margin-bottom:8px"></div>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>MAC</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
+  <div class="m-actions">
+    <button class="btn ghost" onclick="clearScan()">Clear list</button>
+    <button class="btn ghost" onclick="cleanRescan()">Clear + rescan</button>
+    <button class="btn ghost" onclick="document.getElementById('scanModal').classList.remove('show')">CLOSE</button>
+  </div>
+</div></div>
+
+<!-- Backup / Restore modal -->
+<div class="modal" id="backupModal"><div class="modal-box" style="width:min(680px,94vw);max-width:680px">
+  <h3>BACKUP / RESTORE</h3>
+  <div class="modal-scroll">
+  <div class="invbox">
+    <label>CREATE BACKUP</label>
+    <div class="grid2">
+      <div class="field2"><label>Scope</label>
+        <select id="bkScope">
+          <option value="all">All (config + assets + history)</option>
+          <option value="config">Configuration only (Settings + Users)</option>
+          <option value="assets">Assets only (Assets + Checkouts + Maintenance)</option>
+        </select>
+      </div>
+      <div class="field2"><label>&nbsp;</label><button class="btn" id="bkDownload">⬇ CREATE &amp; DOWNLOAD</button></div>
+    </div>
+  </div>
+  <div class="invbox">
+    <label>RESTORE FROM FILE</label>
+    <div class="invrow">
+      <label class="btn ghost" style="cursor:pointer;text-align:center">⬆ CHOOSE .SQL FILE
+        <input type="file" id="bkFile" accept=".sql" style="display:none">
+      </label>
+      <span id="bkStatus" class="muted"></span>
+    </div>
+  </div>
+  <div class="invbox">
+    <label>STORED BACKUPS (local)</label>
+    <div class="tablewrap"><table class="dtable"><thead><tr><th>File</th><th>Scope</th><th>Created</th><th>Size</th><th></th></tr></thead><tbody id="bkList"></tbody></table></div>
+  </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('backupModal').classList.remove('show')">CLOSE</button></div>
+</div></div>
+
+<!-- Signature link modal -->
+<div class="modal" id="signModal"><div class="modal-box" style="width:min(500px,94vw);max-width:500px">
+  <h3>APPROVAL SIGNATURE LINK</h3>
+  <p>Send this link to the approver. They can sign the asset digitally. Link expires in 7 days.</p>
+  <div class="field2"><label>Signature Link</label><input id="signUrl" readonly style="font-family:var(--mono);font-size:12.5px"></div>
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+<script src="/app.js?nocache=20260901g"></script>
+</body>
+</html>
