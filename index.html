@@ -609,7 +609,11 @@
   <div class="camscan-view">
     <video id="camScanVideo" autoplay playsinline muted></video>
   </div>
+  <canvas id="camScanCanvas" style="display:none"></canvas>
   <div class="camscan-status" id="camScanStatus"></div>
+  <div class="camscan-upload-row">
+    <button class="btn sm" id="camScanTextBtn" type="button">📄 SCAN TEXT ON LABEL (S/N, Model…)</button>
+  </div>
   <div class="camscan-upload-row">
     <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
     <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
@@ -771,6 +775,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260902c"></script>
+<script src="/app.js?nocache=20260902d"></script>
 </body>
 </html>

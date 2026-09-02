@@ -36,8 +36,8 @@ class AssetEditFragment : Fragment() {
     private val NONE = "-- select --"
 
     private val scanLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val text = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT) ?: return@registerForActivityResult
-        applyScannedText(text)
+        result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)?.let { applyScannedText(it); return@registerForActivityResult }
+        result.data?.getStringExtra(ScanActivity.EXTRA_TEXT_RESULT)?.let { applyOcrText(it) }
     }
 
     companion object {
@@ -349,6 +349,50 @@ class AssetEditFragment : Fragment() {
             // not JSON -> treat as a plain serial number (the common case for a SN barcode sticker)
             b.fSerial.setText(text)
         }
+    }
+
+    /** Best-effort OCR label parser: looks for common "S/N: X", "Model: X",
+     * "MAC: X" style lines -- also handling the label and value sitting on
+     * separate lines, which is common on printed asset stickers -- and
+     * fills the matching fields (e.g. "SNO" -> Serial, "Model" -> Model). */
+    private fun applyOcrText(text: String) {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+
+        fun findLabeled(aliasesLongestFirst: List<String>): String? {
+            val aliasPattern = aliasesLongestFirst.joinToString("|") { Regex.escape(it) }
+            val sameLine = Regex("""(?i)\b($aliasPattern)\b\.?\s*[:\-]\s*(.+)""")
+            for (line in lines) {
+                sameLine.find(line)?.let { m -> val v = m.groupValues[2].trim(); if (v.isNotBlank()) return v }
+            }
+            for (i in lines.indices) {
+                val norm = lines[i].trimEnd(':').trim()
+                if (aliasesLongestFirst.any { it.equals(norm, ignoreCase = true) } && i + 1 < lines.size) {
+                    val v = lines[i + 1].trim()
+                    if (v.isNotBlank()) return v
+                }
+            }
+            return null
+        }
+
+        val serial = findLabeled(listOf("serial number", "serial no", "serial#", "s/n", "sno", "sn", "serial"))
+        val model = findLabeled(listOf("model number", "model no", "model"))
+        val mfr = findLabeled(listOf("manufacturer", "brand", "make"))
+        var mac = findLabeled(listOf("mac address", "mac id", "mac"))
+        if (mac == null) mac = Regex("""([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}""").find(text)?.value
+
+        val filled = mutableListOf<String>()
+        if (serial != null) { b.fSerial.setText(serial); filled.add("Serial") }
+        if (mac != null) { b.fMacAddress.setText(mac); filled.add("MAC") }
+        if (mfr != null || model != null) {
+            current = current.copy(Manufacturer = mfr ?: current.Manufacturer, Model = model ?: current.Model)
+            bindManufacturerSpinner()
+            if (mfr != null) filled.add("Manufacturer")
+            if (model != null) filled.add("Model")
+        }
+
+        val msg = if (filled.isEmpty()) "Couldn't recognize S/N, Model, or MAC on that label -- try getting closer or better lighting"
+        else "✓ Filled from label: ${filled.joinToString(", ")}"
+        android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onDestroyView() {

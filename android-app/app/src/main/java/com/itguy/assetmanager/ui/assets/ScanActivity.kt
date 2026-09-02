@@ -4,11 +4,14 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -17,20 +20,29 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.itguy.assetmanager.databinding.ActivityScanBinding
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Live camera QR / barcode scanner for the Add/Edit Asset form -- a real
- * native scanner (CameraX + ML Kit), not a browser API, so it works
- * regardless of what WebView/browser engine is on the device. */
+/** Camera scanner for the Add/Edit Asset form -- real native ML Kit, not a
+ * browser API. Two modes: (1) continuous live QR/barcode detection, and
+ * (2) tap-to-capture text recognition (OCR) for reading a printed asset
+ * label (S/N, Model, MAC…) that isn't a barcode at all. */
 class ScanActivity : AppCompatActivity() {
 
-    companion object { const val EXTRA_RESULT = "scan_result" }
+    companion object {
+        const val EXTRA_RESULT = "scan_result"
+        const val EXTRA_TEXT_RESULT = "scan_text_result"
+    }
 
     private lateinit var b: ActivityScanBinding
     private val handled = AtomicBoolean(false)
+    private val ocrBusy = AtomicBoolean(false)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private var imageCapture: ImageCapture? = null
+    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startCamera() else {
@@ -44,6 +56,7 @@ class ScanActivity : AppCompatActivity() {
         b = ActivityScanBinding.inflate(layoutInflater)
         setContentView(b.root)
         b.closeBtn.setOnClickListener { finish() }
+        b.scanTextBtn.setOnClickListener { captureAndReadText() }
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
@@ -72,9 +85,14 @@ class ScanActivity : AppCompatActivity() {
                 .build()
             analysis.setAnalyzer(cameraExecutor) { proxy -> analyze(proxy, scanner) }
 
+            val capture = ImageCapture.Builder()
+                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+                .build()
+            imageCapture = capture
+
             try {
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis, capture)
             } catch (e: Exception) {
                 Toast.makeText(this, "Could not start camera: ${e.message}", Toast.LENGTH_LONG).show()
                 finish()
@@ -99,8 +117,50 @@ class ScanActivity : AppCompatActivity() {
             .addOnCompleteListener { proxy.close() }
     }
 
+    @androidx.camera.core.ExperimentalGetImage
+    private fun captureAndReadText() {
+        if (!ocrBusy.compareAndSet(false, true)) return
+        val capture = imageCapture
+        if (capture == null) { ocrBusy.set(false); return }
+        b.scanTextBtn.isEnabled = false
+        b.scanHint.text = "Reading label…"
+        capture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
+            override fun onCaptureSuccess(image: ImageProxy) {
+                val mediaImage = image.image
+                if (mediaImage == null) { image.close(); ocrFailed("Could not read the camera frame"); return }
+                val input = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
+                textRecognizer.process(input)
+                    .addOnSuccessListener { result ->
+                        val text = result.text
+                        if (text.isBlank()) {
+                            ocrFailed("No text found on that label -- try getting closer or better lighting")
+                        } else if (handled.compareAndSet(false, true)) {
+                            val data = Intent().putExtra(EXTRA_TEXT_RESULT, text)
+                            setResult(RESULT_OK, data)
+                            finish()
+                        }
+                    }
+                    .addOnFailureListener { e -> ocrFailed("Text recognition failed: ${e.message}") }
+                    .addOnCompleteListener { image.close() }
+            }
+            override fun onError(exception: ImageCaptureException) {
+                ocrFailed("Capture failed: ${exception.message}")
+            }
+        })
+    }
+
+    private fun ocrFailed(msg: String) {
+        runOnUiThread {
+            ocrBusy.set(false)
+            b.scanTextBtn.isEnabled = true
+            b.scanHint.text = "Point the camera at a QR code or barcode"
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onDestroy() {
         super.onDestroy()
         cameraExecutor.shutdown()
+        textRecognizer.close()
     }
 }
