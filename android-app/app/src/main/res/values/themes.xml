@@ -9,4 +9,37 @@
         <item name="android:navigationBarColor">@color/bg</item>
         <item name="android:windowLightStatusBar">false</item>
     </style>
+
+    <style name="DarkInputLayout" parent="Widget.MaterialComponents.TextInputLayout.OutlinedBox">
+        <item name="boxStrokeColor">@color/accent</item>
+        <item name="hintTextColor">@color/muted</item>
+        <item name="android:textColorHint">@color/muted</item>
+        <item name="boxBackgroundColor">@color/surface</item>
+    </style>
+
+    <style name="Toolbar.ItGuyAssets" parent="Widget.MaterialComponents.Toolbar">
+        <item name="android:background">@color/surface</item>
+        <item name="titleTextColor">@color/text</item>
+        <item name="android:theme">@style/ThemeOverlay.MaterialComponents.Dark.ActionBar</item>
+    </style>
+
+    <style name="SectionLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">20dp</item>
+        <item name="android:layout_marginBottom">8dp</item>
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textSize">12sp</item>
+        <item name="android:letterSpacing">0.05</item>
+    </style>
+
+    <style name="FieldLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">10dp</item>
+        <item name="android:layout_marginBottom">4dp</item>
+        <item name="android:textColor">@color/muted</item>
+        <item name="android:textSize">12sp</item>
+    </style>
 </resources>
