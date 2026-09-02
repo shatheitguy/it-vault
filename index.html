@@ -594,12 +594,27 @@
 
 <!-- Asset modal -->
 <div class="modal" id="modal"><div class="modal-box">
-  <h3 id="modalTitle">ADD ASSET</h3>
+  <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3><button class="btn sm ghost" id="camScanBtn" type="button">📷 SCAN QR / SN</button></div>
   <div class="modal-scroll">
     <div id="formFields"></div>
     <div class="invbox" id="histWrap"><label>CHANGE HISTORY</label><div id="histBox" class="histbox"></div></div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="cancelBtn">CANCEL</button><button class="btn" id="saveBtn">COMMIT</button></div>
+</div></div>
+
+<!-- Camera scan modal (QR / barcode -> Add Asset form) -->
+<div class="modal" id="camScanModal"><div class="modal-box" style="width:min(480px,94vw);max-width:480px">
+  <h3>SCAN QR / SERIAL NUMBER</h3>
+  <p class="sec-hint" id="camScanHint">Point the camera at a QR code or serial-number barcode. Detected values fill the asset form automatically -- nothing is saved until you hit COMMIT.</p>
+  <div class="camscan-view">
+    <video id="camScanVideo" autoplay playsinline muted></video>
+  </div>
+  <div class="camscan-status" id="camScanStatus"></div>
+  <div class="camscan-upload-row">
+    <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
+    <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="camScanCancel" type="button">CLOSE</button></div>
 </div></div>
 
 <!-- Employee modal -->
@@ -756,6 +771,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260902b"></script>
+<script src="/app.js?nocache=20260902c"></script>
 </body>
 </html>
