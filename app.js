@@ -519,7 +519,41 @@ async function loadDashboardPage(){
       const emp=document.getElementById('dashFeedEmpty'); if(emp) emp.style.display=top.length?'none':'block';
     }
   }catch(e){}
+  loadUnifiWidgets();
 }
+// UniFi Controller dashboard widgets (device list + active clients) --
+// pass force=true to bypass the backend's short-lived cache (e.g. a manual refresh)
+async function loadUnifiWidgets(force){
+  const unifiEmptyMsg=(el,err,emptyText)=>{
+    if(!el)return;
+    if(err==='not_configured'){ el.textContent='UniFi Controller not configured — set it up in Settings ▸ UniFi Controller'; el.style.display='block'; }
+    else if(err){ el.textContent='✕ '+err; el.style.display='block'; }
+    else { el.textContent=emptyText; }
+  };
+  try{
+    const r=await api('/api/unifi/devices'+(force?'?force=1':''));
+    if(r){
+      const j=await r.json(); const list=j.devices||[];
+      const tb=document.getElementById('unifiDevicesBody');
+      if(tb) tb.innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.type)}</td><td class="mono">${esc(d.ip)}</td><td>${d.num_sta||0}</td><td>${d.online?'<span style="color:var(--grn)">● Online</span>':'<span style="color:var(--red)">● Offline</span>'}</td></tr>`).join('');
+      const emp=document.getElementById('unifiDevicesEmpty');
+      if(emp){ emp.style.display=(j.error||!list.length)?'block':'none'; unifiEmptyMsg(emp,j.error,'NO DEVICES'); }
+    }
+  }catch(e){}
+  try{
+    const r=await api('/api/unifi/clients'+(force?'?force=1':''));
+    if(r){
+      const j=await r.json(); const list=j.clients||[];
+      const tb=document.getElementById('unifiClientsBody');
+      if(tb) tb.innerHTML=list.map(c=>`<tr><td>${esc(c.hostname)}</td><td class="mono">${esc(c.ip)}</td><td>${esc(c.network||'—')}</td><td>${c.is_wired?'🔌 Wired':'📶 '+esc(c.essid||'Wi-Fi')}</td></tr>`).join('');
+      const emp=document.getElementById('unifiClientsEmpty');
+      if(emp){ emp.style.display=(j.error||!list.length)?'block':'none'; unifiEmptyMsg(emp,j.error,'NO ACTIVE CLIENTS'); }
+    }
+  }catch(e){}
+}
+let _unifiTimer=null;
+function startUnifiAutoRefresh(){ stopUnifiAutoRefresh(); _unifiTimer=setInterval(()=>loadUnifiWidgets(), 30000); }
+function stopUnifiAutoRefresh(){ if(_unifiTimer){ clearInterval(_unifiTimer); _unifiTimer=null; } }
 const DASH_LAYOUT_KEY='nexus_dash_layout_v1';
 function getDashLayout(){ try{ const v=localStorage.getItem(DASH_LAYOUT_KEY); return v?JSON.parse(v):null; }catch(e){ return null; } }
 function applyDashLayout(){
@@ -1205,6 +1239,7 @@ function showPage(id){
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
   const n=map[id]?document.getElementById(map[id]):null;
   if(n)n.classList.add('active');
+  if(id==='page-dashboard')startUnifiAutoRefresh(); else stopUnifiAutoRefresh();
   if(id==='page-dashboard'){ loadDashboard(); }   // loadDashboard() chains loadDashboardPage() + applyDashLayout()
   else if(id==='page-assets'){ load(); loadStats(); }
   else if(id==='page-employees')loadDirectory();
@@ -2081,6 +2116,15 @@ async function loadUserSettings(){
   if (g('ldap_bind_user')) g('ldap_bind_user').value = s.ldap_bind_user || '';
   if (g('ldap_bind_pass')) g('ldap_bind_pass').value = '';
   if (g('ldap_base_dn')) g('ldap_base_dn').value = s.ldap_base_dn || '';
+  // UniFi Controller fields
+  if (g('unifi_enabled')) g('unifi_enabled').checked = !!s.unifi_enabled;
+  if (g('unifi_host')) g('unifi_host').value = s.unifi_host || '';
+  if (g('unifi_port')) g('unifi_port').value = s.unifi_port || 443;
+  if (g('unifi_site')) g('unifi_site').value = s.unifi_site || 'default';
+  if (g('unifi_user')) g('unifi_user').value = s.unifi_user || '';
+  if (g('unifi_pass')) g('unifi_pass').value = '';
+  if (g('unifi_is_os')) g('unifi_is_os').checked = (s.unifi_is_os == null ? true : !!s.unifi_is_os);
+  if (g('unifi_verify_ssl')) g('unifi_verify_ssl').checked = !!s.unifi_verify_ssl;
   // SLA policy fields
   if (g('sla_low')) g('sla_low').value = s.sla_low || 72;
   if (g('sla_normal')) g('sla_normal').value = s.sla_normal || 24;
@@ -2238,6 +2282,33 @@ async function loadUserSettings(){
   if (g('ldap_bind_pass').value) body.ldap_bind_pass = g('ldap_bind_pass').value;
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if (r && r.ok){ toast('✓ LDAP SAVED'); }
+  else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'save failed')); }
+  };
+  // UniFi test + save (UniFi Controller section)
+  const ut = g('unifiTestBtn');
+  if (ut) ut.onclick = async () => {
+  const m = g('unifiTestMsg'); m.textContent = 'testing…';
+  const body = {
+    unifi_host: g('unifi_host').value.trim(), unifi_port: parseInt(g('unifi_port').value||'443', 10),
+    unifi_site: g('unifi_site').value.trim(), unifi_user: g('unifi_user').value.trim(),
+    unifi_is_os: g('unifi_is_os').checked, unifi_verify_ssl: g('unifi_verify_ssl').checked
+  };
+  if (g('unifi_pass').value) body.unifi_pass = g('unifi_pass').value;
+  const r = await api('/api/test-unifi', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  const j = r ? await r.json().catch(()=>({})) : {};
+  m.textContent = (j.ok? '✓ ' : '✕ ') + (j.msg||''); m.style.color = j.ok? 'var(--grn)':'var(--red)';
+  };
+  const su = g('saveUnifiBtn');
+  if (su) su.onclick = async () => {
+  const body = {
+    unifi_enabled: g('unifi_enabled').checked,
+    unifi_host: g('unifi_host').value.trim(), unifi_port: parseInt(g('unifi_port').value||'443', 10),
+    unifi_site: g('unifi_site').value.trim(), unifi_user: g('unifi_user').value.trim(),
+    unifi_is_os: g('unifi_is_os').checked, unifi_verify_ssl: g('unifi_verify_ssl').checked
+  };
+  if (g('unifi_pass').value) body.unifi_pass = g('unifi_pass').value;
+  const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if (r && r.ok){ toast('✓ UNIFI SAVED'); loadUnifiWidgets(true); }
   else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'save failed')); }
   };
   // Asset Label save button
