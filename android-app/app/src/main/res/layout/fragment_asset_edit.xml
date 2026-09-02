@@ -18,7 +18,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            android:text="📷  Scan QR / Serial Number"
+            android:text="📷  Scan QR/Barcode or Read Label Text"
             android:textColor="@color/accent"
             app:strokeColor="@color/accent" />
 

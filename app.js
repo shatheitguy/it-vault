@@ -851,6 +851,83 @@ document.getElementById('camScanUploadFile').onchange=(e)=>{
   if(f) camScanFromFile(f);
 };
 
+// ---------- OCR (read a printed label's text -- S/N, Model, MAC -- not just QR/barcode) ----------
+// Loaded on demand (only when the user actually taps "Scan Text") rather than
+// on every page load, since it's a ~2MB library most visits never touch.
+let _tesseractLoadPromise=null;
+function loadTesseract(){
+  if(window.Tesseract) return Promise.resolve();
+  if(_tesseractLoadPromise) return _tesseractLoadPromise;
+  _tesseractLoadPromise=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+    s.onload=()=>resolve();
+    s.onerror=()=>{ _tesseractLoadPromise=null; reject(new Error('could not load the text-recognition library (check your internet connection)')); };
+    document.head.appendChild(s);
+  });
+  return _tesseractLoadPromise;
+}
+// Mirrors the Android app's OCR label parser: same-line "KEY: VALUE" lines,
+// plus the common two-line layout (label alone on one line, value on the
+// next) that's typical on printed asset stickers.
+function ocrParseFields(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  function findLabeled(aliasesLongestFirst){
+    const escaped=aliasesLongestFirst.map(a=>a.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
+    const sameLine=new RegExp('\\b('+escaped.join('|')+')\\b\\.?\\s*[:\\-]\\s*(.+)','i');
+    for(const line of lines){
+      const m=line.match(sameLine);
+      if(m){ const v=(m[2]||'').trim(); if(v) return v; }
+    }
+    for(let i=0;i<lines.length;i++){
+      const norm=lines[i].replace(/:$/,'').trim().toLowerCase();
+      if(aliasesLongestFirst.some(a=>a.toLowerCase()===norm) && i+1<lines.length){
+        const v=lines[i+1].trim(); if(v) return v;
+      }
+    }
+    return '';
+  }
+  const serial=findLabeled(['serial number','serial no','serial#','s/n','sno','sn','serial']);
+  const model=findLabeled(['model number','model no','model']);
+  const manufacturer=findLabeled(['manufacturer','brand','make']);
+  let mac=findLabeled(['mac address','mac id','mac']);
+  if(!mac){ const mm=text.match(/([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/); if(mm) mac=mm[0]; }
+  return {serial, model, manufacturer, mac};
+}
+async function captureAndReadText(){
+  const status=document.getElementById('camScanStatus');
+  const vid=document.getElementById('camScanVideo');
+  const btn=document.getElementById('camScanTextBtn');
+  if(!camScanStream || !vid.videoWidth){ status.textContent='✕ Camera not ready yet -- wait a moment and try again.'; return; }
+  btn.disabled=true;
+  status.textContent='Loading text reader…';
+  try{
+    await loadTesseract();
+    const canvas=document.getElementById('camScanCanvas');
+    canvas.width=vid.videoWidth; canvas.height=vid.videoHeight;
+    canvas.getContext('2d').drawImage(vid,0,0,canvas.width,canvas.height);
+    status.textContent='Reading label…';
+    const { data }=await Tesseract.recognize(canvas,'eng');
+    const text=(data&&data.text)||'';
+    if(!text.trim()){ status.textContent='✕ No text found on that label -- try getting closer or better lighting.'; return; }
+    const f=ocrParseFields(text);
+    const obj={};
+    if(f.serial) obj.serial=f.serial;
+    if(f.model) obj.model=f.model;
+    if(f.manufacturer) obj.manufacturer=f.manufacturer;
+    if(f.mac) obj.mac=f.mac;
+    if(!Object.keys(obj).length){ status.textContent='✕ Couldn\'t recognize S/N, Model, or MAC on that label -- try getting closer or better lighting.'; return; }
+    closeCamScan();
+    await applyScannedFields(obj);
+    toast('✓ Filled from label: '+Object.keys(obj).join(', '));
+  }catch(e){
+    status.textContent='✕ Text recognition failed: '+(e.message||e);
+  }finally{
+    btn.disabled=false;
+  }
+}
+document.getElementById('camScanTextBtn').onclick=captureAndReadText;
+
 async function fetchEmployees(){
   const r=await api('/api/employees');
   const list=r?await r.json():[];
