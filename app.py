@@ -2491,6 +2491,23 @@ def asset_signature(aid):
 # ---------- network scanner ----------
 import subprocess, re, concurrent.futures, socket
 
+# MAC vendor (OUI) lookup -- IEEE's official public registry, bundled locally
+# so scans work offline and no internal MAC/IP data ever leaves the network.
+# This only identifies the manufacturer from the first 3 bytes of the MAC; a
+# specific model can't be derived from a MAC address alone.
+_OUI_VENDORS = {}
+try:
+    with open(os.path.join(BASE, "oui_vendors.json"), encoding="utf-8") as f:
+        _OUI_VENDORS = json.load(f)
+except Exception:
+    _OUI_VENDORS = {}
+
+def _mac_vendor(mac):
+    prefix = re.sub(r"[^0-9A-Fa-f]", "", mac or "").upper()[:6]
+    if len(prefix) < 6:
+        return ""
+    return _OUI_VENDORS.get(prefix, "")
+
 def _is_real_host(ip, mac):
     """Filter the ARP table down to actual hosts.
 
@@ -2574,6 +2591,10 @@ def network_scan():
                 ip, host = f.result()
                 if host:
                     devs[ip]["host"] = host
+    # brand/manufacturer from the MAC's OUI (a specific model can't be
+    # determined from a MAC address, only the maker of the network card)
+    for d in devs.values():
+        d["vendor"] = _mac_vendor(d.get("mac"))
     result = sorted(devs.values(), key=lambda d: tuple(int(x) for x in d["ip"].split(".")))
     audit(session.get("user"), "SCAN", "", f"scanned {'deep ' if deep else ''}prefix={prefix or 'local'}: {len(result)} devices")
     return jsonify(result)

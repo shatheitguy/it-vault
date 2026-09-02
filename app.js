@@ -598,8 +598,14 @@ async function openModal(id,prefill){
 // populate Manufacturer + Model <select> dropdowns from backend reference data
 async function loadMfrModelOptions(selMfr, selModel){
   try{
-    const mf=await api('/api/manufacturers'); const mfrs=mf?await mf.json():[];
+    const mf=await api('/api/manufacturers'); let mfrs=mf?await mf.json():[];
     const sel=document.getElementById('f_Manufacturer'); if(!sel)return;
+    // e.g. pre-filled from a network-scan MAC vendor lookup -- add it to the
+    // reference list if it's genuinely new, instead of silently dropping it
+    if(selMfr && !mfrs.some(m=>m.name===selMfr)){
+      const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selMfr})});
+      if(r&&r.ok){ const mf2=await api('/api/manufacturers'); mfrs=mf2?await mf2.json():mfrs; }
+    }
     sel.innerHTML='<option value="">-- choose manufacturer --</option>'+mfrs.map(m=>`<option value="${esc(m.name)}" ${m.name===selMfr?'selected':''}>${esc(m.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
     sel.onchange=async()=>{
       if(sel.value==='__new'){const v=prompt('New manufacturer name:'); if(v&&v.trim()){const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadMfrModelOptions(v.trim(),'');}} else {sel.value=selMfr;}}
@@ -746,49 +752,35 @@ async function clearAuditLog(){
 }
 
 /* ---------- scan ---------- */
-let lastScan=[];
-/* A cleared scan list must STAY cleared -- opening the panel used to silently
-   re-read the ARP table and repopulate it. The flag is remembered so the list
-   also stays empty across a page reload, until you press Scan again. */
-const SCAN_CLEARED_KEY='nexus_scan_cleared';
-function scanIsCleared(){ try{ return localStorage.getItem(SCAN_CLEARED_KEY)==='1'; }catch(e){ return false; } }
-function setScanCleared(v){ try{ if(v) localStorage.setItem(SCAN_CLEARED_KEY,'1'); else localStorage.removeItem(SCAN_CLEARED_KEY); }catch(e){} }
-function renderScanCleared(){
-  document.getElementById('scanBody').innerHTML='<tr><td colspan=5 style="color:var(--muted)">List cleared — press Scan to discover devices again.</td></tr>';
-}
-async function openScan(){
+/* Results are held (persisted) until the next Scan -- opening the panel just
+   shows whatever was last discovered, it doesn't silently re-scan. Scan
+   itself always clears the old list first, so there's one button that does
+   both "clear" and "rescan". */
+const SCAN_LAST_KEY='nexus_scan_last';
+function loadLastScan(){ try{ const s=localStorage.getItem(SCAN_LAST_KEY); const v=s?JSON.parse(s):[]; return Array.isArray(v)?v:[]; }catch(e){ return []; } }
+function saveLastScan(devs){ try{ localStorage.setItem(SCAN_LAST_KEY, JSON.stringify(devs)); }catch(e){} }
+let lastScan=loadLastScan();
+function openScan(){
   document.getElementById('scanStatus').textContent='';
   document.getElementById('scanModal').classList.add('show');
-  if(scanIsCleared()){ lastScan=[]; renderScanCleared(); return; }
-  document.getElementById('scanBody').innerHTML='';
-  const r=await api('/api/scan'); lastScan=r?await r.json():[];
   renderScan(lastScan);
 }
 async function doScan(){
-  setScanCleared(false);
   const prefix=document.getElementById('scanPrefix').value.trim();
   const deep=document.getElementById('scanDeep').checked;
   if(deep && !prefix){toast('✕ enter subnet prefix');return;}
+  lastScan=[];
+  document.getElementById('scanBody').innerHTML='<tr><td colspan=6 style="color:var(--muted)">Clearing…</td></tr>';
   document.getElementById('scanStatus').textContent= deep?'Scanning /24 (this can take ~30s)…':'Reading ARP table…';
   const qs=(prefix?('?prefix='+encodeURIComponent(prefix)):'')+(deep?'&deep=1':'');
   const r=await api('/api/scan'+qs); lastScan=r?await r.json():[];
+  saveLastScan(lastScan);
+  document.getElementById('scanStatus').textContent='';
   renderScan(lastScan);
 }
 function renderScan(devs){
-  const nodes=devs.map((d,i)=>`<tr><td>${esc(d.ip||'')}</td><td>${esc(d.host||'')||'<span class="muted">—</span>'}</td><td>${esc(d.mac||d.hw||'')}</td><td>${esc(d.type||'LAN')}</td><td><button class="btn sm ghost" onclick="addScannedAsAsset('${i}')">Add as asset</button></td></tr>`).join('');
-  document.getElementById('scanBody').innerHTML=nodes||'<tr><td colspan=5 style="color:var(--muted)">No devices found on the local network.</td></tr>';
-}
-function clearScan(){
-  lastScan=[];
-  setScanCleared(true);
-  renderScanCleared();
-  document.getElementById('scanStatus').textContent='';
-}
-async function cleanRescan(){
-  // wipe current results, then re-run scan with current options
-  lastScan=[];
-  document.getElementById('scanBody').innerHTML='<tr><td colspan=5 style="color:var(--muted)">Clearing…</td></tr>';
-  await doScan();
+  const nodes=devs.map((d,i)=>`<tr><td>${esc(d.ip||'')}</td><td>${esc(d.host||'')||'<span class="muted">—</span>'}</td><td>${esc(d.mac||d.hw||'')}</td><td>${esc(d.vendor||'')||'<span class="muted">—</span>'}</td><td>${esc(d.type||'LAN')}</td><td><button class="btn sm ghost" onclick="addScannedAsAsset('${i}')">Add as asset</button></td></tr>`).join('');
+  document.getElementById('scanBody').innerHTML=nodes||'<tr><td colspan=6 style="color:var(--muted)">No results yet — press Scan to discover devices.</td></tr>';
 }
 function addScannedAsAsset(i){
   const dev=lastScan[Number(i)];
@@ -801,6 +793,7 @@ function addScannedAsAsset(i){
     Type:'Network Device',
     Serial:'',
     MacAddress:dev.mac||'',
+    Manufacturer:dev.vendor||'',
     Location:'LAN',
     Status:'Available',
     Note:'Discovered via network scan ('+(dev.ip||'')+(dev.mac?', '+dev.mac:'')+')'
@@ -1068,6 +1061,7 @@ document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
 document.getElementById('navScan').onclick=openScan;
 document.getElementById('scanBtn').onclick=doScan;
+document.getElementById('scanDeep').onchange=e=>{ document.getElementById('scanPrefix').disabled=!e.target.checked; };
 document.getElementById('navBackup').onclick=openBackup;
 document.getElementById('bkDownload').onclick=doBackup;
 document.getElementById('bkFile').onchange=doRestore;
@@ -1422,7 +1416,7 @@ window.repairDashStructure=repairDashStructure;
 // old empty-column or bad-layout selection can't blank the UI for returning users.
 (function healStorage(){
   try{
-    const KEEP=new Set(['nexus_dash_layout_v1','nexus_cols','nexus_sess','nexus_scan_cleared']);
+    const KEEP=new Set(['nexus_dash_layout_v1','nexus_cols','nexus_sess','nexus_scan_last']);
     const bad=[];
     for(let i=localStorage.length-1;i>=0;i--){
       const k=localStorage.key(i);

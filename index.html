@@ -636,16 +636,16 @@
   <div class="invbox">
     <label>SCAN OPTIONS</label>
     <div class="scanrow">
-      <input id="scanPrefix" class="scan-prefix" placeholder="subnet prefix e.g. 192.168.0">
-      <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan (ping /24)</span></label>
       <button class="btn" id="scanBtn">⚡ SCAN</button>
+      <span class="scan-sep"></span>
+      <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan (ping /24)</span></label>
+      <input id="scanPrefix" class="scan-prefix" placeholder="subnet prefix e.g. 192.168.0" disabled>
     </div>
+    <p class="muted scan-hint">Deep scan needs a subnet prefix and takes ~30s; without it, Scan just reads the ARP table (fast, no prefix needed).</p>
   </div>
   <div id="scanStatus" class="muted scan-status"></div>
-  <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
   <div class="m-actions">
-    <button class="btn ghost" onclick="clearScan()">Clear list</button>
-    <button class="btn ghost" onclick="cleanRescan()">Clear + rescan</button>
     <button class="btn ghost" onclick="document.getElementById('scanModal').classList.remove('show')">CLOSE</button>
   </div>
 </div></div>
