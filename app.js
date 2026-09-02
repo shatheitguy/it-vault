@@ -1,6 +1,6 @@
 const APP_VERSION='20260828c';
 const COLUMNS=['Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
-const LABELS={'ReceivedBy':'Received By','NotesReceived':'Receiver Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address'};
+const LABELS={'ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address'};
 
 // --- currency: stored base = AED; display converts via rate and shows symbol ---
 const MONEY={AED:{s:'﷼',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
@@ -23,7 +23,7 @@ const I18N={
 // every column — full detail is one click away via the Columns picker.
 // Guard: if the stored value is invalid, fall back to ALL columns (full details).
 // An empty array (e.g. from an old "NONE" click) must never blank the table.
-const DEFAULT_VISIBLE_COLS=['Name','Type','Serial','Location','Status'];
+const DEFAULT_VISIBLE_COLS=['Name','Type','Serial','Location','Status','EmployeeID'];
 let VISIBLE_COLS = (()=>{
   try{
     const s=localStorage.getItem('nexus_cols');
@@ -358,7 +358,10 @@ function render(){
         return `<td class="mono">${fmtMoney(a.Price||0, CURRENCY)}</td>`;
       }
       if(c==='EmployeeID'){
-        return `<td><span class="mono">${esc(a[c]||'')}</span></td>`;
+        const eid=a[c]||'';
+        if(!eid) return `<td><span class="muted">—</span></td>`;
+        const emp=employees.find(e=>e.EmployeeID===eid);
+        return `<td>${emp?esc(emp.EmployeeName||eid):`<span class="mono">${esc(eid)}</span>`}</td>`;
       }
       return `<td>${esc(a[c])}</td>`;
     }).join('')
