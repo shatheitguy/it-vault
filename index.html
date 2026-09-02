@@ -20,10 +20,10 @@
       <div class="nav-grp">Main</div>
       <a id="navHome" class="active"><span class="ni">🏠</span>Dashboard</a>
       <a id="navAssets" data-i18n="Assets"><span class="ni">💻</span>Assets</a>
-      <a id="navEmployees" style="display:none" data-i18n="Employees"><span class="ni">👥</span>Employees</a>
       <a id="navTickets" data-i18n="Tickets"><span class="ni">🎫</span>Tickets</a>
 
       <div class="nav-grp">Records</div>
+      <a id="navDirectory" style="display:none"><span class="ni">👥</span>Directory</a>
       <a id="navContracts" data-i18n="Contracts"><span class="ni">📄</span>Contracts</a>
       <a id="navLocations" data-i18n="Locations"><span class="ni">📍</span>Locations</a>
       <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
@@ -49,7 +49,13 @@
   <section class="main">
     <div id="page-employees" style="display:none">
       <div class="topbar">
-        <div><div class="crumb" id="crumbText">Employees</div><h2 id="dashTitle">Employees</h2></div>
+        <div><div class="crumb" id="crumbText">Directory</div><h2 id="dashTitle">Directory</h2></div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="dirImportBtn">⬆ IMPORT EXCEL/CSV</button>
+        <input type="file" id="dirImportFile" accept=".xlsx,.xls,.csv" style="display:none">
+      </div>
+      <div class="secthead">EMPLOYEES</div>
+      <div class="topbar">
         <div class="spacer"></div>
         <button class="btn mag" id="addEmpBtn">＋ ADD EMPLOYEE</button>
         <button class="btn ghost" id="importLdapBtn">⬇ PULL FROM LDAP</button>
@@ -61,6 +67,26 @@
       <div class="tablewrap">
         <table id="empGrid"><thead><tr><th>EMP ID</th><th>USERNAME</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
         <div class="empty" id="empEmpty" style="display:none">NO EMPLOYEES // add manually or pull from LDAP</div>
+      </div>
+
+      <div class="secthead" style="margin-top:22px">ORG REFERENCE LISTS</div>
+      <p class="sec-hint">Dropdown values used on the Employee and Add Asset forms -- department, location, and designation. Add everything here in bulk, then just pick it from a dropdown. Import an .xlsx/.xls/.csv with any of these column headers: <b>Department</b>, <b>Location</b>, <b>Designation</b>.</p>
+      <div class="grid3 catalog-grid">
+        <div class="invbox">
+          <label>DEPARTMENTS <span id="depCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="depInput" placeholder="e.g. IT, Finance, HR"><button class="btn sm" id="depAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="depBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>LOCATIONS <span id="dirLocCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="dirLocInput" placeholder="e.g. HQ, Warehouse"><button class="btn sm" id="dirLocAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="dirLocBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>DESIGNATIONS <span id="desCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="desInput" placeholder="e.g. Manager, Technician"><button class="btn sm" id="desAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="desBody"></tbody></table></div>
+        </div>
       </div>
     </div>
 
@@ -562,8 +588,8 @@
     <div class="field2"><label>Emp ID</label><input id="e_EmpCode" placeholder="e.g. 1024 or STAFF-045"></div>
     <div class="field2"><label>Username</label><input id="e_EmployeeID" placeholder="AD/login username, or any unique ID"></div>
     <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
-    <div class="field2"><label>Department</label><input id="e_Department"></div>
-    <div class="field2"><label>Designation</label><input id="e_Designation"></div>
+    <div class="field2"><label>Department</label><select id="e_Department"><option value="">-- select department --</option></select></div>
+    <div class="field2"><label>Designation</label><select id="e_Designation"><option value="">-- select designation --</option></select></div>
     <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="empCancel">CANCEL</button><button class="btn" id="empSave">SAVE</button></div>

@@ -226,10 +226,43 @@ function openEmpModal(id){
   empIdEl.placeholder=id?('auto: '+tempEmpId(e)):'auto-generated if left blank';
   document.getElementById('e_EmployeeID').value=e.EmployeeID||'';
   document.getElementById('e_EmployeeName').value=e.EmployeeName||'';
-  document.getElementById('e_Department').value=e.Department||'';
-  document.getElementById('e_Designation').value=e.Designation||'';
   document.getElementById('e_Email').value=e.Email||'';
   document.getElementById('empModal').classList.add('show');
+  loadDepartmentOptions(e.Department||'');
+  loadDesignationOptions(e.Designation||'');
+}
+// populate the Department <select> on the Employee form from the Departments
+// reference table, auto-adding it if it's genuinely new (e.g. an existing
+// employee's Department value from before this became a picker)
+async function loadDepartmentOptions(selDept){
+  const sel=document.getElementById('e_Department'); if(!sel)return;
+  let deps=[];
+  try{
+    const r=await api('/api/departments'); deps=r?await r.json():[];
+    if(selDept && !deps.some(d=>d.name===selDept)){
+      const r2=await api('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selDept})});
+      if(r2&&r2.ok){ const r3=await api('/api/departments'); deps=r3?await r3.json():deps; }
+    }
+  }catch(e){}
+  sel.innerHTML='<option value="">-- select department --</option>'+deps.map(d=>`<option value="${esc(d.name)}" ${d.name===selDept?'selected':''}>${esc(d.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
+  sel.onchange=async()=>{
+    if(sel.value==='__new'){const v=prompt('New department name:'); if(v&&v.trim()){const r=await api('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadDepartmentOptions(v.trim());}} else {sel.value=selDept;}}
+  };
+}
+async function loadDesignationOptions(selDes){
+  const sel=document.getElementById('e_Designation'); if(!sel)return;
+  let dess=[];
+  try{
+    const r=await api('/api/designations'); dess=r?await r.json():[];
+    if(selDes && !dess.some(d=>d.name===selDes)){
+      const r2=await api('/api/designations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selDes})});
+      if(r2&&r2.ok){ const r3=await api('/api/designations'); dess=r3?await r3.json():dess; }
+    }
+  }catch(e){}
+  sel.innerHTML='<option value="">-- select designation --</option>'+dess.map(d=>`<option value="${esc(d.name)}" ${d.name===selDes?'selected':''}>${esc(d.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
+  sel.onchange=async()=>{
+    if(sel.value==='__new'){const v=prompt('New designation name:'); if(v&&v.trim()){const r=await api('/api/designations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadDesignationOptions(v.trim());}} else {sel.value=selDes;}}
+  };
 }
 async function saveEmployee(){
   const body={
@@ -551,6 +584,7 @@ async function openModal(id,prefill){
     if(c==='Status')return`<div class="field2"><label>${c}</label><select id="f_${c}">${STATUSES.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
     if(c==='EmployeeID')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_EmployeeID"><option value="">-- select employee --</option></select></div>`;
     if(c==='Type')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Type"><option value="">-- select category --</option></select></div>`;
+    if(c==='Location')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Location"><option value="">-- select location --</option></select></div>`;
     if(c==='NotesReceived')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" type="date" value="${esc(val)}"></div>`;
     if(c==='Price')return`<div class="field2"><label>${LABELS[c]||c} (${CURRENCY})</label><input id="f_${c}" type="number" step="0.01" min="0" value="${esc(val)}"></div>`;
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
@@ -594,6 +628,7 @@ async function openModal(id,prefill){
   // populate Manufacturer / Model / Category dropdowns from reference tables
   await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');
   await loadCategoryOptions(a?a.Type||'':'');
+  await loadLocationOptions(a?a.Location||'':'');
   if(id)loadAssetHistory(id);
 }
 
@@ -645,6 +680,25 @@ async function loadCategoryOptions(selCat){
   sel.innerHTML='<option value="">-- select category --</option>'+cats.map(c=>`<option value="${esc(c.name)}" ${c.name===selCat?'selected':''}>${esc(c.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
     if(sel.value==='__new'){const v=prompt('New category name:'); if(v&&v.trim()){const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadCategoryOptions(v.trim());}} else {sel.value=selCat;}}
+  };
+}
+// populate the Location <select> on the Add Asset form from the Locations
+// reference table (shared with the GLPI Location Tree page), auto-adding it
+// if it's genuinely new (e.g. an existing asset's Location value from before
+// this became a picker)
+async function loadLocationOptions(selLoc){
+  const sel=document.getElementById('f_Location'); if(!sel)return;
+  let locs=[];
+  try{
+    const r=await api('/api/locations'); locs=r?await r.json():[];
+    if(selLoc && !locs.some(l=>l.name===selLoc)){
+      const r2=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selLoc})});
+      if(r2&&r2.ok){ const r3=await api('/api/locations'); locs=r3?await r3.json():locs; }
+    }
+  }catch(e){}
+  sel.innerHTML='<option value="">-- select location --</option>'+locs.map(l=>`<option value="${esc(l.name)}" ${l.name===selLoc?'selected':''}>${esc(l.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
+  sel.onchange=async()=>{
+    if(sel.value==='__new'){const v=prompt('New location name:'); if(v&&v.trim()){const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadLocationOptions(v.trim());}} else {sel.value=selLoc;}}
   };
 }
 async function loadAssetHistory(id){
@@ -1145,7 +1199,7 @@ function showPage(id){
   const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-locations','page-catalog','page-usettings','page-scan','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
-  const map={  'page-dashboard':'navHome','page-employees':'navEmployees','page-trash':'navTrash','page-tickets':'navTickets',
+  const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-tickets':'navTickets',
     'page-contracts':'navContracts','page-locations':'navLocations','page-catalog':'navCatalog',
     'page-usettings':'navSettings','page-scan':'navScan',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
@@ -1153,7 +1207,7 @@ function showPage(id){
   if(n)n.classList.add('active');
   if(id==='page-dashboard'){ loadDashboard(); }   // loadDashboard() chains loadDashboardPage() + applyDashLayout()
   else if(id==='page-assets'){ load(); loadStats(); }
-  else if(id==='page-employees')loadEmployees();
+  else if(id==='page-employees')loadDirectory();
   else if(id==='page-trash')loadTrash();
   else if(id==='page-tickets')loadTickets();
   else if(id==='page-contracts')loadContracts();
@@ -1269,6 +1323,62 @@ document.getElementById('catImportFile').onchange=async()=>{
   if(r&&r.ok){
     toast(`✓ imported: ${j.categories||0} categories, ${j.manufacturers||0} manufacturers, ${j.models||0} models`);
     loadCatalog();
+  } else {
+    toast('✕ '+(j.error||'import failed'));
+  }
+};
+
+// ---------- Directory page: Employees + Departments / Locations / Designations ----------
+async function loadDirectory(){
+  await Promise.all([loadEmployees(), loadDirDepartments(), loadDirLocations(), loadDirDesignations()]);
+}
+async function loadDirDepartments(){
+  const r=await api('/api/departments'); const list=r?await r.json():[];
+  document.getElementById('depBody').innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('departments','${d.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('depCount').textContent=list.length?`(${list.length})`:'';
+}
+async function loadDirLocations(){
+  const r=await api('/api/locations'); const list=r?await r.json():[];
+  document.getElementById('dirLocBody').innerHTML=list.map(l=>`<tr><td>${esc(l.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('locations','${l.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('dirLocCount').textContent=list.length?`(${list.length})`:'';
+}
+async function loadDirDesignations(){
+  const r=await api('/api/designations'); const list=r?await r.json():[];
+  document.getElementById('desBody').innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('designations','${d.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('desCount').textContent=list.length?`(${list.length})`:'';
+}
+async function delDirItem(kind,id){
+  if(!confirm('Delete this '+kind.slice(0,-1)+'? Employees/assets already using it keep their saved value.'))return;
+  const r=await api('/api/'+kind,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(r&&r.ok){toast('🗑 DELETED');loadDirectory();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+window.delDirItem=delDirItem;
+document.getElementById('depAdd').onclick=async()=>{
+  const el=document.getElementById('depInput'); const n=el.value.trim(); if(!n)return;
+  const r=await api('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  if(r&&r.ok){el.value='';loadDirDepartments();}
+};
+document.getElementById('dirLocAdd').onclick=async()=>{
+  const el=document.getElementById('dirLocInput'); const n=el.value.trim(); if(!n)return;
+  const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  if(r&&r.ok){el.value='';loadDirLocations();}
+};
+document.getElementById('desAdd').onclick=async()=>{
+  const el=document.getElementById('desInput'); const n=el.value.trim(); if(!n)return;
+  const r=await api('/api/designations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  if(r&&r.ok){el.value='';loadDirDesignations();}
+};
+document.getElementById('dirImportBtn').onclick=()=>document.getElementById('dirImportFile').click();
+document.getElementById('dirImportFile').onchange=async()=>{
+  const inp=document.getElementById('dirImportFile');
+  const file=inp.files[0]; if(!file)return;
+  const fd=new FormData(); fd.append('file',file);
+  const r=await api('/api/directory/import',{method:'POST',body:fd});
+  inp.value='';
+  const j=r?await r.json().catch(()=>({})):{};
+  if(r&&r.ok){
+    toast(`✓ imported: ${j.departments||0} departments, ${j.locations||0} locations, ${j.designations||0} designations`);
+    loadDirectory();
   } else {
     toast('✕ '+(j.error||'import failed'));
   }
@@ -1438,7 +1548,7 @@ window.loadContracts=loadContracts;window.newContract=newContract;
 window.loadLocations=loadLocations;window.addLoc=addLoc;
 
 
-document.getElementById('navEmployees').onclick=()=>showPage('page-employees');
+document.getElementById('navDirectory').onclick=()=>showPage('page-employees');
 document.getElementById('navTrash').onclick=()=>showPage('page-trash');
 document.getElementById('navTickets').onclick=()=>showPage('page-tickets');
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
@@ -1519,7 +1629,7 @@ window.repairDashStructure=repairDashStructure;
   const navShow = {
     navAudit: true,
     navScan: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
-    navEmployees: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navDirectory: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navCatalog: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navBackup: me.role===ROLE_ADMIN

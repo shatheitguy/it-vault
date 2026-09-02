@@ -119,6 +119,12 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS Categories (
         id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) UNIQUE
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS Departments (
+        id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) UNIQUE
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS Designations (
+        id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) UNIQUE
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS History (
         id INT AUTO_INCREMENT PRIMARY KEY, asset_id VARCHAR(40), ts DATETIME, user VARCHAR(80),
         field VARCHAR(80), old_val TEXT, new_val TEXT,
@@ -375,6 +381,39 @@ def migrate_schema():
                 t = (r.get("Type") or "").strip()
                 if t:
                     cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [t])
+    except Exception:
+        pass
+    # Directory pickers (Department / Location / Designation): backfill from
+    # whatever free-text values already exist on real employees/assets, so
+    # switching those fields to dropdowns doesn't blank out anyone's data
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM Departments")
+        if (cur.fetchone() or {}).get("n", 0) == 0:
+            cur.execute("SELECT DISTINCT Department FROM Employees WHERE Department IS NOT NULL AND Department<>''")
+            for r in cur.fetchall():
+                d = (r.get("Department") or "").strip()
+                if d:
+                    cur.execute("INSERT IGNORE INTO Departments (name) VALUES (%s)", [d])
+    except Exception:
+        pass
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM Designations")
+        if (cur.fetchone() or {}).get("n", 0) == 0:
+            cur.execute("SELECT DISTINCT Designation FROM Employees WHERE Designation IS NOT NULL AND Designation<>''")
+            for r in cur.fetchall():
+                d = (r.get("Designation") or "").strip()
+                if d:
+                    cur.execute("INSERT IGNORE INTO Designations (name) VALUES (%s)", [d])
+    except Exception:
+        pass
+    # Locations (existing GLPI site tree) doubles as the asset Location picker
+    # -- keep it topped up with any free-text values already used on assets
+    try:
+        cur.execute("SELECT DISTINCT Location FROM Assets WHERE Location IS NOT NULL AND Location<>''")
+        for r in cur.fetchall():
+            l = (r.get("Location") or "").strip()
+            if l:
+                cur.execute("INSERT IGNORE INTO Locations (name, parent_id) VALUES (%s, 0)", [l])
     except Exception:
         pass
     # avatar column may be too small for base64 photos -> enlarge if needed
@@ -868,6 +907,40 @@ def categories_api():
         cur.execute("DELETE FROM Categories WHERE id=%s", [cid]); c.commit(); c.close()
         return jsonify({"ok": True})
 
+@app.route("/api/departments", methods=["GET", "POST", "DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def departments_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "GET":
+        cur.execute("SELECT id, name FROM Departments ORDER BY name"); rows = cur.fetchall(); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+    if request.method == "POST":
+        n = (request.get_json(force=True).get("name") or "").strip()
+        if not n: return jsonify({"error": "name required"}), 400
+        cur.execute("INSERT IGNORE INTO Departments (name) VALUES (%s)", [n]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        did = request.get_json(force=True).get("id")
+        cur.execute("DELETE FROM Departments WHERE id=%s", [did]); c.commit(); c.close()
+        return jsonify({"ok": True})
+
+@app.route("/api/designations", methods=["GET", "POST", "DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def designations_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "GET":
+        cur.execute("SELECT id, name FROM Designations ORDER BY name"); rows = cur.fetchall(); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+    if request.method == "POST":
+        n = (request.get_json(force=True).get("name") or "").strip()
+        if not n: return jsonify({"error": "name required"}), 400
+        cur.execute("INSERT IGNORE INTO Designations (name) VALUES (%s)", [n]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        did = request.get_json(force=True).get("id")
+        cur.execute("DELETE FROM Designations WHERE id=%s", [did]); c.commit(); c.close()
+        return jsonify({"ok": True})
+
 @app.route("/api/models", methods=["GET", "POST", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def models_api():
@@ -993,6 +1066,58 @@ def import_catalog():
             if cur.rowcount: added_mod += 1
     c.commit(); c.close()
     return jsonify({"ok": True, "categories": added_cat, "manufacturers": added_mfr, "models": added_mod})
+
+@app.route("/api/directory/import", methods=["POST"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def import_directory():
+    """Bulk-add Departments / Locations / Designations from an uploaded
+    .xlsx/.xls/.csv sheet (any subset of those columns). Existing entries
+    are skipped, not duplicated."""
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    f = request.files["file"]
+    fname = (f.filename or "").lower()
+    raw = f.read()
+    if fname.endswith(".csv"):
+        import csv as _csv, io as _io
+        text = raw.decode("utf-8-sig", errors="replace")
+        rows = list(_csv.reader(_io.StringIO(text)))
+    else:
+        wb = load_workbook(io.BytesIO(raw), data_only=True); ws = wb.active
+        rows = [list(r) for r in ws.iter_rows(values_only=True)]
+    if not rows:
+        return jsonify({"error": "empty file"}), 400
+    header = [str(h).strip() if h else "" for h in rows[0]]
+    def hidx(*names):
+        for n in names:
+            for i, h in enumerate(header):
+                if h.lower() == n.lower():
+                    return i
+        return -1
+    depi, loci, desi = hidx("Department"), hidx("Location", "Site"), hidx("Designation", "Title", "Job Title")
+    if depi < 0 and loci < 0 and desi < 0:
+        return jsonify({"error": "no Department / Location / Designation column found in the header row"}), 400
+    def gv(row, idx):
+        if idx < 0 or idx >= len(row) or row[idx] is None:
+            return ""
+        return str(row[idx]).strip()
+    c = conn(); cur = c.cursor()
+    added_dep = added_loc = added_des = 0
+    for row in rows[1:]:
+        if row is None or all(v is None or str(v).strip() == "" for v in row):
+            continue
+        dep, loc, des = gv(row, depi), gv(row, loci), gv(row, desi)
+        if dep:
+            cur.execute("INSERT IGNORE INTO Departments (name) VALUES (%s)", [dep])
+            if cur.rowcount: added_dep += 1
+        if loc:
+            cur.execute("INSERT IGNORE INTO Locations (name, parent_id) VALUES (%s, 0)", [loc])
+            if cur.rowcount: added_loc += 1
+        if des:
+            cur.execute("INSERT IGNORE INTO Designations (name) VALUES (%s)", [des])
+            if cur.rowcount: added_des += 1
+    c.commit(); c.close()
+    return jsonify({"ok": True, "departments": added_dep, "locations": added_loc, "designations": added_des})
 
 @app.route("/api/export")
 @auth_required()
