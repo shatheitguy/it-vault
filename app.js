@@ -768,14 +768,21 @@ function openScan(){
 async function doScan(){
   const prefix=document.getElementById('scanPrefix').value.trim();
   const deep=document.getElementById('scanDeep').checked;
-  if(deep && !prefix){toast('✕ enter subnet prefix');return;}
+  if(deep && !prefix){toast('✕ enter a subnet, e.g. 192.168.0.0/24');return;}
   lastScan=[];
   document.getElementById('scanBody').innerHTML='<tr><td colspan=6 style="color:var(--muted)">Clearing…</td></tr>';
-  document.getElementById('scanStatus').textContent= deep?'Scanning /24 (this can take ~30s)…':'Reading ARP table…';
+  document.getElementById('scanStatus').textContent= deep?'Scanning subnet (larger ranges can take a while)…':'Reading ARP table…';
   const qs=(prefix?('?prefix='+encodeURIComponent(prefix)):'')+(deep?'&deep=1':'');
-  const r=await api('/api/scan'+qs); lastScan=r?await r.json():[];
-  saveLastScan(lastScan);
+  const r=await api('/api/scan'+qs);
+  const j=r?await r.json().catch(()=>null):null;
   document.getElementById('scanStatus').textContent='';
+  if(!r||!r.ok){
+    toast('✕ '+((j&&j.error)||'scan failed'));
+    renderScan(lastScan);
+    return;
+  }
+  lastScan=Array.isArray(j)?j:[];
+  saveLastScan(lastScan);
   renderScan(lastScan);
 }
 function renderScan(devs){

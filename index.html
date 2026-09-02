@@ -632,16 +632,16 @@
 <!-- Network scan modal -->
 <div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
   <h3>NETWORK SCAN — LOCAL DEVICES</h3>
-  <p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep with Deep scan (~30s). Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
+  <p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep of any subnet with Deep scan. Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
   <div class="invbox">
     <label>SCAN OPTIONS</label>
     <div class="scanrow">
       <button class="btn" id="scanBtn">⚡ SCAN</button>
       <span class="scan-sep"></span>
-      <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan (ping /24)</span></label>
-      <input id="scanPrefix" class="scan-prefix" placeholder="subnet prefix e.g. 192.168.0" disabled>
+      <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan</span></label>
+      <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22" disabled>
     </div>
-    <p class="muted scan-hint">Deep scan needs a subnet prefix and takes ~30s; without it, Scan just reads the ARP table (fast, no prefix needed).</p>
+    <p class="muted scan-hint">Deep scan needs a subnet in CIDR form (up to /20, 4096 addresses) and pings every address in it; without it, Scan just reads the ARP table (fast, no subnet needed).</p>
   </div>
   <div id="scanStatus" class="muted scan-status"></div>
   <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>

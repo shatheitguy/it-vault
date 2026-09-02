@@ -2489,7 +2489,23 @@ def asset_signature(aid):
     return jsonify({"ok": True, "data": data})
 
 # ---------- network scanner ----------
-import subprocess, re, concurrent.futures, socket
+import subprocess, re, concurrent.futures, socket, ipaddress
+
+def _parse_scan_range(raw):
+    """Accepts CIDR notation (e.g. '192.168.0.0/24', '172.16.0.0/22') or the
+    older bare-prefix shorthand ('192.168.0' -> assumed /24). Returns the
+    list of host IPs to sweep."""
+    raw = (raw or "").strip()
+    if not raw:
+        raise ValueError("enter a subnet, e.g. 192.168.0.0/24")
+    if "/" not in raw:
+        raw = raw.rstrip(".") + ".0/24"
+    net = ipaddress.ip_network(raw, strict=False)
+    if net.version != 4:
+        raise ValueError("only IPv4 subnets are supported")
+    if net.num_addresses > 4096:
+        raise ValueError("subnet too large -- use /20 or smaller (max 4096 addresses)")
+    return [str(ip) for ip in net.hosts()]
 
 # MAC vendor (OUI) lookup -- IEEE's official public registry, bundled locally
 # so scans work offline and no internal MAC/IP data ever leaves the network.
@@ -2573,8 +2589,10 @@ def network_scan():
     deep = request.args.get("deep", "0") == "1"
     devs = _arp_devices()
     if deep and prefix:
-        # sweep the /24
-        ips = [f"{prefix}.{i}" for i in range(1, 255)]
+        try:
+            ips = _parse_scan_range(prefix)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         with concurrent.futures.ThreadPoolExecutor(max_workers=60) as ex:
             for ip in ex.map(_ping_one, ips):
                 if ip and ip not in devs:
