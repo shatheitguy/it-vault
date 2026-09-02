@@ -740,6 +740,117 @@ async function loadAssetHistory(id){
   const r=await api('/api/assets/'+id+'/history'); if(!r)return; const h=await r.json();
   box.innerHTML = h.length? h.map(e=>`<div class="hist"><span class="hfield">${esc(e.field)}</span> <span class="hold">${esc(e.old_val||'—')}</span> → <span class="hnew">${esc(e.new_val||'—')}</span> <span class="hmeta">${esc(e.user)} · ${esc(e.ts)}</span></div>`).join('') : '<div class="muted">No history yet.</div>';
 }
+// ---------- Camera scan (QR / barcode) -> Add Asset form ----------
+let camScanStream=null, camScanLoopId=null, camScanDetector=null, camScanBusy=false;
+async function getCamScanDetector(){
+  if(camScanDetector) return camScanDetector;
+  if(!('BarcodeDetector' in window)) return null;
+  const formats=['qr_code','code_128','code_39','code_93','codabar','ean_13','ean_8','itf','upc_a','upc_e','data_matrix','pdf417'];
+  try{ camScanDetector=new BarcodeDetector({formats}); }
+  catch(e){ try{ camScanDetector=new BarcodeDetector({formats:['qr_code']}); }catch(e2){ return null; } }
+  return camScanDetector;
+}
+async function openCamScan(){
+  const status=document.getElementById('camScanStatus'); status.textContent='';
+  document.getElementById('camScanModal').classList.add('show');
+  const det=await getCamScanDetector();
+  if(!det){
+    status.textContent='✕ This browser doesn\'t support camera barcode scanning (try Chrome or Edge) -- use "Upload Photo Instead", or type the value in manually.';
+    return;
+  }
+  try{
+    camScanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
+    const vid=document.getElementById('camScanVideo');
+    vid.srcObject=camScanStream;
+    status.textContent='Point the camera at a QR code or barcode…';
+    const tick=async()=>{
+      if(!camScanStream)return;
+      if(!camScanBusy){
+        camScanBusy=true;
+        try{
+          const codes=await det.detect(vid);
+          if(codes && codes.length){ await onCamScanDecoded(codes[0].rawValue); return; }
+        }catch(e){}
+        camScanBusy=false;
+      }
+      camScanLoopId=requestAnimationFrame(tick);
+    };
+    camScanLoopId=requestAnimationFrame(tick);
+  }catch(e){
+    status.textContent='✕ Could not access the camera ('+(e.message||e.name||'permission denied')+') -- use "Upload Photo Instead".';
+  }
+}
+function closeCamScan(){
+  if(camScanLoopId){ cancelAnimationFrame(camScanLoopId); camScanLoopId=null; }
+  if(camScanStream){ camScanStream.getTracks().forEach(t=>t.stop()); camScanStream=null; }
+  camScanBusy=false;
+  document.getElementById('camScanModal').classList.remove('show');
+}
+async function onCamScanDecoded(text){
+  closeCamScan();
+  const status=document.getElementById('camScanStatus');
+  if(!text){ return; }
+  // 1) this app's own printed asset QR (http://host/asset/<id>) -- open that
+  //    existing asset for editing instead of prefilling a duplicate
+  const m=text.match(/\/asset\/([a-f0-9]{8,40})\b/i);
+  if(m && assets.some(a=>a._id===m[1])){
+    toast('✓ SCANNED — opened existing asset');
+    openModal(m[1]);
+    return;
+  }
+  // 2) a QR payload that itself carries structured asset data as JSON
+  let obj=null;
+  try{ const p=JSON.parse(text); if(p && typeof p==='object') obj=p; }catch(e){}
+  if(obj){
+    await applyScannedFields(obj);
+    toast('✓ SCANNED — form filled from QR data');
+    return;
+  }
+  // 3) otherwise treat the raw decoded text as a serial number (the common
+  //    case: a manufacturer's SN barcode/QR sticker)
+  const f=document.getElementById('f_Serial');
+  if(f){ f.value=text; toast('✓ SCANNED — Serial Number filled'); }
+  else{ toast('✓ SCANNED: '+text); }
+}
+async function applyScannedFields(obj){
+  const norm={}; Object.keys(obj).forEach(k=>norm[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=obj[k]);
+  const pick=(...keys)=>{ for(const k of keys){ if(norm[k]!=null && norm[k]!=='') return String(norm[k]); } return ''; };
+  const name=pick('name','assetname','device','devicename');
+  const serial=pick('serial','serialnumber','sn','serialno');
+  const mac=pick('mac','macaddress');
+  const type=pick('type','category','itemcategory');
+  const mfr=pick('manufacturer','brand','make');
+  const model=pick('model');
+  const loc=pick('location','site');
+  if(name && document.getElementById('f_Name')) document.getElementById('f_Name').value=name;
+  if(serial && document.getElementById('f_Serial')) document.getElementById('f_Serial').value=serial;
+  if(mac && document.getElementById('f_MacAddress')) document.getElementById('f_MacAddress').value=mac;
+  if(type && document.getElementById('f_Type')) await loadCategoryOptions(type);
+  if(loc && document.getElementById('f_Location')) await loadLocationOptions(loc);
+  if(mfr || model) await loadMfrModelOptions(mfr, model);
+}
+async function camScanFromFile(file){
+  const status=document.getElementById('camScanStatus');
+  const det=await getCamScanDetector();
+  if(!det){ status.textContent='✕ This browser doesn\'t support barcode scanning (try Chrome or Edge).'; return; }
+  status.textContent='Reading photo…';
+  try{
+    const bmp=await createImageBitmap(file);
+    const codes=await det.detect(bmp);
+    if(codes && codes.length){ await onCamScanDecoded(codes[0].rawValue); }
+    else { status.textContent='✕ No QR/barcode found in that photo -- try again or type the value manually.'; }
+  }catch(e){
+    status.textContent='✕ Could not read that photo ('+(e.message||e.name||'error')+').';
+  }
+}
+document.getElementById('camScanBtn').onclick=openCamScan;
+document.getElementById('camScanCancel').onclick=closeCamScan;
+document.getElementById('camScanUploadBtn').onclick=()=>document.getElementById('camScanUploadFile').click();
+document.getElementById('camScanUploadFile').onchange=(e)=>{
+  const f=e.target.files[0]; e.target.value='';
+  if(f) camScanFromFile(f);
+};
+
 async function fetchEmployees(){
   const r=await api('/api/employees');
   const list=r?await r.json():[];
@@ -778,7 +889,7 @@ async function saveModal(){
     }else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
   }
 }
-function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;}
+function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;closeCamScan();}
 
 /* ---------- checkout / checkin / maint / qr ---------- */
 async function doCheckout(){
