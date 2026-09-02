@@ -6,7 +6,7 @@
 <title>Ticket Monitor</title>
 <style>
   :root{ --bg:#0a0d13; --comp:#121826; --comp2:#0f1620; --line:#222c3d;
-         --acc:#3b9eff; --acc2:#7c5cff; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
+         --acc:#ff3b30; --acc2:#c0392b; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
          --grn:#3ddc97; --red:#ff6b6b; --amber:#ffb454;
          --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif; }
   *{box-sizing:border-box}
@@ -118,8 +118,8 @@ function applyTheme(b){
     var bgValue = bgType==='gradient' ? ('linear-gradient(135deg, '+bgA+', '+bgB+')') : baseHex;
     var surface = hex6(b.comp_bg,'#121826');
     var surfaceLight = isLightHex(surface);
-    var accent = ensureAccentVisible(hex6(b.accent,'#3b9eff'), surface);
-    var accent2 = ensureAccentVisible(hex6(b.accent2,'#7c5cff'), surface);
+    var accent = ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
+    var accent2 = ensureAccentVisible(hex6(b.accent2,'#c0392b'), surface);
     var r = document.documentElement.style;
     r.setProperty('--bg', bgValue);
     r.setProperty('--comp', surface);

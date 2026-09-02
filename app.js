@@ -1478,11 +1478,11 @@ async function putSettingsMerged(patch){
 }
 
 const THEME_PRESETS = {
-  deepdark:   { label:'Deep Dark',   bg_type:'solid', bg:'#0a0d13', comp_bg:'#121826', accent:'#3b9eff', accent2:'#7c5cff', radius:12, font:'Inter',           theme:'dark'  },
-  cleanlight: { label:'Clean Light', bg_type:'solid', bg:'#eef1f6', comp_bg:'#ffffff', accent:'#2b6fff', accent2:'#7c5cff', radius:10, font:'Inter',           theme:'light' },
-  graphite:   { label:'Graphite',    bg_type:'solid', bg:'#16181d', comp_bg:'#1e2127', accent:'#4c8dff', accent2:'#7c8aa5', radius:8,  font:'Inter',           theme:'dark'  },
+  deepdark:   { label:'Deep Dark',   bg_type:'solid', bg:'#0a0d13', comp_bg:'#121826', accent:'#ff3b30', accent2:'#c0392b', radius:12, font:'Inter',           theme:'dark'  },
+  cleanlight: { label:'Clean Light', bg_type:'solid', bg:'#eef1f6', comp_bg:'#ffffff', accent:'#ff3b30', accent2:'#c0392b', radius:10, font:'Inter',           theme:'light' },
+  graphite:   { label:'Graphite',    bg_type:'solid', bg:'#16181d', comp_bg:'#1e2127', accent:'#ff6b57', accent2:'#a56b6b', radius:8,  font:'Inter',           theme:'dark'  },
   /* legacy key kept so a saved 'cyberpunk' setting still resolves */
-  cyberpunk:  { label:'Graphite',    bg_type:'solid', bg:'#16181d', comp_bg:'#1e2127', accent:'#4c8dff', accent2:'#7c8aa5', radius:8,  font:'Inter',           theme:'dark'  },
+  cyberpunk:  { label:'Graphite',    bg_type:'solid', bg:'#16181d', comp_bg:'#1e2127', accent:'#ff6b57', accent2:'#a56b6b', radius:8,  font:'Inter',           theme:'dark'  },
   minimalist: { label:'Minimalist',  bg_type:'solid', bg:'#f7f7f8', comp_bg:'#ffffff', accent:'#111111', accent2:'#888888', radius:2,  font:'Inter',           theme:'light' }
 };
 const EMOJI_FALLBACK = ",'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji'";
@@ -1558,8 +1558,8 @@ function normCustom(s){
     bg: hex6(isGrad ? bgA : bgRaw, '#0a0d13'),
     bgA: bgA, bgB: bgB,
     comp_bg: hex6(s.comp_bg, '#121826'),
-    accent: hex6(s.accent, '#3b9eff'),
-    accent2: hex6(s.accent2, '#7c5cff'),
+    accent: hex6(s.accent, '#ff3b30'),
+    accent2: hex6(s.accent2, '#c0392b'),
     radius: radius,
     font: font
   };
@@ -1636,8 +1636,8 @@ function readCustomForm(){
     comp_bg: hex6(g('compBg').value, '#121826'),
     radius: Math.max(0, Math.min(24, parseInt(g('radius').value, 10) || 0)),
     font: FONT_STACKS[g('font').value] ? g('font').value : 'Inter',
-    accent: hex6(g('accent').value, '#3b9eff'),
-    accent2: hex6(g('accent2').value, '#7c5cff')
+    accent: hex6(g('accent').value, '#ff3b30'),
+    accent2: hex6(g('accent2').value, '#c0392b')
   };
 }
 function fillCustomForm(c){

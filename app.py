@@ -324,8 +324,8 @@ def migrate_schema():
         "comp_bg": "VARCHAR(40) DEFAULT '#121826'",
         "radius": "INT DEFAULT 12",
         "font": "VARCHAR(40) DEFAULT 'Rajdhani'",
-        "accent": "VARCHAR(20) DEFAULT '#3b9eff'",
-        "accent2": "VARCHAR(20) DEFAULT '#7c5cff'",
+        "accent": "VARCHAR(20) DEFAULT '#ff3b30'",
+        "accent2": "VARCHAR(20) DEFAULT '#c0392b'",
         "language": "VARCHAR(10) DEFAULT 'en'",
         "currency": "VARCHAR(6) DEFAULT 'AED'",
         "region": "VARCHAR(40) DEFAULT 'UAE'",
@@ -415,7 +415,7 @@ def me():
                     "theme_preset": s.get("theme_preset", "deepdark"), "bg_type": s.get("bg_type","solid"),
                     "bg": s.get("bg", "#0a0d13"), "comp_bg": s.get("comp_bg", "#121826"),
                     "radius": s.get("radius", 12), "font": s.get("font", "Rajdhani"),
-                    "accent": s.get("accent", "#3b9eff"), "accent2": s.get("accent2", "#7c5cff"),
+                    "accent": s.get("accent", "#ff3b30"), "accent2": s.get("accent2", "#c0392b"),
                     "language": s.get("language", "en"), "currency": s.get("currency", "AED"),
                     "region": s.get("region", "UAE"), "matrix_on": s.get("matrix_on", 1),
                     "app_name": s.get("app_name", "Sha The IT Guy"), "logo_text": s.get("logo_text", "Sha"),
@@ -1078,7 +1078,7 @@ def settings():
                      (gv("theme_preset","deepdark") or "deepdark")[:20], (gv("bg_type","solid") or "solid")[:12],
                      (gv("bg","#0a0d13") or "#0a0d13")[:40], (gv("comp_bg","#121826") or "#121826")[:40],
                      int(gv("radius",12) or 12), (gv("font","Rajdhani") or "Rajdhani")[:40],
-                     (gv("accent","#3b9eff") or "#3b9eff")[:20], (gv("accent2","#7c5cff") or "#7c5cff")[:20],
+                     (gv("accent","#ff3b30") or "#ff3b30")[:20], (gv("accent2","#c0392b") or "#c0392b")[:20],
                      (gv("language","en") or "en")[:10], (gv("currency","AED") or "AED")[:6],
                      (gv("region","UAE") or "UAE")[:40], (d.get("portal_token", cur0.get("portal_token","")) or "")[:64],
                      int(gv("sla_low",72) or 72), int(gv("sla_normal",24) or 24),
@@ -1495,8 +1495,8 @@ def branding():
                     "theme": s.get("theme", "dark"), "theme_preset": s.get("theme_preset", "deepdark"),
                     "bg_type": s.get("bg_type", "solid"), "bg": s.get("bg", "#0a0d13"),
                     "comp_bg": s.get("comp_bg", "#121826"), "radius": s.get("radius", 12),
-                    "font": s.get("font", "Rajdhani"), "accent": s.get("accent", "#3b9eff"),
-                    "accent2": s.get("accent2", "#7c5cff"), "language": s.get("language", "en"),
+                    "font": s.get("font", "Rajdhani"), "accent": s.get("accent", "#ff3b30"),
+                    "accent2": s.get("accent2", "#c0392b"), "language": s.get("language", "en"),
                     "currency": s.get("currency", "AED")})
 
 @app.route("/api/logo", methods=["POST"])
@@ -2112,7 +2112,7 @@ if(!token){document.body.innerHTML='<div class=sign-card><h3>❌ No token</h3><p
 const placeholder=document.getElementById('sigPlaceholder');
 const canvas=document.getElementById('sigCanvas');
 let ctx=null, isDrawing=false, hasSig=false;
-function accentColor(){try{return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#3b9eff';}catch(e){return '#3b9eff';}}
+function accentColor(){try{return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#ff3b30';}catch(e){return '#ff3b30';}}
 function initCanvas(){
   if(ctx) return;
   const w = canvas.offsetWidth||480, h = canvas.offsetHeight||160;
@@ -2220,8 +2220,8 @@ function applySignTheme(b){
     const surface=hex6(b.comp_bg,'#121826');
     const light=isLightHex(baseHex);
     const surfaceLight=isLightHex(surface);
-    const accent=ensureAccentVisible(hex6(b.accent,'#3b9eff'), surface);
-    const accent2=ensureAccentVisible(hex6(b.accent2,'#7c5cff'), surface);
+    const accent=ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
+    const accent2=ensureAccentVisible(hex6(b.accent2,'#c0392b'), surface);
     const radius=Math.max(0,Math.min(24,parseInt(b.radius,10)||12));
     const r=document.documentElement.style;
     r.setProperty('--bg', bgValue);

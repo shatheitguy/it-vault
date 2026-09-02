@@ -3,7 +3,7 @@
   --bg:#0a0d13; --bg1:#0d1119; --surface:#121826; --surface2:#0f1620;
   --line:#222c3d; --line2:#2c384c;
   --txt:#e6edf6; --muted:#8a98b0; --muted2:#5d6b82;
-  --accent:#3b9eff; --accent2:#7c5cff; --accent-soft:rgba(59,158,255,.12);
+  --accent:#ff3b30; --accent2:#c0392b; --accent-soft:rgba(255,59,48,.12);
   --grn:#3ddc97; --amber:#ffb454; --red:#ff6b6b; --cyan:#39d0ff;
   --radius:10px; --shadow:0 1px 2px rgba(0,0,0,.28),0 6px 20px rgba(0,0,0,.22);
   --font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
@@ -12,7 +12,7 @@
 body.light{
   /* applyCustomVars() computes bg/surface/line/txt/muted from the chosen palette --
      only declare what the engine does NOT set, or it gets overridden here. */
-  --accent-soft:rgba(59,158,255,.10);
+  --accent-soft:rgba(255,59,48,.10);
   --shadow:0 1px 2px rgba(16,32,64,.05),0 6px 18px rgba(16,32,64,.07);
   /* semantic colours darkened so they stay legible on a light surface */
   --grn:#0f9d63; --amber:#b0761a; --red:#d24545; --cyan:#0e8fb3;
@@ -51,7 +51,7 @@ canvas#sessBar{position:fixed;bottom:0;left:0;height:3px;width:100%;z-index:60;
 .nav a{display:flex;align-items:center;gap:11px;padding:10px 13px;border-radius:9px;color:var(--muted);
   font-weight:600;font-size:14px;letter-spacing:.3px;cursor:pointer;transition:.15s;border:1px solid transparent}
 .nav a:hover{background:var(--accent-soft);color:var(--txt)}
-.nav a.active{background:var(--accent-soft);color:var(--accent);border-color:rgba(59,158,255,.35);
+.nav a.active{background:var(--accent-soft);color:var(--accent);border-color:rgba(255,59,48,.35);
   box-shadow:inset 2px 0 0 var(--accent)}
 .ni{width:20px;text-align:center;font-size:15px;opacity:.95;flex:0 0 20px;
   font-family:'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji',sans-serif;
@@ -370,7 +370,7 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 .cfgitem{text-align:left;background:transparent;border:1px solid transparent;color:var(--muted);padding:10px 12px;
   border-radius:8px;cursor:pointer;font-family:var(--font);font-weight:500;font-size:13.5px;letter-spacing:0;transition:.15s}
 .cfgitem:hover{background:var(--accent-soft);color:var(--txt)}
-.cfgitem.active{background:var(--accent-soft);color:var(--accent);border-color:rgba(59,158,255,.35);
+.cfgitem.active{background:var(--accent-soft);color:var(--accent);border-color:rgba(255,59,48,.35);
   font-weight:600;box-shadow:inset 2px 0 0 var(--accent)}
 .cfgcontent{min-width:0}
 .cfg-sec{animation:fade .2s ease}

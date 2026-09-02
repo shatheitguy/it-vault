@@ -86,8 +86,8 @@ function applyCustomVars(s){
   const surface=hex6(s.comp_bg,'#121826');
   const light=isLightHex(baseHex);
   const surfaceLight=isLightHex(surface);
-  const accent=ensureAccentVisible(hex6(s.accent,'#3b9eff'), surface);
-  const accent2=ensureAccentVisible(hex6(s.accent2,'#7c5cff'), surface);
+  const accent=ensureAccentVisible(hex6(s.accent,'#ff3b30'), surface);
+  const accent2=ensureAccentVisible(hex6(s.accent2,'#c0392b'), surface);
   const radius=Math.max(0,Math.min(24,parseInt(s.radius,10)||12));
   const r=document.documentElement.style;
   r.setProperty('--bg', bgValue);
