@@ -26,8 +26,9 @@
       <div class="nav-grp">Records</div>
       <a id="navContracts" data-i18n="Contracts"><span class="ni">📄</span>Contracts</a>
       <a id="navLocations" data-i18n="Locations"><span class="ni">📍</span>Locations</a>
-      <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Audit Log</a>
+      <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
       <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
+      <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Audit Log</a>
 
       <div class="nav-grp">Tools</div>
       <a id="navScan" style="display:none" data-i18n="NetworkScan"><span class="ni">📡</span>Network Scan</a>
@@ -120,6 +121,34 @@
         <input id="locInput" placeholder="New location name"><button class="btn mag" id="newLocBtn">＋ ADD</button>
       </div>
       <ul id="locList" class="loclist"></ul>
+    </div>
+
+    <div id="page-catalog" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / PRODUCT CATALOG</div><h2>Product Catalog</h2></div>
+      </div>
+      <p class="sec-hint">Reference lists used on the Add Asset form -- item categories, manufacturers, and models. Add everything here in bulk, then just pick it from a dropdown when adding an asset.</p>
+      <div class="grid2" style="align-items:start">
+        <div class="invbox">
+          <label>ITEM CATEGORIES</label>
+          <div class="invrow"><input id="catInput" placeholder="e.g. Laptop"><button class="btn sm" id="catAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th></th></tr></thead><tbody id="catBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>MANUFACTURERS</label>
+          <div class="invrow"><input id="mfrCatInput" placeholder="e.g. Dell"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
+        </div>
+      </div>
+      <div class="invbox" style="margin-top:14px">
+        <label>MODELS</label>
+        <div class="invrow">
+          <select id="modMfrSelect" style="max-width:240px"><option value="">-- choose manufacturer --</option></select>
+          <input id="modCatInput" placeholder="e.g. Latitude 5420">
+          <button class="btn sm" id="modCatAdd">＋ ADD</button>
+        </div>
+        <div class="tablewrap"><table class="dtable"><thead><tr><th>Model</th><th>Manufacturer</th><th></th></tr></thead><tbody id="modCatBody"></tbody></table></div>
+      </div>
     </div>
 
     <!-- Ticket detail modal -->
@@ -366,10 +395,10 @@
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="pm_saveBrand">✓ SAVE BRANDING</button><button class="btn danger" id="removeLogoBtn" type="button">🗑 REMOVE LOGO</button><img id="b_logoPrev" src="/logo.png?t=1" style="height:34px;margin-left:10px"></div>
 <div class="refcard">
       <div>
-        <div style="font-family:var(--font);font-weight:650;color:var(--txt);letter-spacing:-.01em;font-size:14px">Manufacturers / Models</div>
+        <div style="font-family:var(--font);font-weight:650;color:var(--txt);letter-spacing:-.01em;font-size:14px">Item Categories / Manufacturers / Models</div>
         <div class="rc-info">Manage structured reference data used in the Add Asset form</div>
       </div>
-      <button class="btn ghost" id="openRefBtn" type="button">🏷 MANAGE</button>
+      <button class="btn ghost" id="openRefBtn" type="button">🏷 PRODUCT CATALOG</button>
     </div>
             </div>
           </section>
@@ -535,22 +564,6 @@
     <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="empCancel">CANCEL</button><button class="btn" id="empSave">SAVE</button></div>
-</div></div>
-
-<!-- Manufacturers / Models management modal -->
-<div class="modal" id="refModal"><div class="modal-box" style="width:min(560px,94vw);max-width:560px">
-  <h3>MANUFACTURERS &amp; MODELS</h3>
-  <div class="grid2">
-    <div class="field2"><label>Manufacturer</label>
-      <div class="invrow"><input id="mfrInput" placeholder="e.g. Dell"><button class="btn sm" id="mfrAdd">＋</button></div>
-      <select id="mfrList" size="5" style="width:100%"></select>
-    </div>
-    <div class="field2"><label>Model (of selected manufacturer)</label>
-      <div class="invrow"><input id="modInput" placeholder="e.g. Latitude 5420"><button class="btn sm" id="modAdd">＋</button></div>
-      <select id="modList" size="5" style="width:100%"></select>
-    </div>
-  </div>
-  <div class="m-actions"><button class="btn ghost" id="refClose">CLOSE</button></div>
 </div></div>
 
 <!-- LDAP import modal -->

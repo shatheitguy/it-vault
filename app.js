@@ -550,6 +550,7 @@ async function openModal(id,prefill){
     const val=a?a[c]||'':'';
     if(c==='Status')return`<div class="field2"><label>${c}</label><select id="f_${c}">${STATUSES.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
     if(c==='EmployeeID')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_EmployeeID"><option value="">-- select employee --</option></select></div>`;
+    if(c==='Type')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Type"><option value="">-- select category --</option></select></div>`;
     if(c==='NotesReceived')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" type="date" value="${esc(val)}"></div>`;
     if(c==='Price')return`<div class="field2"><label>${LABELS[c]||c} (${CURRENCY})</label><input id="f_${c}" type="number" step="0.01" min="0" value="${esc(val)}"></div>`;
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
@@ -565,7 +566,7 @@ async function openModal(id,prefill){
       <div class="grid2">${groups[0].cols.map(renderField).join('')}</div>
     </div>`+
     `<div class="invbox refbox">
-       <label>MANUFACTURER &amp; MODEL <a class="mlink" onclick="openRef()">manage ↗</a></label>
+       <label>MANUFACTURER &amp; MODEL <a class="mlink" onclick="closeModal();showPage('page-catalog')">manage in Product Catalog ↗</a></label>
        <div class="ref2">
          <div><select id="f_Manufacturer"><option value="">-- choose manufacturer --</option></select></div>
          <div><select id="f_Model"><option value="">-- choose model --</option></select></div>
@@ -590,8 +591,9 @@ async function openModal(id,prefill){
   if(histWrap)histWrap.style.display=id?'':'none';
   document.getElementById('modal').classList.add('show');
   if(document.getElementById('f_EmployeeID')){fetchEmployees();}
-  // populate Manufacturer / Model dropdowns from reference tables
+  // populate Manufacturer / Model / Category dropdowns from reference tables
   await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');
+  await loadCategoryOptions(a?a.Type||'':'');
   if(id)loadAssetHistory(id);
 }
 
@@ -625,6 +627,24 @@ async function loadModelOptions(selModel, mfr){
   sel.innerHTML=opts;
   sel.onchange=async()=>{
     if(sel.value==='__new'){const v=prompt('New model name:'); if(v&&v.trim()){const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim(),manufacturer:mfr||undefined})}); if(r&&r.ok){await loadModelOptions(v.trim(), mfr);}} else {sel.value=selModel;}}
+  };
+}
+// populate the Item Category <select> on the Add Asset form from the
+// Categories reference table, auto-adding it if it's genuinely new (e.g. an
+// existing asset's Type value from before this became a picker)
+async function loadCategoryOptions(selCat){
+  const sel=document.getElementById('f_Type'); if(!sel)return;
+  let cats=[];
+  try{
+    const r=await api('/api/categories'); cats=r?await r.json():[];
+    if(selCat && !cats.some(c=>c.name===selCat)){
+      const r2=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selCat})});
+      if(r2&&r2.ok){ const r3=await api('/api/categories'); cats=r3?await r3.json():cats; }
+    }
+  }catch(e){}
+  sel.innerHTML='<option value="">-- select category --</option>'+cats.map(c=>`<option value="${esc(c.name)}" ${c.name===selCat?'selected':''}>${esc(c.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
+  sel.onchange=async()=>{
+    if(sel.value==='__new'){const v=prompt('New category name:'); if(v&&v.trim()){const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadCategoryOptions(v.trim());}} else {sel.value=selCat;}}
   };
 }
 async function loadAssetHistory(id){
@@ -1062,7 +1082,7 @@ document.getElementById('accSave').onclick=saveProfile;
 document.getElementById('saveSettings').onclick=saveSettings;
 document.getElementById('pm_saveBrand').onclick=saveBrand;
 document.getElementById('removeLogoBtn').onclick=removeLogo;
-document.getElementById('openRefBtn').onclick=openRef;
+document.getElementById('openRefBtn').onclick=()=>showPage('page-catalog');
 document.getElementById('navAudit').onclick=openAudit;
 document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
@@ -1111,10 +1131,7 @@ document.getElementById('newContractBtn').onclick=newContract;
 document.getElementById('navLocations').onclick=()=>showPage('page-locations');
 document.getElementById('navLocations').style.display=MY_ROLE!==ROLE_VIEW?'':'none';
 document.getElementById('newLocBtn').onclick=addLoc;
-document.getElementById('refClose').onclick=()=>document.getElementById('refModal').classList.remove('show');
-document.getElementById('mfrList').onchange=e=>loadModels(e.target.value);
-document.getElementById('mfrAdd').onclick=async()=>{const n=document.getElementById('mfrInput').value.trim();if(!n)return;const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});if(r&&r.ok){document.getElementById('mfrInput').value='';loadRef();}};
-document.getElementById('modAdd').onclick=async()=>{const mi=document.getElementById('mfrList').value;const n=document.getElementById('modInput').value.trim();if(!mi||!n)return;const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,manufacturer_id:mi})});if(r&&r.ok){document.getElementById('modInput').value='';loadModels(mi);}};
+document.getElementById('navCatalog').onclick=()=>showPage('page-catalog');
 document.getElementById('ldapCancel').onclick=()=>document.getElementById('ldapModal').classList.remove('show');
 document.getElementById('coSave').onclick=doCheckout;
 window.loadCfgUsers=window.loadCfgUsers||function(){};window.editRow=openModal;window.delRow=delRow;window.editUser=editUser;window.delUser=delUser;window.delInvoice=delInvoice;
@@ -1125,11 +1142,11 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-locations','page-usettings','page-scan','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-locations','page-catalog','page-usettings','page-scan','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
   const map={  'page-dashboard':'navHome','page-employees':'navEmployees','page-trash':'navTrash','page-tickets':'navTickets',
-    'page-contracts':'navContracts','page-locations':'navLocations',
+    'page-contracts':'navContracts','page-locations':'navLocations','page-catalog':'navCatalog',
     'page-usettings':'navSettings','page-scan':'navScan',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
   const n=map[id]?document.getElementById(map[id]):null;
@@ -1141,6 +1158,7 @@ function showPage(id){
   else if(id==='page-tickets')loadTickets();
   else if(id==='page-contracts')loadContracts();
   else if(id==='page-locations')loadLocations();
+  else if(id==='page-catalog')loadCatalog();
   else if(id==='page-usettings'){loadUserSettings();loadSettings();loadCustom();}
   else if(id==='page-scan')openScan();
   else if(id==='page-audit')openAudit();
@@ -1194,22 +1212,49 @@ async function emptyTrash(){
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
 
-// Reference data: Manufacturers / Models
-async function openRef(){
-  document.getElementById('refModal').classList.add('show');
-  await loadRef();
+// ---------- Product Catalog page: Categories / Manufacturers / Models ----------
+async function loadCatalog(){
+  await Promise.all([loadCatCategories(), loadCatManufacturers(), loadCatModels()]);
 }
-async function loadRef(){
-  const r=await api('/api/manufacturers'); const mfrs=r?await r.json():[];
-  const ml=document.getElementById('mfrList'); ml.innerHTML=mfrs.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')||'<option disabled>none</option>';
-  if(mfrs.length)loadModels(mfrs[0].id);
+async function loadCatCategories(){
+  const r=await api('/api/categories'); const list=r?await r.json():[];
+  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td><button class="btn sm danger" onclick="delCatalogItem('categories','${c.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
 }
-async function loadModels(mfrId){
-  const r=await api('/api/models'); const all=r?await r.json():[];
-  const list=all.filter(m=>String(m.manufacturer_id)===String(mfrId));
-  const ml=document.getElementById('modList'); ml.innerHTML=list.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join('')||'<option disabled>none yet</option>';
+async function loadCatManufacturers(){
+  const r=await api('/api/manufacturers'); const list=r?await r.json():[];
+  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td><button class="btn sm danger" onclick="delCatalogItem('manufacturers','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  const sel=document.getElementById('modMfrSelect');
+  const cur=sel.value;
+  sel.innerHTML='<option value="">-- choose manufacturer --</option>'+list.map(m=>`<option value="${m.id}" ${String(m.id)===cur?'selected':''}>${esc(m.name)}</option>`).join('');
 }
-window.openRef=openRef;
+async function loadCatModels(){
+  const r=await api('/api/models'); const list=r?await r.json():[];
+  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.manufacturer||'—')}</td><td><button class="btn sm danger" onclick="delCatalogItem('models','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+}
+async function delCatalogItem(kind,id){
+  if(!confirm('Delete this '+kind.slice(0,-1)+'? Assets already using it keep their saved value.'))return;
+  const r=await api('/api/'+kind,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(r&&r.ok){toast('🗑 DELETED');loadCatalog();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+window.delCatalogItem=delCatalogItem;
+document.getElementById('catAdd').onclick=async()=>{
+  const el=document.getElementById('catInput'); const n=el.value.trim(); if(!n)return;
+  const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  if(r&&r.ok){el.value='';loadCatCategories();}
+};
+document.getElementById('mfrCatAdd').onclick=async()=>{
+  const el=document.getElementById('mfrCatInput'); const n=el.value.trim(); if(!n)return;
+  const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  if(r&&r.ok){el.value='';loadCatManufacturers();}
+};
+document.getElementById('modCatAdd').onclick=async()=>{
+  const mid=document.getElementById('modMfrSelect').value;
+  const el=document.getElementById('modCatInput'); const n=el.value.trim();
+  if(!mid){toast('✕ choose a manufacturer first');return;}
+  if(!n)return;
+  const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,manufacturer_id:mid})});
+  if(r&&r.ok){el.value='';loadCatModels();}
+};
 
 // ---------- Tickets (osTicket-style) ----------
 let _usersCache=null;
@@ -1458,6 +1503,7 @@ window.repairDashStructure=repairDashStructure;
     navScan: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navEmployees: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navCatalog: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navBackup: me.role===ROLE_ADMIN
   };
   Object.entries(navShow).forEach(([id,show])=>{ const el=document.getElementById(id); if(el) el.style.display = show ? 'flex' : 'none'; });
@@ -1489,8 +1535,8 @@ function wireModalClose(){
   });
 }
 function bringToFront(m){
-  // keep explicitly-stacked modals (profile/users/ref) above the generic base
-  const fixed={usersModal:210, refModal:220};
+  // keep explicitly-stacked modals (profile/users) above the generic base
+  const fixed={usersModal:210};
   document.querySelectorAll('.modal.show').forEach(el=>{
     if(fixed[el.id]) el.style.zIndex=fixed[el.id];
     else el.style.zIndex=100;

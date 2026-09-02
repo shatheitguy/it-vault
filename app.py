@@ -116,6 +116,9 @@ def init_db():
         id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160), manufacturer_id INT,
         UNIQUE KEY uq_mod (name, manufacturer_id)
     )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS Categories (
+        id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) UNIQUE
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS History (
         id INT AUTO_INCREMENT PRIMARY KEY, asset_id VARCHAR(40), ts DATETIME, user VARCHAR(80),
         field VARCHAR(80), old_val TEXT, new_val TEXT,
@@ -359,6 +362,19 @@ def migrate_schema():
     # holds the AD/login username for LDAP-synced staff)
     try:
         cur.execute("ALTER TABLE Employees ADD COLUMN EmpCode VARCHAR(64) DEFAULT ''")
+    except Exception:
+        pass
+    # Item Category picker: backfill from whatever Type values already exist
+    # on real assets, so switching that field to a dropdown doesn't blank out
+    # anyone's existing data (one-time -- skipped once Categories has rows)
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM Categories")
+        if (cur.fetchone() or {}).get("n", 0) == 0:
+            cur.execute("SELECT DISTINCT Type FROM Assets WHERE Type IS NOT NULL AND Type<>''")
+            for r in cur.fetchall():
+                t = (r.get("Type") or "").strip()
+                if t:
+                    cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [t])
     except Exception:
         pass
     # avatar column may be too small for base64 photos -> enlarge if needed
@@ -835,6 +851,23 @@ def manufacturers_api():
         cur.execute("DELETE FROM Manufacturers WHERE id=%s", [mid]); c.commit(); c.close()
         return jsonify({"ok": True})
 
+@app.route("/api/categories", methods=["GET", "POST", "DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def categories_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "GET":
+        cur.execute("SELECT id, name FROM Categories ORDER BY name"); rows = cur.fetchall(); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+    if request.method == "POST":
+        n = (request.get_json(force=True).get("name") or "").strip()
+        if not n: return jsonify({"error": "name required"}), 400
+        cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [n]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        cid = request.get_json(force=True).get("id")
+        cur.execute("DELETE FROM Categories WHERE id=%s", [cid]); c.commit(); c.close()
+        return jsonify({"ok": True})
+
 @app.route("/api/models", methods=["GET", "POST", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def models_api():
@@ -867,6 +900,7 @@ def import_excel():
         return jsonify({"error": "empty"}), 400
     header = [str(h).strip() if h else "" for h in data[0]]
     c = conn(); cur = c.cursor(); added = updated = 0
+    seen_types = set()
     for raw in data[1:]:
         if raw is None or all(v is None or str(v).strip() == "" for v in raw):
             continue
@@ -881,6 +915,10 @@ def import_excel():
             "Notes": rec.get("Notes") or rec.get("Remark") or rec.get("Comments") or "",
             "PurchaseDate": rec.get("PurchaseDate") or rec.get("Purchase Date") or rec.get("Bought") or "",
         }
+        t = str(row.get("Type") or "").strip()
+        if t and t not in seen_types:
+            seen_types.add(t)
+            cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [t])
         serial = str(row["Serial"]).strip()
         if serial:
             cur.execute("SELECT _id FROM Assets WHERE Serial=%s", [serial]); ex = cur.fetchone()
