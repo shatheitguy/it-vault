@@ -6,18 +6,18 @@ import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
-import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
+import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
 import com.itguy.assetmanager.ui.dashboard.DashboardFragment
 import com.itguy.assetmanager.ui.employees.DirectoryFragment
 import com.itguy.assetmanager.ui.generic.GenericListFragment
 import com.itguy.assetmanager.ui.generic.ListKind
 import com.itguy.assetmanager.ui.login.LoginActivity
+import com.itguy.assetmanager.ui.scan.NetworkScanFragment
 import com.itguy.assetmanager.ui.settings.SettingsFragment
 import com.itguy.assetmanager.ui.tickets.TicketsListFragment
-import com.itguy.assetmanager.ui.unifi.UnifiFragment
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
 
@@ -127,18 +127,11 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_catalog -> showFragment(GenericListFragment.newInstance(ListKind.CATALOG), "Product Catalog")
             com.itguy.assetmanager.R.id.nav_trash -> showFragment(GenericListFragment.newInstance(ListKind.TRASH), "Trash")
             com.itguy.assetmanager.R.id.nav_audit -> showFragment(GenericListFragment.newInstance(ListKind.AUDIT), "Audit Log")
-            com.itguy.assetmanager.R.id.nav_unifi -> showFragment(UnifiFragment(), "UniFi Controller")
+            com.itguy.assetmanager.R.id.nav_scan -> showFragment(NetworkScanFragment(), "Network Scan")
+            com.itguy.assetmanager.R.id.nav_backup -> showFragment(BackupRestoreFragment(), "Backup / Restore")
             com.itguy.assetmanager.R.id.nav_settings -> showFragment(SettingsFragment(), "Settings")
-            com.itguy.assetmanager.R.id.nav_logout -> { logout(); return true }
         }
         item.isChecked = true
         return true
-    }
-
-    private fun logout() {
-        Prefs.clear()
-        ApiClient.reset()
-        startActivity(Intent(this, LoginActivity::class.java))
-        finish()
     }
 }

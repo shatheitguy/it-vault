@@ -46,6 +46,21 @@ class AssetEditFragment : Fragment() {
             f.arguments = Bundle().apply { putString("assetId", assetId) }
             return f
         }
+
+        /** Opens a blank Add Asset form pre-filled from e.g. a Network Scan
+         * result -- nothing is saved until the user hits Save, same as the
+         * QR/label scanner and the web app's "add scanned device" flow. */
+        fun newInstanceWithPrefill(name: String = "", mac: String = "", type: String = "", location: String = ""): AssetEditFragment {
+            val f = AssetEditFragment()
+            f.arguments = Bundle().apply {
+                putString("assetId", null)
+                putString("prefillName", name)
+                putString("prefillMac", mac)
+                putString("prefillType", type)
+                putString("prefillLocation", location)
+            }
+            return f
+        }
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -89,7 +104,12 @@ class AssetEditFragment : Fragment() {
 
                 current = if (assetId != null) {
                     api.getAsset(assetId!!).body() ?: Asset()
-                } else Asset()
+                } else Asset(
+                    Name = arguments?.getString("prefillName").orEmpty(),
+                    MacAddress = arguments?.getString("prefillMac").orEmpty(),
+                    Type = arguments?.getString("prefillType").orEmpty(),
+                    Location = arguments?.getString("prefillLocation").orEmpty()
+                )
 
                 if (_b == null) return@launch
                 bindStatusSpinner()

@@ -110,3 +110,7 @@ data class UnifiClientsResponse(val clients: List<UnifiClient>?, val error: Stri
 
 data class OkResponse(val ok: Boolean?, val error: String?)
 data class IdRequest(val id: Int)
+
+data class ScanDevice(val ip: String, val mac: String?, val type: String?, val host: String?, val vendor: String?)
+data class BackupItem(val file: String, val scope: String, val created: String, val size: Long)
+data class RestoreResponse(val ok: Boolean?, val statements: Int?, val error: String?)

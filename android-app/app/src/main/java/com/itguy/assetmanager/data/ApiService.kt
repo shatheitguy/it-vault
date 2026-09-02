@@ -138,4 +138,17 @@ interface ApiService {
     suspend fun profile(): Response<Map<String, @JvmSuppressWildcards Any?>>
     @PUT("api/profile")
     suspend fun updateProfile(@Body body: Map<String, @JvmSuppressWildcards Any?>): Response<OkResponse>
+
+    // ---- network scan ----
+    @GET("api/scan")
+    suspend fun scan(@Query("prefix") prefix: String? = null, @Query("deep") deep: String? = null): Response<List<ScanDevice>>
+
+    // ---- backup / restore ----
+    @GET("api/backups")
+    suspend fun listBackups(): Response<List<BackupItem>>
+    @DELETE("api/backups/{fname}")
+    suspend fun deleteBackup(@Path("fname") fname: String): Response<OkResponse>
+    @Multipart
+    @POST("api/restore")
+    suspend fun restore(@Part file: okhttp3.MultipartBody.Part): Response<RestoreResponse>
 }
