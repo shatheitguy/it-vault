@@ -233,6 +233,8 @@
         <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
         <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
         <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>
+        <div class="panel widget" data-wkey="unifi-devices"><div class="secthead">UNIFI DEVICES</div><div class="tablewrap" style="max-height:320px"><table id="unifiDevices"><thead><tr><th>NAME</th><th>TYPE</th><th>IP</th><th>CLIENTS</th><th>STATUS</th></tr></thead><tbody id="unifiDevicesBody"></tbody></table><div class="empty" id="unifiDevicesEmpty" style="display:none">NO DEVICES</div></div></div>
+        <div class="panel widget" data-wkey="unifi-clients"><div class="secthead">UNIFI ACTIVE CLIENTS</div><div class="tablewrap" style="max-height:320px"><table id="unifiClients"><thead><tr><th>HOSTNAME</th><th>IP</th><th>NETWORK</th><th>LINK</th></tr></thead><tbody id="unifiClientsBody"></tbody></table><div class="empty" id="unifiClientsEmpty" style="display:none">NO ACTIVE CLIENTS</div></div></div>
       </div>
     </div>
 
@@ -289,6 +291,7 @@
           <button class="cfgitem" data-sec="sla">⏱ SLA & Automation</button>
           <button class="cfgitem" data-sec="database">🗄 Database</button>
           <button class="cfgitem" data-sec="ldap">🛡 LDAP / AD</button>
+          <button class="cfgitem" data-sec="unifi">🛜 UniFi Controller</button>
           <button class="cfgitem" data-sec="branding">🏢 Branding</button>
           <button class="cfgitem" data-sec="custom">🎨 Customization</button>
           <button class="cfgitem" data-sec="label">🏷 Asset Label</button>
@@ -411,6 +414,24 @@
               <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="ldapTestBtn2" type="button">⚡ TEST LDAP</button><button class="btn ghost" id="ldapSyncBtn2" type="button">⇩ SYNC FROM AD NOW</button><span id="ldapTestMsg2" class="muted" style="margin-left:8px"></span></div>
             </div>
             <div class="m-actions"><button class="btn mag" id="saveLdapBtn">✓ SAVE LDAP</button></div>
+          </section>
+          <!-- UNIFI CONTROLLER -->
+          <section class="cfg-sec" data-sec="unifi" style="display:none">
+            <div class="panel"><div class="secthead">UNIFI CONTROLLER</div>
+              <p class="muted" style="margin:0 0 12px">Pulls the managed device list and active clients onto the Dashboard. Use <b>Test</b> before saving.</p>
+              <label class="toggle" style="margin-bottom:12px"><input type="checkbox" id="unifi_enabled"><span>Enabled</span></label>
+              <div class="grid2">
+                <div class="field2"><label>Controller Host / IP</label><input id="unifi_host" placeholder="192.168.1.1 or unifi.company.local"></div>
+                <div class="field2"><label>Port</label><input id="unifi_port" type="number" value="443"></div>
+                <div class="field2"><label>Site</label><input id="unifi_site" placeholder="default"></div>
+                <div class="field2"><label>Username</label><input id="unifi_user" placeholder="local admin / read-only account"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Password</label><input id="unifi_pass" type="password" placeholder="leave blank to keep current"></div>
+              </div>
+              <label class="toggle" style="margin-top:6px"><input type="checkbox" id="unifi_is_os" checked><span>UniFi OS (UDM / UDM Pro / Cloud Key Gen2+)</span></label>
+              <label class="toggle"><input type="checkbox" id="unifi_verify_ssl"><span>Verify SSL certificate</span></label>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn ghost" id="unifiTestBtn" type="button">⚡ TEST CONNECTION</button><span id="unifiTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveUnifiBtn">✓ SAVE UNIFI</button></div>
           </section>
           <!-- BRANDING -->
           <section class="cfg-sec" data-sec="branding" style="display:none">
@@ -735,6 +756,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260902a"></script>
+<script src="/app.js?nocache=20260902b"></script>
 </body>
 </html>

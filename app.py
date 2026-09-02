@@ -73,6 +73,10 @@ app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
 app.permanent_session_lifetime = timedelta(minutes=5)
 
+# UniFi Controller integration -- cached device/client snapshot (see _unifi_refresh)
+_unifi_cache = {"ts": 0, "devices": [], "clients": [], "error": None}
+_UNIFI_CACHE_TTL = 20
+
 @app.after_request
 def _no_cache(resp):
     # Prevent stale JS/HTML caching so dashboard always re-renders fresh
@@ -364,6 +368,22 @@ def migrate_schema():
         cur.execute("ALTER TABLE Assets ADD COLUMN MacAddress VARCHAR(64) DEFAULT ''")
     except Exception:
         pass
+    # UniFi Controller integration (Dashboard device/client widgets)
+    unifi_cols = {
+        "unifi_enabled": "BOOLEAN DEFAULT 0",
+        "unifi_host": "VARCHAR(200) DEFAULT ''",
+        "unifi_port": "INT DEFAULT 443",
+        "unifi_site": "VARCHAR(80) DEFAULT 'default'",
+        "unifi_user": "VARCHAR(120) DEFAULT ''",
+        "unifi_pass": "VARCHAR(200) DEFAULT ''",
+        "unifi_is_os": "BOOLEAN DEFAULT 1",
+        "unifi_verify_ssl": "BOOLEAN DEFAULT 0",
+    }
+    for col, typ in unifi_cols.items():
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
     # Employees: real editable staff/HR ID, separate from EmployeeID (which
     # holds the AD/login username for LDAP-synced staff)
     try:
@@ -1279,6 +1299,125 @@ def test_ldap():
     except Exception as e:
         return jsonify({"ok": False, "msg": str(e)}), 400
 
+def _unifi_request(cfg):
+    """Log into a UniFi Controller and fetch its device + active-client lists.
+    cfg: dict with unifi_host/port/site/user/pass/is_os/verify_ssl. Returns
+    (devices, clients) raw dicts as the controller returns them. Raises
+    Exception with a human-readable message on any failure."""
+    import requests, urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    host = (cfg.get("unifi_host") or "").strip()
+    port = int(cfg.get("unifi_port") or 443)
+    site = (cfg.get("unifi_site") or "default").strip() or "default"
+    user = (cfg.get("unifi_user") or "").strip()
+    pw = cfg.get("unifi_pass") or ""
+    is_os = bool(cfg.get("unifi_is_os"))
+    verify_ssl = bool(cfg.get("unifi_verify_ssl"))
+    if not host or not user or not pw:
+        raise Exception("Host, username and password are required")
+    base = f"https://{host}:{port}"
+    s = requests.Session()
+    login_url = base + ("/api/auth/login" if is_os else "/api/login")
+    try:
+        r = s.post(login_url, json={"username": user, "password": pw}, verify=verify_ssl, timeout=8)
+    except requests.exceptions.SSLError:
+        raise Exception("SSL certificate not trusted -- enable 'Verify SSL' only if the controller has a valid cert, otherwise leave it off")
+    except requests.exceptions.RequestException as e:
+        raise Exception(f"Could not reach {host}:{port} -- {e}")
+    if r.status_code in (400, 401):
+        raise Exception("Login failed -- check username/password")
+    r.raise_for_status()
+    headers = {}
+    csrf = r.headers.get("X-CSRF-Token") or r.headers.get("x-csrf-token")
+    if csrf:
+        headers["X-CSRF-Token"] = csrf
+    prefix = "/proxy/network" if is_os else ""
+    def get(path):
+        rr = s.get(f"{base}{prefix}/api/s/{site}/{path}", headers=headers, verify=verify_ssl, timeout=10)
+        rr.raise_for_status()
+        return (rr.json() or {}).get("data", [])
+    devices = get("stat/device")
+    clients = get("stat/sta")
+    try:
+        s.post(base + ("/api/auth/logout" if is_os else "/api/logout"), headers=headers, verify=verify_ssl, timeout=5)
+    except Exception:
+        pass
+    return devices, clients
+
+@app.route("/api/test-unifi", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def test_unifi():
+    d = request.get_json(force=True) or {}
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
+    saved = cur.fetchone() or {}; c.close()
+    cfg = {
+        "unifi_host": d.get("unifi_host") or saved.get("unifi_host") or "",
+        "unifi_port": d.get("unifi_port") or saved.get("unifi_port") or 443,
+        "unifi_site": d.get("unifi_site") or saved.get("unifi_site") or "default",
+        "unifi_user": d.get("unifi_user") or saved.get("unifi_user") or "",
+        "unifi_pass": d.get("unifi_pass") or saved.get("unifi_pass") or "",
+        "unifi_is_os": d.get("unifi_is_os") if "unifi_is_os" in d else bool(saved.get("unifi_is_os")),
+        "unifi_verify_ssl": d.get("unifi_verify_ssl") if "unifi_verify_ssl" in d else bool(saved.get("unifi_verify_ssl")),
+    }
+    try:
+        devices, clients = _unifi_request(cfg)
+        return jsonify({"ok": True, "msg": f"Connected -- {len(devices)} device(s), {len(clients)} active client(s)"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+
+def _unifi_refresh(force=False):
+    now = time.time()
+    if not force and (now - _unifi_cache["ts"]) < _UNIFI_CACHE_TTL:
+        return
+    c = conn(); cur = c.cursor()
+    cur.execute("""SELECT unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass,
+                   unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1""")
+    cfg = cur.fetchone() or {}; c.close()
+    if not cfg.get("unifi_enabled"):
+        _unifi_cache.update(ts=now, devices=[], clients=[], error="not_configured")
+        return
+    try:
+        devices, clients = _unifi_request(cfg)
+        _unifi_cache.update(ts=now, devices=devices, clients=clients, error=None)
+    except Exception as e:
+        _unifi_cache.update(ts=now, devices=[], clients=[], error=str(e))
+
+_UNIFI_TYPE_LABELS = {"uap": "Access Point", "usw": "Switch", "ugw": "Gateway", "udm": "Gateway", "uxg": "Gateway"}
+
+@app.route("/api/unifi/devices")
+@auth_required()
+def unifi_devices():
+    _unifi_refresh(force=request.args.get("force") == "1")
+    out = [{
+        "name": d.get("name") or d.get("model") or d.get("mac", ""),
+        "model": d.get("model", ""),
+        "type": _UNIFI_TYPE_LABELS.get(d.get("type", ""), d.get("type", "") or "Device"),
+        "ip": d.get("ip", ""),
+        "mac": d.get("mac", ""),
+        "online": d.get("state") == 1,
+        "version": d.get("version", ""),
+        "uptime": d.get("uptime", 0),
+        "num_sta": d.get("num_sta", d.get("user-num_sta", 0)) or 0,
+    } for d in _unifi_cache["devices"]]
+    return jsonify({"devices": out, "error": _unifi_cache["error"]})
+
+@app.route("/api/unifi/clients")
+@auth_required()
+def unifi_clients():
+    _unifi_refresh(force=request.args.get("force") == "1")
+    out = [{
+        "hostname": cl.get("hostname") or cl.get("name") or cl.get("mac", ""),
+        "ip": cl.get("ip", ""),
+        "mac": cl.get("mac", ""),
+        "is_wired": bool(cl.get("is_wired")),
+        "essid": cl.get("essid", ""),
+        "network": cl.get("network", ""),
+        "uptime": cl.get("uptime", 0),
+        "signal": cl.get("signal"),
+    } for cl in _unifi_cache["clients"]]
+    return jsonify({"clients": out, "error": _unifi_cache["error"]})
+
 # ---------- settings (admin) ----------
 @app.route("/api/settings", methods=["GET", "PUT"])
 @auth_required([ROLE_ADMIN])
@@ -1293,7 +1432,7 @@ def settings():
             d = request.get_json(force=True) or {}
             logo = None
         # load current row so partial saves (e.g. branding only) don't reset other fields
-        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply FROM Settings WHERE id=1")
+        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
         cur0 = cur.fetchone() or {}
         def gv(k, fb):
             return d.get(k) if (k in d and d.get(k) not in (None, "")) else cur0.get(k, fb)
@@ -1331,6 +1470,18 @@ def settings():
                      bool(d.get("notify_on_create", cur0.get("notify_on_create", True))),
                      bool(d.get("notify_on_resolve", cur0.get("notify_on_resolve", True))),
                      bool(d.get("notify_on_reply", cur0.get("notify_on_reply", True)))))
+        if any(k in d for k in ("unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user","unifi_pass","unifi_is_os","unifi_verify_ssl")):
+            cur.execute("""UPDATE Settings SET unifi_enabled=%s, unifi_host=%s, unifi_port=%s, unifi_site=%s,
+                          unifi_user=%s, unifi_pass=%s, unifi_is_os=%s, unifi_verify_ssl=%s WHERE id=1""",
+                        (bool(d.get("unifi_enabled", cur0.get("unifi_enabled", False))),
+                         (d.get("unifi_host", cur0.get("unifi_host","")) or "").strip()[:200],
+                         int(d.get("unifi_port") or cur0.get("unifi_port") or 443),
+                         (d.get("unifi_site", cur0.get("unifi_site","default")) or "default").strip()[:80],
+                         (d.get("unifi_user", cur0.get("unifi_user","")) or "").strip()[:120],
+                         d.get("unifi_pass", cur0.get("unifi_pass","")) if d.get("unifi_pass") else cur0.get("unifi_pass",""),
+                         bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
+                         bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
+            _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
         # persist DB connection config (points the app at a different MariaDB)
         if any(k in d for k in ("db_host", "db_port", "db_name", "db_user", "db_pass")):
             save_db_config(d.get("db_host", DB_HOST), d.get("db_port", DB_PORT),
@@ -1361,7 +1512,9 @@ def settings():
                                           "theme_preset","bg_type","bg","comp_bg","radius","font","accent","accent2",
                                           "language","currency","region","portal_token",
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
-                                          "auto_assign_roundrobin","notify_on_create","notify_on_resolve","notify_on_reply"]} | {
+                                          "auto_assign_roundrobin","notify_on_create","notify_on_resolve","notify_on_reply",
+                                          "unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user","unifi_pass",
+                                          "unifi_is_os","unifi_verify_ssl"]} | {
                 "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME,
                 "db_user": DB_USER, "db_pass": DB_PASS})
 
