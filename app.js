@@ -1378,7 +1378,6 @@ document.getElementById('empCancel').onclick=()=>document.getElementById('empMod
 document.getElementById('empSave').onclick=saveEmployee;
 const _ldapSyncBtn=document.getElementById('ldapSyncBtn'); if(_ldapSyncBtn)_ldapSyncBtn.onclick=syncLdap;
 document.getElementById('navTrash').onclick=()=>showPage('page-trash');
-document.getElementById('navTrash').style.display=MY_ROLE!==ROLE_VIEW?'':'none';
 document.getElementById('navTickets').onclick=()=>showPage('page-tickets');
 document.getElementById('newTicketBtn').onclick=openNewTicket;
 document.getElementById('tkFormCancel').onclick=()=>document.getElementById('tkFormModal').classList.remove('show');
@@ -1402,10 +1401,8 @@ document.getElementById('sharePortalBtn').onclick=async()=>{
 };
 document.getElementById('tkModalClose').onclick=()=>document.getElementById('tkModal').classList.remove('show');
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
-document.getElementById('navContracts').style.display=MY_ROLE!==ROLE_VIEW?'':'none';
 document.getElementById('newContractBtn').onclick=newContract;
 document.getElementById('navLocations').onclick=()=>showPage('page-locations');
-document.getElementById('navLocations').style.display=MY_ROLE!==ROLE_VIEW?'':'none';
 document.getElementById('newLocBtn').onclick=addLoc;
 document.getElementById('navCatalog').onclick=()=>showPage('page-catalog');
 document.getElementById('ldapCancel').onclick=()=>document.getElementById('ldapModal').classList.remove('show');
@@ -1861,6 +1858,8 @@ window.repairDashStructure=repairDashStructure;
     navAudit: true,
     navScan: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navDirectory: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navContracts: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navLocations: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navCatalog: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navBackup: me.role===ROLE_ADMIN

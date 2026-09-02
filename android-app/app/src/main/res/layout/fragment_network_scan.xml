@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Finds devices on your local network. Enable Deep scan and give a CIDR range (e.g. 192.168.1.0/24) to actively sweep it; otherwise it just reads the router's ARP table."
+            android:textColor="@color/muted"
+            android:textSize="12.5sp"
+            android:layout_marginBottom="10dp" />
+
+        <CheckBox
+            android:id="@+id/deepScanCheck"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Deep scan"
+            android:textColor="@color/text" />
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            style="@style/DarkInputLayout"
+            android:hint="CIDR range (e.g. 192.168.1.0/24)">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/prefixInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/scanBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:backgroundTint="@color/accent"
+            android:text="SCAN" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/scanStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingHorizontal="16dp"
+        android:paddingBottom="8dp"
+        android:textColor="@color/muted"
+        android:textSize="12.5sp" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/emptyText"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="40dp"
+        android:gravity="center"
+        android:textColor="@color/muted"
+        android:text="No results yet -- tap SCAN"
+        android:visibility="visible" />
+</LinearLayout>
