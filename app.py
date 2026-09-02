@@ -486,7 +486,12 @@ def logout():
 @app.route("/api/me")
 def me():
     if not session.get("user"):
-        return jsonify({"user": None})
+        auth_header = request.headers.get("Authorization", "")
+        key = request.headers.get("X-Api-Key") or (auth_header[7:] if auth_header.startswith("Bearer ") else "")
+        row0 = _user_from_api_key(key.strip()) if key else None
+        if not row0:
+            return jsonify({"user": None})
+        session["user"] = row0["username"]; session["role"] = row0["role"]
     c = conn(); cur = c.cursor()
     cur.execute("SELECT display, email, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]])
     row = cur.fetchone() or {}
@@ -509,14 +514,34 @@ def me():
                     "ldap_server": s.get("ldap_server", ""), "ldap_domain": s.get("ldap_domain", ""),
                     "ldap_bind_user": s.get("ldap_bind_user", ""), "ldap_base_dn": s.get("ldap_base_dn", "")})
 
+def _user_from_api_key(key):
+    """Resolve a persistent per-user API key (Settings > My Account) to its
+    owner. Used so the native mobile client can stay logged in indefinitely
+    (like Nextcloud's app passwords) instead of relying on the web UI's
+    short-lived session cookie."""
+    if not key:
+        return None
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT username, role FROM Users WHERE api_key=%s AND api_key<>''", [key])
+    row = cur.fetchone(); c.close()
+    return row
+
 def auth_required(role=None):
     from functools import wraps
     def deco(f):
         @wraps(f)
         def wrap(*a, **k):
+            urole = session.get("role")
             if not session.get("user"):
-                return jsonify({"error": "unauthorized"}), 401
-            if role and session.get("role") not in (role if isinstance(role, list) else [role]):
+                auth_header = request.headers.get("Authorization", "")
+                key = request.headers.get("X-Api-Key") or (auth_header[7:] if auth_header.startswith("Bearer ") else "")
+                row = _user_from_api_key(key.strip()) if key else None
+                if not row:
+                    return jsonify({"error": "unauthorized"}), 401
+                session["user"] = row["username"]
+                session["role"] = row["role"]
+                urole = row["role"]
+            if role and urole not in (role if isinstance(role, list) else [role]):
                 return jsonify({"error": "forbidden"}), 403
             return f(*a, **k)
         return wrap

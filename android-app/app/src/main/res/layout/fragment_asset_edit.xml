@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/scanBtn"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="📷  Scan QR / Serial Number"
+            android:textColor="@color/accent"
+            app:strokeColor="@color/accent" />
+
+        <TextView style="@style/SectionLabel" android:text="IDENTITY" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Name">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Name" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView style="@style/FieldLabel" android:text="Item Category" />
+        <Spinner android:id="@+id/f_Type" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Serial">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Serial" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="MAC Address">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_MacAddress" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView style="@style/FieldLabel" android:text="Location" />
+        <Spinner android:id="@+id/f_Location" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <TextView style="@style/SectionLabel" android:text="MANUFACTURER &amp; MODEL" />
+        <TextView style="@style/FieldLabel" android:text="Manufacturer" />
+        <Spinner android:id="@+id/f_Manufacturer" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+        <TextView style="@style/FieldLabel" android:text="Model" />
+        <Spinner android:id="@+id/f_Model" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <TextView style="@style/SectionLabel" android:text="PURCHASE &amp; WARRANTY" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Purchased Date (YYYY-MM-DD)">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_PurchaseDate" android:layout_width="match_parent" android:layout_height="wrap_content" android:focusable="false" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Warranty (months)">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_WarrantyMonths" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Price">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Price" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="numberDecimal" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView style="@style/SectionLabel" android:text="STATUS &amp; ASSIGNMENT" />
+        <TextView style="@style/FieldLabel" android:text="Status" />
+        <Spinner android:id="@+id/f_Status" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Signed By">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_ReceivedBy" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Signed Date (YYYY-MM-DD)">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_NotesReceived" android:layout_width="match_parent" android:layout_height="wrap_content" android:focusable="false" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <TextView style="@style/FieldLabel" android:text="Employee" />
+        <Spinner android:id="@+id/f_EmployeeID" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <TextView style="@style/SectionLabel" android:text="NOTE" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Internal note">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Note" android:layout_width="match_parent" android:layout_height="wrap_content" android:minLines="3" android:gravity="top" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:id="@+id/formError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/accent"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="18dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/deleteBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="10dp"
+                android:text="Delete"
+                android:textColor="@color/accent"
+                android:visibility="gone"
+                app:strokeColor="@color/accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/saveBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:backgroundTint="@color/accent"
+                android:text="Save" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/formProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="16dp"
+            android:visibility="gone"
+            android:indeterminateTint="@color/accent" />
+    </LinearLayout>
+</ScrollView>

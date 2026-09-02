@@ -1,8 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The server address is entered by the user at first launch, just like the
-     Nextcloud client, and is very often a plain HTTP LAN address rather than
-     a public HTTPS domain, so cleartext traffic has to stay allowed for
-     whatever host the user configures. -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
