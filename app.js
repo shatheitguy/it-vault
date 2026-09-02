@@ -1,6 +1,6 @@
 const APP_VERSION='20260828c';
-const COLUMNS=['Name','Type','Serial','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
-const LABELS={'ReceivedBy':'Received By','NotesReceived':'Receiver Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price'};
+const COLUMNS=['Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
+const LABELS={'ReceivedBy':'Received By','NotesReceived':'Receiver Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address'};
 
 // --- currency: stored base = AED; display converts via rate and shows symbol ---
 const MONEY={AED:{s:'﷼',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
@@ -539,8 +539,8 @@ function setEditLayout(on){
 
 /* ---------- modal / crud ---------- */
 let editingId=null;
-async function openModal(id){
-  editingId=id;const a=id?assets.find(x=>x._id===id):{};
+async function openModal(id,prefill){
+  editingId=id;const a=id?assets.find(x=>x._id===id):(prefill||{});
   document.getElementById('modalTitle').textContent=id?'Edit asset':'Add asset';
   const inv=a&&a.InvoiceFile?a.InvoiceFile:'';
   const renderField=c=>{
@@ -552,7 +552,7 @@ async function openModal(id){
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
   };
   const groups=[
-    {label:'IDENTITY',cols:['Name','Type','Serial','Location']},
+    {label:'IDENTITY',cols:['Name','Type','Serial','MacAddress','Location']},
     {label:'STATUS &amp; ASSIGNMENT',cols:['Status','ReceivedBy','NotesReceived','EmployeeID']},
     {label:'PURCHASE &amp; WARRANTY',cols:['PurchaseDate','WarrantyMonths','Price']},
   ];
@@ -747,7 +747,7 @@ const SCAN_CLEARED_KEY='nexus_scan_cleared';
 function scanIsCleared(){ try{ return localStorage.getItem(SCAN_CLEARED_KEY)==='1'; }catch(e){ return false; } }
 function setScanCleared(v){ try{ if(v) localStorage.setItem(SCAN_CLEARED_KEY,'1'); else localStorage.removeItem(SCAN_CLEARED_KEY); }catch(e){} }
 function renderScanCleared(){
-  document.getElementById('scanBody').innerHTML='<tr><td colspan=4 style="color:var(--muted)">List cleared — press Scan to discover devices again.</td></tr>';
+  document.getElementById('scanBody').innerHTML='<tr><td colspan=5 style="color:var(--muted)">List cleared — press Scan to discover devices again.</td></tr>';
 }
 async function openScan(){
   document.getElementById('scanStatus').textContent='';
@@ -768,8 +768,8 @@ async function doScan(){
   renderScan(lastScan);
 }
 function renderScan(devs){
-  const nodes=devs.map((d,i)=>`<tr><td>${esc(d.ip||'')}</td><td>${esc(d.mac||d.hw||'')}</td><td>${esc(d.type||'LAN')}</td><td><button class="btn sm ghost" onclick="addScannedAsAsset('${i}')">Add as asset</button></td></tr>`).join('');
-  document.getElementById('scanBody').innerHTML=nodes||'<tr><td colspan=4 style="color:var(--muted)">No devices found on the local network.</td></tr>';
+  const nodes=devs.map((d,i)=>`<tr><td>${esc(d.ip||'')}</td><td>${esc(d.host||'')||'<span class="muted">—</span>'}</td><td>${esc(d.mac||d.hw||'')}</td><td>${esc(d.type||'LAN')}</td><td><button class="btn sm ghost" onclick="addScannedAsAsset('${i}')">Add as asset</button></td></tr>`).join('');
+  document.getElementById('scanBody').innerHTML=nodes||'<tr><td colspan=5 style="color:var(--muted)">No devices found on the local network.</td></tr>';
 }
 function clearScan(){
   lastScan=[];
@@ -780,14 +780,24 @@ function clearScan(){
 async function cleanRescan(){
   // wipe current results, then re-run scan with current options
   lastScan=[];
-  document.getElementById('scanBody').innerHTML='<tr><td colspan=4 style="color:var(--muted)">Clearing…</td></tr>';
+  document.getElementById('scanBody').innerHTML='<tr><td colspan=5 style="color:var(--muted)">Clearing…</td></tr>';
   await doScan();
 }
-async function addScannedAsAsset(i){
+function addScannedAsAsset(i){
   const dev=lastScan[Number(i)];
   if(!dev)return;
-  const r=await api('/api/assets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({Name:'Device '+dev.ip,Type:'Network Device',Serial:dev.mac||dev.ip,Location:'LAN',Status:'Available',Notes:'discovered via network scan',PurchaseDate:'',WarrantyMonths:'12',EmployeeID:''})});
-  if(r&&r.ok){toast('✓ ADDED');load();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  document.getElementById('scanModal').classList.remove('show');
+  // Pre-fill the real Add Asset form instead of inserting straight away, so
+  // it can be reviewed/edited before anything is actually saved.
+  openModal(null,{
+    Name:dev.host||('Device '+dev.ip),
+    Type:'Network Device',
+    Serial:'',
+    MacAddress:dev.mac||'',
+    Location:'LAN',
+    Status:'Available',
+    Note:'Discovered via network scan ('+(dev.ip||'')+(dev.mac?', '+dev.mac:'')+')'
+  });
 }
 
 /* ---------- backup ---------- */

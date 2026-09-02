@@ -193,6 +193,13 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .invrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .m-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
 
+/* network scan modal: prefix input + deep-scan toggle + scan button in one row */
+.scanrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.scanrow .scan-prefix{flex:1 1 200px;width:auto;min-width:160px}
+.scanrow .scan-deep{flex:0 0 auto;margin:0;white-space:nowrap}
+.scanrow #scanBtn{flex:0 0 auto}
+.scan-status{min-height:16px;margin:10px 0 8px}
+
 /* compact data tables inside modals (audit, maintenance, scan, backups) */
 .modal-box .tablewrap{border-radius:var(--radius);max-height:min(46vh,380px);box-shadow:none;max-width:100%}
 .muted{color:var(--muted)}

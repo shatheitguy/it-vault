@@ -631,14 +631,18 @@
 
 <!-- Network scan modal -->
 <div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
-  <h3>Network scan — local devices</h3>
-  <div class="invrow" style="margin-bottom:10px">
-    <input id="scanPrefix" placeholder="subnet prefix e.g. 192.168.0" style="flex:1">
-    <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="scanDeep"> Deep scan (ping /24)</label>
-    <button class="btn" id="scanBtn">Scan</button>
+  <h3>NETWORK SCAN — LOCAL DEVICES</h3>
+  <p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep with Deep scan (~30s). Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
+  <div class="invbox">
+    <label>SCAN OPTIONS</label>
+    <div class="scanrow">
+      <input id="scanPrefix" class="scan-prefix" placeholder="subnet prefix e.g. 192.168.0">
+      <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan (ping /24)</span></label>
+      <button class="btn" id="scanBtn">⚡ SCAN</button>
+    </div>
   </div>
-  <div id="scanStatus" class="muted" style="margin-bottom:8px"></div>
-  <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>MAC</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
+  <div id="scanStatus" class="muted scan-status"></div>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
   <div class="m-actions">
     <button class="btn ghost" onclick="clearScan()">Clear list</button>
     <button class="btn ghost" onclick="cleanRescan()">Clear + rescan</button>

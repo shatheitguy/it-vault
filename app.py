@@ -45,7 +45,7 @@ SECRET = os.environ.get("ITGUY_SECRET", "itguy-local-secret-change-me")
 ADMIN_USER = os.environ.get("ITGUY_ADMIN", "admin")
 ADMIN_PASS = os.environ.get("ITGUY_ADMIN_PASS", "admin123")
 
-COLUMNS = ["Name", "Type", "Serial", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID"]
+COLUMNS = ["Name", "Type", "Serial", "MacAddress", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID"]
 INT_COLS = {"WarrantyMonths"}  # columns stored as integers
 DEC_COLS = {"Price"}  # columns stored as decimals
 
@@ -348,6 +348,11 @@ def migrate_schema():
     # Assets: purchase price (formatted by selected currency)
     try:
         cur.execute("ALTER TABLE Assets ADD COLUMN Price DECIMAL(12,2) DEFAULT 0")
+    except Exception:
+        pass
+    # Assets: MAC address (e.g. from network scan discovery)
+    try:
+        cur.execute("ALTER TABLE Assets ADD COLUMN MacAddress VARCHAR(64) DEFAULT ''")
     except Exception:
         pass
     # Employees: real editable staff/HR ID, separate from EmployeeID (which
@@ -690,11 +695,19 @@ def list_assets():
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def create_asset():
     data = request.get_json(force=True)
+    serial = (data.get("Serial") or "").strip()
+    c = conn(); cur = c.cursor()
+    if serial:
+        cur.execute("SELECT _id, Name FROM Assets WHERE is_deleted=0 AND LOWER(Serial)=%s", [serial.lower()])
+        dup = cur.fetchone()
+        if dup:
+            c.close()
+            return jsonify({"error": f"Serial '{serial}' is already used by asset '{dup.get('Name') or dup['_id']}' -- no duplicate added"}), 409
     a_id = uuid.uuid4().hex
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 2))
-    c = conn(); cur = c.cursor(); cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
+    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
     send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.")
     return jsonify({"ok": True, "_id": a_id})
 
@@ -2476,7 +2489,7 @@ def asset_signature(aid):
     return jsonify({"ok": True, "data": data})
 
 # ---------- network scanner ----------
-import subprocess, re, concurrent.futures
+import subprocess, re, concurrent.futures, socket
 
 def _is_real_host(ip, mac):
     """Filter the ARP table down to actual hosts.
@@ -2528,6 +2541,14 @@ def _ping_one(ip):
     except Exception:
         return None
 
+def _resolve_host(ip):
+    # Reverse-DNS/NetBIOS lookup, best-effort -- many LAN devices won't
+    # resolve, that's fine, we just leave the hostname blank for those.
+    try:
+        return ip, socket.gethostbyaddr(ip)[0].split(".")[0]
+    except Exception:
+        return ip, ""
+
 @app.route("/api/scan")
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def network_scan():
@@ -2541,7 +2562,18 @@ def network_scan():
             for ip in ex.map(_ping_one, ips):
                 if ip and ip not in devs:
                     devs[ip] = {"ip": ip, "mac": "", "type": "discovered"}
-    # also pull hostnames best-effort
+    # pull hostnames best-effort, bounded so a few unresolvable devices can't
+    # stall the whole scan
+    for d in devs.values():
+        d["host"] = ""
+    if devs:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=30) as ex:
+            futs = {ex.submit(_resolve_host, ip): ip for ip in devs}
+            done, _pending = concurrent.futures.wait(futs, timeout=3)
+            for f in done:
+                ip, host = f.result()
+                if host:
+                    devs[ip]["host"] = host
     result = sorted(devs.values(), key=lambda d: tuple(int(x) for x in d["ip"].split(".")))
     audit(session.get("user"), "SCAN", "", f"scanned {'deep ' if deep else ''}prefix={prefix or 'local'}: {len(result)} devices")
     return jsonify(result)
