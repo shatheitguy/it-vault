@@ -486,12 +486,8 @@ def logout():
 @app.route("/api/me")
 def me():
     if not session.get("user"):
-        auth_header = request.headers.get("Authorization", "")
-        key = request.headers.get("X-Api-Key") or (auth_header[7:] if auth_header.startswith("Bearer ") else "")
-        row0 = _user_from_api_key(key.strip()) if key else None
-        if not row0:
+        if not _resolve_session_from_api_key():
             return jsonify({"user": None})
-        session["user"] = row0["username"]; session["role"] = row0["role"]
     c = conn(); cur = c.cursor()
     cur.execute("SELECT display, email, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]])
     row = cur.fetchone() or {}
@@ -526,6 +522,30 @@ def _user_from_api_key(key):
     row = cur.fetchone(); c.close()
     return row
 
+def _request_api_key():
+    """Look for a persistent API key on this request: an X-Api-Key header,
+    an Authorization: Bearer header, or -- for the Android app's WebView,
+    which just loads the real web UI and can't add custom headers to page
+    navigations -- an itguy_api_key cookie set once at login."""
+    key = request.headers.get("X-Api-Key")
+    if not key:
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            key = auth_header[7:]
+    if not key:
+        key = request.cookies.get("itguy_api_key")
+    return (key or "").strip()
+
+def _resolve_session_from_api_key():
+    """If there's no active session cookie, try to establish one from a
+    persistent API key so the rest of the request behaves as if logged in.
+    Returns the resolved user row, or None."""
+    row = _user_from_api_key(_request_api_key())
+    if row:
+        session["user"] = row["username"]
+        session["role"] = row["role"]
+    return row
+
 def auth_required(role=None):
     from functools import wraps
     def deco(f):
@@ -533,13 +553,9 @@ def auth_required(role=None):
         def wrap(*a, **k):
             urole = session.get("role")
             if not session.get("user"):
-                auth_header = request.headers.get("Authorization", "")
-                key = request.headers.get("X-Api-Key") or (auth_header[7:] if auth_header.startswith("Bearer ") else "")
-                row = _user_from_api_key(key.strip()) if key else None
+                row = _resolve_session_from_api_key()
                 if not row:
                     return jsonify({"error": "unauthorized"}), 401
-                session["user"] = row["username"]
-                session["role"] = row["role"]
                 urole = row["role"]
             if role and urole not in (role if isinstance(role, list) else [role]):
                 return jsonify({"error": "forbidden"}), 403
@@ -3176,7 +3192,11 @@ def _no_cache_frontend(resp):
 @app.route("/")
 def index():
     if not session.get("user"):
-        return send_from_directory(BASE, "login.html")
+        # a valid persistent API key (set as a cookie by the Android app right
+        # after login) lets the WebView land straight on index.html instead
+        # of the login page, without ever needing a fresh session cookie
+        if not _resolve_session_from_api_key():
+            return send_from_directory(BASE, "login.html")
     return send_from_directory(BASE, "index.html")
 
 @app.route("/<path:p>")
