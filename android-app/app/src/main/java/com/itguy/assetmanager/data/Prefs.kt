@@ -2,6 +2,7 @@ package com.itguy.assetmanager.data
 
 import android.content.Context
 import android.content.SharedPreferences
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
@@ -49,6 +50,27 @@ object Prefs {
 
     val isLoggedIn: Boolean
         get() = serverUrl.isNotBlank() && apiKey.isNotBlank()
+
+    /** "system" (default, follows the device setting), "light", or "dark". */
+    var themeMode: String
+        get() = prefs.getString("theme_mode", "system") ?: "system"
+        set(v) {
+            prefs.edit().putString("theme_mode", v).apply()
+            applyThemeMode()
+        }
+
+    /** Call once at the top of every entry-point Activity's onCreate, before
+     * super.onCreate() -- AppCompatDelegate needs to know the mode before the
+     * theme is resolved for this Activity's window. */
+    fun applyThemeMode() {
+        AppCompatDelegate.setDefaultNightMode(
+            when (themeMode) {
+                "light" -> AppCompatDelegate.MODE_NIGHT_NO
+                "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            }
+        )
+    }
 
     fun clear() {
         prefs.edit().clear().apply()

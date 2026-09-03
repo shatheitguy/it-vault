@@ -26,7 +26,7 @@
         <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Asset ID">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_AssetTag" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Name">
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Asset Name">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Name" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>
 
@@ -67,16 +67,92 @@
         <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Signed By">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_ReceivedBy" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Signed Date (YYYY-MM-DD)">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_NotesReceived" android:layout_width="match_parent" android:layout_height="wrap_content" android:focusable="false" android:textColor="@color/text" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Signed Date (set automatically at Check Out)">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_NotesReceived" android:layout_width="match_parent" android:layout_height="wrap_content" android:focusable="false" android:textColor="@color/muted" />
         </com.google.android.material.textfield.TextInputLayout>
-        <TextView style="@style/FieldLabel" android:text="Employee" />
+        <TextView style="@style/FieldLabel" android:text="Employee Name" />
         <Spinner android:id="@+id/f_EmployeeID" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="12dp">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/checkOutBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="⇄ Check Out"
+                android:textColor="@color/accent"
+                android:visibility="gone"
+                app:strokeColor="@color/accent" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/checkInBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="↩ Check In"
+                android:textColor="@color/accent"
+                android:visibility="gone"
+                app:strokeColor="@color/accent" />
+        </LinearLayout>
 
         <TextView style="@style/SectionLabel" android:text="NOTE" />
         <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Internal note">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Note" android:layout_width="match_parent" android:layout_height="wrap_content" android:minLines="3" android:gravity="top" android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView style="@style/SectionLabel" android:text="INVOICE / PROOF (PDF OR IMAGE)" />
+        <TextView
+            android:id="@+id/invoiceFileName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:text="No file attached"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/invoicePickBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:text="📎 Attach"
+                android:textColor="@color/accent"
+                app:strokeColor="@color/accent" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/invoiceViewBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginHorizontal="6dp"
+                android:text="View"
+                android:textColor="@color/accent"
+                android:visibility="gone"
+                app:strokeColor="@color/accent" />
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/invoiceRemoveBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:text="Remove"
+                android:textColor="@color/accent"
+                android:visibility="gone"
+                app:strokeColor="@color/accent" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/formError"

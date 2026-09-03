@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#0A0D13</color>
+    <color name="surface">#121826</color>
+    <color name="accent">#FF3B30</color>
+    <color name="accent2">#C0392B</color>
+    <color name="text">#F5F6FA</color>
+    <color name="muted">#8A93A6</color>
+    <color name="bar_track">#1A222E</color>
+</resources>

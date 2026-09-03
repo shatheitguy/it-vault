@@ -27,8 +27,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var drawerToggle: ActionBarDrawerToggle
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         Prefs.init(applicationContext)
+        Prefs.applyThemeMode()
+        super.onCreate(savedInstanceState)
         OfflineCache.init(applicationContext)
         if (!Prefs.isLoggedIn) {
             startActivity(Intent(this, LoginActivity::class.java)); finish(); return

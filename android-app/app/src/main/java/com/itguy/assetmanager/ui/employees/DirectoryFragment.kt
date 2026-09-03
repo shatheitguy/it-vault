@@ -2,12 +2,10 @@ package com.itguy.assetmanager.ui.employees
 
 import android.app.AlertDialog
 import android.os.Bundle
-import android.text.InputType
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
-import android.widget.LinearLayout
 import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -16,6 +14,7 @@ import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.model.Employee
 import com.itguy.assetmanager.data.model.NameOnly
 import com.itguy.assetmanager.databinding.FragmentDirectoryBinding
+import com.itguy.assetmanager.ui.MainActivity
 import com.itguy.assetmanager.ui.Refreshable
 import com.itguy.assetmanager.ui.generic.SimpleAdapter
 import com.itguy.assetmanager.ui.generic.SimpleRow
@@ -96,7 +95,7 @@ class DirectoryFragment : Fragment(), Refreshable {
         val rows = filtered.map { e ->
             SimpleRow(e.EmployeeName.ifBlank { e.EmployeeID }, listOfNotNull(e.EmployeeID, e.Department.ifBlank { null }, e.Designation.ifBlank { null }).joinToString(" · "), e)
         }
-        adapter = SimpleAdapter(onClick = { row -> openEmployeeDialog(row.payload as Employee) }, onDelete = { row ->
+        adapter = SimpleAdapter(onClick = { row -> openEmployeeForm((row.payload as Employee).id) }, onDelete = { row ->
             val e = row.payload as Employee
             lifecycleScope.launch { ApiClient.api().deleteEmployee(e.id ?: return@launch); load() }
         })
@@ -117,10 +116,18 @@ class DirectoryFragment : Fragment(), Refreshable {
 
     private fun onAdd() {
         when (tab) {
-            0 -> openEmployeeDialog(null)
+            0 -> openEmployeeForm(null)
             1 -> promptName("New department") { name -> lifecycleScope.launch { ApiClient.api().addDepartment(NameOnly(name)); load() } }
             2 -> promptName("New designation") { name -> lifecycleScope.launch { ApiClient.api().addDesignation(NameOnly(name)); load() } }
         }
+    }
+
+    private fun openEmployeeForm(employeeId: String?) {
+        (activity as? MainActivity)?.showFragment(
+            EmployeeEditFragment.newInstance(employeeId),
+            if (employeeId == null) "Add Employee" else "Edit Employee",
+            addToBackStack = true
+        )
     }
 
     private fun promptName(title: String, onValue: (String) -> Unit) {
@@ -128,45 +135,6 @@ class DirectoryFragment : Fragment(), Refreshable {
         AlertDialog.Builder(requireContext()).setTitle(title).setView(edit)
             .setPositiveButton("Add") { _, _ -> edit.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(onValue) }
             .setNegativeButton("Cancel", null).show()
-    }
-
-    private fun openEmployeeDialog(existing: Employee?) {
-        val ctx = requireContext()
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val layout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
-        fun field(hint: String, value: String): EditText {
-            val e = EditText(ctx); e.hint = hint; e.setText(value); layout.addView(e); return e
-        }
-        val eId = field("Username / Employee ID", existing?.EmployeeID.orEmpty())
-        val eCode = field("Emp ID (optional)", existing?.EmpCode.orEmpty())
-        val eName = field("Employee name", existing?.EmployeeName.orEmpty())
-        val eDept = field("Department", existing?.Department.orEmpty())
-        val eDesig = field("Designation", existing?.Designation.orEmpty())
-        val eEmail = field("Email", existing?.Email.orEmpty()).apply { inputType = InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS }
-
-        AlertDialog.Builder(ctx)
-            .setTitle(if (existing == null) "Add employee" else "Edit employee")
-            .setView(layout)
-            .setPositiveButton("Save") { _, _ ->
-                val emp = Employee(
-                    id = existing?.id,
-                    EmployeeID = eId.text.toString().trim(),
-                    EmpCode = eCode.text.toString().trim(),
-                    EmployeeName = eName.text.toString().trim(),
-                    Department = eDept.text.toString().trim(),
-                    Designation = eDesig.text.toString().trim(),
-                    Email = eEmail.text.toString().trim()
-                )
-                lifecycleScope.launch {
-                    try {
-                        if (existing?.id == null) ApiClient.api().createEmployee(emp)
-                        else ApiClient.api().updateEmployee(existing.id, emp)
-                        load()
-                    } catch (e: Exception) { }
-                }
-            }
-            .setNegativeButton("Cancel", null)
-            .show()
     }
 
     override fun onDestroyView() { super.onDestroyView(); _b = null }

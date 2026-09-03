@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260902c">
+<link rel="stylesheet" href="/style.css?v=20260902d">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -299,7 +299,7 @@
 
       <div class="toolbar">
         <input id="search" placeholder="Search name, serial, location, type…">
-        <select id="statusFilter"><option value="">All statuses</option><option>New</option><option>Active</option><option>In Use</option><option>Available</option><option>Checked-Out</option><option>Under-Maintenance</option><option>Storage</option><option>Worn</option><option>Retired</option><option>Out of Service</option></select>
+        <select id="statusFilter"><option value="">All statuses</option></select>
         <select id="groupBy"><option value="">No grouping</option><option value="ReceivedBy">Signed by (employee)</option><option value="EmployeeID">Employee ID</option><option value="Type">Item category (type)</option><option value="Status">Status</option><option value="Location">Location</option></select>
         <span class="tb-spacer"></span>
         <div class="count" id="count"></div>
@@ -526,9 +526,21 @@
             <div class="grid2">
               <div class="field2"><label>App / Company Name</label><input id="b_name" placeholder="IT-Vault"></div>
               <div class="field2"><label>Logo Text (sidebar)</label><input id="b_logoText" placeholder="IT-Vault"></div>
+              <div class="field2"><label>Company Phone</label><input id="b_phone" placeholder="+971 4 000 0000"></div>
+              <div class="field2"><label>Company Address</label><input id="b_address" placeholder="Office / building, city, country"></div>
               <div class="field2" style="grid-column:1/-1"><label>Logo (PNG, max 500KB)</label><input type="file" id="b_logo" accept="image/png"></div>
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="pm_saveBrand">✓ SAVE BRANDING</button><button class="btn danger" id="removeLogoBtn" type="button">🗑 REMOVE LOGO</button><img id="b_logoPrev" src="/logo.png?t=1" style="height:34px;margin-left:10px"></div>
+            <div class="invbox" style="margin-top:14px">
+              <label>LETTERHEAD</label>
+              <p class="sec-hint" style="margin:0 0 10px">Upload your official letterhead (PDF or image). Every printed asset/contract sheet and generated PDF (e.g. signed acknowledgements) uses this as its header instead of the plain logo bar.</p>
+              <div class="invrow">
+                <input type="file" id="b_letterhead" accept=".pdf,.png,.jpg,.jpeg">
+                <button class="btn sm" id="pm_saveLetterhead" type="button">⬆ UPLOAD</button>
+                <button class="btn sm danger" id="removeLetterheadBtn" type="button">🗑 REMOVE</button>
+              </div>
+              <img id="b_letterheadPrev" src="/letterhead.png?t=1" style="max-width:100%;max-height:160px;margin-top:10px;border:1px solid var(--line);border-radius:6px;display:none">
+            </div>
             </div>
           </section>
           <!-- CUSTOMIZATION (appearance + theme, single unified section) -->
@@ -676,6 +688,18 @@
   <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3><button class="btn sm ghost" id="camScanBtn" type="button">📷 SCAN QR / SN</button></div>
   <div class="modal-scroll">
     <div id="formFields"></div>
+    <div class="invbox" id="maintWrap" style="display:none">
+      <label>MAINTENANCE / REPAIR LOG</label>
+      <div class="tablewrap"><table class="dtable"><thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Note</th><th></th></tr></thead><tbody id="maintListInline"></tbody></table></div>
+      <div class="grid2" style="margin-top:12px">
+        <div class="field2"><label>Date</label><input id="mDate2" type="date"></div>
+        <div class="field2"><label>Type</label><input id="mType2" placeholder="Repair / Upgrade"></div>
+        <div class="field2"><label>Cost</label><input id="mCost2" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="field2"><label>Note</label><input id="mNote2" placeholder="what was done"></div>
+      </div>
+      <div class="m-actions" style="justify-content:flex-start;padding-top:10px"><button class="btn sm" type="button" id="mAdd2">ADD RECORD</button></div>
+    </div>
+    <div id="noteInvoiceWrap"></div>
     <div class="invbox" id="histWrap"><label>CHANGE HISTORY</label><div id="histBox" class="histbox"></div></div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="cancelBtn">CANCEL</button><button class="btn" id="saveBtn">COMMIT</button></div>
@@ -710,6 +734,7 @@
         <div class="field2"><label>Name</label><input id="ct_name" placeholder="e.g. AC Maintenance AMC, Antivirus License"></div>
         <div class="field2"><label>Type <a class="mlink" onclick="document.getElementById('contractModal').classList.remove('show');showPage('page-catalog')">manage in Product Catalog ↗</a></label><select id="ct_type"><option value="">-- select type --</option></select></div>
         <div class="field2"><label>Vendor / Company</label><input id="ct_vendor" placeholder="Outside company name"></div>
+        <div class="field2"><label>Vendor Email</label><input id="ct_vendor_email" type="email" placeholder="vendor@company.com"></div>
         <div class="field2"><label>Cost (<span id="ctCurLabel">AED</span>)</label><input id="ct_cost" type="number" step="0.01" min="0"></div>
         <div class="field2"><label>Start Date</label><input id="ct_start" type="date"></div>
         <div class="field2"><label>End / Renewal Date</label><input id="ct_end" type="date"></div>
@@ -758,9 +783,26 @@
   <h3>USER MANAGEMENT</h3>
   <div class="toolbar" style="padding:0 0 12px">
     <button class="btn" id="addUserBtn">＋ ADD USER</button>
+    <button class="btn ghost" id="manageRolesBtn" type="button">🛡 MANAGE ROLES</button>
   </div>
   <table id="usersGrid" style="font-size:13px"><thead><tr><th>USER</th><th>ROLE</th><th>DISPLAY</th><th>ACTIONS</th></tr></thead><tbody id="usersBody"></tbody></table>
   <div class="m-actions"><button class="btn ghost" id="usersClose">CLOSE</button></div>
+</div></div>
+
+<!-- Roles modal (custom per-module permissions, e.g. "Manager") -->
+<div class="modal" id="rolesModal"><div class="modal-box" style="width:min(680px,94vw);max-width:680px">
+  <h3>CUSTOM ROLES</h3>
+  <p class="sec-hint" style="margin-top:0">Built-in roles (admin, read-write, read-only) always have full access. Create a custom role to give a user a specific mix, e.g. a "Manager" who can only see Contracts read-only but manage Assets and Directory fully.</p>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>Role Name</th><th>Assets</th><th>Contracts</th><th>Directory</th><th>Tickets</th><th></th></tr></thead><tbody id="rolesBody"></tbody></table></div>
+  <div class="grid2" style="margin-top:12px">
+    <div class="field2"><label>Role Name</label><input id="rl_name" placeholder="e.g. Manager"></div>
+    <div class="field2"><label>Assets</label><select id="rl_assets"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
+    <div class="field2"><label>Contracts</label><select id="rl_contracts"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
+    <div class="field2"><label>Directory</label><select id="rl_directory"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
+    <div class="field2"><label>Tickets</label><select id="rl_tickets"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
+  </div>
+  <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="rl_save">＋ ADD ROLE</button></div>
+  <div class="m-actions"><button class="btn ghost" id="rolesClose">CLOSE</button></div>
 </div></div>
 
 <!-- User edit modal -->
@@ -783,6 +825,7 @@
 <div class="modal" id="checkoutModal"><div class="modal-box">
   <h3>CHECK OUT ASSET</h3>
   <div class="field2"><label>Assign to user</label><select id="coUser"></select></div>
+  <div class="field2"><label>Signed Date</label><input id="coSignedDate" type="date"></div>
   <div class="field2"><label>Expected return</label><input id="coExpected" type="date"></div>
   <div class="field2"><label>Note</label><input id="coNote" placeholder="e.g. event loan"></div>
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('checkoutModal').classList.remove('show')">CANCEL</button><button class="btn" id="coSave">CHECK OUT</button></div>
@@ -857,6 +900,28 @@
     </div>
   </div>
   <div class="invbox">
+    <label>SCHEDULED BACKUPS</label>
+    <div class="grid2">
+      <div class="field2"><label>Frequency</label>
+        <select id="bkSchedule">
+          <option value="off">Off (manual only)</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+      </div>
+      <div class="field2"><label>Scope</label>
+        <select id="bkScheduleScope">
+          <option value="all">All (config + assets + history)</option>
+          <option value="config">Configuration only (Settings + Users)</option>
+          <option value="assets">Assets only (Assets + Checkouts + Maintenance)</option>
+        </select>
+      </div>
+      <div class="field2"><label>Keep last N backups</label><input id="bkRetain" type="number" min="1" max="100" value="7"></div>
+      <div class="field2"><label>&nbsp;</label><button class="btn ghost" id="bkScheduleSave">SAVE SCHEDULE</button></div>
+    </div>
+    <p class="sec-hint" id="bkScheduleHint" style="margin:6px 0 0">Older backups beyond the keep-limit are deleted automatically, every time a backup runs (scheduled or manual).</p>
+  </div>
+  <div class="invbox">
     <label>RESTORE FROM FILE</label>
     <div class="invrow">
       <label class="btn ghost" style="cursor:pointer;text-align:center">⬆ CHOOSE .SQL FILE
@@ -878,10 +943,14 @@
   <h3>APPROVAL SIGNATURE LINK</h3>
   <p>Send this link to the approver. They can sign the asset digitally. Link expires in 7 days.</p>
   <div class="field2"><label>Signature Link</label><input id="signUrl" readonly style="font-family:var(--mono);font-size:12.5px"></div>
+  <div class="m-actions" style="justify-content:flex-start">
+    <button class="btn" id="signCopyBtn" type="button">📋 COPY LINK</button>
+    <button class="btn ghost" id="signShareBtn" type="button" style="display:none">🔗 SHARE</button>
+  </div>
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260902l"></script>
+<script src="/app.js?nocache=20260903i"></script>
 </body>
 </html>

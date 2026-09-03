@@ -1,6 +1,6 @@
 const APP_VERSION='20260828c';
-const COLUMNS=['AssetTag','Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
-const LABELS={'AssetTag':'Asset ID','ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
+const COLUMNS=['AssetTag','Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID','RequestedBy'];
+const LABELS={'AssetTag':'Asset ID','Name':'Asset Name','ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee Name','RequestedBy':'Requested By','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
 
 // --- currency: stored base = AED; display converts via rate and shows symbol ---
 const MONEY={AED:{s:'AED',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
@@ -51,7 +51,8 @@ function applyLanguage(lang){
   });
   document.title=d.Dashboard||document.title;
 }
-const STATUSES=['New','Active','In Use','Available','Checked-Out','Under-Maintenance','Storage','Worn','Retired','Out of Service'];
+const STATUSES=['Available','Checked-Out','Under-Maintenance','Reserved','Retired','Lost/Stolen'];
+{const _sf=document.getElementById('statusFilter'); if(_sf)_sf.innerHTML='<option value="">All statuses</option>'+STATUSES.map(s=>`<option>${s}</option>`).join('');}
 const LABEL_FIELD_KEYS=['Name','Type','AssetID','Serial','Status','Location','ReceivedBy','ReceiverDate','EmployeeID','Department','Warranty','PurchaseDate','Note'];
 const ROLE_ADMIN='admin', ROLE_EDIT='read-write', ROLE_VIEW='read-only';
 const ROLE_LABELS={'admin':'Admin','read-write':'Editor','read-only':'Read-only'};
@@ -94,7 +95,7 @@ function drawMatrix(){
 }
 
 function esc(v){return(v==null?'':String(v)).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function statusClass(s){s=(s||'').toLowerCase();return s==='active'?'s-active':s==='storage'?'s-storage':s==='retired'?'s-retired':'s-default';}
+function statusClass(s){s=(s||'').toLowerCase();return s==='reserved'?'s-reserved':s==='retired'?'s-retired':s==='lost/stolen'?'s-lost':'s-default';}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
 async function api(u,opt){const r=await fetch(u,opt);if(r.status===401){location.href='/';return null;}return r;}
 function canEdit(){return MY_ROLE===ROLE_ADMIN||MY_ROLE===ROLE_EDIT;}
@@ -134,16 +135,38 @@ async function deleteSelected(){
   if(ok){ undoIds=ids.slice(); showUndoBar(ids); load(); loadDashboard(); }
   else toast('✕ delete failed');
 }
+// Shared print/PDF header: if a letterhead (PDF or image, normalized to
+// /letterhead.png on upload) is configured in Branding, every printed sheet
+// uses it as the header instead of the plain logo+name bar.
+// Letterhead is a whole printed page (rasterized from the uploaded PDF's
+// first page, or the image as-is), so it has to act as a full-page
+// background -- position:fixed makes Chrome's print engine repeat it behind
+// every printed page -- with real content pushed down below its header art,
+// NOT stacked inline above the content (that was the "not aligned" bug:
+// a full A4-shaped image at width:100% renders ~277mm tall inline, so it
+// swallowed the whole first page on its own).
+const LETTERHEAD_CLEARANCE_MM=38;
+function printHeaderHtml(title){
+  if(window.HAS_LETTERHEAD){
+    return `<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:100%;z-index:-1">`+
+      (title?`<h2 style="margin:${LETTERHEAD_CLEARANCE_MM}mm 0 10px">${title}</h2>`:`<div style="margin-top:${LETTERHEAD_CLEARANCE_MM}mm"></div>`);
+  }
+  return `<div class="phead"><img src="/logo.png" onerror="this.style.display='none'"><h2 style="margin:0">${title}</h2></div>`;
+}
 function printSelected(){
   const ids=[...document.querySelectorAll('.row-chk:checked')].map(cb=>cb.dataset.id);
   if(!ids.length){toast('No assets selected');return;}
   const rows=ids.map(id=>assets.find(a=>a._id===id)).filter(Boolean);
   const win=window.open('','_blank');
   win.document.write(`<html><head><title>Print Assets</title><style>
+    @page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}
     body{font-family:Arial,sans-serif;padding:20px}
+    .phead{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+    .phead img{height:36px}
     table{width:100%;border-collapse:collapse;margin-top:20px}
     th,td{text-align:left;padding:6px;border-bottom:1px solid #ddd}
-  </style></head><body><h2>Selected Assets</h2><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);
+    td:first-child{font-weight:800;font-family:ui-monospace,Consolas,monospace}
+  </style></head><body>${printHeaderHtml((window.APP_NAME||'IT-Vault')+' — Selected Assets')}<table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);
   win.document.close(); win.print();
 }
 function printQRSelected(){
@@ -157,14 +180,18 @@ function printGroup(safeKey){
   const rows=window.__groups[k]||[];
   const win=window.open('','_blank');
   win.document.write(`<html><head><title>Print Group - ${esc(k)}</title><style>
+    @page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}
     body{font-family:Arial,sans-serif;padding:20px}
-    h2{margin-bottom:4px}
+    .phead{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+    .phead img{height:36px}
+    h2{margin:0}
     .sub{color:#666;margin-bottom:14px;font-size:13px}
     table{width:100%;border-collapse:collapse;margin-top:10px}
     th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #ddd;font-size:13px}
     th{background:#f3f3f3}
+    td:first-child{font-weight:800;font-family:ui-monospace,Consolas,monospace}
     @media print{body{padding:0}button{display:none}}
-  </style></head><body><h2>Asset Group: ${esc(LABELS[groupBy]||groupBy)} — ${esc(k)}</h2><div class="sub">${rows.length} asset${rows.length>1?'s':''} • generated ${new Date().toLocaleString()}</div><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table><button onclick="window.print()">🖨 PRINT</button></body></html>`);
+  </style></head><body>${printHeaderHtml('Asset Group: '+esc(LABELS[groupBy]||groupBy)+' — '+esc(k))}<div class="sub">${rows.length} asset${rows.length>1?'s':''} • generated ${new Date().toLocaleString()}</div><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table><button onclick="window.print()">🖨 PRINT</button></body></html>`);
   win.document.close(); win.print();
 }
 function warrantyEnd(a){
@@ -338,14 +365,16 @@ function toggleRowMenu(e,id){
   if(rowMenuAssetId===id && menu.style.display!=='none'){ menu.style.display='none'; rowMenuAssetId=null; return; }
   rowMenuAssetId=id;
   const a=assets.find(x=>x._id===id);
+  // Checkout / Check-in and Maintenance now live inside the Edit form itself
+  // (STATUS & ASSIGNMENT / MAINTENANCE sections), so the row menu only keeps
+  // the one-click CHECK-IN shortcut -- everything else routes through EDIT.
   const checkoutItem=a&&a.Status==='Checked-Out'
     ?`<button onclick="closeRowMenu();checkinAsset('${id}')">CHECK-IN</button>`
-    :`<button onclick="closeRowMenu();openCheckout('${id}')">CHECKOUT</button>`;
+    :'';
   menu.innerHTML=`
     <button onclick="closeRowMenu();editRow('${id}')">EDIT</button>
     ${checkoutItem}
     <button onclick="closeRowMenu();openSign('${id}')">SIGN</button>
-    <button onclick="closeRowMenu();openMaint('${id}')">MAINT</button>
     <button onclick="closeRowMenu();openQR('${id}')">QR</button>
     <button onclick="closeRowMenu();printAsset('${id}')">PRINT</button>
     <div class="row-menu-sep"></div>
@@ -383,7 +412,7 @@ function render(){
         return `<td class="mono">${esc(a.AssetTag||a._id)}</td>`;
       }
       if(c==='Status'){
-        const col=a.Status==='Available'?'var(--grn)':a.Status==='Checked-Out'?'var(--cyan)':a.Status==='Under-Maintenance'?'var(--amber)':a.Status==='Storage'?'var(--muted)':'var(--red)';
+        const col=a.Status==='Available'?'var(--grn)':a.Status==='Checked-Out'?'var(--cyan)':a.Status==='Under-Maintenance'?'var(--amber)':a.Status==='Reserved'?'var(--muted)':'var(--red)';
         return `<td><span class="status ${statusClass(a.Status)}"><span class="sev" style="color:${col}"></span>${esc(a.Status||'')}</span></td>`;
       }
       if(c==='WarrantyMonths'){
@@ -493,7 +522,7 @@ async function loadDashboard(){
   loadDashboardPage();
 }
 function statusColor(s){
-  return ({'Available':'var(--grn)','Checked-Out':'var(--cyan)','Under-Maintenance':'var(--amber)','Storage':'var(--muted)','Retired':'var(--red)'})[s]||'var(--accent2)';
+  return ({'Available':'var(--grn)','Checked-Out':'var(--cyan)','Under-Maintenance':'var(--amber)','Reserved':'var(--muted)','Retired':'var(--red)','Lost/Stolen':'var(--red)'})[s]||'var(--accent2)';
 }
 function renderBars(elId, obj, colorFn){
   const el=document.getElementById(elId); if(!el) return;
@@ -626,16 +655,18 @@ async function openModal(id,prefill){
     if(c==='AssetTag')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" class="mono" value="${esc(val)}" placeholder="${id?'':'(auto-generated if left blank, e.g. IT-1001)'}"></div>`;
     if(c==='Status')return`<div class="field2"><label>${c}</label><select id="f_${c}">${STATUSES.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
     if(c==='EmployeeID')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_EmployeeID"><option value="">-- select employee --</option></select></div>`;
+    if(c==='RequestedBy')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_RequestedBy"><option value="">-- select employee --</option></select></div>`;
     if(c==='Type')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Type"><option value="">-- select category --</option></select></div>`;
     if(c==='Location')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Location"><option value="">-- select location --</option></select></div>`;
-    if(c==='NotesReceived')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" type="date" value="${esc(val)}"></div>`;
+    if(c==='NotesReceived')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(set automatically at Check Out)</span></label><input id="f_${c}" type="date" value="${esc(val)}" readonly disabled></div>`;
+    if(c==='ReceivedBy')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(set automatically at Check Out)</span></label><input id="f_${c}" value="${esc(val)}" readonly disabled></div>`;
     if(c==='Price')return`<div class="field2"><label>${LABELS[c]||c} (${CURRENCY})</label><input id="f_${c}" type="number" step="0.01" min="0" value="${esc(val)}"></div>`;
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
   };
   const groups=[
     {label:'IDENTITY',cols:['AssetTag','Name','Type','Serial','MacAddress','Location']},
     {label:'PURCHASE &amp; WARRANTY',cols:['PurchaseDate','WarrantyMonths','Price']},
-    {label:'STATUS &amp; ASSIGNMENT',cols:['Status','ReceivedBy','NotesReceived','EmployeeID']},
+    {label:'STATUS &amp; ASSIGNMENT',cols:['Status','EmployeeID','RequestedBy','ReceivedBy','NotesReceived']},
   ];
   document.getElementById('formFields').innerHTML=
     `<div class="invbox">
@@ -652,7 +683,8 @@ async function openModal(id,prefill){
     groups.slice(1).map(g=>`<div class="invbox">
       <label>${g.label}</label>
       <div class="grid2">${g.cols.map(renderField).join('')}</div>
-    </div>`).join('')+
+    </div>`).join('');
+  document.getElementById('noteInvoiceWrap').innerHTML=
     `<div class="invbox">
       <label>NOTE (optional internal note)</label>
       <textarea id="f_Note" rows="3" placeholder="e.g. bought from X, handed to Y...">${esc(a?a.Note||'':'')}</textarea>
@@ -666,12 +698,16 @@ async function openModal(id,prefill){
     </div>`;
   const histWrap=document.getElementById('histWrap');
   if(histWrap)histWrap.style.display=id?'':'none';
+  document.getElementById('maintWrap').style.display=id?'':'none';
+  if(id){ loadMaintInline(id); }
   document.getElementById('modal').classList.add('show');
   if(!id && !(prefill&&prefill.AssetTag)){
     const tagEl=document.getElementById('f_AssetTag');
     if(tagEl){ const r=await api('/api/assets/next-tag'); if(r&&r.ok){ const j=await r.json(); tagEl.value=j.tag||''; } }
   }
-  if(document.getElementById('f_EmployeeID')){fetchEmployees();}
+  if(document.getElementById('f_EmployeeID')){
+    await fetchEmployees(a?a.EmployeeID||'':'', a?a.RequestedBy||'':'');
+  }
   // populate Manufacturer / Model / Category dropdowns from reference tables
   await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');
   await loadCategoryOptions(a?a.Type||'':'');
@@ -693,22 +729,34 @@ async function loadMfrModelOptions(selMfr, selModel){
     sel.innerHTML='<option value="">-- choose manufacturer --</option>'+mfrs.map(m=>`<option value="${esc(m.name)}" ${m.name===selMfr?'selected':''}>${esc(m.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
     sel.onchange=async()=>{
       if(sel.value==='__new'){const v=prompt('New manufacturer name:'); if(v&&v.trim()){const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadMfrModelOptions(v.trim(),'');}} else {sel.value=selMfr;}}
-      else { await loadModelOptions('', sel.value); }
+      else { await loadModelOptions('', sel.value, mfrs); }
     };
-    await loadModelOptions(selModel, sel.value);
+    await loadModelOptions(selModel, sel.value, mfrs);
   }catch(e){}
 }
-async function loadModelOptions(selModel, mfr){
+// Models are strictly scoped to a manufacturer -- can't pick or create one
+// until a manufacturer is chosen/created above (was previously possible to
+// silently create an orphan model with no manufacturer link).
+async function loadModelOptions(selModel, mfrName, mfrs){
   const sel=document.getElementById('f_Model'); if(!sel)return;
+  if(!mfrName){
+    sel.innerHTML='<option value="">-- choose manufacturer first --</option>';
+    sel.disabled=true;
+    sel.onchange=null;
+    return;
+  }
+  sel.disabled=false;
+  const mfrObj=(mfrs||[]).find(m=>m.name===mfrName);
+  const mfrId=mfrObj?mfrObj.id:null;
   let opts='<option value="">-- choose model --</option>';
   try{
     const md=await api('/api/models'); const models=md?await md.json():[];
-    const filtered = mfr ? models.filter(m=>m.manufacturer===mfr) : models;
+    const filtered = models.filter(m=>m.manufacturer===mfrName);
     opts+=filtered.map(m=>`<option value="${esc(m.name)}" ${m.name===selModel?'selected':''}>${esc(m.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   }catch(e){}
   sel.innerHTML=opts;
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=prompt('New model name:'); if(v&&v.trim()){const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim(),manufacturer:mfr||undefined})}); if(r&&r.ok){await loadModelOptions(v.trim(), mfr);}} else {sel.value=selModel;}}
+    if(sel.value==='__new'){const v=prompt('New model name:'); if(v&&v.trim()){const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim(),manufacturer_id:mfrId})}); if(r&&r.ok){await loadModelOptions(v.trim(), mfrName, mfrs);}} else {sel.value=selModel;}}
   };
 }
 // populate the Item Category <select> on the Add Asset form from the
@@ -941,12 +989,14 @@ async function captureAndReadText(){
 }
 document.getElementById('camScanTextBtn').onclick=captureAndReadText;
 
-async function fetchEmployees(){
+async function fetchEmployees(selEmpId,selReqId){
   const r=await api('/api/employees');
   const list=r?await r.json():[];
+  const opts=(list||[]).map(e=>({id:e.EmployeeID,label:e.EmployeeName||e.EmployeeID}));
   const sel=document.getElementById('f_EmployeeID');
-  if(!sel)return;
-  sel.innerHTML='<option value="">-- select employee --</option>'+(list||[]).map(e=>`<option value="${esc(e.EmployeeID)}">${esc(e.EmployeeName||e.EmployeeID)}</option>`).join('');
+  if(sel)sel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selEmpId&&o.id===selEmpId?'selected':''}>${esc(o.label)}</option>`).join('');
+  const reqSel=document.getElementById('f_RequestedBy');
+  if(reqSel)reqSel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selReqId&&o.id===selReqId?'selected':''}>${esc(o.label)}</option>`).join('');
 }
 
 async function delInvoice(id){
@@ -984,10 +1034,11 @@ function closeModal(){document.getElementById('modal').classList.remove('show');
 /* ---------- checkout / checkin / maint / qr ---------- */
 async function doCheckout(){
   const user=document.getElementById('coUser').value;
+  const signedDate=document.getElementById('coSignedDate').value;
   const expected=document.getElementById('coExpected').value;
   const note=document.getElementById('coNote').value.trim();
   if(!user){toast('Select user');return;}
-  const r=await api('/api/assets/'+coAsset+'/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,expected,note})});
+  const r=await api('/api/assets/'+coAsset+'/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,signed_date:signedDate,expected,note})});
   if(r&&r.ok){document.getElementById('checkoutModal').classList.remove('show');toast('✓ CHECKED OUT');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
 }
 async function checkinAsset(id){
@@ -1015,6 +1066,30 @@ async function delMaint(mid){
   if(r&&r.ok){toast('✓ REMOVED');openMaint(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
 }
 function openQR(id){window.open('/label/'+id,'_blank');}
+
+/* ---------- maintenance embedded directly in the Asset form ---------- */
+// Checkout/check-in used to have their own inline section here, duplicating
+// the Employee Name field above -- it's simpler now: Status is the single
+// source of truth (switch it to/from "Checked-Out" and COMMIT), and the
+// backend derives Signed By/Signed Date from Employee Name automatically.
+async function loadMaintInline(id){
+  maintAsset=id;
+  const r=await api('/api/assets/'+id+'/maintenance'); const list=r?await r.json():[];
+  const tbody=document.getElementById('maintListInline'); if(!tbody)return;
+  tbody.innerHTML=list.map(x=>`<tr><td>${esc(x.date||x.ts||'')}</td><td>${esc(x.mtype||x.type||'')}</td><td class="mono">${fmtMoney(x.cost||0, CURRENCY)}</td><td>${esc(x.note||x.detail||'')}</td><td><button class="btn sm ghost" onclick="delMaintInline('${x.id||x._id||''}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">no records</td></tr>';
+}
+async function addMaintInline(){
+  const body={mtype:document.getElementById('mType2').value.trim(),cost:document.getElementById('mCost2').value,note:document.getElementById('mNote2').value.trim(),date:document.getElementById('mDate2').value};
+  if(!body.mtype){toast('Type required');return;}
+  const r=await api('/api/assets/'+maintAsset+'/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+}
+async function delMaintInline(mid){
+  if(!mid)return;
+  const r=await api('/api/assets/'+maintAsset+'/maintenance?id='+mid,{method:'DELETE'});
+  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+}
+document.getElementById('mAdd2').onclick=addMaintInline;
 async function printAsset(id){
   const w=window.open('','_blank');
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
@@ -1026,14 +1101,20 @@ async function printAsset(id){
     return `<tr><td class="k">${esc(LABELS[f]||f)}</td><td class="v">${esc(v)}</td></tr>`;
   }).join('');
   const sig=a.SignatureData?`<div class="sig-block"><div class="sig-title">SIGNATURE / ACKNOWLEDGEMENT</div><img src="${a.SignatureData}" style="max-width:340px;max-height:160px;border:1px solid #ccc;border-radius:6px;background:#fff"/></div>`:`<div class="sig-block muted">Not signed yet</div>`;
-  w.document.write(`<!doctype html><html><head><title>Asset — ${esc(a.Name||'')}</title>
-  <style>@page{margin:14mm}body{font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:0;margin:0}
+  w.document.write(`<!doctype html><html><head><title>Asset ${esc(a.AssetTag||'')} — ${esc(a.Name||'')}</title>
+  <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:0;margin:0}
   .card{border:1px solid #222;border-radius:8px;max-width:720px;margin:0 auto;overflow:hidden}
   .hd{background:#101622;color:#fff;padding:12px 16px;font-family:'Segoe UI',Arial,sans-serif;font-weight:600;letter-spacing:.2px;display:flex;justify-content:space-between;align-items:center}
-  .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
+  .hd .brand{display:flex;align-items:center;gap:10px} .hd img{height:26px}
+  .idbar{background:#f4f6fa;border-bottom:2px solid #101622;padding:12px 16px;text-align:center}
+  .idbar .tag{font-size:26px;font-weight:800;letter-spacing:1px;color:#101622;font-family:ui-monospace,Consolas,monospace}
+  .idbar .nm{font-size:13px;color:#555;margin-top:2px}
+  .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   .sig-block{margin-top:14px;padding:10px;border:1px dashed #999;border-radius:6px} .sig-title{font-weight:700;margin-bottom:6px;font-size:12px;letter-spacing:.5px} .muted{color:#999;font-style:italic}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
-  <body><div class="card"><div class="hd"><span>${(window.APP_NAME||'IT-Vault')} — Asset record</span><span class="id">${esc(a._id||'')}</span></div>
+  <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:100%;z-index:-1">`:''}
+  <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Asset record</span></div></div>`}
+  <div class="idbar"><div class="tag">${esc(a.AssetTag||'—')}</div><div class="nm">${esc(a.Name||'')}</div></div>
   <div class="bd"><table>${rowsHtml}</table>${sig}</div></div>
   <script>setTimeout(()=>{window.print();},250);<\/script></body></html>`);
   w.document.close();
@@ -1129,8 +1210,25 @@ async function openBackup(){
       <button class="btn sm ghost" onclick="window.open('/api/backups/${encodeURIComponent(x.file)}/download','_blank')">⬇ DOWNLOAD</button>
       <button class="btn sm danger" onclick="delBackup('${esc(x.file)}')">DEL</button>
     </div></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">none</td></tr>';
+  const sr=await api('/api/settings'); const s=sr?await sr.json():{};
+  document.getElementById('bkSchedule').value=s.backup_schedule||'off';
+  document.getElementById('bkScheduleScope').value=s.backup_scope||'all';
+  document.getElementById('bkRetain').value=s.backup_retain||7;
+  document.getElementById('bkScheduleHint').textContent = s.backup_last_run
+    ? `Older backups beyond the keep-limit are deleted automatically, every time a backup runs. Last scheduled run: ${s.backup_last_run}.`
+    : 'Older backups beyond the keep-limit are deleted automatically, every time a backup runs (scheduled or manual).';
   document.getElementById('backupModal').classList.add('show');
 }
+async function saveBackupSchedule(){
+  const body={
+    backup_schedule: document.getElementById('bkSchedule').value,
+    backup_scope: document.getElementById('bkScheduleScope').value,
+    backup_retain: parseInt(document.getElementById('bkRetain').value,10)||7
+  };
+  const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r&&r.ok){toast('✓ SCHEDULE SAVED');openBackup();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+document.getElementById('bkScheduleSave').onclick=saveBackupSchedule;
 function doBackup(){
   const scope=document.getElementById('bkScope').value;
   window.open('/api/backup?scope='+encodeURIComponent(scope),'_blank');
@@ -1156,18 +1254,47 @@ async function openSign(id){
   const r=await api('/api/assets/'+id+'/sign/link');
   const j=r?await r.json():{};
   if(!j.ok){toast('✕ '+(j.error||'failed'));return;}
-  const url=j.url;
-  if(navigator.clipboard&&navigator.clipboard.writeText){
-    navigator.clipboard.writeText(url).then(()=>toast('✓ LINK COPIED')).catch(()=>showSignLink(url));
-  }else{showSignLink(url);}
+  showSignLink(j.url);
 }
 function showSignLink(url){
   document.getElementById('signUrl').value=url;
+  const shareBtn=document.getElementById('signShareBtn');
+  if(shareBtn)shareBtn.style.display=(navigator.share)?'':'none';
   document.getElementById('signModal').classList.add('show');
 }
+async function copySignLink(){
+  const url=document.getElementById('signUrl').value;
+  try{
+    if(navigator.clipboard&&navigator.clipboard.writeText){await navigator.clipboard.writeText(url);}
+    else{const el=document.getElementById('signUrl');el.select();document.execCommand('copy');}
+    toast('✓ LINK COPIED');
+  }catch(e){toast('✕ Copy failed — select and copy manually');}
+}
+async function shareSignLink(){
+  const url=document.getElementById('signUrl').value;
+  if(!navigator.share){toast('✕ Sharing not supported on this browser');return;}
+  try{await navigator.share({title:'Asset acknowledgement', text:'Please review and sign this asset acknowledgement.', url});}
+  catch(e){/* user cancelled the share sheet -- not an error */}
+}
+document.getElementById('signCopyBtn').onclick=copySignLink;
+document.getElementById('signShareBtn').onclick=shareSignLink;
 
 /* ---------- users ---------- */
 let editingUser=null;
+// custom roles (created on the Roles page) get appended to the built-in 3
+// wherever a user's role is picked, so a "Manager" role shows up right
+// alongside admin / read-write / read-only.
+async function populateRoleSelect(selectedRole){
+  const sel=document.getElementById('u_role'); if(!sel)return;
+  const built='<option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option>';
+  let custom='';
+  try{
+    const r=await api('/api/roles'); const roles=r?await r.json():[];
+    custom=roles.map(x=>`<option value="${esc(x.name)}">${esc(x.name)} (custom)</option>`).join('');
+  }catch(e){}
+  sel.innerHTML=built+custom;
+  if(selectedRole)sel.value=selectedRole;
+}
 let userModalFromList=false; // true only if userModal was opened from the legacy usersModal list (Profile -> Users)
 async function openUsers(){
   const r=await api('/api/users');if(!r)return; const us=await r.json();
@@ -1184,7 +1311,7 @@ function editUser(un){
   document.getElementById('u_username').readOnly=true;
   document.getElementById('userModalTitle').textContent='Edit user';
   // minimal prefetch
-  api('/api/users').then(r=>r.json()).then(list=>{const u=list.find(x=>x.username===un)||{};document.getElementById('u_username').value=u.username||un;document.getElementById('u_display').value=u.display||'';document.getElementById('u_email').value=u.email||'';document.getElementById('u_role').value=u.role||'read-only';document.getElementById('u_password').value='';document.getElementById('usersModal').classList.remove('show');document.getElementById('userModal').classList.add('show');});
+  api('/api/users').then(r=>r.json()).then(async list=>{const u=list.find(x=>x.username===un)||{};document.getElementById('u_username').value=u.username||un;document.getElementById('u_display').value=u.display||'';document.getElementById('u_email').value=u.email||'';await populateRoleSelect(u.role||'read-only');document.getElementById('u_password').value='';document.getElementById('usersModal').classList.remove('show');document.getElementById('userModal').classList.add('show');});
 }
 async function saveUser(){
   const username=document.getElementById('u_username').value.trim();
@@ -1214,7 +1341,7 @@ async function addUser(){
   document.getElementById('u_username').value='';
   document.getElementById('u_display').value='';
   document.getElementById('u_email').value='';
-  document.getElementById('u_role').value='read-only';
+  await populateRoleSelect('read-only');
   document.getElementById('u_password').value='';
   document.getElementById('userModal').classList.add('show');
 }
@@ -1223,6 +1350,58 @@ async function delUser(un){
   const r=await api('/api/users/'+encodeURIComponent(un),{method:'DELETE'});
   if(r&&r.ok){toast('✓ User deleted');if(window.loadCfgUsers)loadCfgUsers();if(document.getElementById('usersModal').classList.contains('show'))openUsers();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
 }
+
+/* ---------- custom roles (Assets/Contracts/Directory/Tickets read/write) ---------- */
+const PERM_LABEL={none:'No access',read:'Read-only',write:'Read & write'};
+let editingRoleId=null;
+function roleFormReset(){
+  editingRoleId=null;
+  document.getElementById('rl_name').value=''; document.getElementById('rl_name').disabled=false;
+  document.getElementById('rl_assets').value='none'; document.getElementById('rl_contracts').value='none';
+  document.getElementById('rl_directory').value='none'; document.getElementById('rl_tickets').value='none';
+  document.getElementById('rl_save').textContent='＋ ADD ROLE';
+}
+async function loadRolesModal(){
+  const r=await api('/api/roles'); const roles=r?await r.json():[];
+  document.getElementById('rolesBody').innerHTML=roles.map(x=>`<tr>
+      <td>${esc(x.name)}</td><td>${PERM_LABEL[x.perm_assets]||'No access'}</td><td>${PERM_LABEL[x.perm_contracts]||'No access'}</td>
+      <td>${PERM_LABEL[x.perm_directory]||'No access'}</td><td>${PERM_LABEL[x.perm_tickets]||'No access'}</td>
+      <td class="row-actions"><button class="btn sm ghost" onclick="editRoleForm(${x.id},'${esc(x.name)}','${x.perm_assets}','${x.perm_contracts}','${x.perm_directory}','${x.perm_tickets}')">EDIT</button><button class="btn sm danger" onclick="delRole(${x.id})">DEL</button></td>
+    </tr>`).join('')||'<tr><td colspan=6 style="color:var(--muted)">No custom roles yet</td></tr>';
+  roleFormReset();
+  document.getElementById('rolesModal').classList.add('show');
+}
+function editRoleForm(id,name,pa,pc,pd,pt){
+  editingRoleId=id;
+  document.getElementById('rl_name').value=name; document.getElementById('rl_name').disabled=true;
+  document.getElementById('rl_assets').value=pa; document.getElementById('rl_contracts').value=pc;
+  document.getElementById('rl_directory').value=pd; document.getElementById('rl_tickets').value=pt;
+  document.getElementById('rl_save').textContent='✓ UPDATE ROLE';
+}
+async function saveRole(){
+  const body={
+    name: document.getElementById('rl_name').value.trim(),
+    perm_assets: document.getElementById('rl_assets').value,
+    perm_contracts: document.getElementById('rl_contracts').value,
+    perm_directory: document.getElementById('rl_directory').value,
+    perm_tickets: document.getElementById('rl_tickets').value
+  };
+  if(!editingRoleId && !body.name){toast('✕ Role name required');return;}
+  const r=editingRoleId
+    ? await api('/api/roles/'+editingRoleId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    : await api('/api/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r&&r.ok){toast('✓ ROLE SAVED');loadRolesModal();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+async function delRole(id){
+  if(!confirm('Delete this custom role?'))return;
+  const r=await api('/api/roles/'+id,{method:'DELETE'});
+  if(r&&r.ok){toast('✓ ROLE DELETED');loadRolesModal();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+document.getElementById('manageRolesBtn').onclick=loadRolesModal;
+document.getElementById('rolesClose').onclick=()=>document.getElementById('rolesModal').classList.remove('show');
+document.getElementById('rl_save').onclick=saveRole;
+window.editRoleForm=editRoleForm;window.delRole=delRole;
 
 async function delRow(id){
   if(!confirm('DELETE this asset permanently?'))return;
@@ -1249,6 +1428,10 @@ async function loadSettings(){
     document.getElementById('uDel').checked=s.notify_delete!==0;
     document.getElementById('b_name').value=s.app_name||'IT-Vault';
     document.getElementById('b_logoText').value=s.logo_text||'IT-Vault';
+    document.getElementById('b_phone').value=s.company_phone||'';
+    document.getElementById('b_address').value=s.company_address||'';
+    {const _lp=document.getElementById('b_letterheadPrev'); if(_lp){_lp.style.display=s.has_letterhead?'block':'none'; _lp.src='/letterhead.png?t='+Date.now();}
+     const _lr=document.getElementById('removeLetterheadBtn'); if(_lr)_lr.style.display=s.has_letterhead?'':'none';}
     if(document.getElementById('qr_size'))document.getElementById('qr_size').value=(s.qr_size||160).toString();
     if(document.getElementById('label_size'))document.getElementById('label_size').value=(s.label_size||'50x19');
     if(document.getElementById('label_logo'))document.getElementById('label_logo').checked=(s.label_logo!=0);
@@ -1300,10 +1483,26 @@ async function saveProfile(){
 }
 async function saveBrand(){
   const fd=new FormData();fd.append('app_name',document.getElementById('b_name').value.trim());fd.append('logo_text',document.getElementById('b_logoText').value.trim());
+  fd.append('company_phone',document.getElementById('b_phone').value.trim());fd.append('company_address',document.getElementById('b_address').value.trim());
   const logo=document.getElementById('b_logo').files[0]; if(logo)fd.append('logo',logo);
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ BRAND SAVED');document.getElementById('b_logo').value='';applyBranding();}
   else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+}
+async function saveLetterhead(){
+  const f=document.getElementById('b_letterhead').files[0];
+  if(!f){toast('✕ Choose a PDF or image first');return;}
+  const fd=new FormData();fd.append('letterhead',f);
+  const r=await api('/api/settings',{method:'PUT',body:fd});
+  if(r&&r.ok){toast('✓ LETTERHEAD SAVED');document.getElementById('b_letterhead').value='';loadSettings();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+async function removeLetterhead(){
+  if(!confirm('Remove the letterhead? Prints/PDFs will go back to the plain logo header.'))return;
+  const fd=new FormData();fd.append('remove_letterhead','1');
+  const r=await api('/api/settings',{method:'PUT',body:fd});
+  if(r&&r.ok){toast('✓ LETTERHEAD REMOVED');loadSettings();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
 async function removeLogo(){
   if(!confirm('Remove the current logo? This cannot be undone.'))return;
@@ -1316,6 +1515,7 @@ async function applyBranding(){
   const me=await fetch('/api/me').then(r=>r.json());
   const nm=me.app_name||me.display||'IT-Vault';
   window.APP_NAME=nm;
+  window.HAS_LETTERHEAD=!!me.has_letterhead;
   document.getElementById('sideName').textContent=nm;
   document.title=nm+' // Assets Manager';
   const sideLogo=document.getElementById('sideLogo');
@@ -1396,6 +1596,8 @@ document.getElementById('accSave').onclick=saveProfile;
 document.getElementById('saveSettings').onclick=saveSettings;
 document.getElementById('pm_saveBrand').onclick=saveBrand;
 document.getElementById('removeLogoBtn').onclick=removeLogo;
+document.getElementById('pm_saveLetterhead').onclick=saveLetterhead;
+document.getElementById('removeLetterheadBtn').onclick=removeLetterhead;
 document.getElementById('navAudit').onclick=openAudit;
 document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
@@ -1451,7 +1653,7 @@ document.getElementById('navCatalog').onclick=()=>showPage('page-catalog');
 document.getElementById('ldapCancel').onclick=()=>document.getElementById('ldapModal').classList.remove('show');
 document.getElementById('coSave').onclick=doCheckout;
 window.loadCfgUsers=window.loadCfgUsers||function(){};window.editRow=openModal;window.delRow=delRow;window.editUser=editUser;window.delUser=delUser;window.delInvoice=delInvoice;
-window.openSign=openSign;window.openCheckout=(id)=>{coAsset=id;Promise.all([api('/api/users'),api('/api/employees')]).then(async ([ru,re])=>{const us=ru?await ru.json():[];const emps=re?await re.json():[];const opts=us.map(u=>`<option value="${u.username}">${u.display||u.username} (user)</option>`).concat(emps.map(e=>`<option value="${e.EmployeeID}">${e.EmployeeName||e.EmployeeID} (${e.EmployeeID})</option>`));const sel=document.getElementById('coUser');sel.innerHTML=opts.join('');document.getElementById('checkoutModal').classList.add('show');});};
+window.openSign=openSign;window.openCheckout=(id)=>{coAsset=id;Promise.all([api('/api/users'),api('/api/employees')]).then(async ([ru,re])=>{const us=ru?await ru.json():[];const emps=re?await re.json():[];const opts=us.map(u=>`<option value="${u.username}">${u.display||u.username} (user)</option>`).concat(emps.map(e=>`<option value="${e.EmployeeID}">${e.EmployeeName||e.EmployeeID} (${e.EmployeeID})</option>`));const sel=document.getElementById('coUser');sel.innerHTML=opts.join('');document.getElementById('coSignedDate').value=new Date().toISOString().slice(0,10);document.getElementById('coExpected').value='';document.getElementById('coNote').value='';document.getElementById('checkoutModal').classList.add('show');});};
 window.checkinAsset=checkinAsset;window.openMaint=openMaint;window.openQR=openQR;window.doCheckout=doCheckout;window.addMaint=addMaint;window.delMaint=delMaint;
 window.openAudit=openAudit;window.openScan=openScan;window.doScan=doScan;window.addScannedAsAsset=addScannedAsAsset;
 window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore;window.delBackup=delBackup;
@@ -1903,9 +2105,10 @@ function printContractsSelected(){
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
   const rowsHtml=list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Contracts</title>
-  <style>@page{margin:14mm}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
+  <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
+  .phead{display:flex;align-items:center;gap:12px;margin-bottom:4px} .phead img{height:36px} .phead h2{margin:0}
   table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;text-align:left}th{background:#101622;color:#fff}
-  </style></head><body><h2>${(window.APP_NAME||'IT-Vault')} — Contracts</h2><div>${list.length} contract${list.length>1?'s':''} • generated ${new Date().toLocaleString()}</div>
+  </style></head><body>${printHeaderHtml((window.APP_NAME||'IT-Vault')+' — Contracts')}<div>${list.length} contract${list.length>1?'s':''} • generated ${new Date().toLocaleString()}</div>
   <table><thead><tr><th>Name</th><th>Type</th><th>Vendor</th><th>Start</th><th>End</th><th>Cost</th><th>License Key</th><th>Linked Asset</th></tr></thead><tbody>${rowsHtml}</tbody></table>
   <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
@@ -1961,12 +2164,14 @@ function printContract(id){
   rows.push(['Note',c.note||'—']);
   const rowsHtml=rows.map(([k,v])=>`<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Contract — ${esc(c.name||'')}</title>
-  <style>@page{margin:14mm}body{font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:0;margin:0}
+  <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:0;margin:0}
   .card{border:1px solid #222;border-radius:8px;max-width:720px;margin:0 auto;overflow:hidden}
   .hd{background:#101622;color:#fff;padding:12px 16px;font-family:'Segoe UI',Arial,sans-serif;font-weight:600;letter-spacing:.2px;display:flex;justify-content:space-between;align-items:center}
+  .hd .brand{display:flex;align-items:center;gap:10px} .hd img{height:26px}
   .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
-  <body><div class="card"><div class="hd"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span><span class="id">#${c.id}</span></div>
+  <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:100%;z-index:-1">`:''}
+  <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span></div><span class="id">#${c.id}</span></div>`}
   <div class="bd"><table>${rowsHtml}</table></div></div>
   <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
@@ -2026,6 +2231,7 @@ async function openContractModal(id){
   document.getElementById('ctCurLabel').textContent=CURRENCY;
   document.getElementById('ct_name').value=c.name||'';
   document.getElementById('ct_vendor').value=c.vendor||'';
+  document.getElementById('ct_vendor_email').value=c.vendor_email||'';
   document.getElementById('ct_cost').value=c.cost||'';
   document.getElementById('ct_start').value=c.start_date||'';
   document.getElementById('ct_end').value=c.end_date||'';
@@ -2047,6 +2253,7 @@ async function saveContract(){
     name: document.getElementById('ct_name').value.trim(),
     type: document.getElementById('ct_type').value,
     vendor: document.getElementById('ct_vendor').value.trim(),
+    vendor_email: document.getElementById('ct_vendor_email').value.trim(),
     cost: parseFloat(document.getElementById('ct_cost').value)||0,
     start_date: document.getElementById('ct_start').value,
     end_date: document.getElementById('ct_end').value,

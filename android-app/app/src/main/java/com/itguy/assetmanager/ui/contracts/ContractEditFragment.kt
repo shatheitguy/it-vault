@@ -16,6 +16,7 @@ import android.widget.EditText
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.model.Asset
 import com.itguy.assetmanager.data.model.Contract
 import com.itguy.assetmanager.data.model.Employee
@@ -180,17 +181,66 @@ class ContractEditFragment : Fragment() {
     }
 
     private fun bindLocationSpinner() {
-        val labels = mutableListOf("-- none --") + locations.map { it.name }
+        val sel = current.location
+        val labels = mutableListOf("-- none --") + locations.map { it.name } + ADD_NEW
         b.fLocation.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, labels)
-        val idx = locations.indexOfFirst { it.name == current.location }
-        b.fLocation.setSelection(if (idx >= 0) idx + 1 else 0)
+        val idx = locations.indexOfFirst { it.name == sel }
+        val selIdx = if (idx >= 0) idx + 1 else 0
+        b.fLocation.setSelection(selIdx)
+        b.fLocation.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (labels[position] == ADD_NEW) {
+                    promptNewValue("New location") { v ->
+                        lifecycleScope.launch {
+                            ApiClient.api().addLocation(NameOnly(v))
+                            locations = ApiClient.api().locations().body().orEmpty()
+                            current = current.copy(location = v)
+                            if (_b != null) bindLocationSpinner()
+                        }
+                    }
+                    b.fLocation.setSelection(selIdx)
+                }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
     }
 
     private fun bindDepartmentSpinner() {
-        val labels = mutableListOf("-- none --") + departments.map { it.name }
+        val sel = current.department
+        val labels = mutableListOf("-- none --") + departments.map { it.name } + ADD_NEW
         b.fDepartment.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, labels)
-        val idx = departments.indexOfFirst { it.name == current.department }
-        b.fDepartment.setSelection(if (idx >= 0) idx + 1 else 0)
+        val idx = departments.indexOfFirst { it.name == sel }
+        val selIdx = if (idx >= 0) idx + 1 else 0
+        b.fDepartment.setSelection(selIdx)
+        b.fDepartment.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (labels[position] == ADD_NEW) {
+                    promptNewValue("New department") { v ->
+                        lifecycleScope.launch {
+                            ApiClient.api().addDepartment(NameOnly(v))
+                            departments = ApiClient.api().departments().body().orEmpty()
+                            current = current.copy(department = v)
+                            if (_b != null) bindDepartmentSpinner()
+                        }
+                    }
+                    b.fDepartment.setSelection(selIdx)
+                }
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    private fun promptNewValue(title: String, onValue: (String) -> Unit) {
+        val edit = EditText(requireContext())
+        AlertDialog.Builder(requireContext())
+            .setTitle(title)
+            .setView(edit)
+            .setPositiveButton("Add") { _, _ ->
+                val v = edit.text?.toString()?.trim().orEmpty()
+                if (v.isNotBlank()) onValue(v)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun save() {
@@ -274,7 +324,8 @@ class ContractEditFragment : Fragment() {
                 val printManager = requireContext().getSystemService(Context.PRINT_SERVICE) as PrintManager
                 val jobName = "Contract - ${current.name.ifBlank { "record" }}"
                 val adapter = view.createPrintDocumentAdapter(jobName)
-                printManager.print(jobName, adapter, PrintAttributes.Builder().build())
+                val attrs = PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build()
+                printManager.print(jobName, adapter, attrs)
             }
         }
         webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null)
@@ -286,9 +337,17 @@ class ContractEditFragment : Fragment() {
             ?.let { "${it.Name} (${it.Serial.ifBlank { "no S/N" }}) — ID ${it.AssetTag.ifBlank { it.id ?: "" }}" } ?: "—"
         val employeeLabel = employees.firstOrNull { it.EmployeeID == current.employee_id }
             ?.let { it.EmployeeName.ifBlank { it.EmployeeID } } ?: "—"
+        val logoUrl = Prefs.serverUrl.trimEnd('/') + "/logo.png"
+        val letterheadUrl = Prefs.serverUrl.trimEnd('/') + "/letterhead.png"
         return """
             <html><body style='font-family:sans-serif;padding:16px;color:#111'>
-            <h2 style='margin:0 0 12px'>IT-Vault &mdash; Contract record</h2>
+            <img id='lh' src='$letterheadUrl' style='display:none;width:100%;max-height:160px;object-fit:contain;margin-bottom:12px'
+              onload="if(this.naturalWidth>2){this.style.display='block';document.getElementById('plainhd').style.display='none';}"
+              onerror="this.style.display='none'">
+            <div id='plainhd' style='display:flex;align-items:center;gap:10px;margin-bottom:12px'>
+              <img src='$logoUrl' style='height:28px' onerror="this.style.display='none'">
+              <h2 style='margin:0'>IT-Vault &mdash; Contract record</h2>
+            </div>
             <table style='width:100%;border-collapse:collapse'>
             ${row("Name", current.name)}
             ${row("Type", current.type)}

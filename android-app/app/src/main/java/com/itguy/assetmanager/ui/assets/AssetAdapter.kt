@@ -44,6 +44,7 @@ class AssetAdapter(private val onClick: (Asset) -> Unit) : RecyclerView.Adapter<
             "Checked-Out" -> Color.parseColor("#3BC9DB")
             "Under-Maintenance" -> Color.parseColor("#FFB84D")
             "Retired" -> Color.parseColor("#FF3B30")
+            "Lost/Stolen" -> Color.parseColor("#FF3B30")
             else -> Color.parseColor("#8A93A6")
         }
     }

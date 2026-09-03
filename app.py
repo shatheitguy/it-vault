@@ -76,7 +76,7 @@ SECRET = _load_or_create_secret()
 ADMIN_USER = os.environ.get("ITGUY_ADMIN", "admin")
 ADMIN_PASS = os.environ.get("ITGUY_ADMIN_PASS", "admin123")
 
-COLUMNS = ["AssetTag", "Name", "Type", "Serial", "MacAddress", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID"]
+COLUMNS = ["AssetTag", "Name", "Type", "Serial", "MacAddress", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID", "RequestedBy"]
 INT_COLS = {"WarrantyMonths"}  # columns stored as integers
 DEC_COLS = {"Price"}  # columns stored as decimals
 
@@ -93,12 +93,49 @@ def coerce_val(col, v):
         except Exception:
             return 0.0
     return str(v)
-STATUSES = ["New", "In Use", "Available", "Checked-Out", "Under-Maintenance", "Storage", "Worn", "Retired", "Out of Service"]
+STATUSES = ["Available", "Checked-Out", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen"]
 # role groups
 ROLE_VIEW = "read-only"
 ROLE_EDIT = "read-write"
 ROLE_ADMIN = "admin"
 ROLES = [ROLE_ADMIN, ROLE_EDIT, ROLE_VIEW]
+# Built-in roles' access to the modules a custom role can be scoped to
+# (assets / contracts / directory=Employees / tickets). Admin implicitly
+# passes every module+level check (see auth_required), so it isn't listed.
+BUILTIN_ROLE_PERMS = {
+    ROLE_EDIT: {"assets": "write", "contracts": "write", "directory": "write", "tickets": "write"},
+    ROLE_VIEW: {"assets": "read", "contracts": "read", "directory": "read", "tickets": "read"},
+}
+_PERM_ORDER = {"none": 0, "read": 1, "write": 2}
+
+def _role_perms(role_name):
+    """Resolve a role name (built-in or custom, from the Roles table) to its
+    per-module permission dict. Unknown roles get no access anywhere."""
+    if role_name in BUILTIN_ROLE_PERMS:
+        return BUILTIN_ROLE_PERMS[role_name]
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT perm_assets, perm_contracts, perm_directory, perm_tickets FROM Roles WHERE name=%s", [role_name])
+        r = cur.fetchone(); c.close()
+    except Exception:
+        r = None
+    if not r:
+        return {"assets": "none", "contracts": "none", "directory": "none", "tickets": "none"}
+    return {"assets": r.get("perm_assets") or "none", "contracts": r.get("perm_contracts") or "none",
+            "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none"}
+
+def _module_write_allowed(module):
+    """For routes that combine GET (read) with POST/PUT/DELETE (write) under
+    one decorator -- call this inside the view for the write branches."""
+    urole = session.get("role")
+    if not session.get("user"):
+        row = _resolve_session_from_api_key()
+        if not row:
+            return False
+        urole = row["role"]
+    if urole == ROLE_ADMIN:
+        return True
+    return _PERM_ORDER.get(_role_perms(urole).get(module, "none"), 0) >= _PERM_ORDER["write"]
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
@@ -143,7 +180,7 @@ def init_db():
         Name VARCHAR(255), Type VARCHAR(255), Serial VARCHAR(255), Location VARCHAR(255),
         Status VARCHAR(255), ReceivedBy VARCHAR(255), NotesReceived TEXT, Notes TEXT, Note TEXT, PurchaseDate VARCHAR(255),
         WarrantyMonths INT DEFAULT 12, InvoiceFile VARCHAR(255), SignatureData TEXT,
-        EmployeeName VARCHAR(255), EmployeeID VARCHAR(255), Designation VARCHAR(255), Department VARCHAR(255), Email VARCHAR(255),
+        EmployeeName VARCHAR(255), EmployeeID VARCHAR(255), RequestedBy VARCHAR(255) DEFAULT '', Designation VARCHAR(255), Department VARCHAR(255), Email VARCHAR(255),
         Manufacturer VARCHAR(255), Model VARCHAR(255), is_deleted TINYINT DEFAULT 0,
         created_at DATETIME NULL
     )""")
@@ -197,9 +234,19 @@ def init_db():
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
         password VARCHAR(100),
-        role VARCHAR(20),
+        role VARCHAR(50),
         display VARCHAR(80),
         email VARCHAR(160)
+    )""")
+    # Custom roles: admins can build their own (e.g. "Manager") with per-module
+    # read/write/none permissions, instead of only the 3 built-in tiers.
+    cur.execute("""CREATE TABLE IF NOT EXISTS Roles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(50) UNIQUE,
+        perm_assets VARCHAR(10) DEFAULT 'none',
+        perm_contracts VARCHAR(10) DEFAULT 'none',
+        perm_directory VARCHAR(10) DEFAULT 'none',
+        perm_tickets VARCHAR(10) DEFAULT 'none'
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Employees (
         _id VARCHAR(40) PRIMARY KEY,
@@ -428,6 +475,12 @@ def migrate_schema():
         cur.execute("ALTER TABLE Assets ADD COLUMN MacAddress VARCHAR(64) DEFAULT ''")
     except Exception:
         pass
+    # Assets: who requested the device, separate from EmployeeID (who it's
+    # actually assigned/checked out to)
+    try:
+        cur.execute("ALTER TABLE Assets ADD COLUMN RequestedBy VARCHAR(255) DEFAULT ''")
+    except Exception:
+        pass
     # Contracts: who/where a contract belongs to (employee, location, department)
     contract_cols = {
         "employee_id": "VARCHAR(255) DEFAULT ''",
@@ -435,6 +488,8 @@ def migrate_schema():
         "department": "VARCHAR(160) DEFAULT ''",
         "license_key": "VARCHAR(500) DEFAULT ''",
         "is_deleted": "TINYINT DEFAULT 0",
+        "vendor_email": "VARCHAR(160) DEFAULT ''",
+        "expiry_notified_at": "VARCHAR(40) DEFAULT ''",
     }
     for col, typ in contract_cols.items():
         try:
@@ -453,6 +508,34 @@ def migrate_schema():
         "unifi_verify_ssl": "BOOLEAN DEFAULT 0",
     }
     for col, typ in unifi_cols.items():
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # Users.role needs room for custom role names, not just the 3 built-ins
+    try:
+        cur.execute("ALTER TABLE Users MODIFY COLUMN role VARCHAR(50)")
+    except Exception:
+        pass
+    # Branding: organization contact details (shown on QR labels / print footers)
+    branding_cols = {
+        "company_phone": "VARCHAR(60) DEFAULT ''",
+        "company_address": "VARCHAR(255) DEFAULT ''",
+        "has_letterhead": "TINYINT DEFAULT 0",
+    }
+    for col, typ in branding_cols.items():
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # Scheduled backups: frequency, scope, and how many old backups to retain
+    backup_cols = {
+        "backup_schedule": "VARCHAR(20) DEFAULT 'off'",
+        "backup_scope": "VARCHAR(20) DEFAULT 'all'",
+        "backup_retain": "INT DEFAULT 7",
+        "backup_last_run": "VARCHAR(40) DEFAULT ''",
+    }
+    for col, typ in backup_cols.items():
         try:
             cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
         except Exception:
@@ -660,7 +743,7 @@ def me():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT display, email, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]])
     row = cur.fetchone() or {}
-    cur.execute("SELECT theme, ldap_server, ldap_domain, ldap_bind_user, ldap_base_dn, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, matrix_on, app_name, logo_text, logo FROM Settings WHERE id=1")
+    cur.execute("SELECT theme, ldap_server, ldap_domain, ldap_bind_user, ldap_base_dn, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, matrix_on, app_name, logo_text, logo, has_letterhead FROM Settings WHERE id=1")
     s = cur.fetchone() or {"theme":"dark"}
     c.close()
     return jsonify({"user": session["user"], "role": session["role"],
@@ -675,7 +758,7 @@ def me():
                     "language": s.get("language", "en"), "currency": s.get("currency", "AED"),
                     "region": s.get("region", "UAE"), "matrix_on": s.get("matrix_on", 1),
                     "app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
-                    "logo": "/logo.png",
+                    "logo": "/logo.png", "has_letterhead": bool(s.get("has_letterhead")),
                     "ldap_server": s.get("ldap_server", ""), "ldap_domain": s.get("ldap_domain", ""),
                     "ldap_bind_user": s.get("ldap_bind_user", ""), "ldap_base_dn": s.get("ldap_base_dn", "")})
 
@@ -715,7 +798,12 @@ def _resolve_session_from_api_key():
         session["role"] = row["role"]
     return row
 
-def auth_required(role=None):
+def auth_required(role=None, module=None, level="write"):
+    """role: legacy fixed-role gate (list of role names, e.g. [ROLE_ADMIN, ROLE_EDIT]).
+    module/level: granular gate against a role's per-module permission (see
+    _role_perms) -- lets a custom role (e.g. "Manager") get e.g. read-only on
+    Assets and read-write on Directory. admin always passes module checks.
+    Only one of role / module should be given; module wins if both are set."""
     from functools import wraps
     def deco(f):
         @wraps(f)
@@ -726,7 +814,12 @@ def auth_required(role=None):
                 if not row:
                     return jsonify({"error": "unauthorized"}), 401
                 urole = row["role"]
-            if role and urole not in (role if isinstance(role, list) else [role]):
+            if module:
+                if urole != ROLE_ADMIN:
+                    have = _role_perms(urole).get(module, "none")
+                    if _PERM_ORDER.get(have, 0) < _PERM_ORDER.get(level, 2):
+                        return jsonify({"error": "forbidden"}), 403
+            elif role and urole not in (role if isinstance(role, list) else [role]):
                 return jsonify({"error": "forbidden"}), 403
             return f(*a, **k)
         return wrap
@@ -803,7 +896,7 @@ def ldap_search():
     return jsonify(r["json"]), r["status"]
 
 @app.route("/api/employees")
-@auth_required()
+@auth_required(module="directory", level="read")
 def list_employees():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Employees ORDER BY EmployeeName")
@@ -811,7 +904,7 @@ def list_employees():
     return jsonify(rows)
 
 @app.route("/api/employees", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="directory", level="write")
 def create_employee():
     import uuid
     data = request.get_json(force=True) or {}
@@ -833,7 +926,7 @@ def create_employee():
     return jsonify(emp)
 
 @app.route("/api/employees/<e_id>", methods=["PUT"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="directory", level="write")
 def update_employee(e_id):
     data = request.get_json(force=True) or {}
     c = conn(); cur = c.cursor()
@@ -848,7 +941,7 @@ def update_employee(e_id):
     return jsonify({"ok": True})
 
 @app.route("/api/employees/<e_id>", methods=["DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="directory", level="write")
 def delete_employee(e_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT EmployeeName FROM Employees WHERE _id=%s", [e_id])
@@ -862,7 +955,7 @@ def delete_employee(e_id):
     return jsonify({"ok": True})
 
 @app.route("/api/employees/ldap-import", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="directory", level="write")
 def ldap_import_employees():
     data = request.get_json(force=True) or {}
     q = (data.get("q") or "").strip()
@@ -942,7 +1035,7 @@ def ldap_sync_all(row):
     return {"added": added, "updated": updated, "total": len(seen)}
 
 @app.route("/api/employees/ldap-sync", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="directory", level="write")
 def ldap_sync_employees():
     row = _ldap_settings()
     if not (row.get("ldap_server") and row.get("ldap_base_dn") and row.get("ldap_bind_user") and row.get("ldap_bind_pass")):
@@ -955,7 +1048,7 @@ def ldap_sync_employees():
 
 # ---------- assets ----------
 @app.route("/api/assets")
-@auth_required()
+@auth_required(module="assets", level="read")
 def list_assets():
     c = conn(); cur = c.cursor()
     q = request.args.get("q", "").strip(); sf = request.args.get("status", "").strip(); cf = request.args.get("col", "").strip()
@@ -982,15 +1075,26 @@ def _next_asset_tag(cur):
     return f"IT-{n + 1}"
 
 @app.route("/api/assets/next-tag")
-@auth_required()
+@auth_required(module="assets", level="read")
 def next_asset_tag():
     c = conn(); cur = c.cursor()
     tag = _next_asset_tag(cur)
     c.close()
     return jsonify({"tag": tag})
 
+def _resolve_employee_name(cur, employee_id):
+    """Employee Name -> display name, so Signed By reads a real name instead
+    of the raw EmployeeID/username when an asset is auto-checked-out."""
+    if not employee_id:
+        return ""
+    cur.execute("SELECT EmployeeName FROM Employees WHERE EmployeeID=%s", [employee_id])
+    r = cur.fetchone()
+    if r and r.get("EmployeeName"):
+        return r["EmployeeName"]
+    return employee_id
+
 @app.route("/api/assets", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def create_asset():
     data = request.get_json(force=True)
     serial = (data.get("Serial") or "").strip()
@@ -1004,15 +1108,20 @@ def create_asset():
     a_id = uuid.uuid4().hex
     if not (data.get("AssetTag") or "").strip():
         data["AssetTag"] = _next_asset_tag(cur)
+    if data.get("Status") == "Checked-Out" and (data.get("EmployeeID") or "").strip():
+        data["ReceivedBy"] = _resolve_employee_name(cur, data["EmployeeID"])
+        data["NotesReceived"] = datetime.now().strftime("%Y-%m-%d")
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 2))
     cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
     send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.")
+    if (data.get("EmployeeID") or "").strip():
+        notify_person_asset_assigned(data["EmployeeID"], {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
     return jsonify({"ok": True, "_id": a_id})
 
 @app.route("/api/assets/<a_id>", methods=["GET"])
-@auth_required()
+@auth_required(module="assets", level="read")
 def get_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
@@ -1022,7 +1131,7 @@ def get_asset(a_id):
 
 
 @app.route("/api/assets/<a_id>", methods=["PUT"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def update_asset(a_id):
     data = request.get_json(force=True)
     c = conn(); cur = c.cursor()
@@ -1032,9 +1141,31 @@ def update_asset(a_id):
     if not old:
         c.close(); return jsonify({"error": "not found"}), 404
     old = row_to_dict(old)
+    became_checked_out = data.get("Status") == "Checked-Out" and old.get("Status") != "Checked-Out"
+    became_returned = old.get("Status") == "Checked-Out" and data.get("Status") not in (None, "", "Checked-Out")
+    # Checking an asset out/in is just changing Status on this form now (no
+    # separate checkout dialog) -- Signed By / Signed Date are derived here
+    # instead of being asked for again, and the Checkouts history row is
+    # opened/closed the same way the old dedicated checkout/checkin did.
+    recv_by = None
+    if became_checked_out:
+        recv_by = _resolve_employee_name(cur, (data.get("EmployeeID") or old.get("EmployeeID") or "").strip())
+        data["ReceivedBy"] = recv_by
+        data["NotesReceived"] = datetime.now().strftime("%Y-%m-%d")
+    elif became_returned:
+        data["ReceivedBy"] = ""
+        data["NotesReceived"] = ""
     sets = ", ".join(f"`{col}`=%s" for col in COLUMNS)
     vals = [coerce_val(col, data.get(col)) for col in COLUMNS] + [a_id]
     cur.execute(f"UPDATE Assets SET {sets} WHERE _id=%s", vals)
+    if became_checked_out:
+        cur.execute("INSERT INTO Checkouts (asset_id, username, checkout_date, expected_checkin, note) VALUES (%s,%s,%s,%s,%s)",
+                    (a_id, recv_by or "", nowstr(), "", ""))
+    elif became_returned:
+        cur.execute("SELECT id FROM Checkouts WHERE asset_id=%s AND checkin_date IS NULL ORDER BY id DESC LIMIT 1", [a_id])
+        co = cur.fetchone()
+        if co:
+            cur.execute("UPDATE Checkouts SET checkin_date=%s WHERE id=%s", (nowstr(), co["id"]))
     # history log (GLPI-style: every changed field recorded)
     hist = []
     for col in COLUMNS:
@@ -1045,10 +1176,14 @@ def update_asset(a_id):
     if hist:
         cur.executemany("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) VALUES (%s, NOW(), %s, %s, %s, %s)", hist)
     c.commit(); c.close()
+    new_emp = (data.get("EmployeeID") or "").strip()
+    emp_changed = new_emp and new_emp != (old.get("EmployeeID") or "").strip()
+    if new_emp and (emp_changed or became_checked_out):
+        notify_person_asset_assigned(new_emp, {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>", methods=["DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def delete_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT Name, Serial FROM Assets WHERE _id=%s AND is_deleted=0", [a_id]); r = cur.fetchone()
@@ -1061,7 +1196,7 @@ def delete_asset(a_id):
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/history")
-@auth_required()
+@auth_required(module="assets", level="read")
 def asset_history(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT ts, user, field, old_val, new_val FROM History WHERE asset_id=%s ORDER BY ts DESC", [a_id])
@@ -1070,14 +1205,14 @@ def asset_history(a_id):
                     "old_val": r["old_val"], "new_val": r["new_val"]} for r in rows])
 
 @app.route("/api/assets/<a_id>/restore", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def restore_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Assets SET is_deleted=0 WHERE _id=%s", [a_id]); c.commit(); c.close()
     return jsonify({"ok": True})
 
 @app.route("/api/assets/trash")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="read")
 def trash_assets():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=1")
@@ -1094,7 +1229,7 @@ def _purge_asset_row(cur, a_id, invoice_file):
         except Exception: pass
 
 @app.route("/api/assets/<a_id>/permanent", methods=["DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def permanent_delete_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT Name, Serial, InvoiceFile FROM Assets WHERE _id=%s AND is_deleted=1", [a_id])
@@ -1107,7 +1242,7 @@ def permanent_delete_asset(a_id):
     return jsonify({"ok": True})
 
 @app.route("/api/assets/trash/empty", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def empty_trash():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, Name, Serial, InvoiceFile FROM Assets WHERE is_deleted=1")
@@ -1400,7 +1535,7 @@ CONTRACT_EXPORT_LABELS = {"name": "Name", "type": "Type", "vendor": "Vendor", "s
                           "department": "Department", "license_key": "License Key", "note": "Note"}
 
 @app.route("/api/contracts/export")
-@auth_required()
+@auth_required(module="contracts", level="read")
 def export_contracts_excel():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY end_date")
@@ -1414,7 +1549,7 @@ def export_contracts_excel():
                     headers={"Content-Disposition": "attachment; filename=contracts_export.xlsx"})
 
 @app.route("/api/contracts/import", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="contracts", level="write")
 def import_contracts_excel():
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
@@ -1464,6 +1599,18 @@ def import_contracts_excel():
     c.commit(); c.close()
     return jsonify({"ok": True, "added": added})
 
+def _valid_role(name):
+    """A role is valid if it's one of the 3 built-ins or a custom role someone
+    created on the Roles page."""
+    if name in ROLES:
+        return True
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT id FROM Roles WHERE name=%s", [name]); r = cur.fetchone(); c.close()
+        return bool(r)
+    except Exception:
+        return False
+
 # ---------- users (admin only) ----------
 @app.route("/api/users")
 @auth_required([ROLE_ADMIN])
@@ -1479,7 +1626,7 @@ def create_user():
     d = request.get_json(force=True)
     u = (d.get("username") or "").strip(); pw = d.get("password", ""); role = d.get("role", ROLE_VIEW); disp = d.get("display", "") or u; em = d.get("email", "").strip()
     if not u or not pw: return jsonify({"error": "username and password required"}), 400
-    if role not in ROLES: return jsonify({"error": "invalid role"}), 400
+    if not _valid_role(role): return jsonify({"error": "invalid role"}), 400
     c = conn(); cur = c.cursor()
     cur.execute("SELECT username FROM Users WHERE username=%s", [u])
     if cur.fetchone(): c.close(); return jsonify({"error": "user exists"}), 409
@@ -1498,7 +1645,7 @@ def update_user(u):
         cur.execute("SELECT COUNT(*) AS n FROM Users WHERE role=%s", [ROLE_ADMIN]); cnt = cur.fetchone()["n"]
         if cnt <= 1: c.close(); return jsonify({"error": "cannot demote last admin"}), 403
     sets = []; vals = []
-    if "role" in d and d["role"] in ROLES: sets.append("role=%s"); vals.append(d["role"])
+    if "role" in d and _valid_role(d["role"]): sets.append("role=%s"); vals.append(d["role"])
     if "display" in d: sets.append("display=%s"); vals.append(d["display"])
     if "email" in d: sets.append("email=%s"); vals.append(d["email"].strip())
     if d.get("password"): sets.append("password=%s"); vals.append(hash_pw(d["password"]))
@@ -1517,6 +1664,64 @@ def delete_user(u):
         cur.execute("SELECT COUNT(*) AS n FROM Users WHERE role=%s", [ROLE_ADMIN]); cnt = cur.fetchone()["n"]
         if cnt <= 1: c.close(); return jsonify({"error": "cannot delete last admin"}), 403
     cur.execute("DELETE FROM Users WHERE username=%s", [u]); c.commit(); c.close()
+    return jsonify({"ok": True})
+
+PERM_LEVELS = ("none", "read", "write")
+
+@app.route("/api/roles")
+@auth_required([ROLE_ADMIN])
+def list_roles():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets FROM Roles ORDER BY name")
+    rows = cur.fetchall(); c.close()
+    return jsonify([dict(r) for r in rows])
+
+def _role_body(d):
+    name = (d.get("name") or "").strip()[:50]
+    perms = {}
+    for k in ("assets", "contracts", "directory", "tickets"):
+        v = (d.get(f"perm_{k}") or "none").lower()
+        perms[k] = v if v in PERM_LEVELS else "none"
+    return name, perms
+
+@app.route("/api/roles", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def create_role():
+    d = request.get_json(force=True) or {}
+    name, perms = _role_body(d)
+    if not name: return jsonify({"error": "name required"}), 400
+    if name in ROLES: return jsonify({"error": "that name is a built-in role"}), 409
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT id FROM Roles WHERE name=%s", [name])
+    if cur.fetchone(): c.close(); return jsonify({"error": "a role with that name already exists"}), 409
+    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets) VALUES (%s,%s,%s,%s,%s)",
+                (name, perms["assets"], perms["contracts"], perms["directory"], perms["tickets"]))
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/roles/<int:rid>", methods=["PUT"])
+@auth_required([ROLE_ADMIN])
+def update_role(rid):
+    d = request.get_json(force=True) or {}
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT name FROM Roles WHERE id=%s", [rid]); existing = cur.fetchone()
+    if not existing: c.close(); return jsonify({"error": "not found"}), 404
+    _, perms = _role_body(d)
+    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, perm_tickets=%s WHERE id=%s",
+                (perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], rid))
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/roles/<int:rid>", methods=["DELETE"])
+@auth_required([ROLE_ADMIN])
+def delete_role(rid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT name FROM Roles WHERE id=%s", [rid]); existing = cur.fetchone()
+    if not existing: c.close(); return jsonify({"error": "not found"}), 404
+    cur.execute("SELECT COUNT(*) AS n FROM Users WHERE role=%s", [existing["name"]])
+    n = cur.fetchone()["n"]
+    if n: c.close(); return jsonify({"error": f"{n} user(s) still have this role -- reassign them first"}), 409
+    cur.execute("DELETE FROM Roles WHERE id=%s", [rid]); c.commit(); c.close()
     return jsonify({"ok": True})
 
 @app.route("/api/profile/password", methods=["POST"])
@@ -1853,6 +2058,43 @@ def unifi_clients():
     return jsonify({"clients": out, "error": _unifi_cache["error"]})
 
 # ---------- settings (admin) ----------
+def _save_letterhead(fileobj):
+    """Normalizes an uploaded letterhead (PDF or image) to a single PNG at
+    BASE/letterhead.png -- a PDF's first page is rasterized (via PyMuPDF) so
+    every print/PDF surface in the app can just <img src=/letterhead.png>
+    or embed the same PNG, regardless of what format was uploaded."""
+    fname = (fileobj.filename or "").lower()
+    data = fileobj.read()
+    if not data:
+        return False, "empty file"
+    dest = os.path.join(BASE, "letterhead.png")
+    try:
+        if fname.endswith(".pdf") or data[:4] == b"%PDF":
+            import pymupdf
+            doc = pymupdf.open(stream=data, filetype="pdf")
+            if doc.page_count < 1:
+                return False, "PDF has no pages"
+            page = doc.load_page(0)
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))  # ~144dpi
+            pix.save(dest)
+            doc.close()
+        else:
+            from PIL import Image as PILImage
+            img = PILImage.open(io.BytesIO(data)).convert("RGB")
+            img.save(dest, format="PNG")
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+@app.route("/letterhead.png")
+def letterhead_file():
+    p = os.path.join(BASE, "letterhead.png")
+    if os.path.exists(p) and os.path.getsize(p) > 0:
+        return send_from_directory(BASE, "letterhead.png")
+    from flask import Response as _R
+    return _R(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x05\x02\x00\x9d\xfd\xa4\x1e\x00\x00\x00\x00IEND\xaeB`\x82",
+                    mimetype="image/png")
+
 @app.route("/api/settings", methods=["GET", "PUT"])
 @auth_required([ROLE_ADMIN])
 def settings():
@@ -1862,9 +2104,11 @@ def settings():
         if request.content_type and "multipart/form-data" in request.content_type:
             d = request.form.to_dict()
             logo = request.files.get("logo") if "logo" in request.files else None
+            letterhead = request.files.get("letterhead") if "letterhead" in request.files else None
         else:
             d = request.get_json(force=True) or {}
             logo = None
+            letterhead = None
         # load current row so partial saves (e.g. branding only) don't reset other fields
         cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
         cur0 = cur.fetchone() or {}
@@ -1916,6 +2160,27 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
+        if any(k in d for k in ("company_phone", "company_address")):
+            cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
+            br0 = cur.fetchone() or {}
+            cur.execute("UPDATE Settings SET company_phone=%s, company_address=%s WHERE id=1",
+                        ((d.get("company_phone", br0.get("company_phone", "")) or "")[:60],
+                         (d.get("company_address", br0.get("company_address", "")) or "")[:255]))
+        if any(k in d for k in ("backup_schedule", "backup_scope", "backup_retain")):
+            cur.execute("SELECT backup_schedule, backup_scope, backup_retain FROM Settings WHERE id=1")
+            bk0 = cur.fetchone() or {}
+            sched = (d.get("backup_schedule", bk0.get("backup_schedule", "off")) or "off").lower()
+            if sched not in ("off", "daily", "weekly"):
+                sched = "off"
+            bscope = (d.get("backup_scope", bk0.get("backup_scope", "all")) or "all").lower()
+            if bscope not in ("all", "config", "assets"):
+                bscope = "all"
+            try:
+                retain = max(1, int(d.get("backup_retain") or bk0.get("backup_retain") or 7))
+            except (TypeError, ValueError):
+                retain = 7
+            cur.execute("UPDATE Settings SET backup_schedule=%s, backup_scope=%s, backup_retain=%s WHERE id=1",
+                        (sched, bscope, retain))
         # persist DB connection config (points the app at a different MariaDB)
         if any(k in d for k in ("db_host", "db_port", "db_name", "db_user", "db_pass")):
             save_db_config(d.get("db_host", DB_HOST), d.get("db_port", DB_PORT),
@@ -1935,6 +2200,19 @@ def settings():
                 open(os.path.join(BASE, "logo.png"), "wb").close()
             except Exception:
                 pass
+        if letterhead:
+            ok, err = _save_letterhead(letterhead)
+            if ok:
+                cur.execute("UPDATE Settings SET has_letterhead=1 WHERE id=1")
+            else:
+                c.commit(); c.close()
+                return jsonify({"error": err or "could not process letterhead file"}), 400
+        elif str(d.get("remove_letterhead", "")).lower() in ("1", "true"):
+            cur.execute("UPDATE Settings SET has_letterhead=0 WHERE id=1")
+            try:
+                open(os.path.join(BASE, "letterhead.png"), "wb").close()
+            except Exception:
+                pass
         c.commit(); c.close()
         return jsonify({"ok": True})
     cur.execute("SELECT * FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
@@ -1951,7 +2229,9 @@ def settings():
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
                                           "auto_assign_roundrobin","notify_on_create","notify_on_resolve","notify_on_reply",
                                           "unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user",
-                                          "unifi_is_os","unifi_verify_ssl"]} | {
+                                          "unifi_is_os","unifi_verify_ssl",
+                                          "backup_schedule","backup_scope","backup_retain","backup_last_run",
+                                          "company_phone","company_address","has_letterhead"]} | {
                 "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME, "db_user": DB_USER,
                 "ldap_bind_pass_set": bool(s.get("ldap_bind_pass")),
                 "unifi_pass_set": bool(s.get("unifi_pass")),
@@ -1959,47 +2239,59 @@ def settings():
 
 # ---------- contracts / locations (GLPI-style) ----------
 @app.route("/api/contracts", methods=["GET","POST","PUT","DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="contracts", level="read")
 def contracts_api():
+    if request.method != "GET" and not _module_write_allowed("contracts"):
+        return jsonify({"error": "forbidden"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY end_date"); rows = cur.fetchall(); c.close()
         return jsonify([dict(r) for r in rows])
     if request.method == "POST":
         d = request.get_json(force=True)
-        cur.execute("""INSERT INTO Contracts (name, vendor, type, start_date, end_date, cost, asset_id, employee_id, location, department, license_key, note)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                    (d.get("name",""), d.get("vendor",""), d.get("type",""), d.get("start_date",""), d.get("end_date",""),
+        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, asset_id, employee_id, location, department, license_key, note)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
+                     d.get("type",""), d.get("start_date",""), d.get("end_date",""),
                      float(d.get("cost") or 0), d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note","")))
-        c.commit(); c.close(); return jsonify({"ok": True})
+        c.commit(); c.close()
+        if (d.get("employee_id") or "").strip():
+            notify_person_contract_assigned(d["employee_id"], d)
+        return jsonify({"ok": True})
     if request.method == "PUT":
         d = request.get_json(force=True); cid = d.get("id")
-        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, type=%s, start_date=%s, end_date=%s, cost=%s, asset_id=%s,
-                       employee_id=%s, location=%s, department=%s, license_key=%s, note=%s WHERE id=%s""",
-                    (d.get("name",""), d.get("vendor",""), d.get("type",""), d.get("start_date",""), d.get("end_date",""),
+        cur.execute("SELECT employee_id FROM Contracts WHERE id=%s", [cid]); old = cur.fetchone() or {}
+        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, vendor_email=%s, type=%s, start_date=%s, end_date=%s, cost=%s, asset_id=%s,
+                       employee_id=%s, location=%s, department=%s, license_key=%s, note=%s, expiry_notified_at='' WHERE id=%s""",
+                    (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
+                     d.get("type",""), d.get("start_date",""), d.get("end_date",""),
                      float(d.get("cost") or 0), d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note",""), cid))
-        c.commit(); c.close(); return jsonify({"ok": True})
+        c.commit(); c.close()
+        new_emp = (d.get("employee_id") or "").strip()
+        if new_emp and new_emp != (old.get("employee_id") or "").strip():
+            notify_person_contract_assigned(new_emp, d)
+        return jsonify({"ok": True})
     cid = (request.get_json(force=True) or {}).get("id")
     cur.execute("UPDATE Contracts SET is_deleted=1 WHERE id=%s", [cid]); c.commit(); c.close(); return jsonify({"ok": True})
 
 @app.route("/api/contracts/trash")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="contracts", level="read")
 def contracts_trash():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Contracts WHERE is_deleted=1 ORDER BY end_date"); rows = cur.fetchall(); c.close()
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/contracts/<int:cid>/restore", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="contracts", level="write")
 def restore_contract(cid):
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Contracts SET is_deleted=0 WHERE id=%s", [cid]); c.commit(); c.close()
     return jsonify({"ok": True})
 
 @app.route("/api/contracts/<int:cid>/permanent", methods=["DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="contracts", level="write")
 def permanent_delete_contract(cid):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT id FROM Contracts WHERE id=%s AND is_deleted=1", [cid])
@@ -2010,7 +2302,7 @@ def permanent_delete_contract(cid):
     return jsonify({"ok": True})
 
 @app.route("/api/contracts/trash/empty", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="contracts", level="write")
 def empty_contracts_trash():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT id FROM Contracts WHERE is_deleted=1"); rows = cur.fetchall()
@@ -2081,6 +2373,39 @@ def notify_ticket_created(ticket):
         send_notification(f"New Ticket: {ticket['code']}", f"A new ticket has been created.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nPriority: {ticket.get('priority','')}\nRequester: {ticket.get('requester','')}\nCategory: {ticket.get('category','')}\n\nLogin to view and assign.")
     except Exception as e:
         print("notify created error:", e)
+
+def notify_requester_ticket_created(ticket):
+    """Confirms to the requester (not staff) that their ticket was received,
+    with the ticket code they need for the public status-lookup portal."""
+    to = (ticket.get("requester_email") or "").strip()
+    if not to:
+        return
+    bn = brand_name()
+    body = (f"Your support ticket has been received.\n\n"
+            f"Ticket ID: {ticket['code']}\n"
+            f"Subject: {ticket.get('subject','')}\n"
+            f"Priority: {ticket.get('priority','')}\n\n"
+            f"Keep this Ticket ID -- you can check its status any time using it, "
+            f"and we'll email you again when the status changes.")
+    try:
+        _send_simple_email(to, f"Ticket {ticket['code']} received", body)
+    except Exception as e:
+        print("notify requester created error:", e)
+
+def notify_requester_status_changed(ticket, new_status):
+    """Fires on ANY status change, not just Resolved -- separate from
+    notify_ticket_resolved's specific wording, kept for that one case."""
+    to = (ticket.get("requester_email") or "").strip()
+    if not to:
+        return
+    body = (f"Your ticket's status has changed.\n\n"
+            f"Ticket ID: {ticket.get('code','')}\n"
+            f"Subject: {ticket.get('subject','')}\n"
+            f"New Status: {new_status}\n")
+    try:
+        _send_simple_email(to, f"Ticket {ticket.get('code','')} status: {new_status}", body)
+    except Exception as e:
+        print("notify status change error:", e)
 
 def notify_ticket_resolved(ticket):
     """Notify requester when a ticket is resolved/closed."""
@@ -2210,6 +2535,7 @@ def tickets_api():
     ticket = {"id": tid, "code": code, "subject": d.get("subject",""), "priority": priority, "requester": d.get("requester",""), "requester_email": d.get("requester_email",""), "category": category}
     try: notify_ticket_created(ticket)
     except Exception as e: print("notify created error:", e)
+    notify_requester_ticket_created(ticket)
     return jsonify({"ok": True, "id": tid, "code": code})
 
 @app.route("/api/portal/tickets", methods=["POST"])
@@ -2251,6 +2577,7 @@ def portal_create_ticket():
     ticket = {"id": tid, "code": code, "subject": subject, "priority": priority, "requester": d.get("requester",""), "requester_email": d.get("requester_email",""), "category": category}
     try: notify_ticket_created(ticket)
     except Exception as e: print("notify created error:", e)
+    notify_requester_ticket_created(ticket)
     return jsonify({"ok": True, "code": code, "id": tid})
 
 @app.route("/portal")
@@ -2320,10 +2647,17 @@ def ticket_detail(ticket_id):
         if new_assignee and new_assignee != (before.get("assignee") or ""):
             try: notify_ticket_assigned(dict(before), new_assignee)
             except Exception as e: print("assign notify call error:", e)
-        # notify on resolve
-        if d.get("status") in ("Resolved","Closed") and before.get("status") not in ("Resolved","Closed"):
-            try: notify_ticket_resolved(dict(before))
-            except Exception as e: print("resolve notify error:", e)
+        # notify requester on ANY status change -- merged reflects the actual
+        # new state (before was fetched pre-update, so it still has the old status)
+        new_status = d.get("status")
+        old_status = before.get("status")
+        if new_status and new_status != old_status:
+            merged = {**dict(before), **d}
+            if new_status in ("Resolved", "Closed"):
+                try: notify_ticket_resolved(merged)
+                except Exception as e: print("resolve notify error:", e)
+            else:
+                notify_requester_status_changed(merged, new_status)
         return jsonify({"ok": True})
     cur.execute("DELETE FROM Tickets WHERE id=%s", [ticket_id])
     cur.execute("DELETE FROM TicketReplies WHERE ticket_id=%s", [ticket_id])
@@ -2383,7 +2717,7 @@ def ldap_test():
 @app.route("/api/branding")
 def branding():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
+    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
     s = s or {}
     return jsonify({"app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
                     "matrix_on": bool(s.get("matrix_on", 1)), "logo": "/logo.png",
@@ -2392,7 +2726,8 @@ def branding():
                     "comp_bg": s.get("comp_bg", "#121826"), "radius": s.get("radius", 12),
                     "font": s.get("font", "Rajdhani"), "accent": s.get("accent", "#ff3b30"),
                     "accent2": s.get("accent2", "#c0392b"), "language": s.get("language", "en"),
-                    "currency": s.get("currency", "AED")})
+                    "currency": s.get("currency", "AED"),
+                    "company_phone": s.get("company_phone", ""), "company_address": s.get("company_address", "")})
 
 @app.route("/api/logo", methods=["POST"])
 @auth_required([ROLE_ADMIN])
@@ -2427,6 +2762,48 @@ def brand_name():
         return (r.get("app_name") or "IT-Vault") if r else "IT-Vault"
     except Exception:
         return "IT-Vault"
+def _lookup_person_email(identifier):
+    """Resolve either a system Users.username or an Employees.EmployeeID to
+    an email address, since 'who this asset/contract is assigned to' can be
+    either (checkout lets you pick from both). Empty string if none on file."""
+    if not identifier:
+        return ""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT email FROM Users WHERE username=%s", [identifier])
+    r = cur.fetchone()
+    if r and r.get("email"):
+        c.close(); return r["email"]
+    cur.execute("SELECT Email FROM Employees WHERE EmployeeID=%s", [identifier])
+    r = cur.fetchone(); c.close()
+    return (r.get("Email") if r else "") or ""
+
+def notify_person_asset_assigned(employee_id, asset, checked_out=False):
+    """Emails the specific person an asset is assigned to (not the general
+    staff broadcast) -- only Asset ID + Serial, never MAC, per policy."""
+    to = _lookup_person_email(employee_id)
+    if not to:
+        return False
+    bn = brand_name()
+    tag = asset.get("AssetTag") or asset.get("_id", "")
+    verb = "checked out to you" if checked_out else "assigned to you"
+    body = (f"An asset has been {verb}.\n\n"
+            f"Asset ID: {tag}\n"
+            f"Name: {asset.get('Name','')}\n"
+            f"Serial Number: {asset.get('Serial') or '—'}\n"
+            f"Status: {asset.get('Status','')}\n")
+    return _send_simple_email(to, f"Asset {verb}: {asset.get('Name','')}", body)
+
+def notify_person_contract_assigned(employee_id, contract):
+    to = _lookup_person_email(employee_id)
+    if not to:
+        return False
+    body = (f"A contract has been assigned to you.\n\n"
+            f"Name: {contract.get('name','')}\n"
+            f"Type: {contract.get('type','')}\n"
+            f"Vendor: {contract.get('vendor') or '—'}\n"
+            f"End Date: {contract.get('end_date') or '—'}\n")
+    return _send_simple_email(to, f"Contract assigned to you: {contract.get('name','')}", body)
+
 def _email_footer(app_name):
     """Small signature line appended to every outgoing email (notifications,
     OTP codes, alerts) -- keeps the sender's own brand name in the subject/body
@@ -2552,26 +2929,36 @@ def nowstr():
 
 # ---------- ITAM: checkout / checkin ----------
 @app.route("/api/assets/<a_id>/checkout", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def checkout_asset(a_id):
     d = request.get_json(force=True)
     user = (d.get("username") or "").strip()
     if not user: return jsonify({"error": "username required"}), 400
     expected = (d.get("expected") or "").strip()
     note = (d.get("note") or "").strip()
+    # "Signed Date" is only ever set here (at the moment of checkout), never
+    # freely edited on the Asset form -- defaults to today, but the checkout
+    # dialog lets you pick a different day if the sign-off happened earlier.
+    signed_date = (d.get("signed_date") or "").strip() or datetime.now().strftime("%Y-%m-%d")
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
-    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s WHERE _id=%s", (user, a_id))
+    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, NotesReceived=%s WHERE _id=%s", (user, signed_date, a_id))
     cur.execute("INSERT INTO Checkouts (asset_id, username, checkout_date, expected_checkin, note) VALUES (%s,%s,%s,%s,%s)",
                 (a_id, user, nowstr(), expected, note))
     c.commit(); c.close()
     audit(session.get("user"), "CHECKOUT", a_id, f"{a['Name']} -> {user}" + (f" (due {expected})" if expected else ""))
     send_notification("IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.")
+    try:
+        cc = conn(); ccur = cc.cursor()
+        ccur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); full_asset = ccur.fetchone(); cc.close()
+    except Exception:
+        full_asset = None
+    notify_person_asset_assigned(user, full_asset or {"Name": a["Name"], "_id": a_id}, checked_out=True)
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/checkin", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def checkin_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
@@ -2587,7 +2974,7 @@ def checkin_asset(a_id):
 
 # ---------- ITAM: maintenance ----------
 @app.route("/api/assets/<a_id>/maintenance", methods=["GET", "POST", "DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def maintenance(a_id):
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -2693,7 +3080,7 @@ def dashboard():
 
 # ---------- QR label ----------
 @app.route("/api/assets/<a_id>/qr")
-@auth_required()
+@auth_required(module="assets", level="read")
 def asset_qr(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE _id=%s", [a_id])
@@ -2989,7 +3376,7 @@ def asset_public(a_id):
         lan_ip = "127.0.0.1"
     base = f"http://{lan_ip}:5000/"
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE _id=%s", [a_id])
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SignatureData FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone()
     if not a:
         c.close(); return "Asset not found", 404
@@ -3011,13 +3398,24 @@ def asset_public(a_id):
     # org branding + contact
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT app_name, logo_text, org_contact FROM Settings WHERE id=1")
+        scur.execute("SELECT app_name, logo_text, company_phone, company_address FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
-        org_contact = (srow.get("org_contact") or "") if srow else ""
+        company_phone = (srow.get("company_phone") or "") if srow else ""
+        company_address = (srow.get("company_address") or "") if srow else ""
     except Exception:
-        app_name, logo_text, org_contact = "IT-Vault", "IT-Vault", ""
+        app_name, logo_text, company_phone, company_address = "IT-Vault", "IT-Vault", "", ""
+    # who actually processed this asset (the staff/admin account, as opposed to
+    # ReceivedBy which is the person it was signed out to)
+    processed_by = ""
+    try:
+        pc = conn(); pcur = pc.cursor()
+        pcur.execute("SELECT actor FROM AuditLog WHERE asset_id=%s AND action IN ('CHECKOUT','ACKNOWLEDGE') ORDER BY id DESC LIMIT 1", [a_id])
+        prow = pcur.fetchone(); pc.close()
+        processed_by = (prow.get("actor") or "") if prow else ""
+    except Exception:
+        processed_by = ""
     # logo as base64
     logo_uri = ""
     try:
@@ -3036,39 +3434,54 @@ def asset_public(a_id):
         except Exception:
             logo_uri = ""
     c.close()
-    rows = [("Asset Name", asset.get("Name")), ("Asset ID", asset["_id"][:12]),
+    rows = [("Asset Name", asset.get("Name")), ("Asset ID", asset.get("AssetTag") or asset["_id"][:12]),
             ("Category", asset.get("Type")), ("Serial", asset.get("Serial")),
             ("Status", asset.get("Status")), ("Location", asset.get("Location")),
             ("Assigned To", emp_name or "—"), ("Department", asset.get("Department") or "—"),
             ("Designation", asset.get("Designation") or "—"), ("Email", asset.get("Email") or "—"),
             ("Signed By", asset.get("ReceivedBy") or "—"), ("Signed Date", asset.get("NotesReceived") or "—"),
+            ("Given By (Staff)", processed_by or "—"),
             ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"), ("Purchase", asset.get("PurchaseDate") or "—"),
             ("Note", asset.get("Note") or "—")]
     rows_html = "".join(f"<tr><td class='k'>{k}</td><td class='v'>{('' if v is None else v)}</td></tr>" for k,v in rows)
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if logo_uri else ""
-    return f"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+    contact_bits = [c for c in [company_phone, company_address] if c]
+    contact_html = " &nbsp;·&nbsp; ".join(contact_bits) if contact_bits else "—"
+    return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Asset {asset['Name']}</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
 <style>
- body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;background:#0c111b;color:#e6f0f7}}
- .wrap{{max-width:560px;margin:0 auto;padding:20px}}
- .card{{background:#131b29;border:1px solid #233; border-radius:14px;padding:20px;box-shadow:0 8px 30px rgba(0,0,0,.4)}}
- .head{{display:flex;align-items:center;gap:12px;border-bottom:1px solid #2a3a4d;padding-bottom:12px;margin-bottom:14px}}
- .logo{{height:42px;width:auto;max-width:140px;object-fit:contain}}
- .brand{{font-weight:800;font-size:18px;letter-spacing:.5px;color:#5ad8ff;text-transform:uppercase}}
- .title{{font-size:22px;font-weight:700;margin:6px 0 14px}}
- table{{width:100%;border-collapse:collapse}}
- td{{padding:8px 6px;border-bottom:1px solid #1d2a3a;vertical-align:top}}
- .k{{color:#7f93a8;font-size:12px;width:42%}}
- .v{{font-size:14px}}
- .contact{{margin-top:16px;padding:12px 14px;background:#0e1622;border:1px solid #234;border-radius:10px;font-size:14px}}
- .contact b{{color:#5ad8ff}}
- .foot{{text-align:center;color:#5a6b7d;font-size:12px;margin-top:18px}}
- a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:#5ad8ff;color:#04121a;border-radius:8px;text-decoration:none;font-weight:700;font-size:13px}}
+*{{box-sizing:border-box}}
+html{{overflow-y:auto}}
+body{{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}}
+.wrap{{max-width:560px;margin:0 auto}}
+.card{{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.35)}}
+.head{{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px}}
+.logo{{height:32px;width:auto;max-width:120px;object-fit:contain}}
+.brand{{font-family:'Orbitron';font-weight:800;font-size:16px;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;text-transform:uppercase}}
+.assetid-badge{{font-family:'Share Tech Mono',var(--mono);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:5px 14px;display:inline-block;margin-bottom:10px}}
+.title{{font-size:22px;font-weight:700;margin:0 0 14px}}
+table{{width:100%;border-collapse:collapse}}
+td{{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}}
+tr:last-child td{{border-bottom:none}}
+.k{{color:var(--muted);font-size:12px;width:42%;font-weight:600;text-transform:uppercase;letter-spacing:.3px}}
+.v{{font-size:14px;font-weight:600;word-break:break-word}}
+.contact{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);font-size:14px}}
+.contact b{{color:var(--accent)}}
+.foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
+a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:#fff;border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
+.sig-block{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
+.sig-block b{{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:8px}}
+.sig-block img{{max-width:220px;max-height:110px;background:#fff;border-radius:6px;padding:6px}}
+@media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} }}
 </style></head><body><div class=wrap><div class=card>
  <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
+ <div class=assetid-badge>{asset.get("AssetTag") or asset["_id"][:12]}</div>
  <div class=title>{asset['Name']}</div>
  <table>{rows_html}</table>
- <div class=contact>📞 Organization Contact: <b>{org_contact or '—'}</b></div>
+ {f'<div class=sig-block><b>Signature</b><img src="{asset.get("SignatureData")}"></div>' if asset.get("SignatureData") else ''}
+ <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
  <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
  <div class=foot>Scanned from {app_name} • {base}</div>
 </div></div></body></html>"""
@@ -3078,7 +3491,7 @@ ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"}
 import mimetypes as _mtype
 
 @app.route("/api/assets/<a_id>/invoice", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def upload_invoice(a_id):
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
@@ -3104,7 +3517,7 @@ def upload_invoice(a_id):
     return jsonify({"ok": True, "file": stored})
 
 @app.route("/api/assets/<a_id>/invoice", methods=["DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def delete_invoice(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT InvoiceFile FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
@@ -3149,7 +3562,7 @@ def _verify_token(tk):
         return None
 
 @app.route("/api/assets/<a_id>/sign/link")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@auth_required(module="assets", level="write")
 def get_sign_link(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
@@ -3158,33 +3571,49 @@ def get_sign_link(a_id):
     c.close()
     return jsonify({"ok": True, "token": tk, "url": f"{request.host_url}sign?token={quote(tk)}"})
 
-SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1">
+SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>IT-Vault // Asset Acknowledgement</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <style>
-body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;min-height:100vh;background:var(--bg);color:var(--txt);transition:background .25s,color .25s}
+*{box-sizing:border-box}
+html{overflow-y:auto}
+body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);transition:background .25s,color .25s;overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}
 .sign-card{max-width:620px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px 26px 22px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
 .brand{font-family:'Orbitron';font-weight:900;font-size:26px;text-align:center;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;margin:0 0 2px}
 .sub{text-align:center;color:var(--muted);font-size:12px;letter-spacing:3px;margin-bottom:18px}
-.asset-table{width:100%;border-collapse:collapse;margin:10px 0 18px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.assetid-badge{text-align:center;font-family:'Share Tech Mono',var(--mono);font-size:15px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:6px 16px;margin:0 auto 18px;display:table}
+.assetid-badge:empty{display:none}
+.asset-table{width:100%;table-layout:fixed;border-collapse:collapse;margin:10px 0 18px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
 .asset-table td{padding:9px 14px;border-bottom:1px solid var(--line);font-size:14px}
 .asset-table tr:last-child td{border-bottom:none}
-.asset-table td:first-child{color:var(--muted);width:150px;font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase}
-.asset-table td:last-child{color:var(--txt);font-weight:600;word-break:break-word}
+.asset-table td:first-child{color:var(--muted);width:150px;font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;vertical-align:top}
+.asset-table td:last-child{color:var(--txt);font-weight:600;word-break:break-word;overflow-wrap:anywhere;white-space:pre-line}
 .sig-label{color:var(--muted);font-size:13px;margin-bottom:6px;display:block}
 #sigCanvas{width:100%;max-width:480px;height:160px;border-radius:var(--radius);background:var(--surface2);border:2px solid var(--line);cursor:crosshair;display:none;touch-action:none}
 #sigPlaceholder{width:100%;max-width:480px;height:160px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface2);cursor:pointer}
 #sigPlaceholder.hidden{display:none}
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-.btnrow .btn{flex:1;min-width:140px}
+.btnrow .btn{flex:1;min-width:140px;min-height:44px}
 #result{margin-top:16px;font-size:14px;min-height:24px}
 .ok{color:var(--grn)}.err{color:var(--red);white-space:pre-wrap}
 .center{text-align:center;margin-top:40px;color:var(--muted)}
+@media (max-width:480px){
+  body{padding:16px 10px}
+  .sign-card{padding:18px 16px 16px;border-radius:calc(var(--radius) - 2px)}
+  .brand{font-size:22px}
+  .asset-table{display:block}
+  .asset-table tr{display:flex;flex-direction:column;padding:8px 12px}
+  .asset-table td{display:block;padding:2px 0;border-bottom:none;width:auto!important}
+  .asset-table td:first-child{padding-top:6px}
+  .asset-table tr:not(:last-child){border-bottom:1px solid var(--line)}
+  .btnrow .btn{min-width:100%}
+}
 </style></head><body>
 <div class="sign-card">
   <div class="brand" id="brand">IT-Vault</div>
   <div class="sub" id="sub">// ASSET ACKNOWLEDGEMENT</div>
+  <div class="assetid-badge" id="assetIdBadge"></div>
   <div id="assetCard"></div>
   <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
   <div class="sig-wrap">
@@ -3209,10 +3638,18 @@ let ctx=null, isDrawing=false, hasSig=false;
 function accentColor(){try{return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#ff3b30';}catch(e){return '#ff3b30';}}
 function initCanvas(){
   if(ctx) return;
+  // Must run AFTER the canvas is actually visible -- offsetWidth/Height read
+  // 0 on a display:none element, which used to lock the drawing buffer to the
+  // 480x160 fallback regardless of the phone's real (narrower) screen width,
+  // making touches land in the wrong spot on mobile. Also scales the buffer
+  // by devicePixelRatio so the line doesn't look blurry on retina/high-DPI
+  // phone screens.
+  const dpr = window.devicePixelRatio || 1;
   const w = canvas.offsetWidth||480, h = canvas.offsetHeight||160;
-  canvas.width = w; canvas.height = h;
+  canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
   ctx = canvas.getContext('2d');
-  ctx.lineWidth = 2; ctx.lineCap='round';
+  ctx.scale(dpr, dpr);
+  ctx.lineWidth = 2; ctx.lineCap='round'; ctx.lineJoin='round';
   ctx.strokeStyle = accentColor();
   ctx.fillStyle = getComputedStyle(canvas).backgroundColor||'#121826';
   ctx.fillRect(0,0,w,h);
@@ -3234,7 +3671,7 @@ function draw(e){
   const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; updateClearBtn();
 }
 function stopDraw(){ if(!isDrawing) return; isDrawing=false; ctx.beginPath(); updateClearBtn(); }
-function showCanvas(){ initCanvas(); placeholder.classList.add('hidden'); canvas.style.display='block'; canvas.focus(); }
+function showCanvas(){ placeholder.classList.add('hidden'); canvas.style.display='block'; initCanvas(); canvas.focus(); }
 placeholder.addEventListener('click',()=>{showCanvas();});
 canvas.addEventListener('mousedown',startDraw);
 canvas.addEventListener('mousemove',draw);
@@ -3243,7 +3680,7 @@ canvas.addEventListener('mouseleave',stopDraw);
 canvas.addEventListener('touchstart',startDraw,{passive:false});
 canvas.addEventListener('touchmove',draw,{passive:false});
 canvas.addEventListener('touchend',stopDraw,{passive:false});
-function clearSig(){ if(!ctx) return; ctx.clearRect(0,0,canvas.width,canvas.height); hasSig=false; const c=document.getElementById('clearSign'); if(c)c.style.display='none'; }
+function clearSig(){ if(!ctx) return; ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,canvas.width,canvas.height); ctx.restore(); hasSig=false; const c=document.getElementById('clearSign'); if(c)c.style.display='none'; }
 function updateClearBtn(){ const c=document.getElementById('clearSign'); if(!c) return; c.style.display = hasSig?'block':'none'; }
 function getSigData(){return canvas.toDataURL('image/png');}
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
@@ -3256,13 +3693,17 @@ async function load(){
   const notesReceived = a.NotesReceived || a.notes_received || '';
   const viewBtn=document.getElementById('viewSign');
   if(viewBtn){ if(a.SignatureData){ viewBtn.style.display='block'; viewBtn.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+a.SignatureData+'" style="max-width:100%"/>');}; } else { viewBtn.style.display='none'; } }
+  document.getElementById('assetIdBadge').textContent = a.AssetTag||a.asset_tag||'';
   document.getElementById('assetCard').innerHTML=
     '<table class=asset-table>'+
+    '<tr><td>Asset ID</td><td>'+esc(a.AssetTag||a.asset_tag||'—')+'</td></tr>'+
     '<tr><td>Name</td><td>'+esc(a.Name)+'</td></tr>'+
     '<tr><td>Type</td><td>'+esc(a.Type)+'</td></tr>'+
     '<tr><td>Serial</td><td>'+esc(a.Serial)+'</td></tr>'+
     '<tr><td>Status</td><td>'+esc(a.Status)+'</td></tr>'+
     '<tr><td>Location</td><td>'+esc(a.Location)+'</td></tr>'+
+    (a.Department?'<tr><td>Department</td><td>'+esc(a.Department)+'</td></tr>':'')+
+    (a.Designation?'<tr><td>Designation</td><td>'+esc(a.Designation)+'</td></tr>':'')+
     '<tr><td>Notes</td><td>'+esc(a.Notes||'—')+'</td></tr>'+
     '<tr><td>Received By</td><td>'+esc(receivedBy||'Not yet received')+'</td></tr>'+
     '<tr><td>Received Details</td><td>'+esc(notesReceived||'Not yet received')+'</td></tr>'+
@@ -3355,9 +3796,173 @@ def verify_sign():
     d = _verify_token(tk)
     if not d: return jsonify({"ok": False, "error": "invalid or expired token"}), 400
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id AS id, Name, Type, Serial, Status, Location, Notes, ReceivedBy, NotesReceived, SignatureData FROM Assets WHERE _id=%s", [d["asset_id"]]); a = cur.fetchone(); c.close()
-    if not a: return jsonify({"ok": False, "error": "asset not found"}), 404
+    cur.execute("SELECT _id AS id, AssetTag, Name, Type, Serial, Status, Location, Notes, ReceivedBy, NotesReceived, SignatureData, EmployeeID FROM Assets WHERE _id=%s", [d["asset_id"]]); a = cur.fetchone()
+    if not a: c.close(); return jsonify({"ok": False, "error": "asset not found"}), 404
+    if a.get("EmployeeID"):
+        cur.execute("SELECT Department, Designation FROM Employees WHERE EmployeeID=%s", [a["EmployeeID"]])
+        er = cur.fetchone()
+        if er:
+            a["Department"] = er.get("Department") or ""
+            a["Designation"] = er.get("Designation") or ""
+    c.close()
     return jsonify({"ok": True, "asset": a})
+
+def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
+    """One-page A4 PDF of the signed acknowledgement -- Asset ID front and
+    center, full details, and the captured signature -- emailed to both the
+    assigned user and the admin team the moment someone submits /sign."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import mm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+
+    # A letterhead is a whole printed page, so it has to be a full-page
+    # background behind the flowed content (drawn via onFirstPage/onLaterPages
+    # below) -- NOT stacked as an inline flowable at the top of the story.
+    # Stacking it inline was the earlier "not aligned" bug: at the story's
+    # ~178mm content width, a full A4-shaped image renders ~252mm tall on its
+    # own, swallowing almost the entire page before any real content starts.
+    letterhead_path = os.path.join(BASE, "letterhead.png")
+    used_letterhead = os.path.exists(letterhead_path) and os.path.getsize(letterhead_path) > 0
+
+    buf = io.BytesIO()
+    top_margin = 42 * mm if used_letterhead else 16 * mm
+    bottom_margin = 30 * mm if used_letterhead else 16 * mm
+    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=top_margin, bottomMargin=bottom_margin,
+                             leftMargin=16 * mm, rightMargin=16 * mm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    bn = brand_name()
+    if not used_letterhead:
+        logo_path = os.path.join(BASE, "logo.png")
+        if os.path.exists(logo_path) and os.path.getsize(logo_path) > 0:
+            try:
+                from PIL import Image as PILImage
+                pil_logo = PILImage.open(logo_path).convert("RGBA")
+                pil_logo.thumbnail((240, 240))  # PDF is print-sized (28mm) -- no need for source-res pixels
+                logo_buf = io.BytesIO(); pil_logo.save(logo_buf, format="PNG"); logo_buf.seek(0)
+                story.append(RLImage(logo_buf, width=28 * mm, height=28 * mm, kind="proportional"))
+                story.append(Spacer(1, 6))
+            except Exception:
+                pass
+
+    title_style = ParagraphStyle("title", parent=styles["Title"], alignment=TA_CENTER,
+                                  textColor=colors.HexColor("#101622"))
+    story.append(Paragraph(f"{bn} — Asset Acknowledgement", title_style))
+
+    tag_style = ParagraphStyle("tag", parent=styles["Normal"], alignment=TA_CENTER, fontSize=20,
+                                fontName="Helvetica-Bold", textColor=colors.HexColor("#ff3b30"),
+                                spaceBefore=6, spaceAfter=14)
+    story.append(Paragraph(asset.get("AssetTag") or "—", tag_style))
+
+    rows = [
+        ["Asset ID", asset.get("AssetTag") or "—"],
+        ["Name", asset.get("Name") or "—"],
+        ["Type", asset.get("Type") or "—"],
+        ["Serial", asset.get("Serial") or "—"],
+        ["Status", asset.get("Status") or "—"],
+        ["Location", asset.get("Location") or "—"],
+    ]
+    if asset.get("Department"):
+        rows.append(["Department", asset["Department"]])
+    if asset.get("Designation"):
+        rows.append(["Designation", asset["Designation"]])
+    rows += [
+        ["Signed By", signer_name or "—"],
+        ["Signed Date", asset.get("NotesReceived") or "—"],
+    ]
+    t = Table(rows, colWidths=[45 * mm, 115 * mm])
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#555555")),
+        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
+        ("TOPPADDING", (0, 0), (-1, -1), 7),
+        ("LINEBELOW", (0, 0), (-1, -1), 0.5, colors.HexColor("#dddddd")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 18))
+
+    story.append(Paragraph("Signature", ParagraphStyle(
+        "sig-label", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold", spaceAfter=6)))
+    if sig_data_url and sig_data_url.startswith("data:image"):
+        try:
+            b64 = sig_data_url.split(",", 1)[1]
+            sig_bytes = base64.b64decode(b64)
+            from PIL import Image as PILImage
+            pil = PILImage.open(io.BytesIO(sig_bytes))
+            iw, ih = pil.size
+            max_w, max_h = 80 * mm, 40 * mm
+            scale = min(max_w / iw, max_h / ih) if iw and ih else 1
+            story.append(RLImage(io.BytesIO(sig_bytes), width=iw * scale, height=ih * scale))
+        except Exception:
+            story.append(Paragraph("(signature image unavailable)", styles["Normal"]))
+    else:
+        story.append(Paragraph("(no signature captured)", styles["Normal"]))
+
+    def _draw_letterhead_bg(cnv, _doc):
+        if used_letterhead:
+            cnv.saveState()
+            cnv.drawImage(letterhead_path, 0, 0, width=A4[0], height=A4[1],
+                           preserveAspectRatio=False, mask="auto")
+            cnv.restoreState()
+
+    doc.build(story, onFirstPage=_draw_letterhead_bg, onLaterPages=_draw_letterhead_bg)
+    return buf.getvalue()
+
+def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attachment_name):
+    import smtplib
+    from email.message import EmailMessage
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, app_name FROM Settings WHERE id=1")
+    s = cur.fetchone() or {}; c.close()
+    if not s.get("smtp_host") or not to_email:
+        return False
+    try:
+        bn = s.get("app_name") or "IT-Vault"
+        msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
+        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
+        msg.add_attachment(attachment_bytes, maintype="application", subtype="pdf", filename=attachment_name)
+        with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
+            if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
+            sv.send_message(msg)
+        return True
+    except Exception as e:
+        print("email attachment send error:", e); return False
+
+def _email_signed_asset_pdf(asset, signer_name, sig_data_url):
+    """Sends the signed-acknowledgement PDF to the assigned employee/user and
+    to every admin/staff account with an email on file -- fire-and-forget,
+    never blocks or fails the acknowledgement itself."""
+    try:
+        pdf_bytes = _build_signed_asset_pdf(asset, signer_name, sig_data_url)
+    except Exception as e:
+        print("signed pdf build error:", e); return
+    fname = f"{(asset.get('AssetTag') or asset.get('_id') or 'asset')}_signed.pdf"
+    tag = asset.get("AssetTag") or asset.get("_id", "")
+    body = (f"'{asset.get('Name','')}' (Asset ID: {tag}) was acknowledged and signed by "
+            f"{signer_name}. The signed copy is attached as a PDF.")
+    sent_to = set()
+    emp_email = _lookup_person_email(asset.get("EmployeeID") or "")
+    if emp_email:
+        _send_email_with_attachment(emp_email, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
+        sent_to.add(emp_email.lower())
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT email FROM Users WHERE email<>''")
+        admin_emails = [r["email"] for r in cur.fetchall()]
+        c.close()
+    except Exception:
+        admin_emails = []
+    for e in admin_emails:
+        if e and e.lower() not in sent_to:
+            _send_email_with_attachment(e, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
+            sent_to.add(e.lower())
 
 @app.route("/api/assets/sign/approve", methods=["POST"])
 def approve_asset():
@@ -3372,12 +3977,26 @@ def approve_asset():
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     receivedBy = name
-    notesReceived = f"{name} | {ts}"
+    notesReceived = datetime.now().strftime("%Y-%m-%d")
     sigData = (d.get("data") or "").strip()
     cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s WHERE _id=%s",
                 (receivedBy, name, notesReceived, sigData, aid))
     c.commit(); c.close()
     audit(session.get("user"), "ACKNOWLEDGE", aid, f"{name} acknowledged")
+    try:
+        cc = conn(); ccur = cc.cursor()
+        ccur.execute("SELECT * FROM Assets WHERE _id=%s", [aid]); full_asset = ccur.fetchone()
+        if full_asset and full_asset.get("EmployeeID"):
+            ccur.execute("SELECT Department, Designation FROM Employees WHERE EmployeeID=%s", [full_asset["EmployeeID"]])
+            er = ccur.fetchone()
+            if er:
+                full_asset["Department"] = er.get("Department") or ""
+                full_asset["Designation"] = er.get("Designation") or ""
+        cc.close()
+        if full_asset:
+            _email_signed_asset_pdf(full_asset, name, sigData)
+    except Exception as e:
+        print("signed pdf email error:", e)
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<aid>/signature")
@@ -3540,10 +4159,28 @@ def _dump_table(cur, table, cols=None):
         out.append(f"REPLACE INTO `{table}` ({', '.join('`'+c+'`' for c in cols)}) VALUES ({', '.join(vals)});")
     return out
 
-@app.route("/api/backup")
-@auth_required([ROLE_ADMIN])
-def backup():
-    scope = (request.args.get("scope") or "all").lower()
+def _prune_old_backups():
+    """Keeps only the newest Settings.backup_retain backups on disk (default
+    7) -- runs after every backup, scheduled or manual, so the folder never
+    grows unbounded."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT backup_retain FROM Settings WHERE id=1"); row = cur.fetchone() or {}
+        c.close()
+        limit = int(row.get("backup_retain") or 7)
+    except Exception:
+        limit = 7
+    if limit <= 0:
+        return
+    files = sorted([f for f in os.listdir(BACKUP_DIR) if f.endswith(".sql")],
+                    key=lambda f: os.path.getmtime(os.path.join(BACKUP_DIR, f)), reverse=True)
+    for f in files[limit:]:
+        try:
+            os.remove(os.path.join(BACKUP_DIR, f))
+        except Exception:
+            pass
+
+def _run_backup(scope="all"):
     if scope not in ("config", "assets", "all"):
         scope = "all"
     c = conn(); cur = c.cursor()
@@ -3563,6 +4200,16 @@ def backup():
     fpath = os.path.join(BACKUP_DIR, fname)
     with open(fpath, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+    _prune_old_backups()
+    return fname
+
+@app.route("/api/backup")
+@auth_required([ROLE_ADMIN])
+def backup():
+    scope = (request.args.get("scope") or "all").lower()
+    if scope not in ("config", "assets", "all"):
+        scope = "all"
+    fname = _run_backup(scope)
     audit(session.get("user"), "BACKUP", "", f"scope={scope} file={fname}")
     return send_from_directory(BACKUP_DIR, fname, as_attachment=True,
                                 mimetype="application/sql",
@@ -3692,9 +4339,132 @@ def start_ldap_scheduler():
     t = threading.Thread(target=_ldap_auto_sync_loop, daemon=True)
     t.start()
 
+# ---------- scheduled backups (daily / weekly, background thread) ----------
+def _maybe_run_scheduled_backup():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT backup_schedule, backup_scope, backup_last_run FROM Settings WHERE id=1")
+    row = cur.fetchone() or {}; c.close()
+    sched = (row.get("backup_schedule") or "off").lower()
+    if sched not in ("daily", "weekly"):
+        return
+    last = row.get("backup_last_run") or ""
+    due = True
+    if last:
+        try:
+            last_dt = datetime.strptime(last, "%Y-%m-%d %H:%M:%S")
+            hours_needed = 24 if sched == "daily" else 24 * 7
+            due = (datetime.now() - last_dt).total_seconds() >= hours_needed * 3600
+        except Exception:
+            due = True
+    if not due:
+        return
+    scope = (row.get("backup_scope") or "all").lower()
+    fname = _run_backup(scope)
+    c2 = conn(); cur2 = c2.cursor()
+    cur2.execute("UPDATE Settings SET backup_last_run=%s WHERE id=1", [datetime.now().strftime("%Y-%m-%d %H:%M:%S")])
+    c2.commit(); c2.close()
+    audit("system", "BACKUP", "", f"scheduled ({sched}) scope={scope} file={fname}")
+    print(f"[itguy] scheduled backup completed: {fname}")
+
+def _backup_scheduler_loop():
+    while True:
+        try:
+            _maybe_run_scheduled_backup()
+        except Exception as e:
+            print("[itguy] backup scheduler failed:", e)
+        time.sleep(3600)  # check hourly -- actual due-ness is decided by backup_last_run
+
+_backup_thread_started = False
+def start_backup_scheduler():
+    global _backup_thread_started
+    if _backup_thread_started:
+        return
+    _backup_thread_started = True
+    t = threading.Thread(target=_backup_scheduler_loop, daemon=True)
+    t.start()
+
+# ---------- contract / license / subscription expiry notifications ----------
+def _notify_contract_expiring(ct, days_left):
+    when = "today" if days_left == 0 else f"in {days_left} day{'s' if days_left != 1 else ''}"
+    subj = f"Contract expiring {when}: {ct.get('name','')}"
+    body = (f"The following contract/subscription/license is expiring {when}.\n\n"
+            f"Name: {ct.get('name','')}\n"
+            f"Vendor: {ct.get('vendor') or '—'}\n"
+            f"Type: {ct.get('type') or '—'}\n"
+            f"End Date: {ct.get('end_date') or '—'}\n")
+    recipients = set()
+    emp_email = _lookup_person_email(ct.get("employee_id") or "")
+    if emp_email:
+        _send_simple_email(emp_email, subj, body); recipients.add(emp_email.lower())
+    vend_email = (ct.get("vendor_email") or "").strip()
+    if vend_email and vend_email.lower() not in recipients:
+        _send_simple_email(vend_email, subj, body); recipients.add(vend_email.lower())
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT email FROM Users WHERE email<>''")
+        admin_emails = [r["email"] for r in cur.fetchall()]
+        c.close()
+    except Exception:
+        admin_emails = []
+    for e in admin_emails:
+        if e and e.lower() not in recipients:
+            _send_simple_email(e, subj, body); recipients.add(e.lower())
+
+def check_contract_expiry():
+    """Emails the vendor + assigned employee + admin team when a contract is
+    within 3 days of its end_date -- once per expiry date (re-armed
+    automatically if the contract is edited, since PUT resets
+    expiry_notified_at)."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 AND end_date<>''")
+        rows = cur.fetchall(); c.close()
+    except Exception as e:
+        print("[itguy] contract expiry check failed:", e); return
+    today = datetime.now().date()
+    for ct in rows:
+        end_raw = (ct.get("end_date") or "").strip()
+        if not end_raw:
+            continue
+        try:
+            end_d = datetime.strptime(end_raw[:10], "%Y-%m-%d").date()
+        except Exception:
+            continue
+        days_left = (end_d - today).days
+        if days_left < 0 or days_left > 3:
+            continue
+        if (ct.get("expiry_notified_at") or "") == end_raw:
+            continue
+        try:
+            _notify_contract_expiring(ct, days_left)
+            c2 = conn(); cur2 = c2.cursor()
+            cur2.execute("UPDATE Contracts SET expiry_notified_at=%s WHERE id=%s", (end_raw, ct["id"]))
+            c2.commit(); c2.close()
+        except Exception as e:
+            print("[itguy] contract expiry notify failed:", e)
+
+def _contract_expiry_loop():
+    while True:
+        try:
+            check_contract_expiry()
+        except Exception as e:
+            print("[itguy] contract expiry loop error:", e)
+        time.sleep(21600)  # check every 6 hours
+
+_contract_expiry_thread_started = False
+def start_contract_expiry_scheduler():
+    global _contract_expiry_thread_started
+    if _contract_expiry_thread_started:
+        return
+    _contract_expiry_thread_started = True
+    t = threading.Thread(target=_contract_expiry_loop, daemon=True)
+    t.start()
+
 if __name__ == "__main__":
     init_db()
     migrate_schema()
     start_ldap_scheduler()
+    start_backup_scheduler()
+    start_contract_expiry_scheduler()
     print("IT-Vault (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
     app.run(host="0.0.0.0", port=5000, debug=False)

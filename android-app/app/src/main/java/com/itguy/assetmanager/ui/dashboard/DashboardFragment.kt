@@ -144,7 +144,7 @@ class DashboardFragment : Fragment(), Refreshable {
             top.addView(labelTv); top.addView(countTv)
             val track = LinearLayout(requireContext()).apply {
                 layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (5 * density).toInt()).also { it.topMargin = (5 * density).toInt() }
-                setBackgroundColor(Color.parseColor("#1A222E"))
+                setBackgroundColor(resources.getColor(com.itguy.assetmanager.R.color.bar_track, null))
             }
             val fillWidthPct = (count.toFloat() / max.toFloat())
             val fill = View(requireContext())

@@ -1,6 +1,8 @@
 package com.itguy.assetmanager.data
 
 import com.itguy.assetmanager.data.model.*
+import okhttp3.MultipartBody
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.http.*
 
@@ -51,6 +53,23 @@ interface ApiService {
 
     @DELETE("api/assets/{id}/permanent")
     suspend fun permanentDeleteAsset(@Path("id") id: String): Response<OkResponse>
+
+    @Multipart
+    @POST("api/assets/{id}/invoice")
+    suspend fun uploadInvoice(@Path("id") id: String, @Part file: MultipartBody.Part): Response<OkResponse>
+
+    @DELETE("api/assets/{id}/invoice")
+    suspend fun deleteInvoiceFile(@Path("id") id: String): Response<OkResponse>
+
+    @Streaming
+    @GET("invoice/{fn}")
+    suspend fun downloadInvoice(@Path("fn") fn: String): Response<ResponseBody>
+
+    @POST("api/assets/{id}/checkout")
+    suspend fun checkoutAsset(@Path("id") id: String, @Body body: CheckoutRequest): Response<OkResponse>
+
+    @POST("api/assets/{id}/checkin")
+    suspend fun checkinAsset(@Path("id") id: String): Response<OkResponse>
 
     // ---- employees ----
     @GET("api/employees")
