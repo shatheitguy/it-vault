@@ -148,7 +148,7 @@ async function deleteSelected(){
 const LETTERHEAD_CLEARANCE_MM=38;
 function printHeaderHtml(title){
   if(window.HAS_LETTERHEAD){
-    return `<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:100%;z-index:-1">`+
+    return `<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1">`+
       (title?`<h2 style="margin:${LETTERHEAD_CLEARANCE_MM}mm 0 10px">${title}</h2>`:`<div style="margin-top:${LETTERHEAD_CLEARANCE_MM}mm"></div>`);
   }
   return `<div class="phead"><img src="/logo.png" onerror="this.style.display='none'"><h2 style="margin:0">${title}</h2></div>`;
@@ -1125,7 +1125,7 @@ async function printAsset(id){
   .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   .sig-block{margin-top:14px;padding:10px;border:1px dashed #999;border-radius:6px} .sig-title{font-weight:700;margin-bottom:6px;font-size:12px;letter-spacing:.5px} .muted{color:#999;font-style:italic}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
-  <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:100%;z-index:-1">`:''}
+  <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1">`:''}
   <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Asset record</span></div></div>`}
   <div class="idbar"><div class="tag">${esc(a.AssetTag||'—')}</div><div class="nm">${esc(a.Name||'')}</div></div>
   <div class="bd"><table>${rowsHtml}</table>${sig}</div></div>
@@ -2183,7 +2183,7 @@ function printContract(id){
   .hd .brand{display:flex;align-items:center;gap:10px} .hd img{height:26px}
   .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
-  <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:100%;z-index:-1">`:''}
+  <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1">`:''}
   <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span></div><span class="id">#${c.id}</span></div>`}
   <div class="bd"><table>${rowsHtml}</table></div></div>
   <script>window.onload=()=>{window.print();}<\/script>
