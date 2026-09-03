@@ -3714,8 +3714,13 @@ function initCanvas(){
   ctx.scale(dpr, dpr);
   ctx.lineWidth = 2; ctx.lineCap='round'; ctx.lineJoin='round';
   ctx.strokeStyle = accentColor();
-  ctx.fillStyle = getComputedStyle(canvas).backgroundColor||'#121826';
-  ctx.fillRect(0,0,w,h);
+  // No fillRect here on purpose -- the canvas's own CSS background (dark,
+  // matching the page) shows through while signing, but the drawing buffer
+  // itself stays transparent, so the exported PNG (toDataURL) is just the
+  // stroke with a transparent background. A baked-in dark fill here used to
+  // ship as an opaque black box wherever the signature got embedded later
+  // (the emailed PDF, the QR scan page), regardless of that page's own
+  // background color.
 }
 function getPos(e){
   const rect=canvas.getBoundingClientRect();
