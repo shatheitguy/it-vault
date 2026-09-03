@@ -461,6 +461,23 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   .stats{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
 }
 
+/* Danger Zone -- deliberately loud/over-the-top, this is the one place in
+   the app that should NOT look calm and professional */
+.cfgitem-danger{color:#ff3b30!important;font-weight:700}
+.danger-zone-panel{border:2px solid #ff3b30;background:linear-gradient(135deg,rgba(255,59,48,.12),rgba(0,0,0,.25));
+  border-radius:var(--radius);position:relative;overflow:hidden}
+.danger-zone-panel::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(45deg,rgba(255,59,48,.07) 0 10px,transparent 10px 20px)}
+.danger-zone-panel .secthead{letter-spacing:.5px}
+.danger-cta{margin-top:16px}
+.danger-wipe-btn{background:linear-gradient(135deg,#ff3b30,#c0392b)!important;color:#fff!important;
+  font-weight:800;letter-spacing:.6px;text-transform:uppercase;border:none;
+  animation:dangerPulse 1.6s ease-in-out infinite}
+.danger-wipe-btn:hover{filter:brightness(1.1)}
+.danger-wipe-btn:disabled{animation:none;opacity:.35;cursor:not-allowed;filter:none}
+@keyframes dangerPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,59,48,.5)}50%{box-shadow:0 0 0 12px rgba(255,59,48,0)}}
+.danger-modal{border:2px solid #ff3b30!important}
+
 /* print (labels) */
 @media print{
   body{overflow:visible}

@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260903b">
+<link rel="stylesheet" href="/style.css?v=20260903c">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -336,6 +336,7 @@
           <button class="cfgitem" data-sec="branding">🏢 Branding</button>
           <button class="cfgitem" data-sec="custom">🎨 Customization</button>
           <button class="cfgitem" data-sec="label">🏷 Asset Label</button>
+          <button class="cfgitem cfgitem-danger" data-sec="danger" id="navDangerZone" style="display:none">💀 Danger Zone</button>
         </nav>
         <div class="cfgcontent">
           <!-- GENERAL -->
@@ -675,11 +676,34 @@
             </div>
             <div class="m-actions"><button class="btn mag" id="saveLabelBtn">✓ SAVE LABEL SETTINGS</button></div>
           </section>
+          <!-- DANGER ZONE -->
+          <section class="cfg-sec" data-sec="danger" style="display:none">
+            <div class="panel danger-zone-panel">
+              <div class="secthead" style="color:#ff3b30">💀 DANGER ZONE</div>
+              <p class="sec-hint" style="color:#ffb4ac">This nukes <b>everything</b> — every asset, contract, employee, ticket, and your branding — back to a blank slate, like the app was just installed. Login accounts are the only thing kept, so you can still get back in. There's no undo button here, only a backup file: one is taken automatically the instant before the wipe runs.</p>
+              <div class="danger-cta">
+                <button class="btn danger-wipe-btn" id="openWipeBtn" type="button">🔥 WIPE EVERYTHING 🔥</button>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
   </section>
 </div>
+
+<!-- Danger Zone: factory reset confirmation -->
+<div class="modal" id="wipeModal"><div class="modal-box danger-modal" style="width:min(480px,94vw);max-width:480px">
+  <h3 style="color:#ff3b30">💀 FACTORY RESET</h3>
+  <p class="sec-hint">This permanently deletes every asset, contract, employee, ticket, and branding setting, and resets everything else to defaults. A full backup is saved automatically first, but this can't be undone from here.</p>
+  <div class="field2"><label>Your password</label><input id="wipePassword" type="password" placeholder="Confirm it's really you" autocomplete="current-password"></div>
+  <div class="field2"><label>Type <span class="mono">WIPE EVERYTHING</span> to confirm</label><input id="wipeConfirmText" placeholder="WIPE EVERYTHING" autocomplete="off"></div>
+  <div id="wipeErr" class="muted" style="color:#ff3b30;min-height:16px"></div>
+  <div class="m-actions">
+    <button class="btn ghost" id="wipeCancelBtn">CANCEL, I CHANGED MY MIND</button>
+    <button class="btn danger-wipe-btn" id="wipeConfirmBtn" disabled>💣 DELETE EVERYTHING</button>
+  </div>
+</div></div>
 
 <input type="file" id="file" accept=".xlsx,.xls,.csv" style="display:none">
 
@@ -731,7 +755,7 @@
     <div class="invbox">
       <label>DETAILS</label>
       <div class="grid2">
-        <div class="field2" id="ct_idWrap" style="display:none"><label>Contract ID</label><input id="ct_idDisplay" class="mono" readonly disabled></div>
+        <div class="field2"><label>Contract ID</label><input id="ct_idDisplay" class="mono" placeholder="e.g. CT-0001"></div>
         <div class="field2"><label>Name</label><input id="ct_name" placeholder="e.g. AC Maintenance AMC, Antivirus License"></div>
         <div class="field2"><label>Type <a class="mlink" onclick="document.getElementById('contractModal').classList.remove('show');showPage('page-catalog')">manage in Product Catalog ↗</a></label><select id="ct_type"><option value="">-- select type --</option></select></div>
         <div class="field2"><label>Vendor / Company</label><input id="ct_vendor" placeholder="Outside company name"></div>
@@ -960,6 +984,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260903t"></script>
+<script src="/app.js?nocache=20260903v"></script>
 </body>
 </html>
