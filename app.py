@@ -1,5 +1,5 @@
 """
-IT Guy - The Assets Manager — Flask + MariaDB backend.
+IT-Vault — Flask + MariaDB backend.
 Roles: admin (full), read-write (assets CRUD), read-only (view + own password).
 Docker-ready. No Access DB.
 """
@@ -10,6 +10,9 @@ from flask import Flask, request, jsonify, Response, session, send_from_director
 import pymysql
 from openpyxl import Workbook, load_workbook
 import ldap3
+import pyotp
+import qrcode
+import qrcode.image.svg
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 INVOICE_DIR = os.path.join(BASE, "invoices")
@@ -45,7 +48,7 @@ SECRET = os.environ.get("ITGUY_SECRET", "itguy-local-secret-change-me")
 ADMIN_USER = os.environ.get("ITGUY_ADMIN", "admin")
 ADMIN_PASS = os.environ.get("ITGUY_ADMIN_PASS", "admin123")
 
-COLUMNS = ["Name", "Type", "Serial", "MacAddress", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID"]
+COLUMNS = ["AssetTag", "Name", "Type", "Serial", "MacAddress", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID"]
 INT_COLS = {"WarrantyMonths"}  # columns stored as integers
 DEC_COLS = {"Price"}  # columns stored as decimals
 
@@ -106,6 +109,7 @@ def init_db():
     c = conn(); cur = c.cursor()
     cur.execute("""CREATE TABLE IF NOT EXISTS Assets (
         _id VARCHAR(40) PRIMARY KEY,
+        AssetTag VARCHAR(40) DEFAULT '',
         Name VARCHAR(255), Type VARCHAR(255), Serial VARCHAR(255), Location VARCHAR(255),
         Status VARCHAR(255), ReceivedBy VARCHAR(255), NotesReceived TEXT, Notes TEXT, Note TEXT, PurchaseDate VARCHAR(255),
         WarrantyMonths INT DEFAULT 12, InvoiceFile VARCHAR(255), SignatureData TEXT,
@@ -121,6 +125,9 @@ def init_db():
         UNIQUE KEY uq_mod (name, manufacturer_id)
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Categories (
+        id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) UNIQUE
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS ContractTypes (
         id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) UNIQUE
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Departments (
@@ -178,6 +185,13 @@ def init_db():
         cur.execute("SELECT email FROM Users LIMIT 1")
     except Exception:
         cur.execute("ALTER TABLE Users ADD COLUMN email VARCHAR(160)")
+    # migrate: add 2FA columns (TOTP authenticator app + email OTP, both opt-in per user)
+    for col, typ in [("totp_secret", "VARCHAR(64) DEFAULT ''"), ("totp_enabled", "TINYINT DEFAULT 0"),
+                      ("email_otp_enabled", "TINYINT DEFAULT 0")]:
+        try:
+            cur.execute(f"SELECT {col} FROM Users LIMIT 1")
+        except Exception:
+            cur.execute(f"ALTER TABLE Users ADD COLUMN {col} {typ}")
     cur.execute("""CREATE TABLE IF NOT EXISTS Settings (
         id INT PRIMARY KEY DEFAULT 1,
         theme VARCHAR(10) DEFAULT 'dark',
@@ -188,8 +202,8 @@ def init_db():
         smtp_from VARCHAR(160),
         notify_new BOOLEAN DEFAULT 1,
         notify_delete BOOLEAN DEFAULT 1,
-        app_name VARCHAR(60) DEFAULT 'Sha The IT Guy',
-        logo_text VARCHAR(40) DEFAULT 'Sha',
+        app_name VARCHAR(60) DEFAULT 'IT-Vault',
+        logo_text VARCHAR(40) DEFAULT 'IT-Vault',
         matrix_on BOOLEAN DEFAULT 1,
         ldap_server VARCHAR(255),
         ldap_domain VARCHAR(255),
@@ -206,7 +220,7 @@ def init_db():
     try:
         cur.execute("SELECT app_name FROM Settings LIMIT 1")
     except Exception:
-        for col, typ in [("app_name","VARCHAR(60) DEFAULT 'Sha The IT Guy'"),("logo_text","VARCHAR(40) DEFAULT 'Sha'"),("matrix_on","BOOLEAN DEFAULT 1")]:
+        for col, typ in [("app_name","VARCHAR(60) DEFAULT 'IT-Vault'"),("logo_text","VARCHAR(40) DEFAULT 'IT-Vault'"),("matrix_on","BOOLEAN DEFAULT 1")]:
             try: cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
             except Exception: pass
     # migrate: add ldap settings columns if missing
@@ -242,6 +256,22 @@ def init_db():
         cur.execute("SELECT InvoiceFile FROM Assets LIMIT 1")
     except Exception:
         cur.execute("ALTER TABLE Assets ADD COLUMN InvoiceFile VARCHAR(255)")
+    # migrate: add AssetTag (human-friendly "IT-1001" style ID, editable) and backfill existing rows
+    try:
+        cur.execute("SELECT AssetTag FROM Assets LIMIT 1")
+    except Exception:
+        cur.execute("ALTER TABLE Assets ADD COLUMN AssetTag VARCHAR(40) DEFAULT ''")
+    try:
+        cur.execute("SELECT _id FROM Assets WHERE AssetTag IS NULL OR AssetTag='' ORDER BY created_at IS NULL, created_at, _id")
+        missing = cur.fetchall()
+        if missing:
+            cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
+            n = (cur.fetchone() or {}).get("n") or 1000
+            for r in missing:
+                n += 1
+                cur.execute("UPDATE Assets SET AssetTag=%s WHERE _id=%s", [f"IT-{n}", r["_id"]])
+    except Exception:
+        pass
     # migrate: add GLPI-style columns (Manufacturer, Model, is_deleted)
     try:
         cur.execute("SELECT is_deleted FROM Assets LIMIT 1")
@@ -368,6 +398,19 @@ def migrate_schema():
         cur.execute("ALTER TABLE Assets ADD COLUMN MacAddress VARCHAR(64) DEFAULT ''")
     except Exception:
         pass
+    # Contracts: who/where a contract belongs to (employee, location, department)
+    contract_cols = {
+        "employee_id": "VARCHAR(255) DEFAULT ''",
+        "location": "VARCHAR(160) DEFAULT ''",
+        "department": "VARCHAR(160) DEFAULT ''",
+        "license_key": "VARCHAR(500) DEFAULT ''",
+        "is_deleted": "TINYINT DEFAULT 0",
+    }
+    for col, typ in contract_cols.items():
+        try:
+            cur.execute(f"ALTER TABLE Contracts ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
     # UniFi Controller integration (Dashboard device/client widgets)
     unifi_cols = {
         "unifi_enabled": "BOOLEAN DEFAULT 0",
@@ -401,6 +444,21 @@ def migrate_schema():
                 t = (r.get("Type") or "").strip()
                 if t:
                     cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [t])
+    except Exception:
+        pass
+    # Contract Type picker: seed with the original built-in options plus
+    # whatever type values already exist on real contracts, so switching
+    # that field to a managed dropdown doesn't blank out anyone's data
+    try:
+        cur.execute("SELECT COUNT(*) AS n FROM ContractTypes")
+        if (cur.fetchone() or {}).get("n", 0) == 0:
+            for t in ["AMC", "License", "Subscription", "Warranty", "Support", "Lease", "Other"]:
+                cur.execute("INSERT IGNORE INTO ContractTypes (name) VALUES (%s)", [t])
+            cur.execute("SELECT DISTINCT type FROM Contracts WHERE type IS NOT NULL AND type<>''")
+            for r in cur.fetchall():
+                t = (r.get("type") or "").strip()
+                if t:
+                    cur.execute("INSERT IGNORE INTO ContractTypes (name) VALUES (%s)", [t])
     except Exception:
         pass
     # Directory pickers (Department / Location / Designation): backfill from
@@ -471,13 +529,94 @@ def login():
     d = request.get_json(force=True, silent=True) or {}
     u = (d.get("username") or "").strip(); p = d.get("password", "")
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT username, password, role, display FROM Users WHERE username=%s", [u])
+    cur.execute("SELECT username, password, role, display, email, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [u])
     row = cur.fetchone(); c.close()
     if row and verify_pw(p, row["password"]):
+        methods = []
+        if row.get("totp_enabled"): methods.append("totp")
+        if row.get("email_otp_enabled"): methods.append("email")
+        if methods:
+            session.clear()
+            session["pending_2fa_user"] = row["username"]; session["pending_2fa_role"] = row["role"]
+            session["pending_2fa_display"] = row["display"]; session["pending_2fa_exp"] = time.time() + 300
+            session.permanent = True
+            if "email" in methods:
+                _send_login_otp_email(row["username"], row.get("email") or "")
+            return jsonify({"ok": True, "need_2fa": True, "methods": methods})
         session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
         session.permanent = True
         return jsonify({"ok": True, "role": row["role"]})
     return jsonify({"ok": False, "error": "Invalid credentials"}), 401
+
+def _pending_2fa_user():
+    """Validates the short-lived pending-2FA session set by login() when a user has
+    TOTP or email-OTP enabled. Returns the username, or None if there's no valid
+    pending 2FA challenge (expired / never started)."""
+    u = session.get("pending_2fa_user")
+    if not u or time.time() > session.get("pending_2fa_exp", 0):
+        return None
+    return u
+
+def _send_login_otp_email(username, to_email):
+    if not to_email:
+        return False
+    code = f"{secrets.randbelow(1000000):06d}"
+    session["pending_2fa_email_code"] = code
+    session["pending_2fa_email_sent_at"] = time.time()
+    import smtplib
+    from email.message import EmailMessage
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, app_name FROM Settings WHERE id=1")
+    s = cur.fetchone() or {}; c.close()
+    if not s.get("smtp_host"):
+        return False
+    try:
+        bn = s.get("app_name") or "IT-Vault"
+        msg = EmailMessage()
+        msg["Subject"] = f"{bn}: your sign-in code is {code}"
+        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["To"] = to_email
+        msg.set_content(f"Your {bn} sign-in verification code is: {code}\n\nThis code expires in 5 minutes. If you didn't request this, you can ignore this email." + _email_footer(bn))
+        with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
+            if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
+            sv.send_message(msg)
+        return True
+    except Exception as e:
+        print("login OTP email error:", e); return False
+
+@app.route("/api/2fa/resend-email-code", methods=["POST"])
+def resend_login_otp():
+    u = _pending_2fa_user()
+    if not u: return jsonify({"error": "no pending sign-in"}), 400
+    if time.time() - session.get("pending_2fa_email_sent_at", 0) < 20:
+        return jsonify({"error": "please wait a few seconds before requesting another code"}), 429
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT email FROM Users WHERE username=%s", [u]); row = cur.fetchone() or {}; c.close()
+    ok = _send_login_otp_email(u, row.get("email") or "")
+    return jsonify({"ok": ok}) if ok else (jsonify({"error": "could not send email -- check SMTP settings"}), 400)
+
+@app.route("/api/2fa/verify-login", methods=["POST"])
+def verify_login_2fa():
+    u = _pending_2fa_user()
+    if not u: return jsonify({"ok": False, "error": "Sign-in expired -- please log in again"}), 400
+    d = request.get_json(force=True, silent=True) or {}
+    method = d.get("method"); code = (d.get("code") or "").strip()
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT username, role, display, totp_secret, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [u])
+    row = cur.fetchone(); c.close()
+    if not row: return jsonify({"ok": False, "error": "Sign-in expired -- please log in again"}), 400
+    ok = False
+    if method == "totp" and row.get("totp_enabled") and row.get("totp_secret"):
+        ok = pyotp.TOTP(row["totp_secret"]).verify(code, valid_window=1)
+    elif method == "email" and row.get("email_otp_enabled"):
+        ok = bool(code) and code == session.get("pending_2fa_email_code")
+    if not ok:
+        return jsonify({"ok": False, "error": "Invalid or expired code"}), 401
+    for k in ("pending_2fa_user", "pending_2fa_role", "pending_2fa_display", "pending_2fa_exp", "pending_2fa_email_code", "pending_2fa_email_sent_at"):
+        session.pop(k, None)
+    session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
+    session.permanent = True
+    return jsonify({"ok": True, "role": row["role"]})
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
@@ -505,7 +644,7 @@ def me():
                     "accent": s.get("accent", "#ff3b30"), "accent2": s.get("accent2", "#c0392b"),
                     "language": s.get("language", "en"), "currency": s.get("currency", "AED"),
                     "region": s.get("region", "UAE"), "matrix_on": s.get("matrix_on", 1),
-                    "app_name": s.get("app_name", "Sha The IT Guy"), "logo_text": s.get("logo_text", "Sha"),
+                    "app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
                     "logo": "/logo.png",
                     "ldap_server": s.get("ldap_server", ""), "ldap_domain": s.get("ldap_domain", ""),
                     "ldap_bind_user": s.get("ldap_bind_user", ""), "ldap_base_dn": s.get("ldap_base_dn", "")})
@@ -820,6 +959,10 @@ def create_asset():
             c.close()
             return jsonify({"error": f"Serial '{serial}' is already used by asset '{dup.get('Name') or dup['_id']}' -- no duplicate added"}), 409
     a_id = uuid.uuid4().hex
+    if not (data.get("AssetTag") or "").strip():
+        cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
+        n = (cur.fetchone() or {}).get("n") or 1000
+        data["AssetTag"] = f"IT-{n + 1}"
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 2))
@@ -966,6 +1109,23 @@ def categories_api():
     if request.method == "DELETE":
         cid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM Categories WHERE id=%s", [cid]); c.commit(); c.close()
+        return jsonify({"ok": True})
+
+@app.route("/api/contract-types", methods=["GET", "POST", "DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def contract_types_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "GET":
+        cur.execute("SELECT id, name FROM ContractTypes ORDER BY name"); rows = cur.fetchall(); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+    if request.method == "POST":
+        n = (request.get_json(force=True).get("name") or "").strip()
+        if not n: return jsonify({"error": "name required"}), 400
+        cur.execute("INSERT IGNORE INTO ContractTypes (name) VALUES (%s)", [n]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    if request.method == "DELETE":
+        cid = request.get_json(force=True).get("id")
+        cur.execute("DELETE FROM ContractTypes WHERE id=%s", [cid]); c.commit(); c.close()
         return jsonify({"ok": True})
 
 @app.route("/api/departments", methods=["GET", "POST", "DELETE"])
@@ -1193,13 +1353,84 @@ def export_excel():
                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     headers={"Content-Disposition": "attachment; filename=assets_export.xlsx"})
 
+CONTRACT_EXPORT_COLS = ["name", "type", "vendor", "start_date", "end_date", "cost", "employee_id", "location", "department", "license_key", "note"]
+CONTRACT_EXPORT_LABELS = {"name": "Name", "type": "Type", "vendor": "Vendor", "start_date": "Start Date",
+                          "end_date": "End Date", "cost": "Cost", "employee_id": "Employee ID", "location": "Location",
+                          "department": "Department", "license_key": "License Key", "note": "Note"}
+
+@app.route("/api/contracts/export")
+@auth_required()
+def export_contracts_excel():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY end_date")
+    rows = cur.fetchall(); c.close()
+    wb = Workbook(); ws = wb.active; ws.title = "Contracts"
+    ws.append([CONTRACT_EXPORT_LABELS[c_] for c_ in CONTRACT_EXPORT_COLS])
+    for r in rows: ws.append([r.get(c_, "") for c_ in CONTRACT_EXPORT_COLS])
+    buf = io.BytesIO(); wb.save(buf); data = buf.getvalue()
+    return Response(data,
+                    mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": "attachment; filename=contracts_export.xlsx"})
+
+@app.route("/api/contracts/import", methods=["POST"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def import_contracts_excel():
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    f = request.files["file"]
+    wb = load_workbook(io.BytesIO(f.read()), data_only=True); ws = wb.active
+    data = list(ws.iter_rows(values_only=True))
+    if not data:
+        return jsonify({"error": "empty"}), 400
+    header = [str(h).strip() if h else "" for h in data[0]]
+    def hidx(*names):
+        for n in names:
+            for i, h in enumerate(header):
+                if h.lower() == n.lower():
+                    return i
+        return -1
+    idx = {
+        "name": hidx("Name", "Contract Name"), "type": hidx("Type", "Contract Type"),
+        "vendor": hidx("Vendor", "Company", "Vendor / Company"), "start_date": hidx("Start Date", "Start"),
+        "end_date": hidx("End Date", "End", "End / Renewal Date"), "cost": hidx("Cost", "Price", "Amount"),
+        "employee_id": hidx("Employee ID", "Employee"), "location": hidx("Location"),
+        "department": hidx("Department"), "license_key": hidx("License Key"), "note": hidx("Note", "Notes"),
+    }
+    def gv(row, key):
+        i = idx[key]
+        if i < 0 or i >= len(row) or row[i] is None:
+            return ""
+        return str(row[i]).strip()
+    c = conn(); cur = c.cursor(); added = 0; seen_types = set()
+    for raw in data[1:]:
+        if raw is None or all(v is None or str(v).strip() == "" for v in raw):
+            continue
+        name = gv(raw, "name")
+        if not name:
+            continue
+        t = gv(raw, "type")
+        if t and t not in seen_types:
+            seen_types.add(t)
+            cur.execute("INSERT IGNORE INTO ContractTypes (name) VALUES (%s)", [t])
+        cost_raw = gv(raw, "cost")
+        try: cost = float(cost_raw) if cost_raw else 0
+        except Exception: cost = 0
+        cur.execute("""INSERT INTO Contracts (name, vendor, type, start_date, end_date, cost, employee_id, location, department, license_key, note)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (name, gv(raw, "vendor"), t, gv(raw, "start_date"), gv(raw, "end_date"), cost,
+                     gv(raw, "employee_id"), gv(raw, "location"), gv(raw, "department"), gv(raw, "license_key"), gv(raw, "note")))
+        added += 1
+    c.commit(); c.close()
+    return jsonify({"ok": True, "added": added})
+
 # ---------- users (admin only) ----------
 @app.route("/api/users")
 @auth_required([ROLE_ADMIN])
 def list_users():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT username, role, display, email FROM Users ORDER BY role, username"); rows = cur.fetchall(); c.close()
-    return jsonify([{"username": r["username"], "role": r["role"], "display": r["display"], "email": r.get("email", "")} for r in rows])
+    cur.execute("SELECT username, role, display, email, totp_enabled, email_otp_enabled FROM Users ORDER BY role, username"); rows = cur.fetchall(); c.close()
+    return jsonify([{"username": r["username"], "role": r["role"], "display": r["display"], "email": r.get("email", ""),
+                     "totp_enabled": bool(r.get("totp_enabled")), "email_otp_enabled": bool(r.get("email_otp_enabled"))} for r in rows])
 
 @app.route("/api/users", methods=["POST"])
 @auth_required([ROLE_ADMIN])
@@ -1258,6 +1489,127 @@ def change_own_password():
     if not row or not verify_pw(old, row["password"]): c.close(); return jsonify({"error": "old password incorrect"}), 403
     cur.execute("UPDATE Users SET password=%s WHERE username=%s", (hash_pw(new), session["user"])); c.commit(); c.close()
     return jsonify({"ok": True})
+
+# ---------- two-factor auth (self-service: TOTP authenticator app + email OTP) ----------
+@app.route("/api/2fa/status")
+@auth_required()
+def twofa_status():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT email, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [session["user"]])
+    row = cur.fetchone() or {}
+    cur.execute("SELECT smtp_host FROM Settings WHERE id=1"); s = cur.fetchone() or {}
+    c.close()
+    return jsonify({"totp_enabled": bool(row.get("totp_enabled")), "email_otp_enabled": bool(row.get("email_otp_enabled")),
+                    "email": row.get("email") or "", "smtp_configured": bool(s.get("smtp_host"))})
+
+@app.route("/api/2fa/totp/setup", methods=["POST"])
+@auth_required()
+def twofa_totp_setup():
+    secret = pyotp.random_base32()
+    session["totp_pending_secret"] = secret
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT app_name FROM Settings WHERE id=1"); s = cur.fetchone() or {}
+    c.close()
+    issuer = s.get("app_name") or "IT-Vault"
+    otpauth_url = pyotp.TOTP(secret).provisioning_uri(name=session["user"], issuer_name=issuer)
+    img = qrcode.make(otpauth_url, image_factory=qrcode.image.svg.SvgPathImage, box_size=8)
+    buf = io.BytesIO(); img.save(buf)
+    qr_svg = buf.getvalue().decode("utf-8")
+    qr_svg = re.sub(r"<path ", '<path fill="#000" ', qr_svg, count=1)
+    return jsonify({"secret": secret, "otpauth_url": otpauth_url, "qr_svg": qr_svg})
+
+@app.route("/api/2fa/totp/confirm", methods=["POST"])
+@auth_required()
+def twofa_totp_confirm():
+    secret = session.get("totp_pending_secret")
+    if not secret: return jsonify({"error": "start setup first"}), 400
+    d = request.get_json(force=True, silent=True) or {}
+    code = (d.get("code") or "").strip()
+    if not pyotp.TOTP(secret).verify(code, valid_window=1):
+        return jsonify({"error": "Invalid code -- check your authenticator app and try again"}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET totp_secret=%s, totp_enabled=1 WHERE username=%s", (secret, session["user"]))
+    c.commit(); c.close()
+    session.pop("totp_pending_secret", None)
+    return jsonify({"ok": True})
+
+@app.route("/api/2fa/totp/disable", methods=["POST"])
+@auth_required()
+def twofa_totp_disable():
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET totp_secret='', totp_enabled=0 WHERE username=%s", [session["user"]])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/2fa/email-otp/enable", methods=["POST"])
+@auth_required()
+def twofa_email_otp_enable():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT email FROM Users WHERE username=%s", [session["user"]]); row = cur.fetchone() or {}
+    cur.execute("SELECT smtp_host FROM Settings WHERE id=1"); s = cur.fetchone() or {}
+    c.close()
+    email = row.get("email") or ""
+    if not email: return jsonify({"error": "Set an email on your profile first"}), 400
+    if not s.get("smtp_host"): return jsonify({"error": "SMTP is not configured -- ask an admin to set it up in Settings"}), 400
+    code = f"{secrets.randbelow(1000000):06d}"
+    session["email_otp_pending_code"] = code
+    session["email_otp_pending_sent_at"] = time.time()
+    ok = _send_simple_email(email, "Confirm email sign-in codes", f"Your verification code is: {code}\n\nEnter this code to confirm email sign-in codes for your account.")
+    if not ok: return jsonify({"error": "Could not send email -- check SMTP settings"}), 400
+    return jsonify({"ok": True, "sent_to": email})
+
+@app.route("/api/2fa/email-otp/confirm", methods=["POST"])
+@auth_required()
+def twofa_email_otp_confirm():
+    pending = session.get("email_otp_pending_code")
+    if not pending: return jsonify({"error": "start enabling email codes first"}), 400
+    d = request.get_json(force=True, silent=True) or {}
+    code = (d.get("code") or "").strip()
+    if code != pending:
+        return jsonify({"error": "Invalid code"}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET email_otp_enabled=1 WHERE username=%s", [session["user"]])
+    c.commit(); c.close()
+    session.pop("email_otp_pending_code", None); session.pop("email_otp_pending_sent_at", None)
+    return jsonify({"ok": True})
+
+@app.route("/api/2fa/email-otp/disable", methods=["POST"])
+@auth_required()
+def twofa_email_otp_disable():
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET email_otp_enabled=0 WHERE username=%s", [session["user"]])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/users/<u>/2fa/disable", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def admin_disable_2fa(u):
+    """Recovery valve for a locked-out user: an admin can force-disable both
+    2FA methods without needing the user's authenticator or email access."""
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET totp_secret='', totp_enabled=0, email_otp_enabled=0 WHERE username=%s", [u])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+def _send_simple_email(to_email, subject, body):
+    import smtplib
+    from email.message import EmailMessage
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, app_name FROM Settings WHERE id=1")
+    s = cur.fetchone() or {}; c.close()
+    if not s.get("smtp_host") or not to_email:
+        return False
+    try:
+        bn = s.get("app_name") or "IT-Vault"
+        msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
+        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
+        with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
+            if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
+            sv.send_message(msg)
+        return True
+    except Exception as e:
+        print("email send error:", e); return False
 
 # ---------- profile (self) ----------
 @app.route("/api/profile", methods=["GET", "PUT"])
@@ -1490,7 +1842,7 @@ def settings():
                     (gv("theme","dark"), gv("smtp_host",""), int(gv("smtp_port",587) or 587),
                      gv("smtp_user",""), gv("smtp_pass",""), gv("smtp_from",""),
                      bool(d.get("notify_new", cur0.get("notify_new", True))), bool(d.get("notify_delete", cur0.get("notify_delete", True))),
-                     (d.get("app_name", cur0.get("app_name","Sha The IT Guy") )[:60]), (d.get("logo_text", cur0.get("logo_text","Sha"))[:40]),
+                     (d.get("app_name", cur0.get("app_name","IT-Vault") )[:60]), (d.get("logo_text", cur0.get("logo_text","IT-Vault"))[:40]),
                      bool(d.get("matrix_on", cur0.get("matrix_on", True))),
                      (d.get("ldap_server", "") or "").strip(), (d.get("ldap_domain", "") or "").strip(),
                      (d.get("ldap_bind_user", "") or "").strip(), d.get("ldap_bind_pass", cur0.get("ldap_bind_pass","")),
@@ -1565,22 +1917,61 @@ def settings():
 def contracts_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
-        cur.execute("SELECT * FROM Contracts ORDER BY end_date"); rows = cur.fetchall(); c.close()
+        cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY end_date"); rows = cur.fetchall(); c.close()
         return jsonify([dict(r) for r in rows])
     if request.method == "POST":
         d = request.get_json(force=True)
-        cur.execute("INSERT INTO Contracts (name, vendor, type, start_date, end_date, cost, asset_id, note) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+        cur.execute("""INSERT INTO Contracts (name, vendor, type, start_date, end_date, cost, asset_id, employee_id, location, department, license_key, note)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (d.get("name",""), d.get("vendor",""), d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("asset_id") or None, d.get("note","")))
+                     float(d.get("cost") or 0), d.get("asset_id") or None, d.get("employee_id") or "",
+                     d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note","")))
         c.commit(); c.close(); return jsonify({"ok": True})
     if request.method == "PUT":
         d = request.get_json(force=True); cid = d.get("id")
-        cur.execute("UPDATE Contracts SET name=%s, vendor=%s, type=%s, start_date=%s, end_date=%s, cost=%s, asset_id=%s, note=%s WHERE id=%s",
+        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, type=%s, start_date=%s, end_date=%s, cost=%s, asset_id=%s,
+                       employee_id=%s, location=%s, department=%s, license_key=%s, note=%s WHERE id=%s""",
                     (d.get("name",""), d.get("vendor",""), d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("asset_id") or None, d.get("note",""), cid))
+                     float(d.get("cost") or 0), d.get("asset_id") or None, d.get("employee_id") or "",
+                     d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note",""), cid))
         c.commit(); c.close(); return jsonify({"ok": True})
     cid = (request.get_json(force=True) or {}).get("id")
-    cur.execute("DELETE FROM Contracts WHERE id=%s", [cid]); c.commit(); c.close(); return jsonify({"ok": True})
+    cur.execute("UPDATE Contracts SET is_deleted=1 WHERE id=%s", [cid]); c.commit(); c.close(); return jsonify({"ok": True})
+
+@app.route("/api/contracts/trash")
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def contracts_trash():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM Contracts WHERE is_deleted=1 ORDER BY end_date"); rows = cur.fetchall(); c.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/contracts/<int:cid>/restore", methods=["POST"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def restore_contract(cid):
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Contracts SET is_deleted=0 WHERE id=%s", [cid]); c.commit(); c.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/contracts/<int:cid>/permanent", methods=["DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def permanent_delete_contract(cid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT id FROM Contracts WHERE id=%s AND is_deleted=1", [cid])
+    if not cur.fetchone():
+        c.close(); return jsonify({"error": "not found in trash"}), 404
+    cur.execute("DELETE FROM Contracts WHERE id=%s", [cid]); c.commit(); c.close()
+    audit(session.get("user"), "PERMANENT_DELETE_CONTRACT", "", f"contract #{cid}")
+    return jsonify({"ok": True})
+
+@app.route("/api/contracts/trash/empty", methods=["POST"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def empty_contracts_trash():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT id FROM Contracts WHERE is_deleted=1"); rows = cur.fetchall()
+    cur.execute("DELETE FROM Contracts WHERE is_deleted=1")
+    c.commit(); c.close()
+    audit(session.get("user"), "EMPTY_CONTRACTS_TRASH", "", f"{len(rows)} contract(s) permanently deleted")
+    return jsonify({"ok": True, "deleted": len(rows)})
 
 @app.route("/api/locations", methods=["GET","POST","DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
@@ -1663,12 +2054,12 @@ def notify_ticket_resolved(ticket):
         c.close()
         if not settings.get("smtp_host"):
             return
-        bn = settings.get("app_name") or "Sha The IT Guy"
+        bn = settings.get("app_name") or "IT-Vault"
         subj = f"{bn}: Ticket {ticket['code']} Resolved"
         body = (f"Your ticket has been resolved.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nStatus: {ticket.get('status','')}\n\nIf you need further assistance, reply to this email or submit a new ticket.")
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = settings.get("smtp_from") or settings.get("smtp_user")
-        msg["To"] = ticket["requester_email"]; msg.set_content(body)
+        msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -1693,12 +2084,12 @@ def notify_ticket_replied(ticket, reply_author, reply_body):
         c.close()
         if not settings.get("smtp_host"):
             return
-        bn = settings.get("app_name") or "Sha The IT Guy"
+        bn = settings.get("app_name") or "IT-Vault"
         subj = f"{bn}: Reply on Ticket {ticket['code']}"
         body = (f"Your ticket received a reply.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nReply from: {reply_author}\n\n{reply_body[:500]}\n\nLogin to view full thread.")
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = settings.get("smtp_from") or settings.get("smtp_user")
-        msg["To"] = ticket["requester_email"]; msg.set_content(body)
+        msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -1836,7 +2227,7 @@ def portal_link():
     url = base + "/portal"
     if s.get("portal_token"):
         url += "?t=" + s["portal_token"]
-    return jsonify({"url": url, "token": s.get("portal_token") or "", "app_name": s.get("app_name") or "Sha The IT Guy"})
+    return jsonify({"url": url, "token": s.get("portal_token") or "", "app_name": s.get("app_name") or "IT-Vault"})
 
 @app.route("/api/portal/status", methods=["POST"])
 def portal_status():
@@ -1948,7 +2339,7 @@ def branding():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
     s = s or {}
-    return jsonify({"app_name": s.get("app_name", "Sha The IT Guy"), "logo_text": s.get("logo_text", "Sha"),
+    return jsonify({"app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
                     "matrix_on": bool(s.get("matrix_on", 1)), "logo": "/logo.png",
                     "theme": s.get("theme", "dark"), "theme_preset": s.get("theme_preset", "deepdark"),
                     "bg_type": s.get("bg_type", "solid"), "bg": s.get("bg", "#0a0d13"),
@@ -1987,9 +2378,14 @@ def brand_name():
     try:
         c = conn(); cur = c.cursor()
         cur.execute("SELECT app_name FROM Settings WHERE id=1"); r = cur.fetchone(); c.close()
-        return (r.get("app_name") or "Sha The IT Guy") if r else "Sha The IT Guy"
+        return (r.get("app_name") or "IT-Vault") if r else "IT-Vault"
     except Exception:
-        return "Sha The IT Guy"
+        return "IT-Vault"
+def _email_footer(app_name):
+    """Small signature line appended to every outgoing email (notifications,
+    OTP codes, alerts) -- keeps the sender's own brand name in the subject/body
+    while still crediting the tool, unobtrusively, on its own short line."""
+    return f"\n\n—\n{app_name} · Powered by Sha The IT Guy"
 def send_notification(subject, body):
     import smtplib
     from email.message import EmailMessage
@@ -2000,10 +2396,10 @@ def send_notification(subject, body):
     if not s.get("smtp_host") or not emails:
         return False
     try:
-        bn = s.get("app_name") or "Sha The IT Guy"
+        bn = s.get("app_name") or "IT-Vault"
         subj = subject if subject.startswith(bn) else f"{bn}: {subject}" if not subject.startswith("IT Guy") else subject.replace("IT Guy", bn, 1)
         msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = s.get("smtp_from") or s.get("smtp_user")
-        msg["To"] = ", ".join(emails); msg.set_content(body)
+        msg["To"] = ", ".join(emails); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -2025,7 +2421,7 @@ def notify_ticket_assigned(ticket, assignee_user):
     c.close()
     if not s.get("smtp_host"):
         return False
-    bn = s.get("app_name") or "Sha The IT Guy"
+    bn = s.get("app_name") or "IT-Vault"
     recipients = []
     if assignee_email: recipients.append(assignee_email)
     if ticket.get("requester_email"): recipients.append(ticket["requester_email"])
@@ -2038,10 +2434,10 @@ def notify_ticket_assigned(ticket, assignee_user):
                 f"Priority: {ticket.get('priority','')}\n"
                 f"Requester: {ticket.get('requester','')} ({ticket.get('requester_email','')})\n\n"
                 f"This ticket has been assigned to {assignee_user or 'the IT team'}.\n"
-                f"Login to {s.get('app_name') or 'Sha The IT Guy'} to update status and reply.\n")
+                f"Login to {s.get('app_name') or 'IT-Vault'} to update status and reply.\n")
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = s.get("smtp_from") or s.get("smtp_user")
-        msg["To"] = ", ".join(recipients); msg.set_content(body)
+        msg["To"] = ", ".join(recipients); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -2075,15 +2471,16 @@ def test_email():
     if not to:
         return jsonify({"ok": False, "msg": "No address to send the test to -- set your own email on your profile, or an SMTP From address"}), 400
     try:
+        bn = (gv("app_name") or "IT-Vault").strip() or "IT-Vault"
         msg = EmailMessage()
-        msg["Subject"] = "IT Guy Assets Manager · SMTP check ✅"
+        msg["Subject"] = f"{bn} · SMTP check ✅"
         msg["From"] = frm
         msg["To"] = to
         msg.set_content(
-            "Yo — this is your SMTP test email from IT Guy Assets Manager.\n\n"
+            f"Yo — this is your SMTP test email from {bn}.\n\n"
             "If it landed in your inbox, your setup is locked in and ready to send "
             "real notifications. No cap. \U0001F680\n\n"
-            "Nothing else to do here — you're good to go."
+            "Nothing else to do here — you're good to go." + _email_footer(bn)
         )
         with smtplib.SMTP(host, port, timeout=10) as sv:
             if user:
@@ -2222,10 +2619,31 @@ def dashboard():
         by_status[r["Status"]] = by_status.get(r["Status"], 0) + 1
         by_type[r["Type"] or "Unspecified"] = by_type.get(r["Type"] or "Unspecified", 0) + 1
         by_location[r["Location"] or "Unspecified"] = by_location.get(r["Location"] or "Unspecified", 0) + 1
+    # contracts: total / by type / expiring soon (for the dashboard "CONTRACTS" widgets)
+    cur.execute("SELECT id, name, vendor, type, end_date, cost FROM Contracts WHERE is_deleted=0 ORDER BY end_date")
+    crows = cur.fetchall()
+    contracts_total = len(crows)
+    contracts_by_type = {}
+    contracts_expiring_soon = 0
+    expiring_contracts = []
+    for r in crows:
+        t = r["type"] or "Other"
+        contracts_by_type[t] = contracts_by_type.get(t, 0) + 1
+        try:
+            ed = datetime.strptime(r["end_date"], "%Y-%m-%d").date()
+            days_left = (ed - today).days
+            if 0 <= days_left <= 30:
+                contracts_expiring_soon += 1
+                expiring_contracts.append({"id": r["id"], "name": r["name"], "vendor": r["vendor"],
+                                            "type": t, "end_date": r["end_date"], "days_left": days_left})
+        except Exception: pass
+    expiring_contracts.sort(key=lambda x: x["days_left"])
     c.close()
     return jsonify({"total": total, "checked_out": checked_out, "maintenance": maint,
                     "due_soon": due_soon, "warranty_expiring": warranty_exp,
-                    "by_status": by_status, "by_type": by_type, "by_location": by_location})
+                    "by_status": by_status, "by_type": by_type, "by_location": by_location,
+                    "contracts_total": contracts_total, "contracts_by_type": contracts_by_type,
+                    "contracts_expiring_soon": contracts_expiring_soon, "expiring_contracts": expiring_contracts[:12]})
 
 # ---------- QR label ----------
 @app.route("/api/assets/<a_id>/qr")
@@ -2261,10 +2679,10 @@ def label_page(a_id):
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
-        app_name = (srow.get("app_name") or "Sha The IT Guy") if srow else "Sha The IT Guy"
+        app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
     except Exception:
-        qr_size, label_size, show_logo, app_name, logo_text = 160, "50.8x50.8", True, "Sha The IT Guy", "Sha"
+        qr_size, label_size, show_logo, app_name, logo_text = 160, "50.8x50.8", True, "IT-Vault", "IT-Vault"
     # parse label physical size "WxH" mm (default 50.8x50.8)
     try:
         lw, lh = label_size.lower().split("x")
@@ -2407,9 +2825,9 @@ def labels_page():
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
-        app_name = (srow.get("app_name") or "Sha The IT Guy") if srow else "Sha The IT Guy"
+        app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
     except Exception:
-        qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "Sha The IT Guy"
+        qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "IT-Vault"
     try:
         lw, lh = label_size.lower().split("x")
         lw_mm, lh_mm = float(lw), float(lh)
@@ -2549,11 +2967,11 @@ def asset_public(a_id):
         sc = conn(); scur = sc.cursor()
         scur.execute("SELECT app_name, logo_text, org_contact FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
-        app_name = (srow.get("app_name") or "Sha The IT Guy") if srow else "Sha The IT Guy"
+        app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
         org_contact = (srow.get("org_contact") or "") if srow else ""
     except Exception:
-        app_name, logo_text, org_contact = "Sha The IT Guy", "Sha", ""
+        app_name, logo_text, org_contact = "IT-Vault", "IT-Vault", ""
     # logo as base64
     logo_uri = ""
     try:
@@ -2606,7 +3024,7 @@ def asset_public(a_id):
  <table>{rows_html}</table>
  <div class=contact>📞 Organization Contact: <b>{org_contact or '—'}</b></div>
  <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
- <div class=foot>Scanned from IT Guy - The Assets Manager • {base}</div>
+ <div class=foot>Scanned from {app_name} • {base}</div>
 </div></div></body></html>"""
 
 # ---------- invoice attachment ----------
@@ -2695,7 +3113,7 @@ def get_sign_link(a_id):
     return jsonify({"ok": True, "token": tk, "url": f"{request.host_url}sign?token={quote(tk)}"})
 
 SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>IT Guy // Asset Acknowledgement</title>
+<title>IT-Vault // Asset Acknowledgement</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <style>
@@ -2719,7 +3137,7 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;min-height:100
 .center{text-align:center;margin-top:40px;color:var(--muted)}
 </style></head><body>
 <div class="sign-card">
-  <div class="brand" id="brand">IT Guy</div>
+  <div class="brand" id="brand">IT-Vault</div>
   <div class="sub" id="sub">// ASSET ACKNOWLEDGEMENT</div>
   <div id="assetCard"></div>
   <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
@@ -2872,7 +3290,7 @@ function applySignTheme(b){
 }
 (async()=>{ try{
   const b=await (await fetch('/api/branding')).json();
-  const name=b.app_name||'Sha The IT Guy';
+  const name=b.app_name||'IT-Vault';
   document.title=name+' // Asset Acknowledgement';
   const brand=document.getElementById('brand'); brand.textContent=name;
   document.getElementById('sub').textContent='// ASSET ACKNOWLEDGEMENT';
@@ -3083,7 +3501,7 @@ def backup():
     if scope not in ("config", "assets", "all"):
         scope = "all"
     c = conn(); cur = c.cursor()
-    lines = [f"-- IT Guy backup | scope={scope} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    lines = [f"-- IT-Vault backup | scope={scope} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
     if scope in ("config", "all"):
         lines += ["-- == Settings ==", *_dump_table(cur, "Settings")]
         lines += ["-- == Users ==", *_dump_table(cur, "Users")]
@@ -3232,5 +3650,5 @@ if __name__ == "__main__":
     init_db()
     migrate_schema()
     start_ldap_scheduler()
-    print("IT Guy - The Assets Manager (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
+    print("IT-Vault (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
     app.run(host="0.0.0.0", port=5000, debug=False)

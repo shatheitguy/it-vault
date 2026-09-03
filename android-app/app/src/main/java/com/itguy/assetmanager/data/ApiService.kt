@@ -9,6 +9,12 @@ interface ApiService {
     @POST("api/login")
     suspend fun login(@Body body: LoginRequest): Response<LoginResponse>
 
+    @POST("api/2fa/verify-login")
+    suspend fun verifyLogin2fa(@Body body: Verify2faRequest): Response<LoginResponse>
+
+    @POST("api/2fa/resend-email-code")
+    suspend fun resendLoginEmailCode(): Response<OkResponse>
+
     @GET("api/me")
     suspend fun me(): Response<MeResponse>
 
@@ -115,11 +121,20 @@ interface ApiService {
     @HTTP(method = "DELETE", path = "api/locations", hasBody = true)
     suspend fun deleteLocation(@Body body: IdRequest): Response<OkResponse>
 
-    // ---- contracts ----
+    @GET("api/contract-types")
+    suspend fun contractTypes(): Response<List<NamedItem>>
+    @POST("api/contract-types")
+    suspend fun addContractType(@Body body: NameOnly): Response<OkResponse>
+    @HTTP(method = "DELETE", path = "api/contract-types", hasBody = true)
+    suspend fun deleteContractType(@Body body: IdRequest): Response<OkResponse>
+
+    // ---- contracts / AMC / licenses / subscriptions ----
     @GET("api/contracts")
     suspend fun contracts(): Response<List<Contract>>
     @POST("api/contracts")
     suspend fun addContract(@Body body: Contract): Response<OkResponse>
+    @PUT("api/contracts")
+    suspend fun updateContract(@Body body: Contract): Response<OkResponse>
     @HTTP(method = "DELETE", path = "api/contracts", hasBody = true)
     suspend fun deleteContract(@Body body: IdRequest): Response<OkResponse>
 

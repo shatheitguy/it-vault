@@ -1,4 +1,4 @@
-# IT Guy - The Assets Manager — Full Documentation
+# IT-Vault — Full Documentation
 
 > GLPI-style IT Asset Management (ITAM) + osTicket-style ticketing, built on **Flask + MariaDB**.
 > Local-only deployment (Windows host, no external hosting). Cyber/tech dark-slate UI with light theme.
@@ -7,7 +7,7 @@
 
 ## 1. Overview
 
-IT Guy - The Assets Manager is a single-tenant, self-hosted asset & ticket manager for IT teams (e.g. an sports club IT department). It manages:
+IT-Vault is a single-tenant, self-hosted asset & ticket manager for IT teams (e.g. an sports club IT department). It manages:
 
 - **Assets** (laptops, phones, CCTV, network gear) with full lifecycle, change history, QR labels, checkout/checkin, maintenance log, and digital acknowledgement (sign-off).
 - **Employees** (manual or synced from Active Directory / LDAP).

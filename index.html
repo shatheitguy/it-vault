@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IT Guy - The Assets Manager</title>
+<title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260901pro">
+<link rel="stylesheet" href="/style.css?v=20260902c">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -15,17 +15,16 @@
 
 <div id="app">
   <aside class="side">
-    <div class="logo"><img id="sideLogo" src="/logo.png" alt="" onerror="this.style.display='none'"><span id="sideName">IT Guy</span></div>
+    <div class="logo"><img id="sideLogo" src="/logo.png" alt="" onerror="this.style.display='none'"><span id="sideName">IT-Vault</span></div>
     <nav class="nav">
       <div class="nav-grp">Main</div>
       <a id="navHome" class="active"><span class="ni">🏠</span>Dashboard</a>
       <a id="navAssets" data-i18n="Assets"><span class="ni">💻</span>Assets</a>
+      <a id="navContracts" data-i18n="Contracts"><span class="ni">📄</span>Contracts</a>
       <a id="navTickets" data-i18n="Tickets"><span class="ni">🎫</span>Tickets</a>
 
       <div class="nav-grp">Records</div>
       <a id="navDirectory" style="display:none"><span class="ni">👥</span>Directory</a>
-      <a id="navContracts" data-i18n="Contracts"><span class="ni">📄</span>Contracts</a>
-      <a id="navLocations" data-i18n="Locations"><span class="ni">📍</span>Locations</a>
       <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
       <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
       <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Audit Log</a>
@@ -92,15 +91,38 @@
 
     <div id="page-trash" style="display:none">
       <div class="topbar">
-        <div><div class="crumb">IT GUY / TRASH (DELETED ASSETS)</div><h2>Recycle Bin</h2></div>
+        <div><div class="crumb">IT GUY / TRASH</div><h2>Recycle Bin</h2></div>
         <div class="spacer"></div>
-        <button class="btn ghost" id="trashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
-        <button class="btn danger" id="trashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
-        <button class="btn danger" id="trashEmptyBtn">🗑 EMPTY TRASH</button>
       </div>
-      <div class="tablewrap">
-        <table id="trashGrid"><thead><tr><th><input type="checkbox" id="trashChkAll"></th><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th><th></th></tr></thead><tbody id="trashBody"></tbody></table>
-        <div class="empty" id="trashEmpty" style="display:none">TRASH IS EMPTY</div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>DELETED ASSETS</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm ghost" id="trashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
+            <button class="btn sm danger" id="trashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
+            <button class="btn sm danger" id="trashEmptyBtn">🗑 EMPTY</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="trashGrid"><thead><tr><th><input type="checkbox" id="trashChkAll"></th><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th><th></th></tr></thead><tbody id="trashBody"></tbody></table>
+          <div class="empty" id="trashEmpty" style="display:none">TRASH IS EMPTY</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>DELETED CONTRACTS</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm ghost" id="ctTrashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
+            <button class="btn sm danger" id="ctTrashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
+            <button class="btn sm danger" id="ctTrashEmptyBtn">🗑 EMPTY</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="ctTrashGrid"><thead><tr><th><input type="checkbox" id="ctTrashChkAll"></th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>END DATE</th><th></th></tr></thead><tbody id="ctTrashBody"></tbody></table>
+          <div class="empty" id="ctTrashEmpty" style="display:none">CONTRACTS TRASH IS EMPTY</div>
+        </div>
       </div>
     </div>
 
@@ -130,23 +152,35 @@
 
     <div id="page-contracts" style="display:none">
       <div class="topbar">
-        <div><div class="crumb">IT GUY / CONTRACTS (GLPI)</div><h2>Contracts &amp; Warranties</h2></div>
+        <div><div class="crumb">IT GUY / CONTRACTS</div><h2>Contracts, AMC &amp; Subscriptions</h2></div>
         <div class="spacer"></div>
-        <button class="btn mag" id="newContractBtn">＋ NEW CONTRACT</button>
+        <button class="btn mag" id="newContractBtn">＋ ADD CONTRACT</button>
+        <button class="btn ghost" id="ctImportBtn">Import</button>
+        <button class="btn ghost" id="ctExportBtn">Export</button>
+        <input type="file" id="ctFile" accept=".xlsx,.xls,.csv" style="display:none">
       </div>
-      <div class="tablewrap">
-        <table id="ctGrid"><thead><tr><th>NAME</th><th>VENDOR</th><th>TYPE</th><th>START</th><th>END</th><th>COST</th><th>ASSET</th></tr></thead><tbody id="ctBody"></tbody></table>
-        <div class="empty" id="ctEmpty" style="display:none">NO CONTRACTS</div>
+      <div class="stats">
+        <div class="stat c1"><div class="k">Total Contracts</div><div class="v" id="ctTotal">0</div></div>
+        <div class="stat c2"><div class="k">AMC</div><div class="v" id="ctAmc">0</div></div>
+        <div class="stat c3"><div class="k">Licenses</div><div class="v" id="ctLicense">0</div></div>
+        <div class="stat c4"><div class="k">Subscriptions</div><div class="v" id="ctSub">0</div></div>
+        <div class="stat c5"><div class="k">Expiring ≤30d</div><div class="v" id="ctExpiring">0</div></div>
       </div>
-    </div>
 
-    <div id="page-locations" style="display:none">
-      <div class="topbar">
-        <div><div class="crumb">IT GUY / LOCATIONS (GLPI)</div><h2>Location Tree</h2></div>
-        <div class="spacer"></div>
-        <input id="locInput" placeholder="New location name"><button class="btn mag" id="newLocBtn">＋ ADD</button>
+      <div class="toolbar">
+        <input id="ctSearch" placeholder="Search name, vendor, type…">
+        <select id="ctTypeFilter"><option value="">All types</option><option>AMC</option><option>License</option><option>Subscription</option><option>Warranty</option><option>Support</option><option>Lease</option><option>Other</option></select>
+        <select id="ctGroupBy"><option value="">No grouping</option><option value="type">Type</option><option value="vendor">Vendor</option></select>
+        <span class="tb-spacer"></span>
+        <div class="count" id="ctCount"></div>
+        <button class="btn sm ghost" id="ctPrintSelBtn">Print selected</button>
+        <button class="btn sm danger" id="ctDelSelBtn" style="display:none">Delete selected</button>
       </div>
-      <ul id="locList" class="loclist"></ul>
+
+      <div class="tablewrap">
+        <table id="ctGrid"><thead><tr><th><input type="checkbox" id="ctChkAll"/></th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>START</th><th>END</th><th>COST</th><th>LICENSE KEY</th><th>LINKED ASSET</th><th></th></tr></thead><tbody id="ctBody"></tbody></table>
+        <div class="empty" id="ctEmpty" style="display:none">NO CONTRACTS YET</div>
+      </div>
     </div>
 
     <div id="page-catalog" style="display:none">
@@ -156,7 +190,7 @@
         <button class="btn ghost" id="catImportBtn">⬆ IMPORT EXCEL/CSV</button>
         <input type="file" id="catImportFile" accept=".xlsx,.xls,.csv" style="display:none">
       </div>
-      <p class="sec-hint">Reference lists used on the Add Asset form -- item categories, manufacturers, and models. Add everything here in bulk, then just pick it from a dropdown when adding an asset. Import an .xlsx/.xls/.csv with any of these column headers: <b>Category</b>, <b>Manufacturer</b>, <b>Model</b> -- a row can fill in just one, or a Manufacturer+Model pair.</p>
+      <p class="sec-hint">Reference lists used on the Add Asset and Contract forms -- item categories, manufacturers, models, and contract types. Add everything here in bulk, then just pick it from a dropdown. Import an .xlsx/.xls/.csv with any of these column headers: <b>Category</b>, <b>Manufacturer</b>, <b>Model</b> -- a row can fill in just one, or a Manufacturer+Model pair.</p>
       <div class="grid2 catalog-grid">
         <div class="invbox">
           <label>ITEM CATEGORIES <span id="catCount" class="cat-count"></span></label>
@@ -167,6 +201,11 @@
           <label>MANUFACTURERS <span id="mfrCatCount" class="cat-count"></span></label>
           <div class="catrow"><input id="mfrCatInput" placeholder="e.g. Apple, Dell, HP"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>CONTRACT TYPES <span id="ctTypeCatCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="ctTypeCatInput" placeholder="e.g. AMC, License, Subscription"><button class="btn sm" id="ctTypeCatAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="ctTypeCatBody"></tbody></table></div>
         </div>
       </div>
       <div class="invbox" style="margin-top:14px">
@@ -233,6 +272,8 @@
         <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
         <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
         <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>
+        <div class="panel widget" data-wkey="contracts"><div class="secthead">CONTRACTS BY TYPE</div><div class="bars" id="contractsBars"></div></div>
+        <div class="panel widget" data-wkey="contracts-expiring"><div class="secthead">CONTRACTS EXPIRING ≤30d</div><div class="tablewrap" style="max-height:320px"><table id="dashContractsExp"><thead><tr><th>NAME</th><th>VENDOR</th><th>TYPE</th><th>END DATE</th><th>DAYS LEFT</th></tr></thead><tbody id="dashContractsExpBody"></tbody></table><div class="empty" id="dashContractsExpEmpty" style="display:none">NO CONTRACTS EXPIRING SOON</div></div></div>
         <div class="panel widget" data-wkey="unifi-devices"><div class="secthead">UNIFI DEVICES</div><div class="tablewrap" style="max-height:320px"><table id="unifiDevices"><thead><tr><th>NAME</th><th>TYPE</th><th>IP</th><th>CLIENTS</th><th>STATUS</th></tr></thead><tbody id="unifiDevicesBody"></tbody></table><div class="empty" id="unifiDevicesEmpty" style="display:none">NO DEVICES</div></div></div>
         <div class="panel widget" data-wkey="unifi-clients"><div class="secthead">UNIFI ACTIVE CLIENTS</div><div class="tablewrap" style="max-height:320px"><table id="unifiClients"><thead><tr><th>HOSTNAME</th><th>IP</th><th>NETWORK</th><th>LINK</th></tr></thead><tbody id="unifiClientsBody"></tbody></table><div class="empty" id="unifiClientsEmpty" style="display:none">NO ACTIVE CLIENTS</div></div></div>
       </div>
@@ -337,8 +378,53 @@
       <button class="btn ghost" id="pPassSave">✓ UPDATE PASSWORD</button>
       <button class="btn" id="accSave">SAVE ACCOUNT</button>
     </div>
-    <div class="secthead">SESSION TRACKING</div>
-    <ul class="sesslist" id="pSessions"></ul>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">TWO-FACTOR AUTHENTICATION</div>
+              <p class="sec-hint">Add a second step at sign-in. You can enable an authenticator app (TOTP), email codes, or both.</p>
+
+              <div class="refcard" style="margin-bottom:10px">
+                <div class="rc-left"><div class="avatar-prev" id="totpIcon">📱</div></div>
+                <div class="rc-info">
+                  <b>Authenticator App</b><br>
+                  <span id="totpStatusText" class="muted">Not enabled</span>
+                </div>
+                <div class="spacer"></div>
+                <button class="btn sm" id="totpEnableBtn">ENABLE</button>
+                <button class="btn sm danger" id="totpDisableBtn" style="display:none">DISABLE</button>
+              </div>
+              <div id="totpSetupBox" style="display:none;margin-bottom:16px">
+                <div class="field2" style="max-width:260px"><label>Scan with Google Authenticator, Microsoft Authenticator, Authy, etc.</label></div>
+                <div id="totpQr" style="background:#fff;padding:12px;border-radius:8px;width:fit-content;margin-bottom:10px"></div>
+                <div class="field2"><label>Can't scan? Enter this key manually</label><input id="totpSecretText" class="mono" readonly></div>
+                <div class="field2" style="max-width:200px"><label>Enter the 6-digit code to confirm</label><input id="totpConfirmCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+                <div class="m-actions" style="justify-content:flex-start">
+                  <button class="btn" id="totpConfirmBtn">✓ CONFIRM &amp; ENABLE</button>
+                  <button class="btn ghost" id="totpCancelBtn">CANCEL</button>
+                </div>
+                <div class="muted" id="totpSetupMsg" style="margin-top:6px"></div>
+              </div>
+
+              <div class="refcard">
+                <div class="rc-left"><div class="avatar-prev" id="emailOtpIcon">✉️</div></div>
+                <div class="rc-info">
+                  <b>Email Codes</b><br>
+                  <span id="emailOtpStatusText" class="muted">Not enabled</span>
+                </div>
+                <div class="spacer"></div>
+                <button class="btn sm" id="emailOtpEnableBtn">ENABLE</button>
+                <button class="btn sm danger" id="emailOtpDisableBtn" style="display:none">DISABLE</button>
+              </div>
+              <div id="emailOtpSetupBox" style="display:none;margin-top:10px">
+                <div class="field2" style="max-width:200px"><label>Enter the code we emailed you</label><input id="emailOtpConfirmCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+                <div class="m-actions" style="justify-content:flex-start">
+                  <button class="btn" id="emailOtpConfirmBtn">✓ CONFIRM &amp; ENABLE</button>
+                  <button class="btn ghost" id="emailOtpCancelBtn">CANCEL</button>
+                </div>
+                <div class="muted" id="emailOtpSetupMsg" style="margin-top:6px"></div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">SESSION TRACKING</div>
+              <ul class="sesslist" id="pSessions"></ul>
             </div>
           </section>
           <!-- USERS -->
@@ -346,7 +432,7 @@
             <div class="panel"><div class="secthead">SYSTEM USERS</div>
               <p class="sec-hint">Login accounts for this system — Admin, Editor and Read-only. These are the people who sign in to this app. Staff imported from Active Directory are <b>Employees</b>, not system users, and are managed on the Employees page.</p>
               <div class="m-actions" style="justify-content:flex-start;margin-bottom:10px"><button class="btn" id="cfgAddUser">＋ ADD USER</button></div>
-              <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Display name</th><th>Email</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
+              <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Display name</th><th>Email</th><th>2FA</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
             </div>
           </section>
           <!-- NOTIFICATIONS -->
@@ -438,18 +524,11 @@
             <div class="panel"><div class="secthead">BRANDING</div>
             <p class="sec-hint">Your organization's identity across the app — name, logo, and what shows in the sidebar and browser tab. Label printing and appearance/theme have their own sections.</p>
             <div class="grid2">
-              <div class="field2"><label>App / Company Name</label><input id="b_name" placeholder="Sha The IT Guy"></div>
-              <div class="field2"><label>Logo Text (sidebar)</label><input id="b_logoText" placeholder="Sha"></div>
+              <div class="field2"><label>App / Company Name</label><input id="b_name" placeholder="IT-Vault"></div>
+              <div class="field2"><label>Logo Text (sidebar)</label><input id="b_logoText" placeholder="IT-Vault"></div>
               <div class="field2" style="grid-column:1/-1"><label>Logo (PNG, max 500KB)</label><input type="file" id="b_logo" accept="image/png"></div>
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="pm_saveBrand">✓ SAVE BRANDING</button><button class="btn danger" id="removeLogoBtn" type="button">🗑 REMOVE LOGO</button><img id="b_logoPrev" src="/logo.png?t=1" style="height:34px;margin-left:10px"></div>
-<div class="refcard">
-      <div>
-        <div style="font-family:var(--font);font-weight:650;color:var(--txt);letter-spacing:-.01em;font-size:14px">Item Categories / Manufacturers / Models</div>
-        <div class="rc-info">Manage structured reference data used in the Add Asset form</div>
-      </div>
-      <button class="btn ghost" id="openRefBtn" type="button">🏷 PRODUCT CATALOG</button>
-    </div>
             </div>
           </section>
           <!-- CUSTOMIZATION (appearance + theme, single unified section) -->
@@ -621,6 +700,34 @@
   <div class="m-actions"><button class="btn ghost" id="camScanCancel" type="button">CLOSE</button></div>
 </div></div>
 
+<!-- Contract / AMC / License / Subscription modal -->
+<div class="modal" id="contractModal"><div class="modal-box">
+  <h3 id="contractModalTitle">ADD CONTRACT</h3>
+  <div class="modal-scroll">
+    <div class="invbox">
+      <label>DETAILS</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="ct_name" placeholder="e.g. AC Maintenance AMC, Antivirus License"></div>
+        <div class="field2"><label>Type <a class="mlink" onclick="document.getElementById('contractModal').classList.remove('show');showPage('page-catalog')">manage in Product Catalog ↗</a></label><select id="ct_type"><option value="">-- select type --</option></select></div>
+        <div class="field2"><label>Vendor / Company</label><input id="ct_vendor" placeholder="Outside company name"></div>
+        <div class="field2"><label>Cost (<span id="ctCurLabel">AED</span>)</label><input id="ct_cost" type="number" step="0.01" min="0"></div>
+        <div class="field2"><label>Start Date</label><input id="ct_start" type="date"></div>
+        <div class="field2"><label>End / Renewal Date</label><input id="ct_end" type="date"></div>
+        <div class="field2"><label>Linked Asset (optional)</label><select id="ct_asset"><option value="">-- none --</option></select></div>
+        <div class="field2"><label>Employee (optional)</label><select id="ct_employee"><option value="">-- none --</option></select></div>
+        <div class="field2"><label>Location (optional)</label><select id="ct_location"><option value="">-- none --</option></select></div>
+        <div class="field2"><label>Department (optional)</label><select id="ct_department"><option value="">-- none --</option></select></div>
+        <div class="field2" id="ct_license_key_wrap" style="display:none"><label>License Key</label><input id="ct_license_key" placeholder="e.g. XXXXX-XXXXX-XXXXX-XXXXX" class="mono"></div>
+      </div>
+    </div>
+    <div class="invbox">
+      <label>NOTE</label>
+      <textarea id="ct_note" rows="3" placeholder="Coverage details, renewal terms, contact person…"></textarea>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="ctCancel" type="button">CANCEL</button><button class="btn danger" id="ctDelete" type="button" style="display:none">DELETE</button><button class="btn" id="ctSave" type="button">SAVE</button></div>
+</div></div>
+
 <!-- Employee modal -->
 <div class="modal" id="empModal"><div class="modal-box">
   <h3 id="empModalTitle">ADD EMPLOYEE</h3>
@@ -775,6 +882,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260902e"></script>
+<script src="/app.js?nocache=20260902k"></script>
 </body>
 </html>

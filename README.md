@@ -1,4 +1,4 @@
-# IT Guy - The Assets Manager
+# IT-Vault
 
 A self-hosted IT asset & helpdesk manager: track assets, employees, checkouts,
 maintenance history, support tickets (with a public portal + a live wallboard

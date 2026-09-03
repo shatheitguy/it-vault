@@ -128,6 +128,7 @@ class AssetEditFragment : Fragment() {
     }
 
     private fun populatePlainFields() {
+        b.fAssetTag.setText(current.AssetTag)
         b.fName.setText(current.Name)
         b.fSerial.setText(current.Serial)
         b.fMacAddress.setText(current.MacAddress)
@@ -279,6 +280,7 @@ class AssetEditFragment : Fragment() {
         }
 
         val asset = current.copy(
+            AssetTag = b.fAssetTag.text?.toString()?.trim().orEmpty(),
             Name = name,
             Type = spinnerText(b.fType),
             Serial = b.fSerial.text?.toString()?.trim().orEmpty(),

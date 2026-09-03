@@ -1,9 +1,9 @@
 const APP_VERSION='20260828c';
-const COLUMNS=['Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
-const LABELS={'ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
+const COLUMNS=['AssetTag','Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID'];
+const LABELS={'AssetTag':'Asset ID','ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee ID','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
 
 // --- currency: stored base = AED; display converts via rate and shows symbol ---
-const MONEY={AED:{s:'﷼',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
+const MONEY={AED:{s:'AED',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
 let CURRENCY='AED';
 function fmtMoney(v,cur){
   cur=cur||CURRENCY; const m=MONEY[cur]||MONEY.AED;
@@ -23,7 +23,7 @@ const I18N={
 // every column — full detail is one click away via the Columns picker.
 // Guard: if the stored value is invalid, fall back to ALL columns (full details).
 // An empty array (e.g. from an old "NONE" click) must never blank the table.
-const DEFAULT_VISIBLE_COLS=['Name','Type','Serial','Location','Status','EmployeeID'];
+const DEFAULT_VISIBLE_COLS=['AssetTag','Name','Type','Serial','Location','Status','EmployeeID'];
 let VISIBLE_COLS = (()=>{
   try{
     const s=localStorage.getItem('nexus_cols');
@@ -379,6 +379,9 @@ function render(){
   head.querySelectorAll('th[data-c]').forEach(th=>th.onclick=()=>{const c=th.dataset.c;if(sortCol===c)sortDir*=-1;else{sortCol=c;sortDir=1;}render();});
   const rowHtml=a=>`<tr data-id="${a._id}"><td><input type="checkbox" class="row-chk" data-id="${a._id}" onchange="updateSelBtns()"/></td>${
     VC.map(c=>{
+      if(c==='AssetTag'){
+        return `<td class="mono">${esc(a.AssetTag||a._id)}</td>`;
+      }
       if(c==='Status'){
         const col=a.Status==='Available'?'var(--grn)':a.Status==='Checked-Out'?'var(--cyan)':a.Status==='Under-Maintenance'?'var(--amber)':a.Status==='Storage'?'var(--muted)':'var(--red)';
         return `<td><span class="status ${statusClass(a.Status)}"><span class="sev" style="color:${col}"></span>${esc(a.Status||'')}</span></td>`;
@@ -479,6 +482,11 @@ async function loadDashboard(){
   const d=await loadStats(); if(!d)return;
   renderBars('statusBars', d.by_status||{}, statusColor);
   renderBars('typeBars', d.by_type||{}, ()=> 'var(--accent)');
+  renderBars('contractsBars', d.contracts_by_type||{}, ()=> 'var(--accent2)');
+  const exp=d.expiring_contracts||[];
+  const eb=document.getElementById('dashContractsExpBody');
+  if(eb) eb.innerHTML=exp.map(c=>`<tr style="cursor:pointer" onclick="showPage('page-contracts');openContractModal(${c.id})"><td>${esc(c.name)}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.type||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${c.days_left}d</td></tr>`).join('');
+  const ee=document.getElementById('dashContractsExpEmpty'); if(ee) ee.style.display=exp.length?'none':'block';
   applyDashLayout();
   // widget bodies (recent assets / open tickets / activity) must refresh too --
   // previously these only reloaded when you navigated to the page
@@ -615,6 +623,7 @@ async function openModal(id,prefill){
   const inv=a&&a.InvoiceFile?a.InvoiceFile:'';
   const renderField=c=>{
     const val=a?a[c]||'':'';
+    if(c==='AssetTag')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" class="mono" value="${esc(val)}" placeholder="${id?'':'(auto-generated if left blank, e.g. IT-1001)'}"></div>`;
     if(c==='Status')return`<div class="field2"><label>${c}</label><select id="f_${c}">${STATUSES.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
     if(c==='EmployeeID')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_EmployeeID"><option value="">-- select employee --</option></select></div>`;
     if(c==='Type')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Type"><option value="">-- select category --</option></select></div>`;
@@ -624,7 +633,7 @@ async function openModal(id,prefill){
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
   };
   const groups=[
-    {label:'IDENTITY',cols:['Name','Type','Serial','MacAddress','Location']},
+    {label:'IDENTITY',cols:['AssetTag','Name','Type','Serial','MacAddress','Location']},
     {label:'PURCHASE &amp; WARRANTY',cols:['PurchaseDate','WarrantyMonths','Price']},
     {label:'STATUS &amp; ASSIGNMENT',cols:['Status','ReceivedBy','NotesReceived','EmployeeID']},
   ];
@@ -1020,7 +1029,7 @@ async function printAsset(id){
   .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   .sig-block{margin-top:14px;padding:10px;border:1px dashed #999;border-radius:6px} .sig-title{font-weight:700;margin-bottom:6px;font-size:12px;letter-spacing:.5px} .muted{color:#999;font-style:italic}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
-  <body><div class="card"><div class="hd"><span>${(window.APP_NAME||'Sha The IT Guy')} — Asset record</span><span class="id">${esc(a._id||'')}</span></div>
+  <body><div class="card"><div class="hd"><span>${(window.APP_NAME||'IT-Vault')} — Asset record</span><span class="id">${esc(a._id||'')}</span></div>
   <div class="bd"><table>${rowsHtml}</table>${sig}</div></div>
   <script>setTimeout(()=>{window.print();},250);<\/script></body></html>`);
   w.document.close();
@@ -1155,6 +1164,7 @@ function showSignLink(url){
 
 /* ---------- users ---------- */
 let editingUser=null;
+let userModalFromList=false; // true only if userModal was opened from the legacy usersModal list (Profile -> Users)
 async function openUsers(){
   const r=await api('/api/users');if(!r)return; const us=await r.json();
   const tbody=document.getElementById('usersBody');
@@ -1166,6 +1176,7 @@ function closeUsersReturnProfile(){
 }
 function editUser(un){
   editingUser=un;
+  userModalFromList=document.getElementById('usersModal').classList.contains('show');
   document.getElementById('u_username').readOnly=true;
   document.getElementById('userModalTitle').textContent='Edit user';
   // minimal prefetch
@@ -1187,11 +1198,12 @@ async function saveUser(){
   }
   if(r&&r.ok){toast('✓ Saved');document.getElementById('userModal').classList.remove('show');
     if(window.loadCfgUsers)loadCfgUsers();
-    if(document.getElementById('usersModal').classList.contains('show'))openUsers();}
+    if(userModalFromList)openUsers();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
 async function addUser(){
   editingUser=null;
+  userModalFromList=document.getElementById('usersModal').classList.contains('show');
   document.getElementById('usersModal').classList.remove('show');
   document.getElementById('u_username').readOnly=false;
   document.getElementById('userModalTitle').textContent='Add user';
@@ -1231,8 +1243,8 @@ async function loadSettings(){
     document.getElementById('s_pass').value=s.smtp_pass||'';
     document.getElementById('uNew').checked=s.notify_new!==0;
     document.getElementById('uDel').checked=s.notify_delete!==0;
-    document.getElementById('b_name').value=s.app_name||'Sha The IT Guy';
-    document.getElementById('b_logoText').value=s.logo_text||'Sha';
+    document.getElementById('b_name').value=s.app_name||'IT-Vault';
+    document.getElementById('b_logoText').value=s.logo_text||'IT-Vault';
     if(document.getElementById('qr_size'))document.getElementById('qr_size').value=(s.qr_size||160).toString();
     if(document.getElementById('label_size'))document.getElementById('label_size').value=(s.label_size||'50x19');
     if(document.getElementById('label_logo'))document.getElementById('label_logo').checked=(s.label_logo!=0);
@@ -1298,7 +1310,7 @@ async function removeLogo(){
 }
 async function applyBranding(){
   const me=await fetch('/api/me').then(r=>r.json());
-  const nm=me.app_name||me.display||'Sha The IT Guy';
+  const nm=me.app_name||me.display||'IT-Vault';
   window.APP_NAME=nm;
   document.getElementById('sideName').textContent=nm;
   document.title=nm+' // Assets Manager';
@@ -1343,9 +1355,31 @@ document.getElementById('addBtn2').onclick=()=>openModal();
 const ni2=document.getElementById('navImport'); if(ni2) ni2.onclick=()=>document.getElementById('file').click();
 document.getElementById('importBtn2').onclick=()=>document.getElementById('file').click();
 document.getElementById('exportBtn2').onclick=doExport;
+document.getElementById('file').onchange=async()=>{
+  const inp=document.getElementById('file');
+  const file=inp.files[0]; if(!file)return;
+  const fd=new FormData(); fd.append('file',file);
+  const r=await api('/api/import',{method:'POST',body:fd});
+  inp.value='';
+  const j=r?await r.json().catch(()=>({})):{};
+  if(r&&r.ok){ toast(`✓ imported: ${j.added||0} added, ${j.updated||0} updated`); load(); loadDashboard(); }
+  else { toast('✕ '+(j.error||'import failed')); }
+};
+document.getElementById('ctImportBtn').onclick=()=>document.getElementById('ctFile').click();
+document.getElementById('ctExportBtn').onclick=()=>window.location='/api/contracts/export';
+document.getElementById('ctFile').onchange=async()=>{
+  const inp=document.getElementById('ctFile');
+  const file=inp.files[0]; if(!file)return;
+  const fd=new FormData(); fd.append('file',file);
+  const r=await api('/api/contracts/import',{method:'POST',body:fd});
+  inp.value='';
+  const j=r?await r.json().catch(()=>({})):{};
+  if(r&&r.ok){ toast(`✓ imported: ${j.added||0} added`); loadContracts(); }
+  else { toast('✕ '+(j.error||'import failed')); }
+};
 document.getElementById('addUserBtn').onclick=addUser;
 document.getElementById('userSave').onclick=saveUser;
-{const _uc=document.getElementById('userCancel'); if(_uc)_uc.onclick=()=>{document.getElementById('userModal').classList.remove('show');openUsers();};}
+{const _uc=document.getElementById('userCancel'); if(_uc)_uc.onclick=()=>{document.getElementById('userModal').classList.remove('show'); if(userModalFromList)openUsers();};}
 // usersModal close returns to Profile (since it's opened from Profile->Users tab)
 (function(){
   const um=document.getElementById('usersModal');
@@ -1358,7 +1392,6 @@ document.getElementById('accSave').onclick=saveProfile;
 document.getElementById('saveSettings').onclick=saveSettings;
 document.getElementById('pm_saveBrand').onclick=saveBrand;
 document.getElementById('removeLogoBtn').onclick=removeLogo;
-document.getElementById('openRefBtn').onclick=()=>showPage('page-catalog');
 document.getElementById('navAudit').onclick=openAudit;
 document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
@@ -1371,6 +1404,9 @@ document.getElementById('bkFile').onchange=doRestore;
 document.getElementById('trashRestoreSelBtn').onclick=restoreSelectedTrash;
 document.getElementById('trashDelSelBtn').onclick=deleteSelectedTrash;
 document.getElementById('trashEmptyBtn').onclick=emptyTrash;
+document.getElementById('ctTrashRestoreSelBtn').onclick=restoreSelectedContractsTrash;
+document.getElementById('ctTrashDelSelBtn').onclick=deleteSelectedContractsTrash;
+document.getElementById('ctTrashEmptyBtn').onclick=emptyContractsTrash;
 document.getElementById('addEmpBtn').onclick=()=>openEmpModal('');
 document.getElementById('importLdapBtn').onclick=openLdapImport;
 document.getElementById('empSearch').oninput=loadEmployees;
@@ -1401,9 +1437,12 @@ document.getElementById('sharePortalBtn').onclick=async()=>{
 };
 document.getElementById('tkModalClose').onclick=()=>document.getElementById('tkModal').classList.remove('show');
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
-document.getElementById('newContractBtn').onclick=newContract;
-document.getElementById('navLocations').onclick=()=>showPage('page-locations');
-document.getElementById('newLocBtn').onclick=addLoc;
+document.getElementById('newContractBtn').onclick=()=>openContractModal(null);
+document.getElementById('ctSearch').oninput=renderContracts;
+document.getElementById('ctTypeFilter').onchange=renderContracts;
+document.getElementById('ctGroupBy').onchange=(e)=>{ctGroupBy=e.target.value;renderContracts();};
+document.getElementById('ctPrintSelBtn').onclick=printContractsSelected;
+document.getElementById('ctDelSelBtn').onclick=deleteContractsSelected;
 document.getElementById('navCatalog').onclick=()=>showPage('page-catalog');
 document.getElementById('ldapCancel').onclick=()=>document.getElementById('ldapModal').classList.remove('show');
 document.getElementById('coSave').onclick=doCheckout;
@@ -1415,11 +1454,11 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-locations','page-catalog','page-usettings','page-scan','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
   const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-tickets':'navTickets',
-    'page-contracts':'navContracts','page-locations':'navLocations','page-catalog':'navCatalog',
+    'page-contracts':'navContracts','page-catalog':'navCatalog',
     'page-usettings':'navSettings','page-scan':'navScan',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
   const n=map[id]?document.getElementById(map[id]):null;
@@ -1428,10 +1467,9 @@ function showPage(id){
   if(id==='page-dashboard'){ loadDashboard(); }   // loadDashboard() chains loadDashboardPage() + applyDashLayout()
   else if(id==='page-assets'){ load(); loadStats(); }
   else if(id==='page-employees')loadDirectory();
-  else if(id==='page-trash')loadTrash();
+  else if(id==='page-trash'){loadTrash();loadContractsTrash();}
   else if(id==='page-tickets')loadTickets();
   else if(id==='page-contracts')loadContracts();
-  else if(id==='page-locations')loadLocations();
   else if(id==='page-catalog')loadCatalog();
   else if(id==='page-usettings'){loadUserSettings();loadSettings();loadCustom();}
   else if(id==='page-scan')openScan();
@@ -1485,10 +1523,61 @@ async function emptyTrash(){
   if(r&&r.ok){const j=await r.json();toast('🗑 TRASH EMPTIED ('+j.deleted+')');loadTrash();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
+async function loadContractsTrash(){
+  const r=await api('/api/contracts/trash'); if(!r)return; const list=await r.json();
+  const tb=document.getElementById('ctTrashBody');
+  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">DEL</button></div></td></tr>`).join('');
+  document.getElementById('ctTrashEmpty').style.display=list.length?'none':'block';
+  const chkAll=document.getElementById('ctTrashChkAll');
+  if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.ct-trash-chk').forEach(c=>c.checked=chkAll.checked); updateContractTrashSelBtns(); }; }
+  updateContractTrashSelBtns();
+}
+function updateContractTrashSelBtns(){
+  const n=document.querySelectorAll('.ct-trash-chk:checked').length;
+  const rb=document.getElementById('ctTrashRestoreSelBtn'), db=document.getElementById('ctTrashDelSelBtn');
+  if(rb) rb.disabled = n===0;
+  if(db) db.disabled = n===0;
+}
+window.restoreContract=async(id)=>{
+  const r=await api('/api/contracts/'+id+'/restore',{method:'POST'});
+  if(r&&r.ok){toast('♻ RESTORED');loadContractsTrash();loadContracts();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'restore failed'));}
+};
+window.permaDeleteContract=async(id)=>{
+  if(!confirm('Permanently delete this contract? This cannot be undone.'))return;
+  const r=await api('/api/contracts/'+id+'/permanent',{method:'DELETE'});
+  if(r&&r.ok){toast('🗑 DELETED PERMANENTLY');loadContractsTrash();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
+};
+async function restoreSelectedContractsTrash(){
+  const ids=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
+  if(!ids.length)return;
+  if(!confirm(`Restore ${ids.length} contract(s)?`))return;
+  await Promise.all(ids.map(id=>api('/api/contracts/'+id+'/restore',{method:'POST'})));
+  toast('♻ '+ids.length+' RESTORED');
+  loadContractsTrash(); loadContracts();
+}
+async function deleteSelectedContractsTrash(){
+  const ids=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
+  if(!ids.length)return;
+  if(!confirm(`Permanently delete ${ids.length} contract(s)? This cannot be undone.`))return;
+  await Promise.all(ids.map(id=>api('/api/contracts/'+id+'/permanent',{method:'DELETE'})));
+  toast('🗑 '+ids.length+' DELETED PERMANENTLY');
+  loadContractsTrash();
+}
+async function emptyContractsTrash(){
+  if(!confirm('Permanently delete ALL contracts in Trash? This cannot be undone.'))return;
+  const r=await api('/api/contracts/trash/empty',{method:'POST'});
+  if(r&&r.ok){const j=await r.json();toast('🗑 TRASH EMPTIED ('+j.deleted+')');loadContractsTrash();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
 
 // ---------- Product Catalog page: Categories / Manufacturers / Models ----------
 async function loadCatalog(){
-  await Promise.all([loadCatCategories(), loadCatManufacturers(), loadCatModels()]);
+  await Promise.all([loadCatCategories(), loadCatManufacturers(), loadCatModels(), loadCatContractTypes()]);
+}
+async function loadCatContractTypes(){
+  const r=await api('/api/contract-types'); const list=r?await r.json():[];
+  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>`<tr><td>${esc(t.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('contract-types','${t.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('ctTypeCatCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatCategories(){
   const r=await api('/api/categories'); const list=r?await r.json():[];
@@ -1523,6 +1612,11 @@ document.getElementById('mfrCatAdd').onclick=async()=>{
   const el=document.getElementById('mfrCatInput'); const n=el.value.trim(); if(!n)return;
   const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
   if(r&&r.ok){el.value='';loadCatManufacturers();}
+};
+document.getElementById('ctTypeCatAdd').onclick=async()=>{
+  const el=document.getElementById('ctTypeCatInput'); const n=el.value.trim(); if(!n)return;
+  const r=await api('/api/contract-types',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  if(r&&r.ok){el.value='';loadCatContractTypes();}
 };
 document.getElementById('modCatAdd').onclick=async()=>{
   const mid=document.getElementById('modMfrSelect').value;
@@ -1743,44 +1837,248 @@ async function saveNewTicket(){
 window.openNewTicket=openNewTicket;
 window.openTicket=openTicket;
 
-// ---------- Contracts (GLPI) ----------
+// ---------- Contracts / AMC / Licenses / Subscriptions ----------
+let contracts=[];
+let editingContractId=null;
+let ctGroupBy='';
+function assetLabelFor(id){
+  if(!id)return'';
+  const a=assets.find(x=>x._id===id);
+  return a?`${a.Name} (${a.Serial||'no S/N'}) — ID ${a.AssetTag||a._id}`:'';
+}
 async function loadContracts(){
-  const r=await api('/api/contracts'); if(!r)return; const list=await r.json();
+  const r=await api('/api/contracts'); if(!r)return; contracts=await r.json();
+  renderContractStats();
+  renderContracts();
+}
+function renderContracts(){
+  const q=(document.getElementById('ctSearch').value||'').trim().toLowerCase();
+  const tf=document.getElementById('ctTypeFilter').value;
+  let rows=contracts.filter(c=>{
+    if(tf && (c.type||'')!==tf) return false;
+    if(q){ const hay=[c.name,c.vendor,c.type,c.note].join(' ').toLowerCase(); if(!hay.includes(q)) return false; }
+    return true;
+  });
   const tb=document.getElementById('ctBody');
-  tb.innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.type||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td class="mono">${esc(c.asset_id||'—')}</td></tr>`).join('');
-  document.getElementById('ctEmpty').style.display=list.length?'none':'block';
+  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
+  if(ctGroupBy){
+    const groups={};
+    rows.forEach(c=>{const k=(c[ctGroupBy]||'—').toString();(groups[k]=groups[k]||[]).push(c);});
+    const keys=Object.keys(groups).sort((x,y)=>x.toLowerCase()<y.toLowerCase()?-1:1);
+    tb.innerHTML=keys.map(k=>{
+      const g=groups[k];
+      return `<tr class="group-head"><td colspan="10"><span class="gh-label">▣ ${esc(ctGroupBy==='type'?'Type':'Vendor')}: ${esc(k)}</span><span class="gh-count">${g.length} contract${g.length>1?'s':''}</span></td></tr>`+g.map(rowHtml).join('');
+    }).join('');
+  } else {
+    tb.innerHTML=rows.map(rowHtml).join('');
+  }
+  document.getElementById('ctCount').textContent=`${rows.length} of ${contracts.length} contracts`;
+  document.getElementById('ctEmpty').style.display=contracts.length?'none':'block';
+  const chkAll=document.getElementById('ctChkAll');
+  if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.ct-row-chk').forEach(c=>c.checked=chkAll.checked); updateContractSelBtns(); }; }
+  updateContractSelBtns();
 }
-async function newContract(){
-  const name=prompt('Contract name:'); if(!name)return;
-  const vendor=prompt('Vendor:')||''; const type=prompt('Type (Warranty/Support/Lease):')||'';
-  const start=prompt('Start date (YYYY-MM-DD):')||''; const end=prompt('End date (YYYY-MM-DD):')||'';
-  const cost=prompt('Cost:')||0; const asset=prompt('Linked Asset ID (optional):')||'';
-  const r=await api('/api/contracts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,vendor,type,start_date:start,end_date:end,cost:parseFloat(cost)||0,asset_id:asset})});
-  if(r&&r.ok){toast('✓ CONTRACT ADDED');loadContracts();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+function updateContractSelBtns(){
+  const n=document.querySelectorAll('.ct-row-chk:checked').length;
+  const dsb=document.getElementById('ctDelSelBtn');
+  if(dsb){ dsb.style.display = n>0 ? 'inline-flex' : 'none'; dsb.textContent = `Delete selected (${n})`; }
 }
-// ---------- Locations (GLPI) ----------
-async function loadLocations(){
-  const r=await api('/api/locations'); if(!r)return; const list=await r.json();
-  const ul=document.getElementById('locList');
-  ul.innerHTML=list.map(l=>`<li>${esc(l.name)} <button class="btn sm danger" onclick="delLoc(${l.id})">✕</button></li>`).join('')||'<li class="muted">No locations yet.</li>';
+async function deleteContractsSelected(){
+  const ids=[...document.querySelectorAll('.ct-row-chk:checked')].map(c=>parseInt(c.dataset.id));
+  if(!ids.length){toast('No contracts selected');return;}
+  if(!confirm(`Move ${ids.length} contract(s) to trash?`))return;
+  await Promise.all(ids.map(id=>api('/api/contracts',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})));
+  toast('🗑 '+ids.length+' MOVED TO TRASH');
+  loadContracts();
 }
-async function addLoc(){
-  const n=document.getElementById('locInput').value.trim(); if(!n)return;
-  const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
-  if(r&&r.ok){document.getElementById('locInput').value='';loadLocations();}
+function printContractsSelected(){
+  const ids=[...document.querySelectorAll('.ct-row-chk:checked')].map(c=>parseInt(c.dataset.id));
+  if(!ids.length){toast('No contracts selected');return;}
+  const list=contracts.filter(c=>ids.includes(c.id));
+  const w=window.open('','_blank');
+  if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
+  const rowsHtml=list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
+  w.document.write(`<!doctype html><html><head><title>Contracts</title>
+  <style>@page{margin:14mm}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
+  table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;text-align:left}th{background:#101622;color:#fff}
+  </style></head><body><h2>${(window.APP_NAME||'IT-Vault')} — Contracts</h2><div>${list.length} contract${list.length>1?'s':''} • generated ${new Date().toLocaleString()}</div>
+  <table><thead><tr><th>Name</th><th>Type</th><th>Vendor</th><th>Start</th><th>End</th><th>Cost</th><th>License Key</th><th>Linked Asset</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+  <script>window.onload=()=>{window.print();}<\/script>
+  </body></html>`);
+  w.document.close();
 }
-window.delLoc=async(id)=>{const r=await api('/api/locations',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});if(r&&r.ok)loadLocations();};
-
+function renderContractStats(){
+  const today=new Date();
+  const in30=new Date(today.getTime()+30*86400000);
+  const count=t=>contracts.filter(c=>(c.type||'')===t).length;
+  const expiring=contracts.filter(c=>{
+    if(!c.end_date)return false;
+    const d=new Date(c.end_date);
+    return d>=today && d<=in30;
+  }).length;
+  const setKV=(id,v)=>{ const el=document.getElementById(id); if(el)el.textContent=v; };
+  setKV('ctTotal',contracts.length);
+  setKV('ctAmc',count('AMC'));
+  setKV('ctLicense',count('License'));
+  setKV('ctSub',count('Subscription'));
+  setKV('ctExpiring',expiring);
+}
+// per-row "⋮" actions menu -- same shared #rowMenu component the Assets table uses
+function toggleContractRowMenu(e,id){
+  e.stopPropagation();
+  const menu=document.getElementById('rowMenu');
+  if(rowMenuAssetId===('ct'+id) && menu.style.display!=='none'){ menu.style.display='none'; rowMenuAssetId=null; return; }
+  rowMenuAssetId='ct'+id;
+  menu.innerHTML=`
+    <button onclick="closeRowMenu();openContractModal(${id})">EDIT</button>
+    <button onclick="closeRowMenu();printContract(${id})">PRINT</button>
+    <div class="row-menu-sep"></div>
+    <button class="danger" onclick="closeRowMenu();deleteContractRow(${id})">DELETE</button>`;
+  const btn=e.currentTarget.getBoundingClientRect();
+  menu.style.display='flex';
+  const menuRect=menu.getBoundingClientRect();
+  let left=btn.right-menuRect.width;
+  if(left<8) left=8;
+  let top=btn.bottom+4;
+  if(top+menuRect.height>window.innerHeight-8) top=btn.top-menuRect.height-4;
+  menu.style.left=left+'px'; menu.style.top=top+'px';
+}
+window.toggleContractRowMenu=toggleContractRowMenu;
+function printContract(id){
+  const c=contracts.find(x=>x.id===id); if(!c)return;
+  const w=window.open('','_blank');
+  if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
+  const rows=[
+    ['Name',c.name],['Type',c.type||'—'],['Vendor / Company',c.vendor||'—'],
+    ['Cost',fmtMoney(c.cost||0,CURRENCY)],['Start Date',c.start_date||'—'],['End / Renewal Date',c.end_date||'—'],
+    ['Linked Asset',assetLabelFor(c.asset_id)||'—']
+  ];
+  if(c.type==='License' && c.license_key) rows.push(['License Key',c.license_key]);
+  rows.push(['Note',c.note||'—']);
+  const rowsHtml=rows.map(([k,v])=>`<tr><td class="k">${esc(k)}</td><td class="v">${esc(v)}</td></tr>`).join('');
+  w.document.write(`<!doctype html><html><head><title>Contract — ${esc(c.name||'')}</title>
+  <style>@page{margin:14mm}body{font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:0;margin:0}
+  .card{border:1px solid #222;border-radius:8px;max-width:720px;margin:0 auto;overflow:hidden}
+  .hd{background:#101622;color:#fff;padding:12px 16px;font-family:'Segoe UI',Arial,sans-serif;font-weight:600;letter-spacing:.2px;display:flex;justify-content:space-between;align-items:center}
+  .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
+  @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
+  <body><div class="card"><div class="hd"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span><span class="id">#${c.id}</span></div>
+  <div class="bd"><table>${rowsHtml}</table></div></div>
+  <script>window.onload=()=>{window.print();}<\/script>
+  </body></html>`);
+  w.document.close();
+}
+window.printContract=printContract;
+async function deleteContractRow(id){
+  if(!confirm('Move this contract to trash?'))return;
+  const r=await api('/api/contracts',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
+  if(r&&r.ok){toast('🗑 MOVED TO TRASH');loadContracts();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+window.deleteContractRow=deleteContractRow;
+function populateContractAssetSelect(sel){
+  const selEl=document.getElementById('ct_asset');
+  selEl.innerHTML='<option value="">-- none --</option>'+assets.map(a=>`<option value="${a._id}" ${a._id===sel?'selected':''}>${esc(a.Name)} (${esc(a.Serial||'no S/N')}) — ID ${esc(a.AssetTag||a._id)}</option>`).join('');
+}
+async function populateContractEmployeeSelect(sel){
+  const selEl=document.getElementById('ct_employee'); if(!selEl)return;
+  const r=await api('/api/employees'); const list=r?await r.json():[];
+  selEl.innerHTML='<option value="">-- none --</option>'+list.map(e=>`<option value="${esc(e.EmployeeID)}" ${e.EmployeeID===sel?'selected':''}>${esc(e.EmployeeName||e.EmployeeID)}</option>`).join('');
+}
+async function populateContractLocationSelect(sel){
+  const selEl=document.getElementById('ct_location'); if(!selEl)return;
+  const r=await api('/api/locations'); const list=r?await r.json():[];
+  selEl.innerHTML='<option value="">-- none --</option>'+list.map(l=>`<option value="${esc(l.name)}" ${l.name===sel?'selected':''}>${esc(l.name)}</option>`).join('');
+}
+async function populateContractDepartmentSelect(sel){
+  const selEl=document.getElementById('ct_department'); if(!selEl)return;
+  const r=await api('/api/departments'); const list=r?await r.json():[];
+  selEl.innerHTML='<option value="">-- none --</option>'+list.map(d=>`<option value="${esc(d.name)}" ${d.name===sel?'selected':''}>${esc(d.name)}</option>`).join('');
+}
+async function loadContractTypeOptions(selType){
+  const sel=document.getElementById('ct_type'); if(!sel)return;
+  const r=await api('/api/contract-types'); const list=r?await r.json():[];
+  sel.innerHTML='<option value="">-- select type --</option>'+list.map(t=>`<option value="${esc(t.name)}" ${t.name===selType?'selected':''}>${esc(t.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
+  sel.onchange=async()=>{
+    if(sel.value==='__new'){
+      const v=prompt('New contract type:');
+      if(v&&v.trim()){
+        const r2=await api('/api/contract-types',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})});
+        if(r2&&r2.ok){await loadContractTypeOptions(v.trim());}
+      } else { sel.value=selType; }
+    }
+    toggleContractLicenseKeyField();
+  };
+  toggleContractLicenseKeyField();
+}
+function toggleContractLicenseKeyField(){
+  const sel=document.getElementById('ct_type'); const wrap=document.getElementById('ct_license_key_wrap');
+  if(!sel||!wrap)return;
+  wrap.style.display=sel.value==='License'?'':'none';
+}
+async function openContractModal(id){
+  editingContractId=id||null;
+  const c=id?(contracts.find(x=>x.id===id)||{}):{};
+  document.getElementById('contractModalTitle').textContent=id?'EDIT CONTRACT':'ADD CONTRACT';
+  document.getElementById('ctCurLabel').textContent=CURRENCY;
+  document.getElementById('ct_name').value=c.name||'';
+  document.getElementById('ct_vendor').value=c.vendor||'';
+  document.getElementById('ct_cost').value=c.cost||'';
+  document.getElementById('ct_start').value=c.start_date||'';
+  document.getElementById('ct_end').value=c.end_date||'';
+  document.getElementById('ct_license_key').value=c.license_key||'';
+  document.getElementById('ct_note').value=c.note||'';
+  populateContractAssetSelect(c.asset_id||'');
+  await Promise.all([
+    loadContractTypeOptions(c.type||'AMC'),
+    populateContractEmployeeSelect(c.employee_id||''),
+    populateContractLocationSelect(c.location||''),
+    populateContractDepartmentSelect(c.department||'')
+  ]);
+  document.getElementById('ctDelete').style.display=id?'':'none';
+  document.getElementById('contractModal').classList.add('show');
+}
+window.openContractModal=openContractModal;
+async function saveContract(){
+  const body={
+    name: document.getElementById('ct_name').value.trim(),
+    type: document.getElementById('ct_type').value,
+    vendor: document.getElementById('ct_vendor').value.trim(),
+    cost: parseFloat(document.getElementById('ct_cost').value)||0,
+    start_date: document.getElementById('ct_start').value,
+    end_date: document.getElementById('ct_end').value,
+    asset_id: document.getElementById('ct_asset').value||null,
+    employee_id: document.getElementById('ct_employee').value||'',
+    location: document.getElementById('ct_location').value||'',
+    department: document.getElementById('ct_department').value||'',
+    license_key: document.getElementById('ct_license_key').value.trim(),
+    note: document.getElementById('ct_note').value.trim()
+  };
+  if(!body.name){toast('✕ Name required');return;}
+  if(body.type==='__new'){toast('✕ Pick a contract type');return;}
+  const r=editingContractId
+    ? await api('/api/contracts',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,id:editingContractId})})
+    : await api('/api/contracts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r&&r.ok){toast('✓ CONTRACT SAVED');document.getElementById('contractModal').classList.remove('show');loadContracts();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+async function deleteContract(){
+  if(!editingContractId)return;
+  if(!confirm('Move this contract to trash?'))return;
+  const r=await api('/api/contracts',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:editingContractId})});
+  if(r&&r.ok){toast('🗑 MOVED TO TRASH');document.getElementById('contractModal').classList.remove('show');loadContracts();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+document.getElementById('ctCancel').onclick=()=>document.getElementById('contractModal').classList.remove('show');
+document.getElementById('ctSave').onclick=saveContract;
+document.getElementById('ctDelete').onclick=deleteContract;
 window.loadTickets=loadTickets;window.openNewTicket=openNewTicket;window.sendReply=sendReply;
-window.loadContracts=loadContracts;window.newContract=newContract;
-window.loadLocations=loadLocations;window.addLoc=addLoc;
+window.loadContracts=loadContracts;
 
 
 document.getElementById('navDirectory').onclick=()=>showPage('page-employees');
 document.getElementById('navTrash').onclick=()=>showPage('page-trash');
 document.getElementById('navTickets').onclick=()=>showPage('page-tickets');
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
-document.getElementById('navLocations').onclick=()=>showPage('page-locations');
 document.getElementById('logoutBtn').onclick=async()=>{ try{ await api('/api/logout',{method:'POST'}); }catch(e){} location.href='/'; };
 document.getElementById('navSettings').onclick=()=>showPage('page-usettings');
 document.getElementById('navBackup').onclick=()=>openBackup();
@@ -1859,7 +2157,6 @@ window.repairDashStructure=repairDashStructure;
     navScan: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navDirectory: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navContracts: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
-    navLocations: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navCatalog: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navBackup: me.role===ROLE_ADMIN
@@ -2271,8 +2568,79 @@ async function loadProfile(){
     if (r && r.ok){ toast('✓ PASSWORD UPDATED'); g('p_old').value = ''; g('p_new').value = ''; g('p_new2').value = ''; }
     else if (r){ const j = await r.json().catch(() => ({})); toast('✕ ' + (j.error || 'failed')); }
   };
+  load2faStatus();
 }
 window.loadProfile = loadProfile;
+
+/* ---------- two-factor auth (self-service, Settings > My Account) ---------- */
+async function load2faStatus(){
+  const g = id => document.getElementById(id);
+  if (!g('totpStatusText')) return;
+  const s = await api_json('/api/2fa/status');
+  if (!s) return;
+  g('totpStatusText').textContent = s.totp_enabled ? 'Enabled ✓' : 'Not enabled';
+  g('totpEnableBtn').style.display = s.totp_enabled ? 'none' : '';
+  g('totpDisableBtn').style.display = s.totp_enabled ? '' : 'none';
+  g('emailOtpStatusText').textContent = s.email_otp_enabled ? `Enabled ✓ (${esc(s.email)})` : (s.email ? 'Not enabled' : 'Not enabled — set an email above first');
+  g('emailOtpEnableBtn').style.display = s.email_otp_enabled ? 'none' : '';
+  g('emailOtpEnableBtn').disabled = !s.email || !s.smtp_configured;
+  g('emailOtpDisableBtn').style.display = s.email_otp_enabled ? '' : 'none';
+}
+{
+  const g = id => document.getElementById(id);
+  const totpEnableBtn = g('totpEnableBtn');
+  if (totpEnableBtn) totpEnableBtn.onclick = async () => {
+    const j = await api_json('/api/2fa/totp/setup', { method:'POST' });
+    if (!j || !j.secret){ toast('✕ Could not start setup'); return; }
+    g('totpQr').innerHTML = j.qr_svg;
+    g('totpSecretText').value = j.secret;
+    g('totpConfirmCode').value = '';
+    g('totpSetupMsg').textContent = '';
+    g('totpSetupBox').style.display = '';
+  };
+  const totpCancelBtn = g('totpCancelBtn');
+  if (totpCancelBtn) totpCancelBtn.onclick = () => { g('totpSetupBox').style.display = 'none'; };
+  const totpConfirmBtn = g('totpConfirmBtn');
+  if (totpConfirmBtn) totpConfirmBtn.onclick = async () => {
+    const code = g('totpConfirmCode').value.trim();
+    if (!code){ g('totpSetupMsg').textContent = 'Enter the code from your app.'; return; }
+    const r = await api('/api/2fa/totp/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code }) });
+    if (r && r.ok){ toast('✓ AUTHENTICATOR ENABLED'); g('totpSetupBox').style.display = 'none'; load2faStatus(); }
+    else if (r){ const d = await r.json().catch(()=>({})); g('totpSetupMsg').textContent = d.error || 'Invalid code'; }
+  };
+  const totpDisableBtn = g('totpDisableBtn');
+  if (totpDisableBtn) totpDisableBtn.onclick = async () => {
+    if (!confirm('Disable the authenticator app for your account?')) return;
+    const r = await api('/api/2fa/totp/disable', { method:'POST' });
+    if (r && r.ok){ toast('✓ DISABLED'); load2faStatus(); }
+  };
+  const emailOtpEnableBtn = g('emailOtpEnableBtn');
+  if (emailOtpEnableBtn) emailOtpEnableBtn.onclick = async () => {
+    const r = await api('/api/2fa/email-otp/enable', { method:'POST' });
+    const d = r ? await r.json().catch(()=>({})) : {};
+    if (r && r.ok){
+      g('emailOtpConfirmCode').value = '';
+      g('emailOtpSetupMsg').textContent = 'Code sent to ' + (d.sent_to || 'your email') + '.';
+      g('emailOtpSetupBox').style.display = '';
+    } else { toast('✕ ' + (d.error || 'failed')); }
+  };
+  const emailOtpCancelBtn = g('emailOtpCancelBtn');
+  if (emailOtpCancelBtn) emailOtpCancelBtn.onclick = () => { g('emailOtpSetupBox').style.display = 'none'; };
+  const emailOtpConfirmBtn = g('emailOtpConfirmBtn');
+  if (emailOtpConfirmBtn) emailOtpConfirmBtn.onclick = async () => {
+    const code = g('emailOtpConfirmCode').value.trim();
+    if (!code){ g('emailOtpSetupMsg').textContent = 'Enter the code we emailed you.'; return; }
+    const r = await api('/api/2fa/email-otp/confirm', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code }) });
+    if (r && r.ok){ toast('✓ EMAIL CODES ENABLED'); g('emailOtpSetupBox').style.display = 'none'; load2faStatus(); }
+    else if (r){ const d = await r.json().catch(()=>({})); g('emailOtpSetupMsg').textContent = d.error || 'Invalid code'; }
+  };
+  const emailOtpDisableBtn = g('emailOtpDisableBtn');
+  if (emailOtpDisableBtn) emailOtpDisableBtn.onclick = async () => {
+    if (!confirm('Disable email sign-in codes for your account?')) return;
+    const r = await api('/api/2fa/email-otp/disable', { method:'POST' });
+    if (r && r.ok){ toast('✓ DISABLED'); load2faStatus(); }
+  };
+}
 
 /* ---------- USER SETTINGS PAGE (system-wide) ---------- */
 async function loadUserSettings(){
@@ -2401,18 +2769,27 @@ async function loadUserSettings(){
       const r = await api('/api/users');
       if (!r) return;
       const list = await r.json();
+      const tfaLabel = u => { const m=[]; if(u.totp_enabled)m.push('Authenticator'); if(u.email_otp_enabled)m.push('Email'); return m.length?m.join(' + '):'—'; };
       body.innerHTML = (list || []).map(u => `<tr>`
         + `<td>${esc(u.username||'')}</td>`
         + `<td>${esc(ROLE_LABELS[u.role] || u.role || '')}</td>`
         + `<td>${esc(u.display||'')}</td>`
         + `<td>${esc(u.email||'')}</td>`
+        + `<td>${esc(tfaLabel(u))}</td>`
         + `<td class="row-actions"><button class="btn sm ghost" onclick="editUser('${esc(u.username)}')">Edit</button>`
+        + ((u.totp_enabled||u.email_otp_enabled)?`<button class="btn sm ghost" onclick="adminReset2fa('${esc(u.username)}')">Reset 2FA</button>`:'')
         + `<button class="btn sm danger" onclick="delUser('${esc(u.username)}')">Delete</button></td>`
         + `</tr>`).join('')
-        || '<tr><td colspan="5" class="empty">No system users yet.</td></tr>';
+        || '<tr><td colspan="6" class="empty">No system users yet.</td></tr>';
     } catch(e) {}
   };
   loadCfgUsers();
+  window.adminReset2fa = async function(un){
+    if (!confirm(`Reset 2FA for "${un}"? They will be able to sign in with just their password again.`)) return;
+    const r = await api(`/api/users/${encodeURIComponent(un)}/2fa/disable`, { method:'POST' });
+    if (r && r.ok){ toast('✓ 2FA RESET'); loadCfgUsers(); }
+    else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'failed')); }
+  };
   // SMTP test + save (Notifications section)
   const st = g('smtpTestBtn');
   if (st) st.onclick = async () => {

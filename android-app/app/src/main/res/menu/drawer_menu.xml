@@ -5,6 +5,7 @@
             <group android:checkableBehavior="single">
                 <item android:id="@+id/nav_dashboard" android:title="Dashboard" android:icon="@drawable/ic_dashboard" />
                 <item android:id="@+id/nav_assets" android:title="Assets" android:icon="@drawable/ic_assets" />
+                <item android:id="@+id/nav_contracts" android:title="Contracts" android:icon="@drawable/ic_doc" />
                 <item android:id="@+id/nav_tickets" android:title="Tickets" android:icon="@drawable/ic_ticket" />
             </group>
         </menu>
@@ -13,8 +14,6 @@
         <menu>
             <group android:checkableBehavior="single">
                 <item android:id="@+id/nav_directory" android:title="Directory" android:icon="@drawable/ic_people" />
-                <item android:id="@+id/nav_contracts" android:title="Contracts" android:icon="@drawable/ic_doc" />
-                <item android:id="@+id/nav_locations" android:title="Locations" android:icon="@drawable/ic_location" />
                 <item android:id="@+id/nav_catalog" android:title="Product Catalog" android:icon="@drawable/ic_catalog" />
                 <item android:id="@+id/nav_trash" android:title="Trash" android:icon="@drawable/ic_trash" />
                 <item android:id="@+id/nav_audit" android:title="Audit Log" android:icon="@drawable/ic_audit" />

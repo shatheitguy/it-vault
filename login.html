@@ -3,10 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>IT Guy - The Assets Manager — Sign in</title>
+<title>IT-Vault — Sign in</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260901pro">
+<link rel="stylesheet" href="/style.css?v=20260902a">
 <style>
 *{box-sizing:border-box}html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidden;
@@ -38,12 +38,24 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 <body>
 <div class="card"><div class="box" id="box">
   <img id="loginLogo" class="logoimg" src="/logo.png?t=1" alt="" style="display:none">
-  <div class="brand" id="brand" data-t="Sha The IT Guy">Sha The IT Guy</div>
+  <div class="brand" id="brand" data-t="IT-Vault">IT-Vault</div>
   <div class="sub" id="sub">Asset Management</div>
-  <div class="f"><label for="u">Username</label><input id="u" placeholder="Enter your username" autocomplete="username"></div>
-  <div class="f"><label for="p">Password</label><input id="p" type="password" placeholder="Enter your password" autocomplete="current-password"></div>
-  <label class="rem"><input type="checkbox" id="r"> Keep me signed in (5 min)</label>
-  <button class="btn" id="go">Sign in</button>
+  <div id="step1">
+    <div class="f"><label for="u">Username</label><input id="u" placeholder="Enter your username" autocomplete="username"></div>
+    <div class="f"><label for="p">Password</label><input id="p" type="password" placeholder="Enter your password" autocomplete="current-password"></div>
+    <label class="rem"><input type="checkbox" id="r"> Keep me signed in (5 min)</label>
+    <button class="btn" id="go">Sign in</button>
+  </div>
+  <div id="step2fa" style="display:none">
+    <div class="sub" id="tfaMsg" style="margin-bottom:18px">Enter the 6-digit code</div>
+    <div class="f"><label for="code2fa" id="tfaLabel">Verification code</label><input id="code2fa" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
+    <button class="btn" id="verify2fa">Verify</button>
+    <div id="tfaLinks" style="display:flex;justify-content:space-between;margin-top:14px;font-size:12.5px">
+      <a href="#" id="switchMethod" style="color:var(--muted);display:none">Use email code instead</a>
+      <a href="#" id="resendCode" style="color:var(--muted);display:none">Resend code</a>
+    </div>
+    <div style="margin-top:10px;text-align:center"><a href="#" id="backToLogin" style="color:var(--muted);font-size:12.5px">← Back to sign in</a></div>
+  </div>
   <div class="err" id="e"></div>
 </div></div>
 <div class="sess">Session timeout: 5 minutes</div>
@@ -109,7 +121,7 @@ if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListene
 (async()=>{
   try{
     const b=await (await fetch('/api/branding')).json();
-    const name=b.app_name||'Sha The IT Guy';
+    const name=b.app_name||'IT-Vault';
     document.title=name+' — Sign in';
     const brand=document.getElementById('brand');
     brand.textContent=name; brand.setAttribute('data-t',name);
@@ -120,28 +132,96 @@ if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListene
     window.__matrixOn = !!b.matrix_on && !document.body.classList.contains('light');
   }catch(e){ applyTheme('dark'); window.__matrixOn=true; }
 })();
+let tfaMethods=[]; let tfaActive='';
+function shakeBox(){ document.getElementById('box').classList.add('shake'); setTimeout(()=>document.getElementById('box').classList.remove('shake'),400); }
 async function login(){
-  const eEl=document.getElementById('e');
+  const eEl=document.getElementById('e'); eEl.textContent='';
   if(location.protocol==='file:'){
     eEl.textContent='Open this page at http://localhost:5000 — not the file directly.';
-    document.getElementById('box').classList.add('shake');
-    setTimeout(()=>document.getElementById('box').classList.remove('shake'),400);
+    shakeBox();
     return;
   }
   const u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
   try{
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({username:u,password:p,remember:document.getElementById('r').checked})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.need_2fa){
+      tfaMethods=d.methods||[]; tfaActive=tfaMethods[0];
+      showStep2fa();
+      return;
+    }
     if(r.ok){
       const me=await fetch('/api/me'); const j=await me.json();
       if(j.user){ window.location.replace('/'); }
       else{ eEl.textContent='Session could not be started. Please try again.'; }
     } else {
       let msg='Incorrect username or password.';
-      try{ const d=await r.json(); if(d.error) msg=d.error; }catch(e){}
+      if(d.error) msg=d.error;
       eEl.textContent=msg;
-      document.getElementById('box').classList.add('shake');
-      setTimeout(()=>document.getElementById('box').classList.remove('shake'),400);
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }
+}
+function showStep2fa(){
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2fa').style.display='';
+  document.getElementById('e').textContent='';
+  renderTfaStep();
+  document.getElementById('code2fa').value='';
+  document.getElementById('code2fa').focus();
+}
+function renderTfaStep(){
+  const isEmail=tfaActive==='email';
+  document.getElementById('tfaMsg').textContent=isEmail
+    ? 'We emailed a 6-digit code to your address'
+    : 'Enter the 6-digit code from your authenticator app';
+  document.getElementById('tfaLabel').textContent=isEmail?'Email code':'Authenticator code';
+  const sw=document.getElementById('switchMethod');
+  if(tfaMethods.length>1){
+    sw.style.display='';
+    sw.textContent=isEmail?'Use authenticator app instead':'Use email code instead';
+  } else { sw.style.display='none'; }
+  document.getElementById('resendCode').style.display=isEmail?'':'none';
+}
+document.getElementById('switchMethod').onclick=(e)=>{
+  e.preventDefault();
+  tfaActive=tfaActive==='email'?tfaMethods.find(m=>m!=='email'):'email';
+  renderTfaStep();
+  document.getElementById('code2fa').value='';
+};
+document.getElementById('resendCode').onclick=async(e)=>{
+  e.preventDefault();
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const r=await fetch('/api/2fa/resend-email-code',{method:'POST'});
+  const d=await r.json().catch(()=>({}));
+  eEl.style.color=''; eEl.textContent = r.ok ? 'Code resent.' : (d.error||'Could not resend code.');
+};
+document.getElementById('backToLogin').onclick=async(e)=>{
+  e.preventDefault();
+  await fetch('/api/logout',{method:'POST'});
+  document.getElementById('step2fa').style.display='none';
+  document.getElementById('step1').style.display='';
+  document.getElementById('e').textContent='';
+  document.getElementById('p').value='';
+};
+async function verify2fa(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const code=document.getElementById('code2fa').value.trim();
+  if(!code){ eEl.textContent='Enter the code.'; shakeBox(); return; }
+  try{
+    const r=await fetch('/api/2fa/verify-login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({method:tfaActive,code})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){
+      const me=await fetch('/api/me'); const j=await me.json();
+      if(j.user){ window.location.replace('/'); }
+      else{ eEl.textContent='Session could not be started. Please try again.'; }
+    } else {
+      eEl.textContent=d.error||'Invalid code.';
+      shakeBox();
     }
   }catch(err){
     eEl.textContent='Cannot reach the server. Is it running on port 5000?';
@@ -149,6 +229,8 @@ async function login(){
 }
 document.getElementById('go').onclick=login;
 document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+document.getElementById('verify2fa').onclick=verify2fa;
+document.getElementById('code2fa').addEventListener('keydown',e=>{if(e.key==='Enter')verify2fa();});
 </script>
 </body>
 </html>

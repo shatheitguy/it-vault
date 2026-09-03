@@ -3,3 +3,5 @@ pymysql
 openpyxl
 waitress
 ldap3
+pyotp
+qrcode
