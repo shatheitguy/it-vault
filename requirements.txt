@@ -1,5 +1,6 @@
 flask
 pymysql
+DBUtils
 openpyxl
 waitress
 ldap3
