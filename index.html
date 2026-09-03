@@ -492,11 +492,11 @@
             <div class="panel"><div class="secthead">LDAP / ACTIVE DIRECTORY</div>
               <p class="muted" style="margin:0 0 12px">Connect to your Domain Controller to sync employees. Use <b>Test</b> before saving.</p>
               <div class="grid2">
-                <div class="field2"><label>LDAP Server (host or ldap://host:389)</label><input id="ldap_server" placeholder="dc01.company.local or ldap://10.0.0.5:389"></div>
-                <div class="field2"><label>Domain</label><input id="ldap_domain" placeholder="company.local"></div>
-                <div class="field2"><label>Bind User</label><input id="ldap_bind_user" placeholder="company\\svc_ldap"></div>
+                <div class="field2"><label>LDAP Server (host or ldap://host:389)</label><input id="ldap_server" placeholder="192.168.0.0"></div>
+                <div class="field2"><label>Domain</label><input id="ldap_domain" placeholder="domain.local"></div>
+                <div class="field2"><label>Bind User</label><input id="ldap_bind_user" placeholder="domain\\user"></div>
                 <div class="field2"><label>Bind Password</label><input id="ldap_bind_pass" type="password" placeholder="leave blank to keep current"></div>
-                <div class="field2" style="grid-column:1/-1"><label>Base DN</label><input id="ldap_base_dn" placeholder="DC=company,DC=local"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Base DN</label><input id="ldap_base_dn" placeholder="DC=test,DC=local"></div>
               </div>
               <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="ldapTestBtn2" type="button">⚡ TEST LDAP</button><button class="btn ghost" id="ldapSyncBtn2" type="button">⇩ SYNC FROM AD NOW</button><span id="ldapTestMsg2" class="muted" style="margin-left:8px"></span></div>
             </div>
