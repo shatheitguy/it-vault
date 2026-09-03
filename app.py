@@ -1986,7 +1986,7 @@ def admin_disable_2fa(u):
     c.commit(); c.close()
     return jsonify({"ok": True})
 
-def _send_simple_email(to_email, subject, body):
+def _send_simple_email(to_email, subject, body, html_body=None):
     import smtplib
     from email.message import EmailMessage
     c = conn(); cur = c.cursor()
@@ -1999,12 +1999,51 @@ def _send_simple_email(to_email, subject, body):
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
         msg["From"] = s.get("smtp_from") or s.get("smtp_user")
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
+        if html_body:
+            # a plain-text link (what mail clients were rendering before)
+            # still auto-links, but reads like any other line of text -- an
+            # HTML alternative with a real styled button is what makes it
+            # look like an action to take, not just a URL to notice.
+            msg.add_alternative(html_body, subtype="html")
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
         return True
     except Exception as e:
         print("email send error:", e); return False
+
+def _button_email_html(app_name, heading, rows, button_label=None, button_url=None):
+    """Self-contained, inline-styled HTML for a transactional email: a card
+    with a details table and an optional call-to-action button. No external
+    stylesheet or CSS variables -- most mail clients (Outlook especially)
+    strip <style> blocks and don't support var(), so every color here is a
+    literal hex matching the app's actual Deep Dark / red-accent branding."""
+    rows_html = "".join(
+        f'<tr><td style="padding:7px 10px;color:#8a94a6;font-size:11px;font-weight:700;'
+        f'text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #1c2130;'
+        f'white-space:nowrap;">{k}</td>'
+        f'<td style="padding:7px 10px;color:#e6edf6;font-size:14px;font-weight:600;'
+        f'border-bottom:1px solid #1c2130;">{v}</td></tr>'
+        for k, v in rows)
+    button_html = ""
+    if button_url and button_label:
+        button_html = f"""
+  <div style="text-align:center;margin:24px 0 8px;">
+    <a href="{button_url}" style="display:inline-block;padding:13px 32px;background:#ff3b30;
+       color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;border-radius:8px;
+       letter-spacing:.3px;">{button_label}</a>
+  </div>
+  <div style="text-align:center;margin-top:10px;">
+    <a href="{button_url}" style="color:#8a94a6;font-size:11px;word-break:break-all;">{button_url}</a>
+  </div>"""
+    return f"""<!doctype html><html><body style="margin:0;padding:26px 14px;background:#05060a;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;background:#0c0f18;border:1px solid #1c2130;border-radius:12px;padding:24px;">
+    <div style="font-size:14px;font-weight:800;letter-spacing:.6px;color:#ff3b30;text-transform:uppercase;margin-bottom:16px;">{app_name}</div>
+    <div style="font-size:16px;color:#e6edf6;margin-bottom:16px;">{heading}</div>
+    <table style="width:100%;border-collapse:collapse;">{rows_html}</table>
+    {button_html}
+  </div>
+</body></html>"""
 
 # ---------- profile (self) ----------
 @app.route("/api/profile", methods=["GET", "PUT"])
@@ -2968,6 +3007,7 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
             f"Name: {asset.get('Name','')}\n"
             f"Serial Number: {asset.get('Serial') or '—'}\n"
             f"Status: {asset.get('Status','')}\n")
+    sign_url = ""
     aid = asset.get("_id")
     if aid:
         try:
@@ -2976,7 +3016,12 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
             body += f"\nPlease review and sign the acknowledgement for this asset:\n{sign_url}\n"
         except Exception as e:
             print("sign link build error:", e)
-    return _send_simple_email(to, f"Asset {verb}: {asset.get('Name','')}", body)
+    html_body = _button_email_html(
+        bn, f"An asset has been <b>{verb}</b>.",
+        [("Asset ID", tag), ("Name", asset.get("Name", "")),
+         ("Serial Number", asset.get("Serial") or "—"), ("Status", asset.get("Status", ""))],
+        button_label="Review &amp; Sign Acknowledgement" if sign_url else None, button_url=sign_url or None)
+    return _send_simple_email(to, f"Asset {verb}: {asset.get('Name','')}", body, html_body=html_body)
 
 def notify_asset_status_changed(asset, old_status, new_status):
     """Emails the assigned employee, whoever requested it, and every
