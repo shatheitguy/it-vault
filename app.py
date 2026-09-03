@@ -44,7 +44,35 @@ def save_db_config(h, p, n, u, pw):
             json.dump({"db_host": h, "db_port": int(p), "db_name": n, "db_user": u, "db_pass": pw}, f, indent=2)
     except Exception:
         pass
-SECRET = os.environ.get("ITGUY_SECRET", "itguy-local-secret-change-me")
+SECRET_KEY_PATH = os.path.join(BASE, ".secret_key")
+def _load_or_create_secret():
+    """Flask signs session cookies with this. It must never be a hardcoded,
+    guessable default -- anyone who knows it can forge an admin session
+    without a password. Prefer ITGUY_SECRET; otherwise generate one and
+    persist it locally so it survives restarts but never lands in git."""
+    env_secret = os.environ.get("ITGUY_SECRET")
+    if env_secret:
+        return env_secret
+    try:
+        if os.path.exists(SECRET_KEY_PATH):
+            with open(SECRET_KEY_PATH) as f:
+                v = f.read().strip()
+                if v:
+                    return v
+    except Exception:
+        pass
+    v = secrets.token_hex(32)
+    try:
+        with open(SECRET_KEY_PATH, "w") as f:
+            f.write(v)
+        try:
+            os.chmod(SECRET_KEY_PATH, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return v
+SECRET = _load_or_create_secret()
 ADMIN_USER = os.environ.get("ITGUY_ADMIN", "admin")
 ADMIN_PASS = os.environ.get("ITGUY_ADMIN_PASS", "admin123")
 
@@ -75,6 +103,8 @@ ROLES = [ROLE_ADMIN, ROLE_EDIT, ROLE_VIEW]
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
 app.permanent_session_lifetime = timedelta(minutes=5)
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 # UniFi Controller integration -- cached device/client snapshot (see _unifi_refresh)
 _unifi_cache = {"ts": 0, "devices": [], "clients": [], "error": None}
@@ -946,6 +976,19 @@ def list_assets():
     cur.execute(sql, params); rows = cur.fetchall(); c.close()
     return jsonify([row_to_dict(r) for r in rows])
 
+def _next_asset_tag(cur):
+    cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
+    n = (cur.fetchone() or {}).get("n") or 1000
+    return f"IT-{n + 1}"
+
+@app.route("/api/assets/next-tag")
+@auth_required()
+def next_asset_tag():
+    c = conn(); cur = c.cursor()
+    tag = _next_asset_tag(cur)
+    c.close()
+    return jsonify({"tag": tag})
+
 @app.route("/api/assets", methods=["POST"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def create_asset():
@@ -960,9 +1003,7 @@ def create_asset():
             return jsonify({"error": f"Serial '{serial}' is already used by asset '{dup.get('Name') or dup['_id']}' -- no duplicate added"}), 409
     a_id = uuid.uuid4().hex
     if not (data.get("AssetTag") or "").strip():
-        cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
-        n = (cur.fetchone() or {}).get("n") or 1000
-        data["AssetTag"] = f"IT-{n + 1}"
+        data["AssetTag"] = _next_asset_tag(cur)
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 2))
@@ -1898,18 +1939,23 @@ def settings():
         return jsonify({"ok": True})
     cur.execute("SELECT * FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
     s = s or {}
+    # secrets (LDAP bind pw, UniFi pw, DB pw) never round-trip to the browser --
+    # the frontend only ever writes a NEW value for these, never reads the old
+    # one back, so we just tell it whether one's already on file.
     return jsonify({k: s.get(k) for k in ["theme","smtp_host","smtp_port","smtp_user","smtp_from",
                                           "notify_new","notify_delete","app_name","logo_text","matrix_on",
-                                          "ldap_server","ldap_domain","ldap_bind_user","ldap_bind_pass","ldap_base_dn",
+                                          "ldap_server","ldap_domain","ldap_bind_user","ldap_base_dn",
                                           "qr_size","qr_fields","label_size","label_logo",
                                           "theme_preset","bg_type","bg","comp_bg","radius","font","accent","accent2",
                                           "language","currency","region","portal_token",
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
                                           "auto_assign_roundrobin","notify_on_create","notify_on_resolve","notify_on_reply",
-                                          "unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user","unifi_pass",
+                                          "unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user",
                                           "unifi_is_os","unifi_verify_ssl"]} | {
-                "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME,
-                "db_user": DB_USER, "db_pass": DB_PASS})
+                "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME, "db_user": DB_USER,
+                "ldap_bind_pass_set": bool(s.get("ldap_bind_pass")),
+                "unifi_pass_set": bool(s.get("unifi_pass")),
+                "db_pass_set": bool(DB_PASS)})
 
 # ---------- contracts / locations (GLPI-style) ----------
 @app.route("/api/contracts", methods=["GET","POST","PUT","DELETE"])

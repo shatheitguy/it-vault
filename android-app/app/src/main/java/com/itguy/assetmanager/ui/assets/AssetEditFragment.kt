@@ -105,6 +105,7 @@ class AssetEditFragment : Fragment() {
                 current = if (assetId != null) {
                     api.getAsset(assetId!!).body() ?: Asset()
                 } else Asset(
+                    AssetTag = api.nextAssetTag().body()?.tag.orEmpty(),
                     Name = arguments?.getString("prefillName").orEmpty(),
                     MacAddress = arguments?.getString("prefillMac").orEmpty(),
                     Type = arguments?.getString("prefillType").orEmpty(),

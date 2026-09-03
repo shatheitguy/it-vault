@@ -53,6 +53,19 @@
                 android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>
 
+        <TextView
+            android:id="@+id/offlineBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginHorizontal="12dp"
+            android:layout_marginBottom="8dp"
+            android:background="@color/surface"
+            android:padding="8dp"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:visibility="gone" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/assetsRecycler"
             android:layout_width="match_parent"

@@ -7,11 +7,22 @@
     android:background="@color/bg">
 
     <LinearLayout
+        android:id="@+id/loginRoot"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:gravity="center"
-        android:padding="32dp">
+        android:padding="32dp"
+        android:alpha="0">
+
+        <ImageView
+            android:id="@+id/loginLogo"
+            android:layout_width="72dp"
+            android:layout_height="72dp"
+            android:layout_marginBottom="14dp"
+            android:scaleType="fitCenter"
+            android:src="@mipmap/ic_launcher"
+            android:contentDescription="@string/app_name" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -40,14 +51,16 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:hint="@string/server_address_label"
+                app:helperTextEnabled="true"
+                app:helperText="@string/server_address_placeholder"
+                app:helperTextTextColor="@color/muted"
                 style="@style/DarkInputLayout">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/serverInput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:inputType="textUri"
-                    android:textColor="@color/text"
-                    android:hint="@string/server_address_placeholder" />
+                    android:textColor="@color/text" />
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.textfield.TextInputLayout

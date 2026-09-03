@@ -13,26 +13,40 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
   transition:background .25s,color .25s;-webkit-font-smoothing:antialiased}
 .card{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:24px}
 .box{position:relative;width:min(400px,100%);padding:40px 36px;border-radius:var(--radius);
-  background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow)}
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);
+  opacity:0;transform:translateY(16px) scale(.98);animation:boxIn .55s cubic-bezier(.16,1,.3,1) .05s forwards}
 .box{padding-bottom:32px}
-.logoimg{display:block;max-height:44px;max-width:190px;width:auto;height:auto;object-fit:contain;margin:0 auto 16px}
-.brand{font-weight:650;font-size:26px;letter-spacing:-.02em;text-align:center;color:var(--txt);margin:0 0 5px}
-.sub{text-align:center;color:var(--muted);font-size:13.5px;margin-bottom:30px}
-.f{margin-bottom:13px}
+@keyframes boxIn{to{opacity:1;transform:translateY(0) scale(1)}}
+@media (prefers-reduced-motion: reduce){.box{animation:none;opacity:1;transform:none}}
+.logoimg{display:block;max-height:44px;max-width:190px;width:auto;height:auto;object-fit:contain;margin:0 auto 16px;
+  opacity:0;animation:logoIn .5s ease .15s forwards}
+@keyframes logoIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.brand{font-weight:650;font-size:26px;letter-spacing:-.02em;text-align:center;color:var(--txt);margin:0 0 5px;
+  opacity:0;animation:fadeUp .5s ease .18s forwards}
+.sub{text-align:center;color:var(--muted);font-size:13.5px;margin-bottom:30px;
+  opacity:0;animation:fadeUp .5s ease .24s forwards}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.f{margin-bottom:13px;opacity:0;animation:fadeUp .45s ease .3s forwards}
+.f:nth-of-type(2){animation-delay:.36s}
 .f label{display:block;font-size:12.5px;font-weight:500;color:var(--muted);margin-bottom:6px}
 .f input{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);
-  padding:11px 13px;border-radius:8px;font-family:var(--font);font-size:14px;outline:none;transition:.15s}
+  padding:11px 13px;border-radius:8px;font-family:var(--font);font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}
 .f input::placeholder{color:var(--muted2)}
 .f input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .btn{width:100%;margin-top:20px;padding:12px;border:none;border-radius:8px;cursor:pointer;
-  font-family:var(--font);font-weight:600;font-size:14px;color:#04121f;background:var(--accent);transition:.15s}
-.btn:hover{filter:brightness(1.08)}
-.btn:active{transform:translateY(1px)}
+  font-family:var(--font);font-weight:600;font-size:14px;color:#04121f;background:var(--accent);
+  transition:filter .15s,transform .15s,box-shadow .15s}
+.btn:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 18px var(--accent-soft)}
+.btn:active{transform:translateY(1px);box-shadow:none}
 .rem{display:flex;align-items:center;gap:9px;margin-top:16px;color:var(--muted);font-size:13px;cursor:pointer}
 .rem input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;margin:0}
 .err{color:var(--red);font-size:13px;text-align:center;min-height:0;margin-top:14px;line-height:1.4}
 .shake{animation:sh .4s}@keyframes sh{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-5px)}}
 .sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px}
+#step1,#step2fa{animation:fadeUp .35s ease}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#04121f;
+  border-radius:50%;animation:spin .6s linear infinite;vertical-align:-3px;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -134,6 +148,10 @@ if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListene
 })();
 let tfaMethods=[]; let tfaActive='';
 function shakeBox(){ document.getElementById('box').classList.add('shake'); setTimeout(()=>document.getElementById('box').classList.remove('shake'),400); }
+function setBtnBusy(btn,busy,busyText){
+  if(busy){ btn.dataset.label=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'+busyText; }
+  else{ btn.disabled=false; btn.textContent=btn.dataset.label||btn.textContent; }
+}
 async function login(){
   const eEl=document.getElementById('e'); eEl.textContent='';
   if(location.protocol==='file:'){
@@ -142,6 +160,8 @@ async function login(){
     return;
   }
   const u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
+  const goBtn=document.getElementById('go');
+  setBtnBusy(goBtn,true,'Signing in…');
   try{
     const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({username:u,password:p,remember:document.getElementById('r').checked})});
@@ -153,7 +173,7 @@ async function login(){
     }
     if(r.ok){
       const me=await fetch('/api/me'); const j=await me.json();
-      if(j.user){ window.location.replace('/'); }
+      if(j.user){ window.location.replace('/'); return; }
       else{ eEl.textContent='Session could not be started. Please try again.'; }
     } else {
       let msg='Incorrect username or password.';
@@ -163,6 +183,8 @@ async function login(){
     }
   }catch(err){
     eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(goBtn,false);
   }
 }
 function showStep2fa(){
@@ -211,13 +233,15 @@ async function verify2fa(){
   const eEl=document.getElementById('e'); eEl.textContent='';
   const code=document.getElementById('code2fa').value.trim();
   if(!code){ eEl.textContent='Enter the code.'; shakeBox(); return; }
+  const vBtn=document.getElementById('verify2fa');
+  setBtnBusy(vBtn,true,'Verifying…');
   try{
     const r=await fetch('/api/2fa/verify-login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({method:tfaActive,code})});
     const d=await r.json().catch(()=>({}));
     if(r.ok && d.ok){
       const me=await fetch('/api/me'); const j=await me.json();
-      if(j.user){ window.location.replace('/'); }
+      if(j.user){ window.location.replace('/'); return; }
       else{ eEl.textContent='Session could not be started. Please try again.'; }
     } else {
       eEl.textContent=d.error||'Invalid code.';
@@ -225,6 +249,8 @@ async function verify2fa(){
     }
   }catch(err){
     eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(vBtn,false);
   }
 }
 document.getElementById('go').onclick=login;

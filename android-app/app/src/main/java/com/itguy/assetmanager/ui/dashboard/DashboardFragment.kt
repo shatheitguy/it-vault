@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.NetworkUtils
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.databinding.FragmentDashboardBinding
 import com.itguy.assetmanager.ui.MainActivity
@@ -42,13 +43,21 @@ class DashboardFragment : Fragment(), Refreshable {
     override fun refresh() {
         val bb = _b ?: return
         bb.dashProgress.visibility = View.VISIBLE
+        bb.offlineBanner.visibility = View.GONE
         lifecycleScope.launch {
             try {
-                var d = try {
+                var d = if (!NetworkUtils.isOnline(requireContext())) null else try {
                     val resp = ApiClient.api().dashboard()
                     resp.body()?.also { if (resp.isSuccessful) OfflineCache.saveDashboard(it) }
                 } catch (e: Exception) { null }
-                if (d == null) d = OfflineCache.loadDashboard()
+                if (d == null) {
+                    d = OfflineCache.loadDashboard()
+                    if (d != null && _b != null) {
+                        val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("dashboard"))
+                        b.offlineBanner.text = "📡 Offline — showing cached data from $age"
+                        b.offlineBanner.visibility = View.VISIBLE
+                    }
+                }
                 if (_b != null && d != null) {
                     b.statTotal.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.total.toString()
                     b.statOut.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.checked_out.toString()

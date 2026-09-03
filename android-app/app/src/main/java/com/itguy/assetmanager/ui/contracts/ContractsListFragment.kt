@@ -11,6 +11,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.NetworkUtils
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.model.Contract
 import com.itguy.assetmanager.databinding.FragmentContractsListBinding
@@ -61,6 +62,11 @@ class ContractsListFragment : Fragment(), Refreshable {
 
     private fun load() {
         lifecycleScope.launch {
+            b.offlineBanner.visibility = View.GONE
+            if (!NetworkUtils.isOnline(requireContext())) {
+                showFromCache(null)
+                return@launch
+            }
             try {
                 all = ApiClient.api().contracts().body().orEmpty()
                 OfflineCache.saveContracts(all)
@@ -74,16 +80,24 @@ class ContractsListFragment : Fragment(), Refreshable {
                 if (_b != null) { render(b.searchInput.text?.toString().orEmpty()); renderStats() }
             } catch (e: Exception) {
                 if (_b == null) return@launch
-                val cached = OfflineCache.loadContracts()
-                if (cached != null) {
-                    all = cached
-                    render(b.searchInput.text?.toString().orEmpty())
-                    renderStats()
-                    b.emptyText.text = "Offline — showing cached data"
-                } else {
-                    b.emptyText.text = "Could not load contracts: ${e.message}"; b.emptyText.visibility = View.VISIBLE
-                }
+                showFromCache(e)
             }
+        }
+    }
+
+    private fun showFromCache(error: Exception?) {
+        if (_b == null) return
+        val cached = OfflineCache.loadContracts()
+        if (cached != null) {
+            all = cached
+            render(b.searchInput.text?.toString().orEmpty())
+            renderStats()
+            val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("contracts"))
+            b.offlineBanner.text = "📡 Offline — showing cached data from $age"
+            b.offlineBanner.visibility = View.VISIBLE
+        } else {
+            b.emptyText.text = if (error != null) "Could not load contracts: ${error.message}" else "No connection and nothing cached yet"
+            b.emptyText.visibility = View.VISIBLE
         }
     }
 
