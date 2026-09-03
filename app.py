@@ -1180,6 +1180,10 @@ def update_asset(a_id):
     emp_changed = new_emp and new_emp != (old.get("EmployeeID") or "").strip()
     if new_emp and (emp_changed or became_checked_out):
         notify_person_asset_assigned(new_emp, {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
+    try:
+        notify_asset_status_changed({**data, "_id": a_id}, old.get("Status"), data.get("Status"))
+    except Exception as e:
+        print("asset status-change notify error:", e)
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>", methods=["DELETE"])
@@ -2779,7 +2783,9 @@ def _lookup_person_email(identifier):
 
 def notify_person_asset_assigned(employee_id, asset, checked_out=False):
     """Emails the specific person an asset is assigned to (not the general
-    staff broadcast) -- only Asset ID + Serial, never MAC, per policy."""
+    staff broadcast) -- only Asset ID + Serial, never MAC, per policy. Includes
+    a signature/acknowledgement link so they can sign for it directly from
+    the email, without an admin having to separately generate and send one."""
     to = _lookup_person_email(employee_id)
     if not to:
         return False
@@ -2791,7 +2797,46 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
             f"Name: {asset.get('Name','')}\n"
             f"Serial Number: {asset.get('Serial') or '—'}\n"
             f"Status: {asset.get('Status','')}\n")
+    aid = asset.get("_id")
+    if aid:
+        try:
+            tk = _sign_token({"asset_id": aid, "name": asset.get("Name", "")}, exp_hours=168)
+            sign_url = f"{request.host_url}sign?token={quote(tk)}"
+            body += f"\nPlease review and sign the acknowledgement for this asset:\n{sign_url}\n"
+        except Exception as e:
+            print("sign link build error:", e)
     return _send_simple_email(to, f"Asset {verb}: {asset.get('Name','')}", body)
+
+def notify_asset_status_changed(asset, old_status, new_status):
+    """Emails the assigned employee, whoever requested it, and every
+    admin/staff account whenever an asset's Status changes -- e.g.
+    Available -> Under-Maintenance or Checked-Out -> Retired, not just
+    checkout/checkin."""
+    if not new_status or new_status == old_status:
+        return
+    tag = asset.get("AssetTag") or asset.get("_id", "")
+    subj = f"Asset status changed: {asset.get('Name','')}"
+    body = (f"'{asset.get('Name','')}' (Asset ID: {tag}) status changed from "
+            f"{old_status or '—'} to {new_status}.\n\n"
+            f"Asset ID: {tag}\n"
+            f"Serial Number: {asset.get('Serial') or '—'}\n")
+    recipients = set()
+    emp_email = _lookup_person_email(asset.get("EmployeeID") or "")
+    if emp_email:
+        _send_simple_email(emp_email, subj, body); recipients.add(emp_email.lower())
+    req_email = _lookup_person_email(asset.get("RequestedBy") or "")
+    if req_email and req_email.lower() not in recipients:
+        _send_simple_email(req_email, subj, body); recipients.add(req_email.lower())
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT email FROM Users WHERE email<>''")
+        admin_emails = [r["email"] for r in cur.fetchall()]
+        c.close()
+    except Exception:
+        admin_emails = []
+    for e in admin_emails:
+        if e and e.lower() not in recipients:
+            _send_simple_email(e, subj, body); recipients.add(e.lower())
 
 def notify_person_contract_assigned(employee_id, contract):
     to = _lookup_person_email(employee_id)
@@ -2954,15 +2999,21 @@ def checkout_asset(a_id):
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); full_asset = ccur.fetchone(); cc.close()
     except Exception:
         full_asset = None
-    notify_person_asset_assigned(user, full_asset or {"Name": a["Name"], "_id": a_id}, checked_out=True)
+    full_asset = full_asset or {"Name": a["Name"], "_id": a_id}
+    notify_person_asset_assigned(user, full_asset, checked_out=True)
+    try:
+        notify_asset_status_changed(full_asset, None, "Checked-Out")
+    except Exception as e:
+        print("asset status-change notify error:", e)
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/checkin", methods=["POST"])
 @auth_required(module="assets", level="write")
 def checkin_asset(a_id):
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
+    cur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
+    old_status = a.get("Status")
     cur.execute("SELECT id FROM Checkouts WHERE asset_id=%s AND checkin_date IS NULL ORDER BY id DESC LIMIT 1", [a_id])
     co = cur.fetchone()
     if co:
@@ -2970,6 +3021,10 @@ def checkin_asset(a_id):
     cur.execute("UPDATE Assets SET Status='Available', ReceivedBy='' WHERE _id=%s", [a_id])
     c.commit(); c.close()
     audit(session.get("user"), "CHECKIN", a_id, f"{a['Name']} returned")
+    try:
+        notify_asset_status_changed(a, old_status, "Available")
+    except Exception as e:
+        print("asset status-change notify error:", e)
     return jsonify({"ok": True})
 
 # ---------- ITAM: maintenance ----------
@@ -2987,14 +3042,22 @@ def maintenance(a_id):
                     (a_id, (d.get("date") or nowstr()), d.get("mtype", "Repair"),
                      float(d.get("cost") or 0), (d.get("note") or "").strip(), session.get("user")))
         # logging a maintenance record puts the asset under maintenance
-        cur.execute("SELECT Status FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
+        cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
         arow = cur.fetchone()
+        status_changed = False
+        old_status = arow["Status"] if arow else None
         if arow and arow["Status"] != "Under-Maintenance":
             cur.execute("UPDATE Assets SET Status=%s WHERE _id=%s", ["Under-Maintenance", a_id])
             cur.execute("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) VALUES (%s, NOW(), %s, %s, %s, %s)",
                         (a_id, session.get("user", "?"), "Status", arow["Status"], "Under-Maintenance"))
+            status_changed = True
         c.commit(); c.close()
         audit(session.get("user"), "MAINTENANCE", a_id, f"{(d.get('mtype') or 'Repair')} cost {d.get('cost') or 0}")
+        if status_changed and arow:
+            try:
+                notify_asset_status_changed(arow, old_status, "Under-Maintenance")
+            except Exception as e:
+                print("asset status-change notify error:", e)
         return jsonify({"ok": True})
     if request.method == "DELETE":
         mid = request.args.get("id")

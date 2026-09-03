@@ -701,18 +701,31 @@ async function openModal(id,prefill){
   document.getElementById('maintWrap').style.display=id?'':'none';
   if(id){ loadMaintInline(id); }
   document.getElementById('modal').classList.add('show');
-  if(!id && !(prefill&&prefill.AssetTag)){
-    const tagEl=document.getElementById('f_AssetTag');
-    if(tagEl){ const r=await api('/api/assets/next-tag'); if(r&&r.ok){ const j=await r.json(); tagEl.value=j.tag||''; } }
+  // The Employee/Manufacturer/Model/Category/Location dropdowns below are
+  // populated asynchronously AFTER the modal is already visible and
+  // clickable -- without this guard, hitting COMMIT during that brief
+  // window (e.g. right after the modal auto-reopens from adding/deleting a
+  // maintenance record) would submit those fields still on their empty
+  // placeholder option, silently wiping the real Employee Name/Manufacturer/
+  // etc. that was set before.
+  const saveBtn=document.getElementById('saveBtn');
+  if(saveBtn)saveBtn.disabled=true;
+  try{
+    if(!id && !(prefill&&prefill.AssetTag)){
+      const tagEl=document.getElementById('f_AssetTag');
+      if(tagEl){ const r=await api('/api/assets/next-tag'); if(r&&r.ok){ const j=await r.json(); tagEl.value=j.tag||''; } }
+    }
+    if(document.getElementById('f_EmployeeID')){
+      await fetchEmployees(a?a.EmployeeID||'':'', a?a.RequestedBy||'':'');
+    }
+    // populate Manufacturer / Model / Category dropdowns from reference tables
+    await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');
+    await loadCategoryOptions(a?a.Type||'':'');
+    await loadLocationOptions(a?a.Location||'':'');
+    if(id)loadAssetHistory(id);
+  }finally{
+    if(saveBtn)saveBtn.disabled=false;
   }
-  if(document.getElementById('f_EmployeeID')){
-    await fetchEmployees(a?a.EmployeeID||'':'', a?a.RequestedBy||'':'');
-  }
-  // populate Manufacturer / Model / Category dropdowns from reference tables
-  await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');
-  await loadCategoryOptions(a?a.Type||'':'');
-  await loadLocationOptions(a?a.Location||'':'');
-  if(id)loadAssetHistory(id);
 }
 
 // populate Manufacturer + Model <select> dropdowns from backend reference data
@@ -1002,7 +1015,7 @@ async function fetchEmployees(selEmpId,selReqId){
 async function delInvoice(id){
   if(!confirm('Remove invoice file?'))return;
   const r=await api('/api/assets/'+id+'/invoice',{method:'DELETE'});
-  if(r&&r.ok){toast('✕ INVOICE REMOVED');openModal(id);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✕ INVOICE REMOVED');await openModal(id);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
 }
 async function saveModal(){
   const row={};COLUMNS.forEach(c=>{const el=document.getElementById('f_'+c);row[c]=el?el.value.trim():'';});
@@ -1082,12 +1095,12 @@ async function addMaintInline(){
   const body={mtype:document.getElementById('mType2').value.trim(),cost:document.getElementById('mCost2').value,note:document.getElementById('mNote2').value.trim(),date:document.getElementById('mDate2').value};
   if(!body.mtype){toast('Type required');return;}
   const r=await api('/api/assets/'+maintAsset+'/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();await openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
 }
 async function delMaintInline(mid){
   if(!mid)return;
   const r=await api('/api/assets/'+maintAsset+'/maintenance?id='+mid,{method:'DELETE'});
-  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();await openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
 }
 document.getElementById('mAdd2').onclick=addMaintInline;
 async function printAsset(id){
@@ -2392,7 +2405,15 @@ function wireModalClose(){
   document.querySelectorAll('.modal').forEach(m=>{
     if(m.id==='usersModal')return; // handled by closeUsersReturnProfile (returns to Profile)
     if(!m.dataset._wired){
-      m.addEventListener('click',e=>{ if(e.target===m) m.classList.remove('show'); });
+      // Only close on a genuine click on the backdrop -- mousedown AND
+      // mouseup both landing on the backdrop itself. Checking the click
+      // target alone was the bug: dragging to select text (e.g. copying the
+      // sign link) that drifts past the dialog's edge for even a moment
+      // still fires a "click" on the backdrop when the mouse comes up out
+      // there, closing the modal mid-selection.
+      let downOnBackdrop=false;
+      m.addEventListener('mousedown',e=>{ downOnBackdrop=(e.target===m); });
+      m.addEventListener('click',e=>{ if(downOnBackdrop && e.target===m) m.classList.remove('show'); downOnBackdrop=false; });
       new MutationObserver(mo=>{
         if(m.classList.contains('show')) bringToFront(m);
       }).observe(m,{attributes:true,attributeFilter:['class']});
