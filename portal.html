@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>IT-Vault — Support Portal</title>
 <style>
-  :root{ --bg:#0a0d13; --comp:#121826; --comp2:#0f1620; --line:#222c3d;
+  /* kept byte-for-byte identical to what the JS below computes for the
+     app's actual default theme, so the first paint doesn't flash from an
+     older palette to the real one once settings load. */
+  :root{ --bg:#000000; --comp:#000000; --comp2:#000000; --line:#1a1a1a;
          --acc:#ff3b30; --acc2:#c0392b; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
          --grn:#3ddc97; --red:#ff6b6b; --amber:#ffb454;
          --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif; }

@@ -1,11 +1,17 @@
 :root{
-  /* professional dark palette — calm, not neon-clash */
-  --bg:#0a0d13; --bg1:#0d1119; --surface:#121826; --surface2:#0f1620;
-  --line:#222c3d; --line2:#2c384c;
+  /* Deep Dark defaults -- kept byte-for-byte identical to what
+     applyCustomVars() computes for the app's actual default theme
+     (bg/comp_bg #000000, accent #ff3b30) so the very first paint already
+     matches what JS applies a moment later once /api/settings resolves.
+     A mismatch here is exactly what a theme-color "flicker" on load is --
+     the page briefly painting these static values before JS overwrites
+     them with the real (usually identical) ones. */
+  --bg:#000000; --bg1:#080808; --surface:#000000; --surface2:#000000;
+  --line:#1a1a1a; --line2:#292929;
   --txt:#e6edf6; --muted:#8a98b0; --muted2:#5d6b82;
-  --accent:#ff3b30; --accent2:#c0392b; --accent-soft:rgba(255,59,48,.12);
+  --accent:#ff3b30; --accent2:#c0392b; --accent-soft:rgba(255,59,48,.14);
   --grn:#3ddc97; --amber:#ffb454; --red:#ff6b6b; --cyan:#39d0ff;
-  --radius:10px; --shadow:0 1px 2px rgba(0,0,0,.28),0 6px 20px rgba(0,0,0,.22);
+  --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.28),0 6px 20px rgba(0,0,0,.22);
   --font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
   --mono:ui-monospace,'Cascadia Mono','Consolas',Menlo,monospace;
 }
