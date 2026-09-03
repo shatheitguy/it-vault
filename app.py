@@ -4005,22 +4005,33 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                                 spaceBefore=6, spaceAfter=14)
     story.append(Paragraph(asset.get("AssetTag") or "—", tag_style))
 
+    # Same field set/order/labels as the web "print asset" page, so the
+    # emailed PDF and a manual print of the same asset read the same way.
+    currency = asset.get("_currency") or "AED"
+    try:
+        price_str = f"{currency} {float(asset.get('Price') or 0):.2f}"
+    except (TypeError, ValueError):
+        price_str = f"{currency} 0.00"
     rows = [
         ["Asset ID", asset.get("AssetTag") or "—"],
-        ["Name", asset.get("Name") or "—"],
-        ["Type", asset.get("Type") or "—"],
+        ["Asset Name", asset.get("Name") or "—"],
+        ["Item Category", asset.get("Type") or "—"],
         ["Serial", asset.get("Serial") or "—"],
-        ["Status", asset.get("Status") or "—"],
         ["Location", asset.get("Location") or "—"],
-    ]
-    if asset.get("Department"):
-        rows.append(["Department", asset["Department"]])
-    if asset.get("Designation"):
-        rows.append(["Designation", asset["Designation"]])
-    rows += [
-        ["Signed By", signer_name or "—"],
+        ["Status", asset.get("Status") or "—"],
+        ["Price", price_str],
+        ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0)],
         ["Signed Date", asset.get("NotesReceived") or "—"],
+        ["Notes", asset.get("Notes") or "—"],
+        ["Signed By", signer_name or "—"],
     ]
+    if asset.get("EmployeeID"):
+        rows += [
+            ["Employee Name", asset.get("EmployeeName") or asset.get("EmployeeID")],
+            ["Department", asset.get("Department") or "—"],
+            ["Designation", asset.get("Designation") or "—"],
+            ["Email", asset.get("Email") or "—"],
+        ]
     t = Table(rows, colWidths=[45 * mm, 115 * mm])
     t.setStyle(TableStyle([
         ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
@@ -4134,11 +4145,15 @@ def approve_asset():
         cc = conn(); ccur = cc.cursor()
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [aid]); full_asset = ccur.fetchone()
         if full_asset and full_asset.get("EmployeeID"):
-            ccur.execute("SELECT Department, Designation FROM Employees WHERE EmployeeID=%s", [full_asset["EmployeeID"]])
+            ccur.execute("SELECT EmployeeName, Department, Designation, Email FROM Employees WHERE EmployeeID=%s", [full_asset["EmployeeID"]])
             er = ccur.fetchone()
             if er:
+                full_asset["EmployeeName"] = er.get("EmployeeName") or ""
                 full_asset["Department"] = er.get("Department") or ""
                 full_asset["Designation"] = er.get("Designation") or ""
+                full_asset["Email"] = er.get("Email") or ""
+        ccur.execute("SELECT currency FROM Settings WHERE id=1"); srow = ccur.fetchone() or {}
+        full_asset["_currency"] = srow.get("currency") or "AED"
         cc.close()
         if full_asset:
             _email_signed_asset_pdf(full_asset, name, sigData)
