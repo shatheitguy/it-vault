@@ -34,7 +34,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 .f input::placeholder{color:var(--muted2)}
 .f input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .btn{width:100%;margin-top:20px;padding:12px;border:none;border-radius:8px;cursor:pointer;
-  font-family:var(--font);font-weight:600;font-size:14px;color:#04121f;background:var(--accent);
+  font-family:var(--font);font-weight:600;font-size:14px;color:var(--btn-text,#04121f);background:var(--accent);
   transition:filter .15s,transform .15s,box-shadow .15s}
 .btn:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 18px var(--accent-soft)}
 .btn:active{transform:translateY(1px);box-shadow:none}
@@ -44,7 +44,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 .shake{animation:sh .4s}@keyframes sh{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-5px)}}
 .sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px}
 #step1,#step2fa,#stepForgot{animation:fadeUp .35s ease}
-.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#04121f;
+.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:var(--btn-text,#04121f);
   border-radius:50%;animation:spin .6s linear infinite;vertical-align:-3px;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -114,6 +114,7 @@ function rgba(h,a){ const c=hexRgb(h); return 'rgba('+c[0]+','+c[1]+','+c[2]+','
 function shade(h,amt){ const c=hexRgb(h); const f=n=>{const v=Math.max(0,Math.min(255,Math.round(n+255*amt)));return v.toString(16).padStart(2,'0');}; return '#'+f(c[0])+f(c[1])+f(c[2]); }
 function isLightHex(h){ const c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.114)>150; }
 function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
+function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
 function muteFor(bgHex,k){ const light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
 function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*bl;}; const la=L(a),lb=L(b); const hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
 function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
@@ -147,6 +148,7 @@ function applyCustomVars(s){
   r.setProperty('--accent', accent);
   r.setProperty('--accent2', accent2);
   r.setProperty('--accent-soft', rgba(accent,0.14));
+  r.setProperty('--btn-text', bestTextOn(accent));
   r.setProperty('--radius', radius+'px');
   document.body.classList.toggle('light', light);
 }
