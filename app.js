@@ -1750,7 +1750,7 @@ window.showPage=showPage;
 async function loadTrash(){
   const r=await api('/api/assets/trash'); if(!r)return; const list=await r.json();
   const tb=document.getElementById('trashBody');
-  tb.innerHTML=list.map(a=>`<tr><td><input type="checkbox" class="trash-chk" data-id="${a._id}" onchange="updateTrashSelBtns()"/></td><td>${esc(a.Name||'')}</td><td>${esc(a.Type||'')}</td><td class="mono">${esc(a.Serial||'')}</td><td>${esc(a.Status||'')}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreAsset('${a._id}')">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteAsset('${a._id}')">DEL</button></div></td></tr>`).join('');
+  tb.innerHTML=list.map(a=>`<tr><td><input type="checkbox" class="trash-chk" data-id="${a._id}" onchange="updateTrashSelBtns()"/></td><td class="mono">${esc(a.AssetTag||a._id)}</td><td>${esc(a.Name||'')}</td><td>${esc(a.Type||'')}</td><td class="mono">${esc(a.Serial||'')}</td><td>${esc(a.Location||'')}</td><td>${esc(a.Status||'')}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreAsset('${a._id}')">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteAsset('${a._id}')">DEL</button></div></td></tr>`).join('');
   document.getElementById('trashEmpty').style.display=list.length?'none':'block';
   const chkAll=document.getElementById('trashChkAll');
   if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.trash-chk').forEach(c=>c.checked=chkAll.checked); updateTrashSelBtns(); }; }
@@ -1796,7 +1796,7 @@ async function emptyTrash(){
 async function loadContractsTrash(){
   const r=await api('/api/contracts/trash'); if(!r)return; const list=await r.json();
   const tb=document.getElementById('ctTrashBody');
-  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">DEL</button></div></td></tr>`).join('');
+  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td class="mono">${esc(contractIdLabel(c.id))}</td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td class="mono">${fmtMoney(c.cost||0,CURRENCY)}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">DEL</button></div></td></tr>`).join('');
   document.getElementById('ctTrashEmpty').style.display=list.length?'none':'block';
   const chkAll=document.getElementById('ctTrashChkAll');
   if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.ct-trash-chk').forEach(c=>c.checked=chkAll.checked); updateContractTrashSelBtns(); }; }
