@@ -231,6 +231,12 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 
 /* compact data tables inside modals (audit, maintenance, scan, backups) */
 .modal-box .tablewrap{border-radius:var(--radius);max-height:min(46vh,380px);box-shadow:none;max-width:100%}
+/* backups list: fixed metadata columns that never wrap/reflow, one compact
+   kebab-menu button for actions instead of a row of buttons -- a long
+   filename plus 3 buttons was forcing the date/size columns to wrap
+   mid-word and pushing the buttons off the edge of the modal. */
+#backupModal .dtable td,#backupModal .dtable th{white-space:nowrap;padding-left:9px;padding-right:9px}
+#backupModal .dtable td:first-child{color:var(--text)}
 .muted{color:var(--muted)}
 .m-actions .muted,.toolbar .muted,.assignbar .muted,.dash-tools .muted{font-size:12.5px}
 

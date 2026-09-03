@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260903c">
+<link rel="stylesheet" href="/style.css?v=20260903d">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -916,7 +916,7 @@
 </div></div>
 
 <!-- Backup / Restore modal -->
-<div class="modal" id="backupModal"><div class="modal-box" style="width:min(680px,94vw);max-width:680px">
+<div class="modal" id="backupModal"><div class="modal-box" style="width:min(820px,94vw);max-width:820px">
   <h3>BACKUP / RESTORE</h3>
   <div class="modal-scroll">
   <div class="invbox">
@@ -957,8 +957,8 @@
   <div class="invbox">
     <label>RESTORE FROM FILE</label>
     <div class="invrow">
-      <label class="btn ghost" style="cursor:pointer;text-align:center">⬆ CHOOSE .SQL FILE
-        <input type="file" id="bkFile" accept=".sql" style="display:none">
+      <label class="btn ghost" style="cursor:pointer;text-align:center">⬆ CHOOSE BACKUP FILE
+        <input type="file" id="bkFile" accept=".sql,.zip" style="display:none">
       </label>
       <span id="bkStatus" class="muted"></span>
     </div>
@@ -984,6 +984,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260903v"></script>
+<script src="/app.js?nocache=202609031a"></script>
 </body>
 </html>

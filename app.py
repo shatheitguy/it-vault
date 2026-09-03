@@ -3,7 +3,7 @@ IT-Vault — Flask + MariaDB backend.
 Roles: admin (full), read-write (assets CRUD), read-only (view + own password).
 Docker-ready. No Access DB.
 """
-import os, io, json, hashlib, uuid, secrets, time, base64, re
+import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, session, send_from_directory
@@ -300,6 +300,17 @@ def init_db():
         for col, typ in [("app_name","VARCHAR(60) DEFAULT 'IT-Vault'"),("logo_text","VARCHAR(40) DEFAULT 'IT-Vault'"),("matrix_on","BOOLEAN DEFAULT 1")]:
             try: cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
             except Exception: pass
+    # migrate: columns created back when this app was still called "Nexus" kept
+    # that literal string baked in as their MySQL-level DEFAULT forever after --
+    # changing the CREATE TABLE text above does nothing to an already-existing
+    # column, so a Settings reset (factory wipe, or a fresh row insert) kept
+    # silently reintroducing the old branding. Force the default straight, and
+    # repair any row that's still carrying the stale value.
+    for col in ("app_name", "logo_text"):
+        try: cur.execute(f"ALTER TABLE Settings ALTER COLUMN {col} SET DEFAULT 'IT-Vault'")
+        except Exception: pass
+        try: cur.execute(f"UPDATE Settings SET {col}='IT-Vault' WHERE LOWER({col})='nexus'")
+        except Exception: pass
     # migrate: add ldap settings columns if missing
     for col, typ in [("ldap_server","VARCHAR(255)"),("ldap_domain","VARCHAR(255)"),("ldap_bind_user","VARCHAR(255)"),("ldap_bind_pass","VARCHAR(255)"),("ldap_base_dn","VARCHAR(255)")]:
         try:
@@ -455,6 +466,34 @@ def migrate_schema():
             cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
         except Exception:
             pass
+    # migrate: accent/accent2 were added back when the default theme was blue
+    # (#3b9eff/#7c5cff) -- ADD COLUMN above is a no-op once the column already
+    # exists, so that old blue stayed the live MySQL-level default forever
+    # after, the same way the "Nexus" app_name default did. Force it to the
+    # current red Deep Dark preset, and repair any row still on the old blue.
+    try: cur.execute("ALTER TABLE Settings ALTER COLUMN accent SET DEFAULT '#ff3b30'")
+    except Exception: pass
+    try: cur.execute("ALTER TABLE Settings ALTER COLUMN accent2 SET DEFAULT '#c0392b'")
+    except Exception: pass
+    try: cur.execute("UPDATE Settings SET accent='#ff3b30' WHERE accent='#3b9eff'")
+    except Exception: pass
+    try: cur.execute("UPDATE Settings SET accent2='#c0392b' WHERE accent2='#7c5cff'")
+    except Exception: pass
+    # migrate: "Deep Dark" (THEME_PRESETS.deepdark in app.js) -- kept in sync
+    # with the JS preset by hand each time it's tuned; now pure black on both
+    # the page background and card surfaces, per explicit request. Column
+    # default (and the live row, if it's still on an older shade) both get
+    # corrected; font/radius were already right.
+    try: cur.execute("ALTER TABLE Settings ALTER COLUMN bg SET DEFAULT '#000000'")
+    except Exception: pass
+    try: cur.execute("ALTER TABLE Settings ALTER COLUMN comp_bg SET DEFAULT '#000000'")
+    except Exception: pass
+    try: cur.execute("ALTER TABLE Settings ALTER COLUMN font SET DEFAULT 'Inter'")
+    except Exception: pass
+    try: cur.execute("UPDATE Settings SET bg='#000000' WHERE bg IN ('#0a0d13', '#05060a')")
+    except Exception: pass
+    try: cur.execute("UPDATE Settings SET comp_bg='#000000' WHERE comp_bg IN ('#121826', '#0c0f18')")
+    except Exception: pass
     user_cols = {
         "avatar": "VARCHAR(60) DEFAULT ''",
         "api_key": "VARCHAR(64) DEFAULT ''",
@@ -988,17 +1027,17 @@ def list_employees():
 def create_employee():
     import uuid
     data = request.get_json(force=True) or {}
+    c = conn(); cur = c.cursor()
     emp = {
         "_id": uuid.uuid4().hex,
         "EmployeeID": data.get("EmployeeID") or "",
-        "EmpCode": data.get("EmpCode") or "",
+        "EmpCode": (data.get("EmpCode") or "").strip() or _next_emp_code(cur),
         "EmployeeName": data.get("EmployeeName") or "",
         "Designation": data.get("Designation") or "",
         "Department": data.get("Department") or "",
         "Email": data.get("Email") or "",
         "source": "manual"
     }
-    c = conn(); cur = c.cursor()
     cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source)
                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
                 (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["source"]))
@@ -1049,9 +1088,9 @@ def ldap_import_employees():
     for item in (r.get("json") or {}).get("results", []):
         import uuid
         emp_id = uuid.uuid4().hex
-        cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmployeeName, Designation, Department, Email, source)
-                       VALUES (%s,%s,%s,%s,%s,%s,'ldap')""",
-                    (emp_id, item.get("EmployeeID",""), item.get("EmployeeName",""), item.get("Designation",""),
+        cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,'ldap')""",
+                    (emp_id, item.get("EmployeeID",""), _next_emp_code(cur), item.get("EmployeeName",""), item.get("Designation",""),
                      item.get("Department",""), item.get("Email","")))
         imported.append(item)
     c.commit(); c.close()
@@ -1103,9 +1142,9 @@ def ldap_sync_all(row):
                         (name, desig, dept, email, existing["_id"]))
             updated += 1
         else:
-            cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmployeeName, Designation, Department, Email, source)
-                           VALUES (%s,%s,%s,%s,%s,%s,'ldap')""",
-                        (uuid.uuid4().hex, sam, name, desig, dept, email))
+            cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source)
+                           VALUES (%s,%s,%s,%s,%s,%s,%s,'ldap')""",
+                        (uuid.uuid4().hex, sam, _next_emp_code(cur), name, desig, dept, email))
             added += 1
     try:
         lc.unbind()
@@ -1159,6 +1198,11 @@ def _next_contract_tag(cur):
     n = (cur.fetchone() or {}).get("n") or 0
     return f"CT-{n + 1:04d}"
 
+def _next_emp_code(cur):
+    cur.execute("SELECT MAX(CAST(SUBSTRING(EmpCode,5) AS UNSIGNED)) AS n FROM Employees WHERE EmpCode REGEXP '^EMP-[0-9]+$'")
+    n = (cur.fetchone() or {}).get("n") or 0
+    return f"EMP-{n + 1:03d}"
+
 @app.route("/api/contracts/next-tag")
 @auth_required(module="contracts", level="read")
 def next_contract_tag():
@@ -1166,6 +1210,14 @@ def next_contract_tag():
     tag = _next_contract_tag(cur)
     c.close()
     return jsonify({"tag": tag})
+
+@app.route("/api/employees/next-code")
+@auth_required(module="directory", level="read")
+def next_emp_code():
+    c = conn(); cur = c.cursor()
+    code = _next_emp_code(cur)
+    c.close()
+    return jsonify({"code": code})
 
 @app.route("/api/assets/next-tag")
 @auth_required(module="assets", level="read")
@@ -2848,10 +2900,34 @@ def logo_file():
     p = os.path.join(BASE, "logo.png")
     if os.path.exists(p) and os.path.getsize(p) > 0:
         return send_from_directory(BASE, "logo.png")
-    # transparent 1px fallback so <img> doesn't break
-    from flask import Response as _R
-    return _R(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x05\x02\x00\x9d\xfd\xa4\x1e\x00\x00\x00\x00IEND\xaeB`\x82",
-                    mimetype="image/png")
+    # no custom logo uploaded yet (fresh install, or right after a wipe) --
+    # show the real IT-Vault shield mark instead of a blank/broken image,
+    # until an admin uploads their own.
+    return send_from_directory(BASE, "default_logo.png")
+
+def _logo_data_uri():
+    """Logo as a data: URI for embedding straight into a print/PDF: the
+    uploaded blob if there is one, else the on-disk logo.png if it's not
+    just the empty placeholder a wipe leaves behind, else the bundled
+    IT-Vault shield mark -- so a fresh/wiped instance still prints a real
+    logo instead of a blank box."""
+    import base64
+    try:
+        lc = conn(); lcur = lc.cursor()
+        lcur.execute("SELECT logo FROM Settings WHERE id=1"); lr = lcur.fetchone(); lc.close()
+        if lr and lr.get("logo"):
+            return "data:image/png;base64," + base64.b64encode(lr["logo"]).decode("ascii")
+    except Exception:
+        pass
+    for fname in ("logo.png", "default_logo.png"):
+        try:
+            p = os.path.join(BASE, fname)
+            if os.path.getsize(p) > 0:
+                with open(p, "rb") as fp:
+                    return "data:image/png;base64," + base64.b64encode(fp.read()).decode("ascii")
+        except Exception:
+            continue
+    return ""
 
 # ---------- email notifications ----------
 def brand_name():
@@ -3295,22 +3371,7 @@ def label_page(a_id):
     qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
     qr_px = int(qr_mm * 3.78)
     # embed logo as base64 if present (no extra request, prints reliably)
-    logo_uri = ""
-    try:
-        lc = conn(); lcur = lc.cursor()
-        lcur.execute("SELECT logo FROM Settings WHERE id=1"); lr = lcur.fetchone(); lc.close()
-        if lr and lr.get("logo"):
-            import base64
-            logo_uri = "data:image/png;base64," + base64.b64encode(lr["logo"]).decode("ascii")
-    except Exception:
-        logo_uri = ""
-    if not logo_uri:
-        try:
-            with open(os.path.join(BASE, "logo.png"), "rb") as fp:
-                import base64
-                logo_uri = "data:image/png;base64," + base64.b64encode(fp.read()).decode("ascii")
-        except Exception:
-            logo_uri = ""
+    logo_uri = _logo_data_uri()
     rows_html = ""
     field_defs = {
         "Name": ("Asset", asset.get("Name")),
@@ -3433,22 +3494,7 @@ def labels_page():
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
     qr_px = int(qr_mm * 3.78)
-    logo_uri = ""
-    try:
-        lc = conn(); lcur = lc.cursor()
-        lcur.execute("SELECT logo FROM Settings WHERE id=1"); lr = lcur.fetchone(); lc.close()
-        if lr and lr.get("logo"):
-            import base64
-            logo_uri = "data:image/png;base64," + base64.b64encode(lr["logo"]).decode("ascii")
-    except Exception:
-        logo_uri = ""
-    if not logo_uri:
-        try:
-            with open(os.path.join(BASE, "logo.png"), "rb") as fp:
-                import base64
-                logo_uri = "data:image/png;base64," + base64.b64encode(fp.read()).decode("ascii")
-        except Exception:
-            logo_uri = ""
+    logo_uri = _logo_data_uri()
     chosen = [f.strip() for f in (srow.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location").split(",") if f.strip()] if srow else ["Name","AssetID","Type","Serial","Status","Location"]
     for forced in ["Type", "AssetID"]:
         if forced not in chosen:
@@ -3575,22 +3621,7 @@ def asset_public(a_id):
     except Exception:
         processed_by = ""
     # logo as base64
-    logo_uri = ""
-    try:
-        lc = conn(); lcur = lc.cursor()
-        lcur.execute("SELECT logo FROM Settings WHERE id=1"); lr = lcur.fetchone(); lc.close()
-        if lr and lr.get("logo"):
-            import base64
-            logo_uri = "data:image/png;base64," + base64.b64encode(lr["logo"]).decode("ascii")
-    except Exception:
-        logo_uri = ""
-    if not logo_uri:
-        try:
-            with open(os.path.join(BASE, "logo.png"), "rb") as fp:
-                import base64
-                logo_uri = "data:image/png;base64," + base64.b64encode(fp.read()).decode("ascii")
-        except Exception:
-            logo_uri = ""
+    logo_uri = _logo_data_uri()
     c.close()
     rows = [("Asset Name", asset.get("Name")), ("Asset ID", asset.get("AssetTag") or asset["_id"][:12]),
             ("Category", asset.get("Type")), ("Serial", asset.get("Serial")),
@@ -4331,9 +4362,22 @@ def _dump_table(cur, table, cols=None):
         vals = []
         for c in cols:
             v = r[c]
-            if v is None: vals.append("NULL")
-            elif isinstance(v, (int, float)): vals.append(str(v))
-            else: vals.append("'" + str(v).replace("'", "''") + "'")
+            if v is None:
+                vals.append("NULL")
+            elif isinstance(v, (bytes, bytearray)):
+                # binary columns (the embedded logo blob) as raw text/quote
+                # escaping corrupts on backslashes/control bytes -- hex
+                # literals are the only safe way to round-trip them.
+                vals.append("0x" + v.hex() if v else "NULL")
+            elif isinstance(v, (int, float)):
+                vals.append(str(v))
+            else:
+                # MariaDB treats backslash as an escape char inside '...' by
+                # default, so a value with a literal backslash (a Windows
+                # path in Notes, a DOMAIN\user LDAP bind) needs doubling too
+                # -- quoting only single quotes let those corrupt the dump.
+                esc = str(v).replace("\\", "\\\\").replace("'", "''")
+                vals.append("'" + esc + "'")
         out.append(f"REPLACE INTO `{table}` ({', '.join('`'+c+'`' for c in cols)}) VALUES ({', '.join(vals)});")
     return out
 
@@ -4350,7 +4394,7 @@ def _prune_old_backups():
         limit = 7
     if limit <= 0:
         return
-    files = sorted([f for f in os.listdir(BACKUP_DIR) if f.endswith(".sql")],
+    files = sorted([f for f in os.listdir(BACKUP_DIR) if f.endswith((".sql", ".zip"))],
                     key=lambda f: os.path.getmtime(os.path.join(BACKUP_DIR, f)), reverse=True)
     for f in files[limit:]:
         try:
@@ -4358,26 +4402,61 @@ def _prune_old_backups():
         except Exception:
             pass
 
+def _dump_section(cur, table):
+    """One table's worth of restore statements: a DELETE first so restoring
+    this section actually reverts to the backup's exact state instead of just
+    upserting rows on top of whatever is there now, then the REPLACE INTOs."""
+    return [f"-- == {table} ==", f"DELETE FROM `{table}`;", *_dump_table(cur, table)]
+
+# Every table a factory wipe can touch -- kept in sync with WIPE_TABLES below
+# so an "all"/"assets" backup is always a complete, restorable snapshot.
+ASSET_SCOPE_TABLES = [
+    "Assets", "Checkouts", "Maintenance", "Contracts", "Employees",
+    "Tickets", "TicketReplies", "Manufacturers", "Models", "Categories",
+    "ContractTypes", "Departments", "Designations", "Locations", "Roles", "History",
+]
+
+BACKUP_BRANDING_FILES = ("logo.png", "letterhead.png")
+
 def _run_backup(scope="all"):
     if scope not in ("config", "assets", "all"):
         scope = "all"
     c = conn(); cur = c.cursor()
     lines = [f"-- IT-Vault backup | scope={scope} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    include_branding = scope in ("config", "all")
     if scope in ("config", "all"):
-        lines += ["-- == Settings ==", *_dump_table(cur, "Settings")]
-        lines += ["-- == Users ==", *_dump_table(cur, "Users")]
+        lines += _dump_section(cur, "Settings")
+        lines += _dump_section(cur, "Users")
     if scope in ("assets", "all"):
-        lines += ["-- == Assets ==", *_dump_table(cur, "Assets")]
-        lines += ["-- == Checkouts ==", *_dump_table(cur, "Checkouts")]
-        lines += ["-- == Maintenance ==", *_dump_table(cur, "Maintenance")]
+        for t in ASSET_SCOPE_TABLES:
+            lines += _dump_section(cur, t)
     if scope == "all":
-        lines += ["-- == AuditLog ==", *_dump_table(cur, "AuditLog")]
+        lines += _dump_section(cur, "AuditLog")
     c.close()
+    sql_text = "\n".join(lines) + "\n"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fname = f"nexus_backup_{scope}_{stamp}.sql"
-    fpath = os.path.join(BACKUP_DIR, fname)
-    with open(fpath, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    if not include_branding:
+        # assets-only scope never touches Settings, so there's no branding to
+        # bundle -- keep it a plain .sql, same as before.
+        fname = f"itvault_backup_{scope}_{stamp}.sql"
+        with open(os.path.join(BACKUP_DIR, fname), "w", encoding="utf-8") as f:
+            f.write(sql_text)
+    else:
+        # config/all scopes include Settings, so a backup calling itself
+        # "whole" needs the logo and letterhead too -- those only ever live
+        # on disk (has_letterhead is just a flag; letterhead is never stored
+        # in the DB), so the SQL dump alone can't restore them. Bundle both
+        # into a .zip alongside the dump; restore knows how to unpack it.
+        fname = f"itvault_backup_{scope}_{stamp}.zip"
+        with zipfile.ZipFile(os.path.join(BACKUP_DIR, fname), "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("dump.sql", sql_text)
+            for bf in BACKUP_BRANDING_FILES:
+                p = os.path.join(BASE, bf)
+                try:
+                    if os.path.getsize(p) > 0:
+                        zf.write(p, bf)
+                except Exception:
+                    pass
     _prune_old_backups()
     return fname
 
@@ -4392,8 +4471,11 @@ WIPE_TABLES = [
 @auth_required([ROLE_ADMIN])
 def wipe_everything():
     """Danger Zone factory reset: password-gated, phrase-confirmed, takes an
-    automatic full backup first so a wipe is always recoverable. Deliberately
-    leaves the Users table alone so admins can still log back in afterward."""
+    automatic full backup first so a wipe is always recoverable. Leaves the
+    Users table's accounts (username/password/role) alone so admins can still
+    log back in afterward, but strips personal fields (email, LDAP/SMTP
+    config, branding) so the instance comes back genuinely blank and ready to
+    reconfigure rather than just missing its assets."""
     d = request.get_json(force=True) or {}
     pw = d.get("password", "")
     confirm = (d.get("confirm") or "").strip().upper()
@@ -4411,6 +4493,7 @@ def wipe_everything():
             cur.execute(f"DELETE FROM `{t}`")
         cur.execute("DELETE FROM Settings WHERE id=1")
         cur.execute("INSERT INTO Settings (id, theme) VALUES (1, 'dark')")
+        cur.execute("UPDATE Users SET email=NULL, totp_secret='', totp_enabled=0, email_otp_enabled=0")
         c.commit(); c.close()
         for fname in ("logo.png", "letterhead.png"):
             try:
@@ -4433,18 +4516,25 @@ def backup():
         scope = "all"
     fname = _run_backup(scope)
     audit(session.get("user"), "BACKUP", "", f"scope={scope} file={fname}")
+    mt = "application/zip" if fname.endswith(".zip") else "application/sql"
     return send_from_directory(BACKUP_DIR, fname, as_attachment=True,
-                                mimetype="application/sql",
+                                mimetype=mt,
                                 download_name=fname)
 
 @app.route("/api/backups")
 @auth_required([ROLE_ADMIN])
 def list_backups():
-    files = sorted([f for f in os.listdir(BACKUP_DIR) if f.endswith(".sql")], reverse=True)
+    # newest-first by actual file time, not filename string -- sorting by name
+    # put every "config" backup ahead of a same-day "all" one since "c" > "a".
+    files = sorted([f for f in os.listdir(BACKUP_DIR) if f.endswith((".sql", ".zip"))],
+                    key=lambda f: os.path.getmtime(os.path.join(BACKUP_DIR, f)), reverse=True)
     out = []
     for f in files:
         try:
-            # filenames look like nexus_backup_<scope>_<YYYYMMDD>_<HHMMSS>.sql
+            # filenames look like itvault_backup_<scope>_<YYYYMMDD>_<HHMMSS>.sql
+            # (older backups made before the app was renamed from Nexus may
+            # still be sitting in this folder as nexus_backup_... -- both
+            # patterns parse the same way since only the prefix differs)
             ts = "_".join(f.rsplit(".", 1)[0].split("_")[-2:])
             dt = datetime.strptime(ts, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
@@ -4459,7 +4549,7 @@ def list_backups():
         out.append({"file": f, "scope": scope, "created": dt, "size": os.path.getsize(os.path.join(BACKUP_DIR, f))})
     return jsonify(out)
 
-BACKUP_FNAME_RE = re.compile(r"^nexus_backup_(all|config|assets)_\d{8}_\d{6}\.sql$")
+BACKUP_FNAME_RE = re.compile(r"^(?:nexus|itvault)_backup_(all|config|assets)_\d{8}_\d{6}\.(sql|zip)$")
 
 @app.route("/api/backups/<fname>/download")
 @auth_required([ROLE_ADMIN])
@@ -4468,8 +4558,9 @@ def download_backup(fname):
         return jsonify({"error": "invalid filename"}), 400
     if not os.path.exists(os.path.join(BACKUP_DIR, fname)):
         return jsonify({"error": "not found"}), 404
+    mt = "application/zip" if fname.endswith(".zip") else "application/sql"
     return send_from_directory(BACKUP_DIR, fname, as_attachment=True,
-                                mimetype="application/sql", download_name=fname)
+                                mimetype=mt, download_name=fname)
 
 @app.route("/api/backups/<fname>", methods=["DELETE"])
 @auth_required([ROLE_ADMIN])
@@ -4483,26 +4574,105 @@ def delete_backup(fname):
     audit(session.get("user"), "BACKUP_DELETE", "", f"file={fname}")
     return jsonify({"ok": True})
 
-@app.route("/api/restore", methods=["POST"])
-@auth_required([ROLE_ADMIN])
-def restore():
-    if "file" not in request.files:
-        return jsonify({"error": "no file"}), 400
-    f = request.files["file"]
-    if not f.filename.endswith(".sql"):
-        return jsonify({"error": "only .sql backup allowed"}), 400
-    content = f.read().decode("utf-8", "replace")
+def _split_sql_statements(content):
+    """Split a backup file into individual statements on ';', but only
+    outside of single-quoted string literals -- a naive content.split(';')
+    corrupts the very next statement whenever a dumped value (Notes,
+    Address, ...) happens to contain a semicolon of its own, which was
+    silently breaking real-world restores."""
+    stmts, buf, in_str, i, n = [], [], False, 0, len(content)
+    while i < n:
+        ch = content[i]
+        buf.append(ch)
+        if ch == "'":
+            if in_str and i + 1 < n and content[i + 1] == "'":
+                buf.append(content[i + 1]); i += 1  # escaped '' -- stays in-string
+            else:
+                in_str = not in_str
+        elif ch == ";" and not in_str:
+            stmts.append("".join(buf[:-1])); buf = []
+        i += 1
+    tail = "".join(buf).strip()
+    if tail:
+        stmts.append(tail)
+    return stmts
+
+def _apply_restore_sql(content):
+    """Runs every statement in a backup file inside one transaction -- either
+    the whole restore lands or none of it does, so a bad file never leaves
+    the database half-migrated."""
     c = conn(); cur = c.cursor()
     applied = 0
-    for stmt in content.split(";"):
+    for stmt in _split_sql_statements(content):
         s = stmt.strip()
         if not s or s.startswith("--"): continue
         try:
             cur.execute(s); applied += 1
         except Exception as e:
             c.rollback(); c.close()
-            return jsonify({"error": f"restore failed near: {s[:60]} -> {e}"}), 400
+            return None, f"restore failed near: {s[:60]} -> {e}"
     c.commit(); c.close()
+    return applied, None
+
+def _apply_restore_bytes(data, filename=""):
+    """Accepts either a legacy plain-SQL backup or the newer .zip bundle (a
+    dump.sql plus logo.png/letterhead.png -- those never lived in the
+    database, so a "whole" backup has to carry the actual files) and applies
+    whichever it is. Branding files are written to disk before the SQL runs,
+    so a restore that fails partway through the SQL still leaves them in a
+    consistent, already-swapped state rather than a half-updated one."""
+    is_zip = filename.lower().endswith(".zip") or data[:2] == b"PK"
+    if not is_zip:
+        return _apply_restore_sql(data.decode("utf-8", "replace"))
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = zf.namelist()
+            if "dump.sql" not in names:
+                return None, "invalid backup: missing dump.sql in archive"
+            sql_text = zf.read("dump.sql").decode("utf-8", "replace")
+            branding = {bf: zf.read(bf) for bf in BACKUP_BRANDING_FILES if bf in names}
+    except zipfile.BadZipFile:
+        return None, "invalid backup: not a valid .zip archive"
+    applied, err = _apply_restore_sql(sql_text)
+    if err:
+        return None, err
+    for bf, data_bytes in branding.items():
+        try:
+            with open(os.path.join(BASE, bf), "wb") as fp:
+                fp.write(data_bytes)
+        except Exception:
+            pass
+    return applied, None
+
+@app.route("/api/restore", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def restore():
+    if "file" not in request.files:
+        return jsonify({"error": "no file"}), 400
+    f = request.files["file"]
+    if not (f.filename.endswith(".sql") or f.filename.endswith(".zip")):
+        return jsonify({"error": "only .sql or .zip backup allowed"}), 400
+    data = f.read()
+    applied, err = _apply_restore_bytes(data, f.filename)
+    if err:
+        return jsonify({"error": err}), 400
+    audit(session.get("user"), "RESTORE", "", f"file={f.filename} statements={applied}")
+    return jsonify({"ok": True, "statements": applied})
+
+@app.route("/api/backups/<fname>/restore", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def restore_from_backup(fname):
+    if not BACKUP_FNAME_RE.match(fname):
+        return jsonify({"error": "invalid filename"}), 400
+    fpath = os.path.join(BACKUP_DIR, fname)
+    if not os.path.exists(fpath):
+        return jsonify({"error": "not found"}), 404
+    with open(fpath, "rb") as fp:
+        data = fp.read()
+    applied, err = _apply_restore_bytes(data, fname)
+    if err:
+        return jsonify({"error": err}), 400
+    audit(session.get("user"), "RESTORE", "", f"file={fname} statements={applied}")
     return jsonify({"ok": True, "statements": applied})
 
 # ---------- frontend ----------
