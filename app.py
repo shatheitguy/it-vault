@@ -2012,36 +2012,19 @@ def _send_simple_email(to_email, subject, body, html_body=None):
     except Exception as e:
         print("email send error:", e); return False
 
-def _button_email_html(app_name, heading, rows, button_label=None, button_url=None):
-    """Self-contained, inline-styled HTML for a transactional email: a card
-    with a details table and an optional call-to-action button. No external
-    stylesheet or CSS variables -- most mail clients (Outlook especially)
-    strip <style> blocks and don't support var(), so every color here is a
-    literal hex matching the app's actual Deep Dark / red-accent branding."""
-    rows_html = "".join(
-        f'<tr><td style="padding:7px 10px;color:#8a94a6;font-size:11px;font-weight:700;'
-        f'text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid #1c2130;'
-        f'white-space:nowrap;">{k}</td>'
-        f'<td style="padding:7px 10px;color:#e6edf6;font-size:14px;font-weight:600;'
-        f'border-bottom:1px solid #1c2130;">{v}</td></tr>'
-        for k, v in rows)
-    button_html = ""
-    if button_url and button_label:
-        button_html = f"""
-  <div style="text-align:center;margin:24px 0 8px;">
+def _button_email_html(heading, button_label, button_url):
+    """Self-contained, inline-styled HTML for a transactional email: one
+    line of context and a call-to-action button, nothing else -- no card,
+    no branded header, no details table. No external stylesheet or CSS
+    variables -- most mail clients (Outlook especially) strip <style>
+    blocks and don't support var(), so every color here is a literal hex
+    matching the app's red accent."""
+    return f"""<!doctype html><html><body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:480px;margin:0 auto;text-align:center;">
+    <p style="font-size:15px;color:#111111;margin:0 0 20px;">{heading}</p>
     <a href="{button_url}" style="display:inline-block;padding:13px 32px;background:#ff3b30;
        color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;border-radius:8px;
        letter-spacing:.3px;">{button_label}</a>
-  </div>
-  <div style="text-align:center;margin-top:10px;">
-    <a href="{button_url}" style="color:#8a94a6;font-size:11px;word-break:break-all;">{button_url}</a>
-  </div>"""
-    return f"""<!doctype html><html><body style="margin:0;padding:26px 14px;background:#05060a;font-family:Arial,Helvetica,sans-serif;">
-  <div style="max-width:480px;margin:0 auto;background:#0c0f18;border:1px solid #1c2130;border-radius:12px;padding:24px;">
-    <div style="font-size:14px;font-weight:800;letter-spacing:.6px;color:#ff3b30;text-transform:uppercase;margin-bottom:16px;">{app_name}</div>
-    <div style="font-size:16px;color:#e6edf6;margin-bottom:16px;">{heading}</div>
-    <table style="width:100%;border-collapse:collapse;">{rows_html}</table>
-    {button_html}
   </div>
 </body></html>"""
 
@@ -2999,28 +2982,20 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
     to = _lookup_person_email(employee_id)
     if not to:
         return False
-    bn = brand_name()
     tag = asset.get("AssetTag") or asset.get("_id", "")
     verb = "checked out to you" if checked_out else "assigned to you"
-    body = (f"An asset has been {verb}.\n\n"
-            f"Asset ID: {tag}\n"
-            f"Name: {asset.get('Name','')}\n"
-            f"Serial Number: {asset.get('Serial') or '—'}\n"
-            f"Status: {asset.get('Status','')}\n")
-    sign_url = ""
+    heading = f"'{asset.get('Name','')}' ({tag}) has been {verb}."
+    body = f"{heading}\n"
+    html_body = None
     aid = asset.get("_id")
     if aid:
         try:
             tk = _sign_token({"asset_id": aid, "name": asset.get("Name", "")}, exp_hours=168)
             sign_url = f"{request.host_url}sign?token={quote(tk)}"
             body += f"\nPlease review and sign the acknowledgement for this asset:\n{sign_url}\n"
+            html_body = _button_email_html(heading, "Review &amp; Sign Acknowledgement", sign_url)
         except Exception as e:
             print("sign link build error:", e)
-    html_body = _button_email_html(
-        bn, f"An asset has been <b>{verb}</b>.",
-        [("Asset ID", tag), ("Name", asset.get("Name", "")),
-         ("Serial Number", asset.get("Serial") or "—"), ("Status", asset.get("Status", ""))],
-        button_label="Review &amp; Sign Acknowledgement" if sign_url else None, button_url=sign_url or None)
     return _send_simple_email(to, f"Asset {verb}: {asset.get('Name','')}", body, html_body=html_body)
 
 def notify_asset_status_changed(asset, old_status, new_status):
