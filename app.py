@@ -3,11 +3,12 @@ IT-Vault — Flask + MariaDB backend.
 Roles: admin (full), read-write (assets CRUD), read-only (view + own password).
 Docker-ready. No Access DB.
 """
-import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile
+import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, session, send_from_directory
 import pymysql
+from dbutils.pooled_db import PooledDB
 from openpyxl import Workbook, load_workbook
 import ldap3
 import pyotp
@@ -168,9 +169,50 @@ def verify_pw(pw, stored):
     return h == hashlib.sha256((salt + pw).encode()).hexdigest()
 
 # ---------- db ----------
+# Opening a fresh MariaDB connection costs ~33ms (TCP + auth handshake);
+# the query it then carries costs ~0.2ms. Since every request opened one or
+# two, that handshake -- not the SQL -- was the floor under every endpoint's
+# response time. Connections now come from a pool: conn() keeps its exact
+# old signature and .close() hands the connection back instead of dropping
+# it, so all ~130 call sites (including ones that nest a second conn()
+# inside a handler that already holds one) work unchanged.
+_pool_obj = None
+_pool_key = None
+_pool_lock = threading.Lock()
+
+def _db_pool():
+    """Pool for the CURRENT DB config. save_db_config() can repoint the app
+    at a different server at runtime, so the pool is keyed on the config and
+    rebuilt if it changes -- otherwise it would keep serving connections to
+    the old database."""
+    global _pool_obj, _pool_key
+    key = (DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS)
+    with _pool_lock:
+        if _pool_obj is None or _pool_key != key:
+            old = _pool_obj
+            _pool_obj = PooledDB(
+                creator=pymysql, host=DB_HOST, port=DB_PORT, user=DB_USER,
+                password=DB_PASS, database=DB_NAME, charset="utf8mb4",
+                cursorclass=pymysql.cursors.DictCursor,
+                mincached=0,          # lazy: build connections on demand, so constructing the
+                                      # pool itself can't fail (a bad repoint via the DB-settings
+                                      # UI then surfaces per-request and recovers once fixed,
+                                      # instead of erroring while the pool is being built)
+                maxcached=8,          # ...and once warm, connections are reused from here
+                maxconnections=32,    # ceiling; blocking=True queues rather than erroring past it
+                blocking=True,
+                ping=1,               # verify on checkout, so a connection MySQL closed
+                                      # out from under us (wait_timeout) reconnects instead
+                                      # of surfacing as a random query error
+            )
+            _pool_key = key
+            if old is not None:
+                try: old.close()
+                except Exception: pass
+        return _pool_obj
+
 def conn():
-    return pymysql.connect(host=DB_HOST, port=DB_PORT, user=DB_USER, password=DB_PASS,
-                            database=DB_NAME, charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor)
+    return _db_pool().connection()
 
 def init_db():
     c = conn(); cur = c.cursor()
@@ -2983,20 +3025,25 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
     if not to:
         return False
     tag = asset.get("AssetTag") or asset.get("_id", "")
+    name = (asset.get("Name") or "").strip()
+    what = f"{tag} ({name})" if name else tag
     verb = "checked out to you" if checked_out else "assigned to you"
-    heading = f"'{asset.get('Name','')}' ({tag}) has been {verb}."
-    body = f"{heading}\n"
+    lead = f"We have deployed asset {what} to you."
+    ask = "Kindly review the details and acknowledge receipt by signing."
+    body = f"{lead}\n"
     html_body = None
     aid = asset.get("_id")
     if aid:
         try:
             tk = _sign_token({"asset_id": aid, "name": asset.get("Name", "")}, exp_hours=168)
             sign_url = f"{request.host_url}sign?token={quote(tk)}"
-            body += f"\nPlease review and sign the acknowledgement for this asset:\n{sign_url}\n"
-            html_body = _button_email_html(heading, "Review &amp; Sign Acknowledgement", sign_url)
+            body += f"\n{ask}\n{sign_url}\n"
+            html_body = _button_email_html(
+                f"We have deployed asset <b>{tag}</b>{(' (' + name + ')') if name else ''} to you.<br>{ask}",
+                "Review &amp; Sign Acknowledgement", sign_url)
         except Exception as e:
             print("sign link build error:", e)
-    return _send_simple_email(to, f"Asset {verb}: {asset.get('Name','')}", body, html_body=html_body)
+    return _send_simple_email(to, f"Asset {verb}: {name or tag}", body, html_body=html_body)
 
 def notify_asset_status_changed(asset, old_status, new_status):
     """Emails the assigned employee, whoever requested it, and every
@@ -3935,7 +3982,7 @@ document.getElementById('saveSign').addEventListener('click',async()=>{
   res.textContent='Submitting…';
   const r=await fetch('/api/assets/sign/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name,data})});
   const j=await r.json();
-  if(j.ok){res.className='ok';res.innerHTML='✅ <b>ACKNOWLEDGED</b> — Thank you!';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+data+'" style="max-width:100%"/>');};}}
+  if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+data+'" style="max-width:100%"/>');};}}
   else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
 });
 /* ---- branding + theme (same color math as the main app / login page, so
@@ -4163,19 +4210,22 @@ def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attac
 def _email_signed_asset_pdf(asset, signer_name, sig_data_url):
     """Sends the signed-acknowledgement PDF to the assigned employee/user and
     to every admin/staff account with an email on file -- fire-and-forget,
-    never blocks or fails the acknowledgement itself."""
+    never blocks or fails the acknowledgement itself. Returns True if a copy
+    actually went to the assigned employee, so the sign page can promise
+    "sent to your email" only when that's true."""
     try:
         pdf_bytes = _build_signed_asset_pdf(asset, signer_name, sig_data_url)
     except Exception as e:
-        print("signed pdf build error:", e); return
+        print("signed pdf build error:", e); return False
     fname = f"{(asset.get('AssetTag') or asset.get('_id') or 'asset')}_signed.pdf"
     tag = asset.get("AssetTag") or asset.get("_id", "")
     body = (f"'{asset.get('Name','')}' (Asset ID: {tag}) was acknowledged and signed by "
             f"{signer_name}. The signed copy is attached as a PDF.")
     sent_to = set()
+    emailed_employee = False
     emp_email = _lookup_person_email(asset.get("EmployeeID") or "")
     if emp_email:
-        _send_email_with_attachment(emp_email, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
+        emailed_employee = bool(_send_email_with_attachment(emp_email, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname))
         sent_to.add(emp_email.lower())
     try:
         c = conn(); cur = c.cursor()
@@ -4188,6 +4238,7 @@ def _email_signed_asset_pdf(asset, signer_name, sig_data_url):
         if e and e.lower() not in sent_to:
             _send_email_with_attachment(e, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
             sent_to.add(e.lower())
+    return emailed_employee
 
 @app.route("/api/assets/sign/approve", methods=["POST"])
 def approve_asset():
@@ -4208,6 +4259,7 @@ def approve_asset():
                 (receivedBy, name, notesReceived, sigData, aid))
     c.commit(); c.close()
     audit(session.get("user"), "ACKNOWLEDGE", aid, f"{name} acknowledged")
+    emailed = False
     try:
         cc = conn(); ccur = cc.cursor()
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [aid]); full_asset = ccur.fetchone()
@@ -4223,10 +4275,13 @@ def approve_asset():
         full_asset["_currency"] = srow.get("currency") or "AED"
         cc.close()
         if full_asset:
-            _email_signed_asset_pdf(full_asset, name, sigData)
+            emailed = _email_signed_asset_pdf(full_asset, name, sigData)
     except Exception as e:
         print("signed pdf email error:", e)
-    return jsonify({"ok": True})
+    # tells the sign page whether it can honestly say a copy reached the
+    # signer's own inbox (it only does if the asset has an employee with an
+    # email on file and SMTP actually accepted it)
+    return jsonify({"ok": True, "emailed": bool(emailed)})
 
 @app.route("/api/assets/<aid>/signature")
 @auth_required()
@@ -4729,7 +4784,6 @@ def static_files(p):
     return jsonify({"error": "not found"}), 404
 
 # ---------- LDAP auto-sync scheduler (background thread) ----------
-import threading
 
 def _ldap_auto_sync_loop():
     while True:

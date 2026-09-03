@@ -22,4 +22,4 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
     CMD curl -f http://localhost:5000/ || exit 1
 
-CMD ["sh", "-c", "python wait_for_db.py && python app.py"]
+CMD ["sh", "-c", "python wait_for_db.py && python serve.py"]
