@@ -2360,6 +2360,30 @@ async function openContractModal(id){
   document.getElementById('contractModal').classList.add('show');
 }
 window.openContractModal=openContractModal;
+// Picking a recurring Payment Plan (or changing the Start Date once one's
+// picked) auto-fills End/Renewal Date to match -- still a plain editable
+// date input, so a manual override afterward just sticks. One-Time has no
+// cadence to compute from, so it's left alone.
+function calcContractEndDate(startStr, period){
+  const months={Monthly:1, Quarterly:3, 'Semi-Annually':6, Annually:12}[period];
+  if(!startStr || !months) return '';
+  const d=new Date(startStr+'T00:00:00');
+  if(isNaN(d)) return '';
+  const day=d.getDate();
+  d.setMonth(d.getMonth()+months);
+  if(d.getDate()!==day) d.setDate(0); // month overflowed (e.g. Jan 31 +1mo) -- clamp to that month's last day
+  // build the string from local date parts, not toISOString() -- that
+  // converts to UTC and can shift the date by a day either way depending
+  // on the browser's timezone offset from a plain local midnight Date.
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${dd}`;
+}
+function autoFillContractEnd(){
+  const end=calcContractEndDate(document.getElementById('ct_start').value, document.getElementById('ct_billing').value);
+  if(end) document.getElementById('ct_end').value=end;
+}
+document.getElementById('ct_billing').onchange=autoFillContractEnd;
+document.getElementById('ct_start').onchange=autoFillContractEnd;
 async function saveContract(){
   const body={
     contract_tag: document.getElementById('ct_idDisplay').value.trim(),
