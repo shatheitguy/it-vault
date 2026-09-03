@@ -9,6 +9,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.databinding.FragmentAssetsListBinding
 import com.itguy.assetmanager.ui.MainActivity
 import com.itguy.assetmanager.ui.Refreshable
@@ -57,8 +58,20 @@ class AssetsListFragment : Fragment(), Refreshable {
                 val list = resp.body().orEmpty()
                 adapter.submit(list)
                 b.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+                if (query.isBlank()) OfflineCache.saveAssets(list)
             } catch (e: Exception) {
-                if (_b != null) {
+                if (_b == null) return@launch
+                val cached = OfflineCache.loadAssets()
+                if (cached != null) {
+                    val filtered = if (query.isBlank()) cached else cached.filter {
+                        it.Name.contains(query, true) || it.Type.contains(query, true) ||
+                        it.Serial.contains(query, true) || it.Location.contains(query, true) ||
+                        it.AssetTag.contains(query, true)
+                    }
+                    adapter.submit(filtered)
+                    b.emptyText.text = "Offline — showing cached data"
+                    b.emptyText.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
+                } else {
                     adapter.submit(emptyList())
                     b.emptyText.text = "Could not load assets: ${e.message}"
                     b.emptyText.visibility = View.VISIBLE

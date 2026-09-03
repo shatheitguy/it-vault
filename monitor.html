@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Ticket Monitor</title>
+<title>IT-Vault — Ticket Monitor</title>
 <style>
   :root{ --bg:#0a0d13; --comp:#121826; --comp2:#0f1620; --line:#222c3d;
          --acc:#ff3b30; --acc2:#c0392b; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
@@ -65,7 +65,7 @@
   <div class="header">
     <img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'">
     <div>
-      <div class="brand" id="brandName">Sha The IT Guy</div>
+      <div class="brand" id="brandName">IT-Vault</div>
       <div class="sub">Ticket Monitor</div>
     </div>
     <div class="spacer"></div>
@@ -220,7 +220,7 @@ function loadTickets(){
 }
 
 fetch('/api/branding').then(function(r){return r.json()}).then(function(b){
-  var name = b.app_name || 'Sha The IT Guy';
+  var name = b.app_name || 'IT-Vault';
   document.getElementById('brandName').textContent = name;
   document.title = name + ' — Ticket Monitor';
   if(b.logo){ document.getElementById('logo').src='/logo.png?t='+Date.now(); }

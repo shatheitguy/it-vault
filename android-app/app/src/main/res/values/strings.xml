@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">IT Guy Assets</string>
+    <string name="app_name">IT-Vault</string>
     <string name="setup_title">Connect to your server</string>
-    <string name="setup_hint">Same as the Nextcloud app -- enter the address of your IT Guy Assets Manager server.</string>
+    <string name="setup_hint">Same as the Nextcloud app -- enter the address of your IT-Vault server.</string>
     <string name="server_address_label">Server address</string>
     <string name="server_address_placeholder">e.g. 192.168.1.50:5000 or assets.company.com</string>
     <string name="connect_button">Connect</string>

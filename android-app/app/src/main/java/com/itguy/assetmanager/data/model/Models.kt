@@ -3,7 +3,8 @@ package com.itguy.assetmanager.data.model
 import com.google.gson.annotations.SerializedName
 
 data class LoginRequest(val username: String, val password: String)
-data class LoginResponse(val ok: Boolean, val role: String?, val error: String?)
+data class LoginResponse(val ok: Boolean, val role: String?, val error: String?, val need_2fa: Boolean = false, val methods: List<String>? = null)
+data class Verify2faRequest(val method: String, val code: String)
 
 data class ApiKeyResponse(@SerializedName("api_key") val apiKey: String)
 
@@ -18,6 +19,7 @@ data class MeResponse(
 
 data class Asset(
     @SerializedName("_id") val id: String? = null,
+    var AssetTag: String = "",
     var Name: String = "",
     var Type: String = "",
     var Serial: String = "",
@@ -88,6 +90,10 @@ data class Contract(
     var end_date: String = "",
     var cost: Double = 0.0,
     var asset_id: String? = null,
+    var employee_id: String = "",
+    var location: String = "",
+    var department: String = "",
+    var license_key: String = "",
     var note: String = ""
 )
 
@@ -100,8 +106,14 @@ data class DashboardStats(
     val due_soon: Int = 0,
     val warranty_expiring: Int = 0,
     val by_status: Map<String, Int>? = null,
-    val by_type: Map<String, Int>? = null
+    val by_type: Map<String, Int>? = null,
+    val contracts_total: Int = 0,
+    val contracts_by_type: Map<String, Int>? = null,
+    val contracts_expiring_soon: Int = 0,
+    val expiring_contracts: List<ExpiringContract>? = null
 )
+
+data class ExpiringContract(val id: Int, val name: String, val vendor: String?, val type: String?, val end_date: String?, val days_left: Int)
 
 data class UnifiDevice(val name: String?, val model: String?, val type: String?, val ip: String?, val mac: String?, val online: Boolean, val version: String?, val uptime: Long, val num_sta: Int)
 data class UnifiDevicesResponse(val devices: List<UnifiDevice>?, val error: String?)

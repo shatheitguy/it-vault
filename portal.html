@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Support Portal</title>
+<title>IT-Vault — Support Portal</title>
 <style>
   :root{ --bg:#0a0d13; --comp:#121826; --comp2:#0f1620; --line:#222c3d;
          --acc:#ff3b30; --acc2:#c0392b; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
@@ -67,7 +67,7 @@
 </head>
 <body>
   <div class="card">
-    <div class="brand"><img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'"><span class="name" id="appName">IT Guy Request Portal</span></div>
+    <div class="brand"><img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'"><span class="name" id="appName">IT-Vault Request Portal</span></div>
     <p class="sub">Submit a support ticket or request. We'll assign it to our IT team and keep you updated by email.</p>
     
     <div class="tabs">
@@ -107,7 +107,7 @@
       <div id="statusResult"></div>
     </div>
 
-    <div class="foot">Powered by <span id="fName">Sha The IT Guy</span> — your IT asset &amp; support portal</div>
+    <div class="foot">Powered by <span id="fName">IT-Vault</span> — your IT asset &amp; support portal</div>
   </div>
 <script>
 (function(){
@@ -163,7 +163,7 @@
   }
 
   fetch('/api/branding').then(function(r){return r.json()}).then(function(b){
-    var shortName = b.logo_text || b.app_name || 'Sha The IT Guy';
+    var shortName = b.logo_text || b.app_name || 'IT-Vault';
     document.getElementById('appName').textContent = shortName + ' Request Portal';
     document.title = shortName + ' Request Portal';
     if(b.app_name) document.getElementById('fName').textContent=b.app_name;

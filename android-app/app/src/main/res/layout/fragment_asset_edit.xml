@@ -23,7 +23,10 @@
             app:strokeColor="@color/accent" />
 
         <TextView style="@style/SectionLabel" android:text="IDENTITY" />
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Name">
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Asset ID">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_AssetTag" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Name">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_Name" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>
 

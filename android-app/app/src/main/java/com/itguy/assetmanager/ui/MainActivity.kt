@@ -6,10 +6,12 @@ import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
 import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
+import com.itguy.assetmanager.ui.contracts.ContractsListFragment
 import com.itguy.assetmanager.ui.dashboard.DashboardFragment
 import com.itguy.assetmanager.ui.employees.DirectoryFragment
 import com.itguy.assetmanager.ui.generic.GenericListFragment
@@ -27,6 +29,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Prefs.init(applicationContext)
+        OfflineCache.init(applicationContext)
         if (!Prefs.isLoggedIn) {
             startActivity(Intent(this, LoginActivity::class.java)); finish(); return
         }
@@ -122,8 +125,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_assets -> showFragment(AssetsListFragment(), "Assets")
             com.itguy.assetmanager.R.id.nav_directory -> showFragment(DirectoryFragment(), "Directory")
             com.itguy.assetmanager.R.id.nav_tickets -> showFragment(TicketsListFragment(), "Tickets")
-            com.itguy.assetmanager.R.id.nav_contracts -> showFragment(GenericListFragment.newInstance(ListKind.CONTRACTS), "Contracts")
-            com.itguy.assetmanager.R.id.nav_locations -> showFragment(GenericListFragment.newInstance(ListKind.LOCATIONS), "Locations")
+            com.itguy.assetmanager.R.id.nav_contracts -> showFragment(ContractsListFragment(), "Contracts")
             com.itguy.assetmanager.R.id.nav_catalog -> showFragment(GenericListFragment.newInstance(ListKind.CATALOG), "Product Catalog")
             com.itguy.assetmanager.R.id.nav_trash -> showFragment(GenericListFragment.newInstance(ListKind.TRASH), "Trash")
             com.itguy.assetmanager.R.id.nav_audit -> showFragment(GenericListFragment.newInstance(ListKind.AUDIT), "Audit Log")

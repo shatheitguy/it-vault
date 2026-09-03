@@ -65,6 +65,18 @@
             <LinearLayout android:id="@+id/activityFeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
         </LinearLayout>
 
+        <!-- CONTRACTS BY TYPE widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="CONTRACTS BY TYPE" />
+            <LinearLayout android:id="@+id/contractsBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- CONTRACTS EXPIRING widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="CONTRACTS EXPIRING ≤30d" />
+            <LinearLayout android:id="@+id/contractsExpiring" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
         <ProgressBar
             android:id="@+id/dashProgress"
             android:layout_width="wrap_content"

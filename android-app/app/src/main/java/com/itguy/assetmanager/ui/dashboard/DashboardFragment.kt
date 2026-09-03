@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.databinding.FragmentDashboardBinding
 import com.itguy.assetmanager.ui.MainActivity
 import com.itguy.assetmanager.ui.Refreshable
@@ -43,9 +44,12 @@ class DashboardFragment : Fragment(), Refreshable {
         bb.dashProgress.visibility = View.VISIBLE
         lifecycleScope.launch {
             try {
-                val resp = ApiClient.api().dashboard()
-                val d = resp.body()
-                if (_b != null && resp.isSuccessful && d != null) {
+                var d = try {
+                    val resp = ApiClient.api().dashboard()
+                    resp.body()?.also { if (resp.isSuccessful) OfflineCache.saveDashboard(it) }
+                } catch (e: Exception) { null }
+                if (d == null) d = OfflineCache.loadDashboard()
+                if (_b != null && d != null) {
                     b.statTotal.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.total.toString()
                     b.statOut.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.checked_out.toString()
                     b.statMaint.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.maintenance.toString()
@@ -54,6 +58,15 @@ class DashboardFragment : Fragment(), Refreshable {
 
                     renderBars(b.statusBars, (d.by_status ?: emptyMap()), ::statusColor)
                     renderBars(b.typeBars, (d.by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent, null) }
+                    renderBars(b.contractsBars, (d.contracts_by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent2, null) }
+                    b.contractsExpiring.removeAllViews()
+                    val expiring = d.expiring_contracts ?: emptyList()
+                    if (expiring.isEmpty()) emptyRow(b.contractsExpiring, "No contracts expiring soon")
+                    else expiring.forEach { ec ->
+                        addTwoLineRow(b.contractsExpiring, "${ec.name} · ${ec.type ?: "—"}", "${ec.vendor ?: "—"} · ends ${ec.end_date ?: "—"} · ${ec.days_left}d left") {
+                            (activity as? MainActivity)?.showFragment(com.itguy.assetmanager.ui.contracts.ContractEditFragment.newInstance(ec.id), "Edit Contract", addToBackStack = true)
+                        }
+                    }
                 }
             } catch (e: Exception) {}
 

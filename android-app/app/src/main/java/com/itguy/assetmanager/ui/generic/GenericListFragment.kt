@@ -16,16 +16,17 @@ import com.itguy.assetmanager.databinding.FragmentDirectoryBinding
 import com.itguy.assetmanager.ui.Refreshable
 import kotlinx.coroutines.launch
 
-enum class ListKind { CONTRACTS, LOCATIONS, CATALOG, TRASH, AUDIT }
+enum class ListKind { CATALOG, TRASH, AUDIT }
 
 /** One reusable read/add/delete list screen for every simple reference-style
- * section (Contracts, Locations, Product Catalog, Trash, Audit Log) -- all
- * driven straight from the server's REST API, no WebView involved. */
+ * section (Product Catalog, Trash, Audit Log) -- all driven straight from
+ * the server's REST API, no WebView involved. Contracts has its own
+ * dedicated list+edit screens (see ui.contracts) since it needs a real form. */
 class GenericListFragment : Fragment(), Refreshable {
     private var _b: FragmentDirectoryBinding? = null
     private val b get() = _b!!
     private lateinit var kind: ListKind
-    private var catalogTab = 0 // 0=categories 1=manufacturers 2=models
+    private var catalogTab = 0 // 0=categories 1=manufacturers 2=models 3=contract types
 
     companion object {
         fun newInstance(kind: ListKind) = GenericListFragment().apply {
@@ -39,7 +40,7 @@ class GenericListFragment : Fragment(), Refreshable {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        kind = ListKind.valueOf(arguments?.getString("kind") ?: ListKind.CONTRACTS.name)
+        kind = ListKind.valueOf(arguments?.getString("kind") ?: ListKind.CATALOG.name)
         b.recycler.layoutManager = LinearLayoutManager(requireContext())
         b.searchWrap.visibility = View.GONE
 
@@ -48,6 +49,7 @@ class GenericListFragment : Fragment(), Refreshable {
             b.tabs.addTab(b.tabs.newTab().setText("Categories"))
             b.tabs.addTab(b.tabs.newTab().setText("Manufacturers"))
             b.tabs.addTab(b.tabs.newTab().setText("Models"))
+            b.tabs.addTab(b.tabs.newTab().setText("Contract Types"))
             b.tabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
                 override fun onTabSelected(t: com.google.android.material.tabs.TabLayout.Tab) { catalogTab = t.position; load() }
                 override fun onTabUnselected(t: com.google.android.material.tabs.TabLayout.Tab) {}
@@ -67,17 +69,11 @@ class GenericListFragment : Fragment(), Refreshable {
 
     private fun onAdd() {
         when (kind) {
-            ListKind.CONTRACTS -> promptName("New contract name") { name ->
-                lifecycleScope.launch {
-                    ApiClient.api().addContract(com.itguy.assetmanager.data.model.Contract(name = name))
-                    load()
-                }
-            }
-            ListKind.LOCATIONS -> promptName("New location") { name -> lifecycleScope.launch { ApiClient.api().addLocation(NameOnly(name)); load() } }
             ListKind.CATALOG -> when (catalogTab) {
                 0 -> promptName("New category") { name -> lifecycleScope.launch { ApiClient.api().addCategory(NameOnly(name)); load() } }
                 1 -> promptName("New manufacturer") { name -> lifecycleScope.launch { ApiClient.api().addManufacturer(NameOnly(name)); load() } }
                 2 -> promptName("New model") { name -> lifecycleScope.launch { ApiClient.api().addModel(mapOf("name" to name)); load() } }
+                3 -> promptName("New contract type") { name -> lifecycleScope.launch { ApiClient.api().addContractType(NameOnly(name)); load() } }
             }
             else -> {}
         }
@@ -94,20 +90,6 @@ class GenericListFragment : Fragment(), Refreshable {
         lifecycleScope.launch {
             try {
                 when (kind) {
-                    ListKind.CONTRACTS -> {
-                        val list = ApiClient.api().contracts().body().orEmpty()
-                        render(list.map { SimpleRow("${it.name} · ${it.vendor}", "${it.type} · ends ${it.end_date}", it) }) { row ->
-                            val c = row.payload as com.itguy.assetmanager.data.model.Contract
-                            ApiClient.api().deleteContract(IdRequest(c.id)); load()
-                        }
-                    }
-                    ListKind.LOCATIONS -> {
-                        val list = ApiClient.api().locations().body().orEmpty()
-                        render(list.map { SimpleRow(it.name, payload = it) }) { row ->
-                            val l = row.payload as com.itguy.assetmanager.data.model.LocationItem
-                            ApiClient.api().deleteLocation(IdRequest(l.id)); load()
-                        }
-                    }
                     ListKind.CATALOG -> when (catalogTab) {
                         0 -> {
                             val list = ApiClient.api().categories().body().orEmpty()
@@ -123,11 +105,18 @@ class GenericListFragment : Fragment(), Refreshable {
                                 ApiClient.api().deleteManufacturer(IdRequest(i.id)); load()
                             }
                         }
-                        else -> {
+                        2 -> {
                             val list = ApiClient.api().models().body().orEmpty()
                             render(list.map { SimpleRow(it.name, it.manufacturer ?: "", it) }) { row ->
                                 val i = row.payload as com.itguy.assetmanager.data.model.ModelItem
                                 ApiClient.api().deleteModel(IdRequest(i.id)); load()
+                            }
+                        }
+                        else -> {
+                            val list = ApiClient.api().contractTypes().body().orEmpty()
+                            render(list.map { SimpleRow(it.name, payload = it) }) { row ->
+                                val i = row.payload as com.itguy.assetmanager.data.model.NamedItem
+                                ApiClient.api().deleteContractType(IdRequest(i.id)); load()
                             }
                         }
                     }

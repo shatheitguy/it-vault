@@ -28,6 +28,7 @@ class AssetAdapter(private val onClick: (Asset) -> Unit) : RecyclerView.Adapter<
         fun bind(a: Asset, onClick: (Asset) -> Unit) {
             b.assetName.text = a.Name.ifBlank { "(unnamed)" }
             val meta = listOfNotNull(
+                "ID: ${a.AssetTag.ifBlank { a.id ?: "" }}".takeIf { a.AssetTag.isNotBlank() || a.id != null },
                 a.Type.ifBlank { null },
                 a.Serial.ifBlank { null },
                 a.Location.ifBlank { null }
