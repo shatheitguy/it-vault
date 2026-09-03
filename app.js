@@ -667,6 +667,10 @@ async function openModal(id,prefill){
   const histWrap=document.getElementById('histWrap');
   if(histWrap)histWrap.style.display=id?'':'none';
   document.getElementById('modal').classList.add('show');
+  if(!id && !(prefill&&prefill.AssetTag)){
+    const tagEl=document.getElementById('f_AssetTag');
+    if(tagEl){ const r=await api('/api/assets/next-tag'); if(r&&r.ok){ const j=await r.json(); tagEl.value=j.tag||''; } }
+  }
   if(document.getElementById('f_EmployeeID')){fetchEmployees();}
   // populate Manufacturer / Model / Category dropdowns from reference tables
   await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');

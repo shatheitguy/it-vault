@@ -19,8 +19,8 @@ android {
         applicationId = "com.itguy.assetmanager"
         minSdk = 24
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 5
+        versionName = "1.2.0"
     }
 
     signingConfigs {

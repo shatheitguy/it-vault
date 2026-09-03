@@ -1,5 +1,6 @@
 # --- runtime data / secrets: never commit real org data or credentials ---
 nexus_config.json
+.secret_key
 .env
 *.env
 backups/

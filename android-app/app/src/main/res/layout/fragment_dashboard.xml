@@ -10,6 +10,18 @@
         android:orientation="vertical"
         android:padding="16dp">
 
+        <TextView
+            android:id="@+id/offlineBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:background="@color/surface"
+            android:padding="8dp"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:visibility="gone" />
+
         <!-- KPI row (matches the web dashboard's top stat cards) -->
         <LinearLayout
             android:layout_width="match_parent"

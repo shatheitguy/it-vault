@@ -28,6 +28,9 @@ interface ApiService {
     @GET("api/assets")
     suspend fun listAssets(@Query("q") q: String? = null, @Query("order") order: String? = null): Response<List<Asset>>
 
+    @GET("api/assets/next-tag")
+    suspend fun nextAssetTag(): Response<NextTagResponse>
+
     @GET("api/assets/{id}")
     suspend fun getAsset(@Path("id") id: String): Response<Asset>
 

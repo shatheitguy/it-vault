@@ -9,6 +9,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.NetworkUtils
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.databinding.FragmentAssetsListBinding
 import com.itguy.assetmanager.ui.MainActivity
@@ -52,31 +53,47 @@ class AssetsListFragment : Fragment(), Refreshable {
 
     private fun load(query: String) {
         lifecycleScope.launch {
+            b.offlineBanner.visibility = View.GONE
+            // Skip straight to cache if there's plainly no network -- avoids
+            // sitting through a multi-second connect timeout on every screen.
+            if (!NetworkUtils.isOnline(requireContext())) {
+                showFromCache(query, null)
+                return@launch
+            }
             try {
                 val resp = ApiClient.api().listAssets(q = query.ifBlank { null })
                 if (_b == null) return@launch
                 val list = resp.body().orEmpty()
                 adapter.submit(list)
+                b.emptyText.text = "No assets found"
                 b.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
                 if (query.isBlank()) OfflineCache.saveAssets(list)
             } catch (e: Exception) {
                 if (_b == null) return@launch
-                val cached = OfflineCache.loadAssets()
-                if (cached != null) {
-                    val filtered = if (query.isBlank()) cached else cached.filter {
-                        it.Name.contains(query, true) || it.Type.contains(query, true) ||
-                        it.Serial.contains(query, true) || it.Location.contains(query, true) ||
-                        it.AssetTag.contains(query, true)
-                    }
-                    adapter.submit(filtered)
-                    b.emptyText.text = "Offline — showing cached data"
-                    b.emptyText.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
-                } else {
-                    adapter.submit(emptyList())
-                    b.emptyText.text = "Could not load assets: ${e.message}"
-                    b.emptyText.visibility = View.VISIBLE
-                }
+                showFromCache(query, e)
             }
+        }
+    }
+
+    private fun showFromCache(query: String, error: Exception?) {
+        if (_b == null) return
+        val cached = OfflineCache.loadAssets()
+        if (cached != null) {
+            val filtered = if (query.isBlank()) cached else cached.filter {
+                it.Name.contains(query, true) || it.Type.contains(query, true) ||
+                it.Serial.contains(query, true) || it.Location.contains(query, true) ||
+                it.AssetTag.contains(query, true)
+            }
+            adapter.submit(filtered)
+            val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("assets"))
+            b.offlineBanner.text = "📡 Offline — showing cached data from $age"
+            b.offlineBanner.visibility = View.VISIBLE
+            b.emptyText.text = "No cached assets match \"$query\""
+            b.emptyText.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
+        } else {
+            adapter.submit(emptyList())
+            b.emptyText.text = if (error != null) "Could not load assets: ${error.message}" else "No connection and nothing cached yet"
+            b.emptyText.visibility = View.VISIBLE
         }
     }
 

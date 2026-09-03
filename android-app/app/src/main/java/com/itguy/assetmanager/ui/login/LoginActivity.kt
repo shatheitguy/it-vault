@@ -3,6 +3,8 @@ package com.itguy.assetmanager.ui.login
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
@@ -45,6 +47,30 @@ class LoginActivity : AppCompatActivity() {
         }
         b.resendCodeBtn.setOnClickListener { resendEmailCode() }
         b.backToLoginBtn.setOnClickListener { backToStep1() }
+
+        playEntranceAnimation()
+    }
+
+    /** A gentle fade+rise for the card, with the logo popping in slightly
+     * after -- mirrors the same entrance the web login page now does. */
+    private fun playEntranceAnimation() {
+        b.loginRoot.translationY = 40f
+        b.loginRoot.animate().alpha(1f).translationY(0f).setDuration(420)
+            .setInterpolator(AccelerateDecelerateInterpolator()).start()
+
+        b.loginLogo.scaleX = 0.6f; b.loginLogo.scaleY = 0.6f; b.loginLogo.alpha = 0f
+        b.loginLogo.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(120).setDuration(420)
+            .setInterpolator(OvershootInterpolator(2.2f)).start()
+    }
+
+    private fun shakeCard() {
+        b.loginRoot.animate().translationX(-14f).setDuration(60).withEndAction {
+            b.loginRoot.animate().translationX(14f).setDuration(90).withEndAction {
+                b.loginRoot.animate().translationX(-8f).setDuration(80).withEndAction {
+                    b.loginRoot.animate().translationX(0f).setDuration(70).start()
+                }.start()
+            }.start()
+        }.start()
     }
 
     private fun setBusy(busy: Boolean) {
@@ -56,6 +82,7 @@ class LoginActivity : AppCompatActivity() {
     private fun showError(msg: String) {
         b.loginError.text = msg
         b.loginError.visibility = View.VISIBLE
+        shakeCard()
     }
 
     private fun attemptLogin() {
