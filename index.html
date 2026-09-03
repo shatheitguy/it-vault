@@ -345,10 +345,6 @@
               <div class="field2"><label>Currency</label><select id="uCur"><option value="AED">AED — UAE Dirham</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option><option value="INR">INR — Indian Rupee</option></select></div>
               <div class="field2"><label>Region</label><select id="uRegion"><option value="UAE">United Arab Emirates</option><option value="US">United States</option><option value="GB">United Kingdom</option><option value="IN">India</option><option value="FR">France</option></select></div>
             </div></div>
-            <div class="panel"><div class="secthead">INTERFACE</div><div class="grid2">
-              <label class="chk"><input type="checkbox" id="uNew"> Notify on new asset created</label>
-              <label class="chk"><input type="checkbox" id="uDel"> Notify on asset deletion</label>
-            </div></div>
             <div class="m-actions"><button class="btn mag" id="saveUsetBtn">✓ SAVE GENERAL</button></div>
           </section>
           <!-- MY ACCOUNT -->
@@ -445,6 +441,10 @@
               <div class="field2" style="grid-column:1/-1"><label>From</label><input id="s_from"></div>
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="saveSettings">Save notifications</button><button class="btn ghost" id="smtpTestBtn">⚡ TEST EMAIL</button><span id="smtpTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">ASSET EVENT NOTIFICATIONS</div>
+              <label class="toggle"><input type="checkbox" id="uNew"><span>Notify on new asset created</span></label>
+              <label class="toggle"><input type="checkbox" id="uDel"><span>Notify on asset deletion</span></label>
             </div>
             <div class="panel" style="margin-top:14px"><div class="secthead">TICKET EVENT NOTIFICATIONS</div>
               <label class="toggle"><input type="checkbox" id="notify_on_create"><span>New ticket created</span></label>
@@ -951,6 +951,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260903l"></script>
+<script src="/app.js?nocache=20260903m"></script>
 </body>
 </html>

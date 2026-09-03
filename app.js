@@ -2932,7 +2932,6 @@ async function loadUserSettings(){
   if (sv) sv.onclick = async () => {
     const body = {
       language: g('uLang').value, currency: g('uCur').value, region: g('uRegion').value,
-      notify_new: g('uNew').checked ? 1 : 0, notify_delete: g('uDel').checked ? 1 : 0,
       db_host: g('db_host').value.trim(), db_port: g('db_port').value || 3306,
       db_name: g('db_name').value.trim(), db_user: g('db_user').value.trim(),
       ldap_server: g('ldap_server').value.trim(), ldap_domain: g('ldap_domain').value.trim(),
@@ -3050,7 +3049,9 @@ async function loadUserSettings(){
     smtp_from: g('s_from').value.trim(),
     notify_on_create: g('notify_on_create').checked,
     notify_on_resolve: g('notify_on_resolve').checked,
-    notify_on_reply: g('notify_on_reply').checked
+    notify_on_reply: g('notify_on_reply').checked,
+    notify_new: g('uNew').checked ? 1 : 0,
+    notify_delete: g('uDel').checked ? 1 : 0
   };
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if (r && r.ok){ toast('✓ NOTIFICATIONS SAVED'); }
