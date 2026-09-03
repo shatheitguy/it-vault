@@ -261,12 +261,19 @@ async function delEmployee(id){
 }
 
 let editingEmpId=null;
-function openEmpModal(id){
+async function openEmpModal(id){
   editingEmpId=id; const e=(id?employees.find(x=>x._id===id):{})||{};
   document.getElementById('empModalTitle').textContent=id?'EDIT EMPLOYEE':'ADD EMPLOYEE';
   const empIdEl=document.getElementById('e_EmpCode');
-  empIdEl.value=e.EmpCode||'';
-  empIdEl.placeholder=id?('auto: '+tempEmpId(e)):'auto-generated if left blank';
+  if(id){
+    empIdEl.value=e.EmpCode||'';
+    empIdEl.placeholder=e.EmpCode?'':('auto: '+tempEmpId(e));
+  }else{
+    empIdEl.value='';
+    empIdEl.placeholder='…';
+    const r=await api('/api/employees/next-code');
+    if(r&&r.ok){ const j=await r.json(); empIdEl.value=j.code||''; }
+  }
   document.getElementById('e_EmployeeID').value=e.EmployeeID||'';
   document.getElementById('e_EmployeeName').value=e.EmployeeName||'';
   document.getElementById('e_Email').value=e.Email||'';
@@ -1266,9 +1273,8 @@ function fmtBytes(n){
 }
 async function openBackup(){
   const r=await api('/api/backups'); const rows=r?await r.json():[];
-  document.getElementById('bkList').innerHTML=rows.map(x=>`<tr><td class="mono">${esc(x.file)}</td><td>${esc(x.scope)}</td><td>${esc(x.created||'')}</td><td class="mono">${fmtBytes(x.size)}</td><td><div class="row-actions">
-      <button class="btn sm ghost" onclick="window.open('/api/backups/${encodeURIComponent(x.file)}/download','_blank')">⬇ DOWNLOAD</button>
-      <button class="btn sm danger" onclick="delBackup('${esc(x.file)}')">DEL</button>
+  document.getElementById('bkList').innerHTML=rows.map(x=>`<tr><td class="mono">${esc(x.file)}</td><td>${esc(x.scope)}</td><td class="mono">${esc(x.created||'')}</td><td class="mono">${fmtBytes(x.size)}</td><td><div class="row-actions">
+      <button class="btn sm ghost row-more" onclick="toggleBackupRowMenu(event,'${esc(x.file)}')" aria-label="Actions">⋮</button>
     </div></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">none</td></tr>';
   const sr=await api('/api/settings'); const s=sr?await sr.json():{};
   document.getElementById('bkSchedule').value=s.backup_schedule||'off';
@@ -1303,10 +1309,36 @@ async function delBackup(file){
 }
 async function doRestore(){
   const file=document.getElementById('bkFile').files[0];
-  if(!file){toast('Select a .sql backup');return;}
+  if(!file){toast('Select a backup file');return;}
+  if(!confirm('Restore "'+file.name+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
   const fd=new FormData();fd.append('file',file);
   const r=await api('/api/restore',{method:'POST',body:fd});
   if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+}
+async function restoreFromBackup(file){
+  if(!confirm('Restore "'+file+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
+  const r=await api('/api/backups/'+encodeURIComponent(file)+'/restore',{method:'POST'});
+  if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+}
+function toggleBackupRowMenu(e,file){
+  e.stopPropagation();
+  const menu=document.getElementById('rowMenu');
+  const key='bk'+file;
+  if(rowMenuAssetId===key && menu.style.display!=='none'){ menu.style.display='none'; rowMenuAssetId=null; return; }
+  rowMenuAssetId=key;
+  menu.innerHTML=`
+    <button onclick="closeRowMenu();window.open('/api/backups/${encodeURIComponent(file)}/download','_blank')">⬇ DOWNLOAD</button>
+    <button onclick="closeRowMenu();restoreFromBackup('${esc(file)}')">↺ RESTORE</button>
+    <div class="row-menu-sep"></div>
+    <button class="danger" onclick="closeRowMenu();delBackup('${esc(file)}')">DELETE</button>`;
+  const btn=e.currentTarget.getBoundingClientRect();
+  menu.style.display='flex';
+  const menuRect=menu.getBoundingClientRect();
+  let left=btn.right-menuRect.width;
+  if(left<8) left=8;
+  let top=btn.bottom+4;
+  if(top+menuRect.height>window.innerHeight-8) top=btn.top-menuRect.height-4;
+  menu.style.left=left+'px'; menu.style.top=top+'px';
 }
 
 /* ---------- signature ---------- */
@@ -2524,7 +2556,7 @@ async function putSettingsMerged(patch){
 }
 
 const THEME_PRESETS = {
-  deepdark:   { label:'Deep Dark',   bg_type:'solid', bg:'#0a0d13', comp_bg:'#121826', accent:'#ff3b30', accent2:'#c0392b', radius:12, font:'Inter',           theme:'dark'  },
+  deepdark:   { label:'Deep Dark',   bg_type:'solid', bg:'#000000', comp_bg:'#000000', accent:'#ff3b30', accent2:'#c0392b', radius:12, font:'Inter',           theme:'dark'  },
   cleanlight: { label:'Clean Light', bg_type:'solid', bg:'#eef1f6', comp_bg:'#ffffff', accent:'#ff3b30', accent2:'#c0392b', radius:10, font:'Inter',           theme:'light' },
   graphite:   { label:'Graphite',    bg_type:'solid', bg:'#16181d', comp_bg:'#1e2127', accent:'#ff6b57', accent2:'#a56b6b', radius:8,  font:'Inter',           theme:'dark'  },
   /* legacy key kept so a saved 'cyberpunk' setting still resolves */
