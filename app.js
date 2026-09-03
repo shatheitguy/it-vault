@@ -146,6 +146,22 @@ async function deleteSelected(){
 // a full A4-shaped image at width:100% renders ~277mm tall inline, so it
 // swallowed the whole first page on its own).
 const LETTERHEAD_CLEARANCE_MM=38;
+// Waits for the letterhead image specifically (not just window.onload, which
+// can fire before a slow/remote-hosted image is actually painted -- that was
+// the "letterhead pops in a few seconds after the print dialog" bug on a
+// real deployment where images load slower than on localhost) before
+// triggering print, so what's on screen when print fires already has it.
+function printReadyScript(){
+  if(window.HAS_LETTERHEAD){
+    return `<script>(function(){
+      var img=document.querySelector('img[src*="/letterhead.png"]');
+      function go(){ setTimeout(function(){ window.print(); }, 30); }
+      if(img && !img.complete){ img.addEventListener('load',go); img.addEventListener('error',go); }
+      else { go(); }
+    })();<\/script>`;
+  }
+  return `<script>setTimeout(function(){ window.print(); }, 100);<\/script>`;
+}
 function printHeaderHtml(title){
   if(window.HAS_LETTERHEAD){
     return `<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1">`+
@@ -166,8 +182,8 @@ function printSelected(){
     table{width:100%;border-collapse:collapse;margin-top:20px}
     th,td{text-align:left;padding:6px;border-bottom:1px solid #ddd}
     td:first-child{font-weight:800;font-family:ui-monospace,Consolas,monospace}
-  </style></head><body>${printHeaderHtml((window.APP_NAME||'IT-Vault')+' — Selected Assets')}<table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table></body></html>`);
-  win.document.close(); win.print();
+  </style></head><body>${printHeaderHtml((window.APP_NAME||'IT-Vault')+' — Selected Assets')}<table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table>${printReadyScript()}</body></html>`);
+  win.document.close();
 }
 function printQRSelected(){
   const ids=[...document.querySelectorAll('.row-chk:checked')].map(cb=>cb.dataset.id);
@@ -191,8 +207,8 @@ function printGroup(safeKey){
     th{background:#f3f3f3}
     td:first-child{font-weight:800;font-family:ui-monospace,Consolas,monospace}
     @media print{body{padding:0}button{display:none}}
-  </style></head><body>${printHeaderHtml('Asset Group: '+esc(LABELS[groupBy]||groupBy)+' — '+esc(k))}<div class="sub">${rows.length} asset${rows.length>1?'s':''} • generated ${new Date().toLocaleString()}</div><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table><button onclick="window.print()">🖨 PRINT</button></body></html>`);
-  win.document.close(); win.print();
+  </style></head><body>${printHeaderHtml('Asset Group: '+esc(LABELS[groupBy]||groupBy)+' — '+esc(k))}<div class="sub">${rows.length} asset${rows.length>1?'s':''} • generated ${new Date().toLocaleString()}</div><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table><button onclick="window.print()">🖨 PRINT</button>${printReadyScript()}</body></html>`);
+  win.document.close();
 }
 function warrantyEnd(a){
   if(!a.PurchaseDate)return null;
@@ -682,7 +698,9 @@ async function openModal(id,prefill){
      </div>`+
     groups.slice(1).map(g=>`<div class="invbox">
       <label>${g.label}</label>
-      <div class="grid2">${g.cols.map(renderField).join('')}</div>
+      <div class="grid2">${g.cols.map(renderField).join('')}${g.label.indexOf('STATUS')===0?
+        `<div class="field2"><label>Employee Department</label><input id="f_EmpDepartment" value="" readonly disabled></div>
+         <div class="field2"><label>Employee Designation</label><input id="f_EmpDesignation" value="" readonly disabled></div>`:''}</div>
     </div>`).join('');
   document.getElementById('noteInvoiceWrap').innerHTML=
     `<div class="invbox">
@@ -1005,11 +1023,26 @@ document.getElementById('camScanTextBtn').onclick=captureAndReadText;
 async function fetchEmployees(selEmpId,selReqId){
   const r=await api('/api/employees');
   const list=r?await r.json():[];
-  const opts=(list||[]).map(e=>({id:e.EmployeeID,label:e.EmployeeName||e.EmployeeID}));
+  window.__employeesCache=list; // reused so Department/Designation can be pulled live without another API call
+  const opts=list.map(e=>({id:e.EmployeeID,label:e.EmployeeName||e.EmployeeID}));
   const sel=document.getElementById('f_EmployeeID');
-  if(sel)sel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selEmpId&&o.id===selEmpId?'selected':''}>${esc(o.label)}</option>`).join('');
+  if(sel){
+    sel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selEmpId&&o.id===selEmpId?'selected':''}>${esc(o.label)}</option>`).join('');
+    sel.onchange=()=>fillEmpDeptDesig(sel.value);
+  }
   const reqSel=document.getElementById('f_RequestedBy');
   if(reqSel)reqSel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selReqId&&o.id===selReqId?'selected':''}>${esc(o.label)}</option>`).join('');
+  fillEmpDeptDesig(selEmpId);
+}
+// Department/Designation are Employee-record fields, not Asset fields --
+// pulled live from the Directory whenever Employee Name is set/changed on
+// the asset form, so they're never stale or manually re-typed.
+function fillEmpDeptDesig(empId){
+  const dEl=document.getElementById('f_EmpDepartment'), sEl=document.getElementById('f_EmpDesignation');
+  if(!dEl||!sEl)return;
+  const emp=(window.__employeesCache||[]).find(e=>e.EmployeeID===empId);
+  dEl.value=emp?(emp.Department||''):'';
+  sEl.value=emp?(emp.Designation||''):'';
 }
 
 async function delInvoice(id){
@@ -1108,11 +1141,25 @@ async function printAsset(id){
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
   const r=await api('/api/assets/'+id); if(!r){w.close();return;} const a=await r.json();
   if(a.error){w.close();toast('✕ '+a.error);return;}
-  const fields=[...visCols(),'Price','WarrantyMonths','NotesReceived','Notes','ReceivedBy','EmployeeName','EmployeeID','Designation','Department','Email'];
+  // EmployeeName/Designation/Department/Email were never real Asset columns
+  // (only EmployeeID is) -- they always came back blank. Pulled live from
+  // the assigned employee's Directory record instead, same as the sign
+  // page / QR scan page / signed PDF. EmployeeID itself is dropped from the
+  // generic field list below so "Employee Name" doesn't print twice.
+  let emp=null;
+  if(a.EmployeeID){
+    const er=await api('/api/employees'); const elist=er?await er.json():[];
+    emp=elist.find(e=>e.EmployeeID===a.EmployeeID)||null;
+  }
+  const fields=[...visCols(),'Price','WarrantyMonths','NotesReceived','Notes','ReceivedBy'].filter(f=>f!=='EmployeeID');
   const seen=new Set(); const rowsHtml=fields.filter(f=>!seen.has(f)&&seen.add(f)).map(f=>{
     let v=a[f]; if(f==='Price')v=fmtMoney(a.Price||0,CURRENCY); if(v==null||v==='')v='—';
     return `<tr><td class="k">${esc(LABELS[f]||f)}</td><td class="v">${esc(v)}</td></tr>`;
-  }).join('');
+  }).join('') + (a.EmployeeID ? `
+    <tr><td class="k">Employee Name</td><td class="v">${esc((emp&&emp.EmployeeName)||a.EmployeeID)}</td></tr>
+    <tr><td class="k">Department</td><td class="v">${esc((emp&&emp.Department)||'—')}</td></tr>
+    <tr><td class="k">Designation</td><td class="v">${esc((emp&&emp.Designation)||'—')}</td></tr>
+    <tr><td class="k">Email</td><td class="v">${esc((emp&&emp.Email)||'—')}</td></tr>` : '');
   const sig=a.SignatureData?`<div class="sig-block"><div class="sig-title">SIGNATURE / ACKNOWLEDGEMENT</div><img src="${a.SignatureData}" style="max-width:340px;max-height:160px;border:1px solid #ccc;border-radius:6px;background:#fff"/></div>`:`<div class="sig-block muted">Not signed yet</div>`;
   w.document.write(`<!doctype html><html><head><title>Asset ${esc(a.AssetTag||'')} — ${esc(a.Name||'')}</title>
   <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111;padding:0;margin:0}
@@ -1129,7 +1176,7 @@ async function printAsset(id){
   <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Asset record</span></div></div>`}
   <div class="idbar"><div class="tag">${esc(a.AssetTag||'—')}</div><div class="nm">${esc(a.Name||'')}</div></div>
   <div class="bd"><table>${rowsHtml}</table>${sig}</div></div>
-  <script>setTimeout(()=>{window.print();},250);<\/script></body></html>`);
+  ${printReadyScript()}</body></html>`);
   w.document.close();
 }
 
@@ -1616,7 +1663,11 @@ document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
 document.getElementById('navScan').onclick=openScan;
 document.getElementById('scanBtn').onclick=doScan;
-document.getElementById('scanDeep').onchange=e=>{ document.getElementById('scanPrefix').disabled=!e.target.checked; };
+document.getElementById('scanDeep').onchange=e=>{
+  const row=document.getElementById('scanPrefixRow');
+  row.style.display=e.target.checked?'':'none';
+  if(e.target.checked) document.getElementById('scanPrefix').focus();
+};
 document.getElementById('navBackup').onclick=openBackup;
 document.getElementById('bkDownload').onclick=doBackup;
 document.getElementById('bkFile').onchange=doRestore;
@@ -2060,10 +2111,13 @@ window.openTicket=openTicket;
 let contracts=[];
 let editingContractId=null;
 let ctGroupBy='';
+function contractIdLabel(id){
+  return 'CT-'+String(id).padStart(4,'0');
+}
 function assetLabelFor(id){
   if(!id)return'';
   const a=assets.find(x=>x._id===id);
-  return a?`${a.Name} (${a.Serial||'no S/N'}) — ID ${a.AssetTag||a._id}`:'';
+  return a?`${a.AssetTag||a._id} — ${a.Name} (${a.Serial||'no S/N'})`:'';
 }
 async function loadContracts(){
   const r=await api('/api/contracts'); if(!r)return; contracts=await r.json();
@@ -2079,14 +2133,14 @@ function renderContracts(){
     return true;
   });
   const tb=document.getElementById('ctBody');
-  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
+  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td class="mono" style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(contractIdLabel(c.id))}</td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
   if(ctGroupBy){
     const groups={};
     rows.forEach(c=>{const k=(c[ctGroupBy]||'—').toString();(groups[k]=groups[k]||[]).push(c);});
     const keys=Object.keys(groups).sort((x,y)=>x.toLowerCase()<y.toLowerCase()?-1:1);
     tb.innerHTML=keys.map(k=>{
       const g=groups[k];
-      return `<tr class="group-head"><td colspan="11"><span class="gh-label">▣ ${esc(ctGroupBy==='type'?'Type':'Vendor')}: ${esc(k)}</span><span class="gh-count">${g.length} contract${g.length>1?'s':''}</span></td></tr>`+g.map(rowHtml).join('');
+      return `<tr class="group-head"><td colspan="12"><span class="gh-label">▣ ${esc(ctGroupBy==='type'?'Type':'Vendor')}: ${esc(k)}</span><span class="gh-count">${g.length} contract${g.length>1?'s':''}</span></td></tr>`+g.map(rowHtml).join('');
     }).join('');
   } else {
     tb.innerHTML=rows.map(rowHtml).join('');
@@ -2116,14 +2170,14 @@ function printContractsSelected(){
   const list=contracts.filter(c=>ids.includes(c.id));
   const w=window.open('','_blank');
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
-  const rowsHtml=list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
+  const rowsHtml=list.map(c=>`<tr><td class="mono">${esc(contractIdLabel(c.id))}</td><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Contracts</title>
   <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
   .phead{display:flex;align-items:center;gap:12px;margin-bottom:4px} .phead img{height:36px} .phead h2{margin:0}
   table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;text-align:left}th{background:#101622;color:#fff}
   </style></head><body>${printHeaderHtml((window.APP_NAME||'IT-Vault')+' — Contracts')}<div>${list.length} contract${list.length>1?'s':''} • generated ${new Date().toLocaleString()}</div>
-  <table><thead><tr><th>Name</th><th>Type</th><th>Vendor</th><th>Start</th><th>End</th><th>Cost</th><th>Plan</th><th>License Key</th><th>Linked Asset</th></tr></thead><tbody>${rowsHtml}</tbody></table>
-  <script>window.onload=()=>{window.print();}<\/script>
+  <table><thead><tr><th>Contract ID</th><th>Name</th><th>Type</th><th>Vendor</th><th>Start</th><th>End</th><th>Cost</th><th>Plan</th><th>License Key</th><th>Linked Asset</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+  ${printReadyScript()}
   </body></html>`);
   w.document.close();
 }
@@ -2184,9 +2238,9 @@ function printContract(id){
   .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
   <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1">`:''}
-  <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span></div><span class="id">#${c.id}</span></div>`}
+  <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span></div><span class="id">${contractIdLabel(c.id)}</span></div>`}
   <div class="bd"><table>${rowsHtml}</table></div></div>
-  <script>window.onload=()=>{window.print();}<\/script>
+  ${printReadyScript()}
   </body></html>`);
   w.document.close();
 }
@@ -2199,7 +2253,7 @@ async function deleteContractRow(id){
 window.deleteContractRow=deleteContractRow;
 function populateContractAssetSelect(sel){
   const selEl=document.getElementById('ct_asset');
-  selEl.innerHTML='<option value="">-- none --</option>'+assets.map(a=>`<option value="${a._id}" ${a._id===sel?'selected':''}>${esc(a.Name)} (${esc(a.Serial||'no S/N')}) — ID ${esc(a.AssetTag||a._id)}</option>`).join('');
+  selEl.innerHTML='<option value="">-- none --</option>'+assets.map(a=>`<option value="${a._id}" ${a._id===sel?'selected':''}>${esc(a.AssetTag||a._id)} — ${esc(a.Name)} (${esc(a.Serial||'no S/N')})</option>`).join('');
 }
 async function populateContractEmployeeSelect(sel){
   const selEl=document.getElementById('ct_employee'); if(!selEl)return;
@@ -2242,6 +2296,8 @@ async function openContractModal(id){
   const c=id?(contracts.find(x=>x.id===id)||{}):{};
   document.getElementById('contractModalTitle').textContent=id?'EDIT CONTRACT':'ADD CONTRACT';
   document.getElementById('ctCurLabel').textContent=CURRENCY;
+  document.getElementById('ct_idWrap').style.display=id?'':'none';
+  if(id)document.getElementById('ct_idDisplay').value=contractIdLabel(id);
   document.getElementById('ct_name').value=c.name||'';
   document.getElementById('ct_vendor').value=c.vendor||'';
   document.getElementById('ct_vendor_email').value=c.vendor_email||'';
@@ -2488,6 +2544,18 @@ function isLightHex(h){ const c = hexRgb(h); return (c[0]*0.299 + c[1]*0.587 + c
 function onBg(bgHex){
   return isLightHex(bgHex) ? '#16202e' : '#e6edf6';
 }
+// For button text ON TOP OF an accent color, a simple light/dark luminance
+// split (like onBg) is too blunt -- a saturated color like the default red
+// accent reads as "dark" by that formula even though the dark navy text
+// (#04121f) the app has always used actually contrasts better against it
+// than light text would. Pick whichever of the two candidate text colors
+// gives the higher WCAG contrast ratio against this specific accent, so
+// every existing preset keeps its current look and only a genuinely bad
+// pairing (e.g. Minimalist's near-black accent) actually changes.
+function bestTextOn(bgHex){
+  const dark = '#04121f', light = '#e6edf6';
+  return contrastRatio(bgHex, dark) >= contrastRatio(bgHex, light) ? dark : light;
+}
 function muteFor(bgHex, k){
   // k: 'muted' (secondary text) or 'muted2' (tertiary)
   const light = isLightHex(bgHex);
@@ -2583,6 +2651,13 @@ function applyCustomVars(s){
   st.setProperty('--accent', accent);
   st.setProperty('--accent2', accent2);
   st.setProperty('--accent-soft', rgba(accent, 0.14));
+  // Primary buttons paint text on top of --accent -- a fixed dark text color
+  // (the old behavior) goes invisible on presets like Minimalist whose
+  // accent is itself near-black. Derive readable button text from the
+  // accent's own lightness instead, same as --txt is derived from the page
+  // background.
+  st.setProperty('--btn-text', bestTextOn(accent));
+  st.setProperty('--btn-mag-text', bestTextOn(accent2));
   st.setProperty('--radius', c.radius + 'px');
   const fontStack = FONT_STACKS[c.font] || FONT_STACKS['Inter'];
   st.setProperty('--font', fontStack);

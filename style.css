@@ -83,10 +83,10 @@ canvas#sessBar{position:fixed;bottom:0;left:0;height:3px;width:100%;z-index:60;
 .undobar .ub-undo{background:var(--amber);color:#1a1300;border:none;border-radius:7px;padding:6px 16px;font-weight:800;cursor:pointer;font-family:var(--font)}
 .undobar .ub-undo:hover{filter:brightness(1.08)}
 
-.btn{background:var(--accent);color:#04121f;border:none;border-radius:8px;padding:9px 16px;font-weight:600;
+.btn{background:var(--accent);color:var(--btn-text,#04121f);border:none;border-radius:8px;padding:9px 16px;font-weight:600;
   font-family:var(--font);letter-spacing:0;cursor:pointer;font-size:13px;transition:.15s}
 .btn:hover{filter:brightness(1.08)}
-.btn.mag{background:var(--accent2);color:#fff}
+.btn.mag{background:var(--accent2);color:var(--btn-mag-text,#fff)}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--muted)}
 .btn.ghost:hover{color:var(--txt);border-color:var(--accent)}
 .btn.sm{padding:5px 11px;font-size:12px}
@@ -211,13 +211,12 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .invrow{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .m-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px}
 
-/* network scan modal: scan button + deep-scan toggle + its prefix input */
+/* network scan modal: scan button + deep-scan toggle, prefix input reveals below only when relevant */
 .scanrow{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
 .scanrow #scanBtn{flex:0 0 auto}
-.scanrow .scan-sep{flex:0 0 auto;width:1px;align-self:stretch;background:var(--line)}
 .scanrow .scan-deep{flex:0 0 auto;margin:0;white-space:nowrap}
-.scanrow .scan-prefix{flex:1 1 200px;width:auto;min-width:160px}
-.scanrow .scan-prefix:disabled{opacity:.5;cursor:not-allowed}
+.scan-prefix-row{margin-top:10px;animation:fade .2s ease}
+.scan-prefix-row .scan-prefix{width:100%}
 .scan-hint{margin:8px 0 0;font-size:12px}
 .scan-status{min-height:16px;margin:10px 0 8px}
 

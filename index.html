@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260902d">
+<link rel="stylesheet" href="/style.css?v=20260903b">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -178,7 +178,7 @@
       </div>
 
       <div class="tablewrap">
-        <table id="ctGrid"><thead><tr><th><input type="checkbox" id="ctChkAll"/></th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>START</th><th>END</th><th>COST</th><th>PLAN</th><th>LICENSE KEY</th><th>LINKED ASSET</th><th></th></tr></thead><tbody id="ctBody"></tbody></table>
+        <table id="ctGrid"><thead><tr><th><input type="checkbox" id="ctChkAll"/></th><th>CONTRACT ID</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>START</th><th>END</th><th>COST</th><th>PLAN</th><th>LICENSE KEY</th><th>LINKED ASSET</th><th></th></tr></thead><tbody id="ctBody"></tbody></table>
         <div class="empty" id="ctEmpty" style="display:none">NO CONTRACTS YET</div>
       </div>
     </div>
@@ -731,6 +731,7 @@
     <div class="invbox">
       <label>DETAILS</label>
       <div class="grid2">
+        <div class="field2" id="ct_idWrap" style="display:none"><label>Contract ID</label><input id="ct_idDisplay" class="mono" readonly disabled></div>
         <div class="field2"><label>Name</label><input id="ct_name" placeholder="e.g. AC Maintenance AMC, Antivirus License"></div>
         <div class="field2"><label>Type <a class="mlink" onclick="document.getElementById('contractModal').classList.remove('show');showPage('page-catalog')">manage in Product Catalog ↗</a></label><select id="ct_type"><option value="">-- select type --</option></select></div>
         <div class="field2"><label>Vendor / Company</label><input id="ct_vendor" placeholder="Outside company name"></div>
@@ -876,9 +877,10 @@
     <label>SCAN OPTIONS</label>
     <div class="scanrow">
       <button class="btn" id="scanBtn">⚡ SCAN</button>
-      <span class="scan-sep"></span>
       <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan</span></label>
-      <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22" disabled>
+    </div>
+    <div class="scan-prefix-row" id="scanPrefixRow" style="display:none">
+      <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22">
     </div>
     <p class="muted scan-hint">Deep scan needs a subnet in CIDR form (up to /20, 4096 addresses) and pings every address in it; without it, Scan just reads the ARP table (fast, no subnet needed).</p>
   </div>
@@ -958,6 +960,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260903n"></script>
+<script src="/app.js?nocache=20260903s"></script>
 </body>
 </html>

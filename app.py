@@ -1144,7 +1144,7 @@ def list_assets():
     if request.args.get("order") == "recent":
         sql += " ORDER BY created_at IS NULL, created_at DESC, Name"
     else:
-        sql += " ORDER BY Name"
+        sql += " ORDER BY AssetTag='', AssetTag, Name"
     cur.execute(sql, params); rows = cur.fetchall(); c.close()
     return jsonify([row_to_dict(r) for r in rows])
 
@@ -1621,7 +1621,7 @@ CONTRACT_EXPORT_LABELS = {"name": "Name", "type": "Type", "vendor": "Vendor", "s
 @auth_required(module="contracts", level="read")
 def export_contracts_excel():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY end_date")
+    cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY id")
     rows = cur.fetchall(); c.close()
     wb = Workbook(); ws = wb.active; ws.title = "Contracts"
     ws.append([CONTRACT_EXPORT_LABELS[c_] for c_ in CONTRACT_EXPORT_COLS])
@@ -2328,7 +2328,7 @@ def contracts_api():
         return jsonify({"error": "forbidden"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
-        cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY end_date"); rows = cur.fetchall(); c.close()
+        cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY id"); rows = cur.fetchall(); c.close()
         return jsonify([dict(r) for r in rows])
     if request.method == "POST":
         d = request.get_json(force=True)
