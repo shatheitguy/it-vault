@@ -2663,15 +2663,15 @@ function normCustom(s){
   let radius = parseInt(s.radius, 10); if (!isFinite(radius)) radius = 12;
   radius = Math.max(0, Math.min(24, radius));
   // derive light/dark from base background (single source of truth)
-  const baseHex = isGrad ? bgA : hex6(bgRaw, '#0a0d13');
+  const baseHex = isGrad ? bgA : hex6(bgRaw, '#000000');
   const theme = isLightHex(baseHex) ? 'light' : 'dark';
   return {
     theme_preset: String(s.theme_preset || 'deepdark'),
     theme: theme,
     bg_type: isGrad ? 'gradient' : 'solid',
-    bg: hex6(isGrad ? bgA : bgRaw, '#0a0d13'),
+    bg: hex6(isGrad ? bgA : bgRaw, '#000000'),
     bgA: bgA, bgB: bgB,
-    comp_bg: hex6(s.comp_bg, '#121826'),
+    comp_bg: hex6(s.comp_bg, '#000000'),
     accent: hex6(s.accent, '#ff3b30'),
     accent2: hex6(s.accent2, '#c0392b'),
     radius: radius,
