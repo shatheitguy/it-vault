@@ -10,7 +10,38 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <TextView style="@style/SectionLabel" android:text="MY ACCOUNT" android:layout_marginTop="0dp" />
+        <TextView style="@style/SectionLabel" android:text="APPEARANCE" android:layout_marginTop="0dp" />
+        <RadioGroup
+            android:id="@+id/themeGroup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <RadioButton
+                android:id="@+id/themeSystem"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Follow system"
+                android:textColor="@color/text"
+                android:buttonTint="@color/accent" />
+            <RadioButton
+                android:id="@+id/themeLight"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Light"
+                android:textColor="@color/text"
+                android:buttonTint="@color/accent" />
+            <RadioButton
+                android:id="@+id/themeDark"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Dark"
+                android:textColor="@color/text"
+                android:buttonTint="@color/accent" />
+        </RadioGroup>
+
+        <TextView style="@style/SectionLabel" android:text="MY ACCOUNT" />
         <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Display name">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/displayInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
         </com.google.android.material.textfield.TextInputLayout>

@@ -25,8 +25,9 @@ class LoginActivity : AppCompatActivity() {
     private var tfaActive: String = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
         Prefs.init(applicationContext)
+        Prefs.applyThemeMode()
+        super.onCreate(savedInstanceState)
 
         if (Prefs.isLoggedIn) {
             startActivity(Intent(this, MainActivity::class.java))

@@ -6,6 +6,7 @@ nexus_config.json
 backups/
 invoices/
 logo.png
+letterhead.png
 logs/
 
 # --- real / non-generic sample data ---

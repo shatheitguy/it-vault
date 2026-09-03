@@ -5,3 +5,5 @@ waitress
 ldap3
 pyotp
 qrcode
+reportlab
+pymupdf

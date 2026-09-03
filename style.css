@@ -359,7 +359,10 @@ tbody tr.group-head:hover td{background:var(--bg1)}
   text-align:right;word-break:break-all}
 
 /* range + color inputs inside .field2 */
-.field2 input[type=color]{padding:3px;height:38px;cursor:pointer}
+/* Fixed, theme-independent border -- var(--line) can be near-white on the
+   Clean Light preset, which made a white/near-white swatch value (e.g. the
+   background-color picker) blend invisibly into the panel behind it. */
+.field2 input[type=color]{padding:3px;height:38px;cursor:pointer;border:2px solid #8a93a6;box-shadow:0 0 0 1px rgba(0,0,0,.15) inset}
 .field2 input[type=range]{padding:0;min-height:auto;height:26px;accent-color:var(--accent);cursor:pointer;background:transparent;border:none}
 
 /* ---- responsive ---- */

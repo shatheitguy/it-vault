@@ -40,6 +40,7 @@ data class Asset(
 
 data class CreateAssetResponse(val ok: Boolean?, @SerializedName("_id") val id: String?, val error: String?)
 data class NextTagResponse(val tag: String?)
+data class CheckoutRequest(val username: String, val signed_date: String, val expected: String, val note: String)
 
 data class Employee(
     @SerializedName("_id") val id: String? = null,

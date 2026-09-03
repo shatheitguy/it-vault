@@ -3,19 +3,29 @@ package com.itguy.assetmanager.ui.assets
 import android.app.AlertDialog
 import android.app.DatePickerDialog
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ArrayAdapter
 import android.widget.EditText
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.model.*
 import com.itguy.assetmanager.databinding.FragmentAssetEditBinding
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.Calendar
 
 class AssetEditFragment : Fragment() {
@@ -31,13 +41,32 @@ class AssetEditFragment : Fragment() {
     private var locations: List<LocationItem> = emptyList()
     private var employees: List<Employee> = emptyList()
 
-    private val STATUSES = listOf("Available", "Checked-Out", "Under-Maintenance", "Storage", "Retired")
+    private val STATUSES = listOf("Available", "Checked-Out", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen")
     private val ADD_NEW = "＋ Add new…"
     private val NONE = "-- select --"
+    private val ALLOWED_INVOICE_EXT = setOf("pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff")
 
     private val scanLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)?.let { applyScannedText(it); return@registerForActivityResult }
         result.data?.getStringExtra(ScanActivity.EXTRA_TEXT_RESULT)?.let { applyOcrText(it) }
+    }
+
+    // Invoice/proof attachment: a newly-picked file isn't uploaded until Save
+    // (mirrors the web form -- for a brand-new asset there's no _id to attach
+    // it to until the asset itself is created).
+    private var pickedInvoiceUri: Uri? = null
+    private var pickedInvoiceName: String = ""
+    private val pickInvoiceLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val name = queryFileName(uri)
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext !in ALLOWED_INVOICE_EXT) {
+            Toast.makeText(requireContext(), "Only PDF/image files allowed", Toast.LENGTH_LONG).show()
+            return@registerForActivityResult
+        }
+        pickedInvoiceUri = uri
+        pickedInvoiceName = name
+        b.invoiceFileName.text = "$name (will be uploaded on save)"
     }
 
     companion object {
@@ -73,11 +102,18 @@ class AssetEditFragment : Fragment() {
         b.deleteBtn.visibility = if (assetId != null) View.VISIBLE else View.GONE
 
         setupDatePicker(b.fPurchaseDate)
-        setupDatePicker(b.fNotesReceived)
+        // Signed Date is set only by Check Out (see checkoutAsset()), never
+        // freely edited here -- matches the web form's lock.
+        b.fNotesReceived.isEnabled = false
 
         b.scanBtn.setOnClickListener { scanLauncher.launch(Intent(requireContext(), ScanActivity::class.java)) }
         b.saveBtn.setOnClickListener { save() }
         b.deleteBtn.setOnClickListener { confirmDelete() }
+        b.invoicePickBtn.setOnClickListener { pickInvoiceLauncher.launch("*/*") }
+        b.invoiceViewBtn.setOnClickListener { viewInvoice() }
+        b.invoiceRemoveBtn.setOnClickListener { removeInvoice() }
+        b.checkOutBtn.setOnClickListener { openCheckoutDialog() }
+        b.checkInBtn.setOnClickListener { confirmCheckin() }
 
         loadReferenceDataAndAsset()
     }
@@ -139,6 +175,190 @@ class AssetEditFragment : Fragment() {
         b.fReceivedBy.setText(current.ReceivedBy)
         b.fNotesReceived.setText(current.NotesReceived)
         b.fNote.setText(current.Note)
+        renderInvoiceState()
+
+        val isExisting = assetId != null
+        b.checkOutBtn.visibility = if (isExisting && current.Status != "Checked-Out") View.VISIBLE else View.GONE
+        b.checkInBtn.visibility = if (isExisting && current.Status == "Checked-Out") View.VISIBLE else View.GONE
+    }
+
+    /** Assign to an employee -- same "Signed Date defaults to today, only
+     * changeable here" rule as the web Check Out dialog. */
+    private fun openCheckoutDialog() {
+        val id = assetId ?: return
+        val ctx = requireContext()
+        val pad = (16 * resources.displayMetrics.density).toInt()
+        val layout = android.widget.LinearLayout(ctx).apply { orientation = android.widget.LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
+
+        val userLabels = employees.map { it.EmployeeName.ifBlank { it.EmployeeID } }
+        val userSpinner = android.widget.Spinner(ctx).apply {
+            adapter = ArrayAdapter(ctx, android.R.layout.simple_spinner_dropdown_item, userLabels)
+        }
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+        val signedDateField = EditText(ctx).apply { hint = "Signed date"; setText(today); isFocusable = false }
+        signedDateField.setOnClickListener {
+            val cal = Calendar.getInstance()
+            DatePickerDialog(ctx, { _, y, m, d -> signedDateField.setText(String.format("%04d-%02d-%02d", y, m + 1, d)) },
+                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+        }
+        val expectedField = EditText(ctx).apply { hint = "Expected return (optional)" }
+        expectedField.setOnClickListener {
+            val cal = Calendar.getInstance()
+            DatePickerDialog(ctx, { _, y, m, d -> expectedField.setText(String.format("%04d-%02d-%02d", y, m + 1, d)) },
+                cal.get(Calendar.YEAR), cal.get(Calendar.MONTH), cal.get(Calendar.DAY_OF_MONTH)).show()
+        }
+        val noteField = EditText(ctx).apply { hint = "Note (optional)" }
+
+        layout.addView(android.widget.TextView(ctx).apply { text = "Assign to"; setTextColor(resources.getColor(com.itguy.assetmanager.R.color.muted, null)) })
+        layout.addView(userSpinner)
+        layout.addView(signedDateField)
+        layout.addView(expectedField)
+        layout.addView(noteField)
+
+        AlertDialog.Builder(ctx)
+            .setTitle("Check Out Asset")
+            .setView(layout)
+            .setPositiveButton("Check Out") { _, _ ->
+                val idx = userSpinner.selectedItemPosition
+                if (idx < 0 || employees.isEmpty()) { Toast.makeText(ctx, "No employee selected", Toast.LENGTH_SHORT).show(); return@setPositiveButton }
+                val username = employees[idx].EmployeeID
+                val req = CheckoutRequest(
+                    username = username,
+                    signed_date = signedDateField.text?.toString()?.trim().orEmpty(),
+                    expected = expectedField.text?.toString()?.trim().orEmpty(),
+                    note = noteField.text?.toString()?.trim().orEmpty()
+                )
+                lifecycleScope.launch {
+                    try {
+                        ApiClient.api().checkoutAsset(id, req)
+                        loadReferenceDataAndAsset()
+                    } catch (e: Exception) {
+                        Toast.makeText(ctx, "Check out failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun confirmCheckin() {
+        val id = assetId ?: return
+        AlertDialog.Builder(requireContext())
+            .setTitle("Check in this asset?")
+            .setPositiveButton("Check In") { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        ApiClient.api().checkinAsset(id)
+                        loadReferenceDataAndAsset()
+                    } catch (e: Exception) {
+                        if (_b != null) Toast.makeText(requireContext(), "Check in failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun renderInvoiceState() {
+        val file = current.InvoiceFile
+        if (pickedInvoiceUri != null) {
+            b.invoiceFileName.text = "$pickedInvoiceName (will be uploaded on save)"
+            b.invoiceViewBtn.visibility = View.GONE
+            b.invoiceRemoveBtn.visibility = View.GONE
+        } else if (!file.isNullOrBlank()) {
+            b.invoiceFileName.text = file
+            b.invoiceViewBtn.visibility = View.VISIBLE
+            b.invoiceRemoveBtn.visibility = View.VISIBLE
+        } else {
+            b.invoiceFileName.text = "No file attached"
+            b.invoiceViewBtn.visibility = View.GONE
+            b.invoiceRemoveBtn.visibility = View.GONE
+        }
+    }
+
+    private fun queryFileName(uri: Uri): String {
+        var name = "invoice"
+        try {
+            requireContext().contentResolver.query(uri, null, null, null, null)?.use { c ->
+                val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && c.moveToFirst()) name = c.getString(idx) ?: name
+            }
+        } catch (e: Exception) { }
+        return name
+    }
+
+    private suspend fun uploadPickedInvoice(id: String) {
+        val uri = pickedInvoiceUri ?: return
+        try {
+            val bytes = withContext(Dispatchers.IO) {
+                requireContext().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            } ?: return
+            val ext = pickedInvoiceName.substringAfterLast('.', "pdf")
+            val mime = when (ext.lowercase()) {
+                "pdf" -> "application/pdf"
+                "png" -> "image/png"
+                "gif" -> "image/gif"
+                "webp" -> "image/webp"
+                "bmp" -> "image/bmp"
+                "tif", "tiff" -> "image/tiff"
+                else -> "image/jpeg"
+            }
+            val body = bytes.toRequestBody(mime.toMediaTypeOrNull())
+            val part = MultipartBody.Part.createFormData("file", pickedInvoiceName, body)
+            ApiClient.api().uploadInvoice(id, part)
+            pickedInvoiceUri = null
+        } catch (e: Exception) {
+            if (_b != null) Toast.makeText(requireContext(), "Invoice upload failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun viewInvoice() {
+        val file = current.InvoiceFile ?: return
+        lifecycleScope.launch {
+            try {
+                val resp = ApiClient.api().downloadInvoice(file)
+                val body = resp.body() ?: run {
+                    Toast.makeText(requireContext(), "Could not open invoice", Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                val dir = File(requireContext().cacheDir, "downloads").apply { mkdirs() }
+                val outFile = File(dir, file)
+                withContext(Dispatchers.IO) {
+                    body.byteStream().use { input -> outFile.outputStream().use { output -> input.copyTo(output) } }
+                }
+                val uri = FileProvider.getUriForFile(requireContext(), "${requireContext().packageName}.fileprovider", outFile)
+                val mime = requireContext().contentResolver.getType(uri)
+                    ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.substringAfterLast('.', "")) ?: "*/*"
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mime)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                try { startActivity(intent) }
+                catch (e: Exception) { Toast.makeText(requireContext(), "No app found to open this file", Toast.LENGTH_LONG).show() }
+            } catch (e: Exception) {
+                if (_b != null) Toast.makeText(requireContext(), "Could not open invoice: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun removeInvoice() {
+        val id = assetId ?: return
+        AlertDialog.Builder(requireContext())
+            .setTitle("Remove invoice file?")
+            .setPositiveButton("Remove") { _, _ ->
+                lifecycleScope.launch {
+                    try {
+                        ApiClient.api().deleteInvoiceFile(id)
+                        current = current.copy(InvoiceFile = null)
+                        if (_b != null) renderInvoiceState()
+                    } catch (e: Exception) {
+                        if (_b != null) Toast.makeText(requireContext(), "Remove failed: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     // ---- Status (fixed list) ----
@@ -307,7 +527,9 @@ class AssetEditFragment : Fragment() {
                 val id = assetId
                 if (id == null) {
                     val resp = api.createAsset(asset)
-                    if (resp.isSuccessful && resp.body()?.ok == true) {
+                    val newId = resp.body()?.id
+                    if (resp.isSuccessful && resp.body()?.ok == true && newId != null) {
+                        if (pickedInvoiceUri != null) uploadPickedInvoice(newId)
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     } else {
                         showFormError(resp)
@@ -315,6 +537,7 @@ class AssetEditFragment : Fragment() {
                 } else {
                     val resp = api.updateAsset(id, asset)
                     if (resp.isSuccessful && resp.body()?.ok == true) {
+                        if (pickedInvoiceUri != null) uploadPickedInvoice(id)
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     } else {
                         showFormError(resp)

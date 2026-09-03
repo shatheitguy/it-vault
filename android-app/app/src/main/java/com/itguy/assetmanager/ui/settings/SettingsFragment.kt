@@ -26,10 +26,30 @@ class SettingsFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         b.serverText.text = Prefs.serverUrl
         loadProfile()
+        setupThemePicker()
 
         b.saveProfileBtn.setOnClickListener { saveProfile() }
         b.changePassBtn.setOnClickListener { changePassword() }
         b.changeServerBtn.setOnClickListener { confirmChangeServer() }
+    }
+
+    private fun setupThemePicker() {
+        when (Prefs.themeMode) {
+            "light" -> b.themeLight.isChecked = true
+            "dark" -> b.themeDark.isChecked = true
+            else -> b.themeSystem.isChecked = true
+        }
+        b.themeGroup.setOnCheckedChangeListener { _, checkedId ->
+            val mode = when (checkedId) {
+                b.themeLight.id -> "light"
+                b.themeDark.id -> "dark"
+                else -> "system"
+            }
+            if (mode != Prefs.themeMode) {
+                Prefs.themeMode = mode
+                requireActivity().recreate()
+            }
+        }
     }
 
     private fun loadProfile() {
