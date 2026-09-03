@@ -43,7 +43,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 .err{color:var(--red);font-size:13px;text-align:center;min-height:0;margin-top:14px;line-height:1.4}
 .shake{animation:sh .4s}@keyframes sh{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-5px)}}
 .sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px}
-#step1,#step2fa{animation:fadeUp .35s ease}
+#step1,#step2fa,#stepForgot{animation:fadeUp .35s ease}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#04121f;
   border-radius:50%;animation:spin .6s linear infinite;vertical-align:-3px;margin-right:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -59,6 +59,25 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
     <div class="f"><label for="p">Password</label><input id="p" type="password" placeholder="Enter your password" autocomplete="current-password"></div>
     <label class="rem"><input type="checkbox" id="r"> Keep me signed in (5 min)</label>
     <button class="btn" id="go">Sign in</button>
+    <div style="margin-top:14px;text-align:center"><a href="#" id="forgotLink" style="color:var(--muted);font-size:12.5px">Forgot password?</a></div>
+  </div>
+  <div id="stepForgot" style="display:none">
+    <div id="forgotRequest">
+      <div class="sub" style="margin-bottom:18px">Enter your username or email and we'll send you a reset code</div>
+      <div class="f"><label for="fpUser">Username or email</label><input id="fpUser" placeholder="Username or email" autocomplete="username"></div>
+      <button class="btn" id="fpSend">Send reset code</button>
+    </div>
+    <div id="forgotReset" style="display:none">
+      <div class="sub" style="margin-bottom:18px">We emailed a 6-digit code to your address (if an account exists). Enter it below with your new password.</div>
+      <div class="f"><label for="fpCode">Reset code</label><input id="fpCode" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
+      <div class="f"><label for="fpNew">New password</label><input id="fpNew" type="password" placeholder="New password" autocomplete="new-password"></div>
+      <div class="f"><label for="fpNew2">Confirm new password</label><input id="fpNew2" type="password" placeholder="Confirm new password" autocomplete="new-password"></div>
+      <button class="btn" id="fpReset">Reset password</button>
+      <div style="display:flex;justify-content:space-between;margin-top:14px;font-size:12.5px">
+        <a href="#" id="fpResend" style="color:var(--muted)">Resend code</a>
+      </div>
+    </div>
+    <div style="margin-top:10px;text-align:center"><a href="#" id="backToLoginFromForgot" style="color:var(--muted);font-size:12.5px">← Back to sign in</a></div>
   </div>
   <div id="step2fa" style="display:none">
     <div class="sub" id="tfaMsg" style="margin-bottom:18px">Enter the 6-digit code</div>
@@ -257,6 +276,91 @@ document.getElementById('go').onclick=login;
 document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
 document.getElementById('verify2fa').onclick=verify2fa;
 document.getElementById('code2fa').addEventListener('keydown',e=>{if(e.key==='Enter')verify2fa();});
+
+/* ---- forgot password (self-service reset via emailed OTP) ---- */
+function showForgot(){
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2fa').style.display='none';
+  document.getElementById('stepForgot').style.display='';
+  document.getElementById('forgotRequest').style.display='';
+  document.getElementById('forgotReset').style.display='none';
+  document.getElementById('e').textContent='';
+  document.getElementById('fpUser').value=document.getElementById('u').value.trim();
+  document.getElementById('fpUser').focus();
+}
+function backToSignInFromForgot(){
+  document.getElementById('stepForgot').style.display='none';
+  document.getElementById('step1').style.display='';
+  document.getElementById('e').textContent='';
+}
+document.getElementById('forgotLink').onclick=(e)=>{ e.preventDefault(); showForgot(); };
+document.getElementById('backToLoginFromForgot').onclick=(e)=>{ e.preventDefault(); backToSignInFromForgot(); };
+
+async function requestReset(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const ident=document.getElementById('fpUser').value.trim();
+  if(!ident){ eEl.textContent='Enter your username or email.'; shakeBox(); return; }
+  const btn=document.getElementById('fpSend');
+  setBtnBusy(btn,true,'Sending…');
+  try{
+    const r=await fetch('/api/forgot-password/request',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:ident})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){
+      document.getElementById('forgotRequest').style.display='none';
+      document.getElementById('forgotReset').style.display='';
+      document.getElementById('fpCode').value=''; document.getElementById('fpNew').value=''; document.getElementById('fpNew2').value='';
+      document.getElementById('fpCode').focus();
+    } else {
+      eEl.textContent=d.error||'Could not send reset code.';
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(btn,false);
+  }
+}
+async function submitReset(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const code=document.getElementById('fpCode').value.trim();
+  const pw1=document.getElementById('fpNew').value;
+  const pw2=document.getElementById('fpNew2').value;
+  if(!code){ eEl.textContent='Enter the code from your email.'; shakeBox(); return; }
+  if(!pw1){ eEl.textContent='Enter a new password.'; shakeBox(); return; }
+  if(pw1!==pw2){ eEl.textContent='Passwords do not match.'; shakeBox(); return; }
+  const btn=document.getElementById('fpReset');
+  setBtnBusy(btn,true,'Resetting…');
+  try{
+    const r=await fetch('/api/forgot-password/reset',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code,new_password:pw1})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){
+      const me=await fetch('/api/me'); const j=await me.json();
+      if(j.user){ window.location.replace('/'); return; }
+      else{ eEl.textContent='Password reset -- please sign in.'; backToSignInFromForgot(); }
+    } else {
+      eEl.textContent=d.error||'Invalid or expired code.';
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(btn,false);
+  }
+}
+document.getElementById('fpSend').onclick=requestReset;
+document.getElementById('fpUser').addEventListener('keydown',e=>{if(e.key==='Enter')requestReset();});
+document.getElementById('fpReset').onclick=submitReset;
+document.getElementById('fpNew2').addEventListener('keydown',e=>{if(e.key==='Enter')submitReset();});
+document.getElementById('fpResend').onclick=async(e)=>{
+  e.preventDefault();
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const r=await fetch('/api/forgot-password/request',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:document.getElementById('fpUser').value.trim()})});
+  const d=await r.json().catch(()=>({}));
+  eEl.textContent = r.ok ? 'Code resent.' : (d.error||'Could not resend code.');
+};
 </script>
 </body>
 </html>

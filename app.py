@@ -490,6 +490,7 @@ def migrate_schema():
         "is_deleted": "TINYINT DEFAULT 0",
         "vendor_email": "VARCHAR(160) DEFAULT ''",
         "expiry_notified_at": "VARCHAR(40) DEFAULT ''",
+        "billing_period": "VARCHAR(20) DEFAULT 'One-Time'",
     }
     for col, typ in contract_cols.items():
         try:
@@ -730,6 +731,84 @@ def verify_login_2fa():
     session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
     session.permanent = True
     return jsonify({"ok": True, "role": row["role"]})
+
+def _send_password_reset_email(username, to_email, code):
+    if not to_email:
+        return False
+    import smtplib
+    from email.message import EmailMessage
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, app_name FROM Settings WHERE id=1")
+    s = cur.fetchone() or {}; c.close()
+    if not s.get("smtp_host"):
+        return False
+    try:
+        bn = s.get("app_name") or "IT-Vault"
+        msg = EmailMessage()
+        msg["Subject"] = f"{bn}: password reset code"
+        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["To"] = to_email
+        msg.set_content(f"Your {bn} password reset code is: {code}\n\nThis code expires in 10 minutes. "
+                         f"If you didn't request this, you can safely ignore this email -- your password "
+                         f"will not be changed." + _email_footer(bn))
+        with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
+            if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
+            sv.send_message(msg)
+        return True
+    except Exception as e:
+        print("password reset email error:", e); return False
+
+@app.route("/api/forgot-password/request", methods=["POST"])
+def forgot_password_request():
+    """Step 1 of self-service password reset: emails a 6-digit code good for
+    10 minutes. Always reports success regardless of whether the
+    username/email matches an account, so this can't be used to enumerate
+    valid logins."""
+    d = request.get_json(force=True, silent=True) or {}
+    ident = (d.get("username") or "").strip()
+    if not ident:
+        return jsonify({"error": "username or email required"}), 400
+    if session.get("pwreset_sent_at") and time.time() - session["pwreset_sent_at"] < 20:
+        return jsonify({"error": "please wait a few seconds before requesting another code"}), 429
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT username, email FROM Users WHERE username=%s OR email=%s", [ident, ident])
+    row = cur.fetchone(); c.close()
+    if row and row.get("email"):
+        code = f"{secrets.randbelow(1000000):06d}"
+        session.clear()
+        session["pwreset_user"] = row["username"]
+        session["pwreset_code"] = code
+        session["pwreset_exp"] = time.time() + 600
+        session["pwreset_sent_at"] = time.time()
+        session.permanent = True
+        _send_password_reset_email(row["username"], row["email"], code)
+    return jsonify({"ok": True})
+
+@app.route("/api/forgot-password/reset", methods=["POST"])
+def forgot_password_reset():
+    """Step 2: verify the emailed code and set a new password. Signs the user
+    in on success, same as completing 2FA."""
+    u = session.get("pwreset_user")
+    if not u or time.time() > session.get("pwreset_exp", 0):
+        return jsonify({"error": "Reset code expired -- please request a new one"}), 400
+    d = request.get_json(force=True, silent=True) or {}
+    code = (d.get("code") or "").strip()
+    new_pw = d.get("new_password") or ""
+    if not code or code != session.get("pwreset_code"):
+        return jsonify({"error": "Invalid code"}), 401
+    if not new_pw:
+        return jsonify({"error": "New password required"}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET password=%s WHERE username=%s", (hash_pw(new_pw), u))
+    c.commit()
+    cur.execute("SELECT username, role, display FROM Users WHERE username=%s", [u]); row = cur.fetchone(); c.close()
+    for k in ("pwreset_user", "pwreset_code", "pwreset_exp", "pwreset_sent_at"):
+        session.pop(k, None)
+    if row:
+        session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
+        session.permanent = True
+    audit(u, "PASSWORD_RESET", "", "password reset via email OTP")
+    return jsonify({"ok": True})
 
 @app.route("/api/logout", methods=["POST"])
 def logout():
@@ -2253,11 +2332,11 @@ def contracts_api():
         return jsonify([dict(r) for r in rows])
     if request.method == "POST":
         d = request.get_json(force=True)
-        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, asset_id, employee_id, location, department, license_key, note)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, billing_period, asset_id, employee_id, location, department, license_key, note)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("asset_id") or None, d.get("employee_id") or "",
+                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note","")))
         c.commit(); c.close()
         if (d.get("employee_id") or "").strip():
@@ -2266,11 +2345,11 @@ def contracts_api():
     if request.method == "PUT":
         d = request.get_json(force=True); cid = d.get("id")
         cur.execute("SELECT employee_id FROM Contracts WHERE id=%s", [cid]); old = cur.fetchone() or {}
-        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, vendor_email=%s, type=%s, start_date=%s, end_date=%s, cost=%s, asset_id=%s,
+        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, vendor_email=%s, type=%s, start_date=%s, end_date=%s, cost=%s, billing_period=%s, asset_id=%s,
                        employee_id=%s, location=%s, department=%s, license_key=%s, note=%s, expiry_notified_at='' WHERE id=%s""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("asset_id") or None, d.get("employee_id") or "",
+                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note",""), cid))
         c.commit(); c.close()
         new_emp = (d.get("employee_id") or "").strip()

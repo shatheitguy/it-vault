@@ -2079,14 +2079,14 @@ function renderContracts(){
     return true;
   });
   const tb=document.getElementById('ctBody');
-  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
+  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
   if(ctGroupBy){
     const groups={};
     rows.forEach(c=>{const k=(c[ctGroupBy]||'—').toString();(groups[k]=groups[k]||[]).push(c);});
     const keys=Object.keys(groups).sort((x,y)=>x.toLowerCase()<y.toLowerCase()?-1:1);
     tb.innerHTML=keys.map(k=>{
       const g=groups[k];
-      return `<tr class="group-head"><td colspan="10"><span class="gh-label">▣ ${esc(ctGroupBy==='type'?'Type':'Vendor')}: ${esc(k)}</span><span class="gh-count">${g.length} contract${g.length>1?'s':''}</span></td></tr>`+g.map(rowHtml).join('');
+      return `<tr class="group-head"><td colspan="11"><span class="gh-label">▣ ${esc(ctGroupBy==='type'?'Type':'Vendor')}: ${esc(k)}</span><span class="gh-count">${g.length} contract${g.length>1?'s':''}</span></td></tr>`+g.map(rowHtml).join('');
     }).join('');
   } else {
     tb.innerHTML=rows.map(rowHtml).join('');
@@ -2116,13 +2116,13 @@ function printContractsSelected(){
   const list=contracts.filter(c=>ids.includes(c.id));
   const w=window.open('','_blank');
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
-  const rowsHtml=list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
+  const rowsHtml=list.map(c=>`<tr><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Contracts</title>
   <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
   .phead{display:flex;align-items:center;gap:12px;margin-bottom:4px} .phead img{height:36px} .phead h2{margin:0}
   table{width:100%;border-collapse:collapse;margin-top:10px}th,td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:12px;text-align:left}th{background:#101622;color:#fff}
   </style></head><body>${printHeaderHtml((window.APP_NAME||'IT-Vault')+' — Contracts')}<div>${list.length} contract${list.length>1?'s':''} • generated ${new Date().toLocaleString()}</div>
-  <table><thead><tr><th>Name</th><th>Type</th><th>Vendor</th><th>Start</th><th>End</th><th>Cost</th><th>License Key</th><th>Linked Asset</th></tr></thead><tbody>${rowsHtml}</tbody></table>
+  <table><thead><tr><th>Name</th><th>Type</th><th>Vendor</th><th>Start</th><th>End</th><th>Cost</th><th>Plan</th><th>License Key</th><th>Linked Asset</th></tr></thead><tbody>${rowsHtml}</tbody></table>
   <script>window.onload=()=>{window.print();}<\/script>
   </body></html>`);
   w.document.close();
@@ -2170,7 +2170,7 @@ function printContract(id){
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
   const rows=[
     ['Name',c.name],['Type',c.type||'—'],['Vendor / Company',c.vendor||'—'],
-    ['Cost',fmtMoney(c.cost||0,CURRENCY)],['Start Date',c.start_date||'—'],['End / Renewal Date',c.end_date||'—'],
+    ['Cost',fmtMoney(c.cost||0,CURRENCY)],['Payment Plan',c.billing_period||'One-Time'],['Start Date',c.start_date||'—'],['End / Renewal Date',c.end_date||'—'],
     ['Linked Asset',assetLabelFor(c.asset_id)||'—']
   ];
   if(c.type==='License' && c.license_key) rows.push(['License Key',c.license_key]);
@@ -2246,6 +2246,7 @@ async function openContractModal(id){
   document.getElementById('ct_vendor').value=c.vendor||'';
   document.getElementById('ct_vendor_email').value=c.vendor_email||'';
   document.getElementById('ct_cost').value=c.cost||'';
+  document.getElementById('ct_billing').value=c.billing_period||'One-Time';
   document.getElementById('ct_start').value=c.start_date||'';
   document.getElementById('ct_end').value=c.end_date||'';
   document.getElementById('ct_license_key').value=c.license_key||'';
@@ -2268,6 +2269,7 @@ async function saveContract(){
     vendor: document.getElementById('ct_vendor').value.trim(),
     vendor_email: document.getElementById('ct_vendor_email').value.trim(),
     cost: parseFloat(document.getElementById('ct_cost').value)||0,
+    billing_period: document.getElementById('ct_billing').value,
     start_date: document.getElementById('ct_start').value,
     end_date: document.getElementById('ct_end').value,
     asset_id: document.getElementById('ct_asset').value||null,
