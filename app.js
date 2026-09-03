@@ -1796,7 +1796,7 @@ async function emptyTrash(){
 async function loadContractsTrash(){
   const r=await api('/api/contracts/trash'); if(!r)return; const list=await r.json();
   const tb=document.getElementById('ctTrashBody');
-  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td class="mono">${esc(contractIdLabel(c.id))}</td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td class="mono">${fmtMoney(c.cost||0,CURRENCY)}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">DEL</button></div></td></tr>`).join('');
+  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td class="mono">${esc(contractIdFor(c))}</td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td class="mono">${fmtMoney(c.cost||0,CURRENCY)}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">DEL</button></div></td></tr>`).join('');
   document.getElementById('ctTrashEmpty').style.display=list.length?'none':'block';
   const chkAll=document.getElementById('ctTrashChkAll');
   if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.ct-trash-chk').forEach(c=>c.checked=chkAll.checked); updateContractTrashSelBtns(); }; }
@@ -2114,6 +2114,12 @@ let ctGroupBy='';
 function contractIdLabel(id){
   return 'CT-'+String(id).padStart(4,'0');
 }
+// Prefer the user-editable contract_tag (like Assets' AssetTag) -- falls
+// back to the auto CT-0001 format derived from the row id for contracts
+// created before contract_tag existed, or left blank.
+function contractIdFor(c){
+  return (c&&c.contract_tag)?c.contract_tag:contractIdLabel(c?c.id:'');
+}
 function assetLabelFor(id){
   if(!id)return'';
   const a=assets.find(x=>x._id===id);
@@ -2133,7 +2139,7 @@ function renderContracts(){
     return true;
   });
   const tb=document.getElementById('ctBody');
-  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td class="mono" style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(contractIdLabel(c.id))}</td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
+  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td class="mono" style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(contractIdFor(c))}</td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
   if(ctGroupBy){
     const groups={};
     rows.forEach(c=>{const k=(c[ctGroupBy]||'—').toString();(groups[k]=groups[k]||[]).push(c);});
@@ -2170,7 +2176,7 @@ function printContractsSelected(){
   const list=contracts.filter(c=>ids.includes(c.id));
   const w=window.open('','_blank');
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
-  const rowsHtml=list.map(c=>`<tr><td class="mono">${esc(contractIdLabel(c.id))}</td><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
+  const rowsHtml=list.map(c=>`<tr><td class="mono">${esc(contractIdFor(c))}</td><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Contracts</title>
   <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
   .phead{display:flex;align-items:center;gap:12px;margin-bottom:4px} .phead img{height:36px} .phead h2{margin:0}
@@ -2238,7 +2244,7 @@ function printContract(id){
   .hd .id{font-size:11px;opacity:.7} .bd{padding:14px 16px} table{width:100%;border-collapse:collapse} td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top} td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
   @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.card{border-color:#222}}</style></head>
   <body>${window.HAS_LETTERHEAD?`<img src="/letterhead.png?t=${Date.now()}" style="position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1">`:''}
-  <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span></div><span class="id">${contractIdLabel(c.id)}</span></div>`}
+  <div class="card" style="${window.HAS_LETTERHEAD?`margin-top:${LETTERHEAD_CLEARANCE_MM}mm`:''}">${window.HAS_LETTERHEAD?'':`<div class="hd"><div class="brand"><img src="/logo.png" onerror="this.style.display='none'"><span>${(window.APP_NAME||'IT-Vault')} — Contract record</span></div><span class="id">${contractIdFor(c)}</span></div>`}
   <div class="bd"><table>${rowsHtml}</table></div></div>
   ${printReadyScript()}
   </body></html>`);
@@ -2296,8 +2302,12 @@ async function openContractModal(id){
   const c=id?(contracts.find(x=>x.id===id)||{}):{};
   document.getElementById('contractModalTitle').textContent=id?'EDIT CONTRACT':'ADD CONTRACT';
   document.getElementById('ctCurLabel').textContent=CURRENCY;
-  document.getElementById('ct_idWrap').style.display=id?'':'none';
-  if(id)document.getElementById('ct_idDisplay').value=contractIdLabel(id);
+  if(id){
+    document.getElementById('ct_idDisplay').value=contractIdFor(c);
+  }else{
+    document.getElementById('ct_idDisplay').value='';
+    const r=await api('/api/contracts/next-tag'); if(r&&r.ok){ const j=await r.json(); document.getElementById('ct_idDisplay').value=j.tag||''; }
+  }
   document.getElementById('ct_name').value=c.name||'';
   document.getElementById('ct_vendor').value=c.vendor||'';
   document.getElementById('ct_vendor_email').value=c.vendor_email||'';
@@ -2320,6 +2330,7 @@ async function openContractModal(id){
 window.openContractModal=openContractModal;
 async function saveContract(){
   const body={
+    contract_tag: document.getElementById('ct_idDisplay').value.trim(),
     name: document.getElementById('ct_name').value.trim(),
     type: document.getElementById('ct_type').value,
     vendor: document.getElementById('ct_vendor').value.trim(),
@@ -2426,6 +2437,7 @@ window.repairDashStructure=repairDashStructure;
   if(!me.user){location.href='/'+(location.search||'');return;}
   MY_ROLE=me.role;
   window.sessionUser=me.user;
+  {const dz=document.getElementById('navDangerZone'); if(dz)dz.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';}
   applyTheme(me.theme||'dark');
   try{applyCustomVars(me);}catch(e){console.warn('theme vars skipped',e);}
   CURRENCY=me.currency||'AED';
@@ -3206,3 +3218,47 @@ async function loadUserSettings(){
   page.dataset._wired = '1';
 }
 window.loadUserSettings = loadUserSettings;
+
+/* ---------- Danger Zone: factory reset ---------- */
+(function(){
+  const openBtn=document.getElementById('openWipeBtn');
+  const modal=document.getElementById('wipeModal');
+  const pwEl=document.getElementById('wipePassword');
+  const confirmEl=document.getElementById('wipeConfirmText');
+  const goBtn=document.getElementById('wipeConfirmBtn');
+  const cancelBtn=document.getElementById('wipeCancelBtn');
+  const errEl=document.getElementById('wipeErr');
+  if(!openBtn||!modal)return;
+  function resetForm(){
+    pwEl.value=''; confirmEl.value=''; errEl.textContent=''; goBtn.disabled=true;
+  }
+  function checkReady(){
+    goBtn.disabled=!(pwEl.value && confirmEl.value.trim().toUpperCase()==='WIPE EVERYTHING');
+  }
+  openBtn.onclick=()=>{ resetForm(); modal.classList.add('show'); pwEl.focus(); };
+  cancelBtn.onclick=()=>{ modal.classList.remove('show'); };
+  pwEl.addEventListener('input',checkReady);
+  confirmEl.addEventListener('input',checkReady);
+  goBtn.onclick=async()=>{
+    errEl.textContent='';
+    goBtn.disabled=true; const label=goBtn.textContent; goBtn.textContent='WIPING…';
+    try{
+      const r=await api('/api/admin/wipe',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({password:pwEl.value,confirm:confirmEl.value.trim()})});
+      const j=r?await r.json().catch(()=>({})):{};
+      if(r&&r.ok){
+        toast('💀 EVERYTHING WIPED — backup: '+(j.backup_file||''));
+        modal.classList.remove('show');
+        setTimeout(()=>{ window.location.reload(); }, 1200);
+      }else{
+        errEl.textContent=j.error||'Wipe failed.';
+        goBtn.disabled=false;
+      }
+    }catch(e){
+      errEl.textContent='Cannot reach the server.';
+      goBtn.disabled=false;
+    }finally{
+      goBtn.textContent=label;
+    }
+  };
+})();

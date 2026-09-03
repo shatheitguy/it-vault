@@ -491,6 +491,7 @@ def migrate_schema():
         "vendor_email": "VARCHAR(160) DEFAULT ''",
         "expiry_notified_at": "VARCHAR(40) DEFAULT ''",
         "billing_period": "VARCHAR(20) DEFAULT 'One-Time'",
+        "contract_tag": "VARCHAR(40) DEFAULT ''",
     }
     for col, typ in contract_cols.items():
         try:
@@ -1152,6 +1153,19 @@ def _next_asset_tag(cur):
     cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
     n = (cur.fetchone() or {}).get("n") or 1000
     return f"IT-{n + 1}"
+
+def _next_contract_tag(cur):
+    cur.execute("SELECT MAX(CAST(SUBSTRING(contract_tag,4) AS UNSIGNED)) AS n FROM Contracts WHERE contract_tag REGEXP '^CT-[0-9]+$'")
+    n = (cur.fetchone() or {}).get("n") or 0
+    return f"CT-{n + 1:04d}"
+
+@app.route("/api/contracts/next-tag")
+@auth_required(module="contracts", level="read")
+def next_contract_tag():
+    c = conn(); cur = c.cursor()
+    tag = _next_contract_tag(cur)
+    c.close()
+    return jsonify({"tag": tag})
 
 @app.route("/api/assets/next-tag")
 @auth_required(module="assets", level="read")
@@ -2332,11 +2346,12 @@ def contracts_api():
         return jsonify([dict(r) for r in rows])
     if request.method == "POST":
         d = request.get_json(force=True)
-        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, billing_period, asset_id, employee_id, location, department, license_key, note)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        tag = (d.get("contract_tag") or "").strip() or _next_contract_tag(cur)
+        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, billing_period, contract_tag, asset_id, employee_id, location, department, license_key, note)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", d.get("asset_id") or None, d.get("employee_id") or "",
+                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note","")))
         c.commit(); c.close()
         if (d.get("employee_id") or "").strip():
@@ -2345,11 +2360,12 @@ def contracts_api():
     if request.method == "PUT":
         d = request.get_json(force=True); cid = d.get("id")
         cur.execute("SELECT employee_id FROM Contracts WHERE id=%s", [cid]); old = cur.fetchone() or {}
-        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, vendor_email=%s, type=%s, start_date=%s, end_date=%s, cost=%s, billing_period=%s, asset_id=%s,
+        tag = (d.get("contract_tag") or "").strip() or _next_contract_tag(cur)
+        cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, vendor_email=%s, type=%s, start_date=%s, end_date=%s, cost=%s, billing_period=%s, contract_tag=%s, asset_id=%s,
                        employee_id=%s, location=%s, department=%s, license_key=%s, note=%s, expiry_notified_at='' WHERE id=%s""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", d.get("asset_id") or None, d.get("employee_id") or "",
+                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note",""), cid))
         c.commit(); c.close()
         new_emp = (d.get("employee_id") or "").strip()
@@ -4364,6 +4380,50 @@ def _run_backup(scope="all"):
         f.write("\n".join(lines) + "\n")
     _prune_old_backups()
     return fname
+
+WIPE_TABLES = [
+    "Assets", "Manufacturers", "Models", "Categories", "ContractTypes",
+    "Departments", "Designations", "History", "Contracts", "Locations",
+    "Tickets", "TicketReplies", "Roles", "Employees", "Checkouts",
+    "Maintenance", "AuditLog",
+]
+
+@app.route("/api/admin/wipe", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def wipe_everything():
+    """Danger Zone factory reset: password-gated, phrase-confirmed, takes an
+    automatic full backup first so a wipe is always recoverable. Deliberately
+    leaves the Users table alone so admins can still log back in afterward."""
+    d = request.get_json(force=True) or {}
+    pw = d.get("password", "")
+    confirm = (d.get("confirm") or "").strip().upper()
+    if confirm != "WIPE EVERYTHING":
+        return jsonify({"error": 'Type "WIPE EVERYTHING" exactly to confirm'}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT password FROM Users WHERE username=%s", [session.get("user")])
+    row = cur.fetchone(); c.close()
+    if not row or not verify_pw(pw, row["password"]):
+        return jsonify({"error": "Incorrect password"}), 401
+    backup_file = _run_backup("all")
+    try:
+        c = conn(); cur = c.cursor()
+        for t in WIPE_TABLES:
+            cur.execute(f"DELETE FROM `{t}`")
+        cur.execute("DELETE FROM Settings WHERE id=1")
+        cur.execute("INSERT INTO Settings (id, theme) VALUES (1, 'dark')")
+        c.commit(); c.close()
+        for fname in ("logo.png", "letterhead.png"):
+            try:
+                open(os.path.join(BASE, fname), "wb").close()
+            except Exception:
+                pass
+        c = conn(); cur = c.cursor()
+        cur.execute("INSERT INTO AuditLog (actor, action, asset_id, detail) VALUES (%s,%s,%s,%s)",
+                    (session.get("user"), "FACTORY_RESET", "", f"full wipe -- backup saved as {backup_file}"))
+        c.commit(); c.close()
+    except Exception as e:
+        return jsonify({"error": f"Wipe failed partway through: {e}. A pre-wipe backup was saved as {backup_file} -- restore it from Backup/Restore."}), 500
+    return jsonify({"ok": True, "backup_file": backup_file})
 
 @app.route("/api/backup")
 @auth_required([ROLE_ADMIN])
