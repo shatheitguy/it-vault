@@ -42,7 +42,19 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 .rem input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;margin:0}
 .err{color:var(--red);font-size:13px;text-align:center;min-height:0;margin-top:14px;line-height:1.4}
 .shake{animation:sh .4s}@keyframes sh{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-5px)}}
-.sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px}
+.sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px;
+  display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:0 16px}
+.sess .sep{opacity:.35}
+/* animated gradient wordmark -- the credit line, with a bit of shine */
+.pwr{font-weight:800;letter-spacing:.2px;white-space:nowrap;
+  background:linear-gradient(90deg,var(--accent),#ff9f45,var(--accent2),var(--accent));
+  background-size:300% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:pwrShine 5s linear infinite}
+.pwr b{font-weight:900}
+@keyframes pwrShine{to{background-position:300% 0}}
+@media (prefers-reduced-motion:reduce){.pwr{animation:none}}
 #step1,#step2fa,#stepForgot{animation:fadeUp .35s ease}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:var(--btn-text,#04121f);
   border-radius:50%;animation:spin .6s linear infinite;vertical-align:-3px;margin-right:8px}
@@ -57,7 +69,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
   <div id="step1">
     <div class="f"><label for="u">Username</label><input id="u" placeholder="Enter your username" autocomplete="username"></div>
     <div class="f"><label for="p">Password</label><input id="p" type="password" placeholder="Enter your password" autocomplete="current-password"></div>
-    <label class="rem"><input type="checkbox" id="r"> Keep me signed in (5 min)</label>
+    <label class="rem"><input type="checkbox" id="r"> Keep me signed in until I sign out</label>
     <button class="btn" id="go">Sign in</button>
     <div style="margin-top:14px;text-align:center"><a href="#" id="forgotLink" style="color:var(--muted);font-size:12.5px">Forgot password?</a></div>
   </div>
@@ -91,7 +103,11 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
   </div>
   <div class="err" id="e"></div>
 </div></div>
-<div class="sess">Session timeout: 5 minutes</div>
+<div class="sess">
+  <span id="sessNote">Session timeout: 5 minutes</span>
+  <span class="sep">•</span>
+  <span class="pwr">⚡ powered by <b>Sha The IT Guy</b></span>
+</div>
 <script>
 /* ---- theme preset + branding (follows dashboard customization engine) ---- */
 let savedTheme='dark';
@@ -363,6 +379,17 @@ document.getElementById('fpResend').onclick=async(e)=>{
   const d=await r.json().catch(()=>({}));
   eEl.textContent = r.ok ? 'Code resent.' : (d.error||'Could not resend code.');
 };
+
+/* keep the footer note honest about which session mode is selected */
+(function(){
+  const box=document.getElementById('r'), note=document.getElementById('sessNote');
+  if(!box||!note) return;
+  const sync=()=>{ note.textContent = box.checked
+    ? 'Stays signed in until you sign out'
+    : 'Session timeout: 5 minutes of inactivity'; };
+  box.addEventListener('change', sync);
+  sync();
+})();
 </script>
 </body>
 </html>

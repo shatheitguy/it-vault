@@ -17,6 +17,10 @@ RUN mkdir -p invoices backups \
     && chown -R itguy:itguy /app
 USER itguy
 
+# lets the app tell a container install from a source install, so "check for
+# updates" advises pulling a new image rather than git pull
+ENV ITVAULT_DOCKER=1
+
 EXPOSE 5000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \

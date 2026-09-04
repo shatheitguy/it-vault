@@ -83,6 +83,55 @@ def setup_needed() -> bool:
     except Exception:
         return True
 
+# ---- release identity + update checks ----
+def _read_version():
+    try:
+        with open(os.path.join(BASE, "VERSION")) as f:
+            v = f.read().strip()
+            if v:
+                return v
+    except Exception:
+        pass
+    return "0.0.0-dev"
+
+APP_VERSION = _read_version()
+
+# Where update checks look for new releases, as GitHub "owner/repo". Baked in
+# so a normal install needs no configuration at all; ITVAULT_UPDATE_REPO only
+# exists to point a fork or a private mirror somewhere else.
+DEFAULT_UPDATE_REPO = "shatheitguy/it-vault"
+
+def update_repo():
+    return (_env("ITVAULT_UPDATE_REPO", default="") or DEFAULT_UPDATE_REPO or "").strip().strip("/")
+
+def _in_docker():
+    """Docker installs upgrade by pulling a new image, not by touching files
+    in place, so the update advice has to differ. ITVAULT_DOCKER is set by
+    the Dockerfile; /.dockerenv is the fallback for images built elsewhere."""
+    if os.environ.get("ITVAULT_DOCKER") == "1":
+        return True
+    try:
+        return os.path.exists("/.dockerenv")
+    except Exception:
+        return False
+
+IS_DOCKER = _in_docker()
+
+def _version_tuple(v):
+    """'v1.6.0' / '1.6' / '1.6.0-rc1' -> comparable (1,6,0). Any trailing
+    pre-release suffix is dropped, so a tagged release always sorts above a
+    release candidate of the same number rather than comparing as text."""
+    v = str(v or "").strip().lstrip("vV").split("+")[0].split("-")[0]
+    parts = []
+    for chunk in v.split(".")[:3]:
+        try:
+            parts.append(int(chunk))
+        except ValueError:
+            parts.append(0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
 SECRET_KEY_PATH = os.path.join(BASE, ".secret_key")
 
 def _env(*names, default=None):
@@ -196,7 +245,14 @@ def _module_write_allowed(module):
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
-app.permanent_session_lifetime = timedelta(minutes=5)
+# Flask's session lifetime is a single app-wide value, so it can't express
+# "5 minutes for this user, until-logout for that one". Mutating it per
+# request would race across waitress' worker threads. Instead the COOKIE is
+# allowed to live a long time, and the real timeout is an absolute expiry
+# stamped into the session itself and enforced in _enforce_session_timeout()
+# below -- absent for "keep me signed in", which then lasts until logout.
+SHORT_SESSION_SECONDS = 5 * 60
+app.permanent_session_lifetime = timedelta(days=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
@@ -825,12 +881,12 @@ def login():
             session.clear()
             session["pending_2fa_user"] = row["username"]; session["pending_2fa_role"] = row["role"]
             session["pending_2fa_display"] = row["display"]; session["pending_2fa_exp"] = time.time() + 300
+            session["pending_2fa_remember"] = bool(d.get("remember"))
             session.permanent = True
             if "email" in methods:
                 _send_login_otp_email(row["username"], row.get("email") or "")
             return jsonify({"ok": True, "need_2fa": True, "methods": methods})
-        session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
-        session.permanent = True
+        _start_session(row["username"], row["role"], row["display"], bool(d.get("remember")))
         return jsonify({"ok": True, "role": row["role"]})
     return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
@@ -898,10 +954,11 @@ def verify_login_2fa():
         ok = bool(code) and code == session.get("pending_2fa_email_code")
     if not ok:
         return jsonify({"ok": False, "error": "Invalid or expired code"}), 401
-    for k in ("pending_2fa_user", "pending_2fa_role", "pending_2fa_display", "pending_2fa_exp", "pending_2fa_email_code", "pending_2fa_email_sent_at"):
+    remember = bool(session.get("pending_2fa_remember"))
+    for k in ("pending_2fa_user", "pending_2fa_role", "pending_2fa_display", "pending_2fa_exp",
+              "pending_2fa_email_code", "pending_2fa_email_sent_at", "pending_2fa_remember"):
         session.pop(k, None)
-    session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
-    session.permanent = True
+    _start_session(row["username"], row["role"], row["display"], remember)
     return jsonify({"ok": True, "role": row["role"]})
 
 def _send_password_reset_email(username, to_email, code):
@@ -977,8 +1034,7 @@ def forgot_password_reset():
     for k in ("pwreset_user", "pwreset_code", "pwreset_exp", "pwreset_sent_at"):
         session.pop(k, None)
     if row:
-        session["user"] = row["username"]; session["role"] = row["role"]; session["display"] = row["display"]
-        session.permanent = True
+        _start_session(row["username"], row["role"], row["display"], remember=False)
     audit(u, "PASSWORD_RESET", "", "password reset via email OTP")
     return jsonify({"ok": True})
 
@@ -4686,6 +4742,83 @@ def wipe_everything():
     session.clear()
     return jsonify({"ok": True, "backup_file": backup_file, "setup_required": True})
 
+@app.route("/api/version")
+@auth_required()
+def version_info():
+    return jsonify({
+        "version": APP_VERSION,
+        "is_docker": IS_DOCKER,
+        "repo": update_repo(),
+    })
+
+@app.route("/api/check-update", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def check_update():
+    """Asks GitHub for the newest published release of this project and
+    compares it to VERSION. Deliberately only ever runs when an admin presses
+    the button -- this is a self-hosted tool and shouldn't phone home on its
+    own. Nothing is downloaded or applied here: it reports what's available
+    and how to upgrade, which for a container means pulling a new image."""
+    repo = update_repo()
+    if not repo or "/" not in repo:
+        return jsonify({
+            "ok": False,
+            "current": APP_VERSION,
+            "error": "This build has no update source baked in. Set "
+                     "ITVAULT_UPDATE_REPO to a GitHub project (owner/repo) "
+                     "that publishes releases.",
+        }), 400
+
+    import json as _json
+    import urllib.error
+    import urllib.request
+    url = f"https://api.github.com/repos/{repo}/releases/latest"
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"IT-Vault/{APP_VERSION}",
+    })
+    try:
+        # short timeout: an unreachable network must not tie up a worker
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = _json.loads(resp.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return jsonify({"ok": True, "current": APP_VERSION, "latest": None,
+                            "update_available": False, "is_docker": IS_DOCKER,
+                            "note": "No releases published yet for "
+                                    f"{repo} -- nothing to update to."})
+        return jsonify({"ok": False, "current": APP_VERSION,
+                        "error": f"GitHub returned HTTP {e.code}"}), 502
+    except Exception as e:
+        return jsonify({"ok": False, "current": APP_VERSION,
+                        "error": f"Could not reach GitHub: {e}"}), 502
+
+    latest = (data.get("tag_name") or data.get("name") or "").strip()
+    newer = bool(latest) and _version_tuple(latest) > _version_tuple(APP_VERSION)
+    if newer and IS_DOCKER:
+        how = ("You're running the container image. Pull the new image and "
+               "recreate the container:\n\n"
+               "    docker compose pull && docker compose up -d\n\n"
+               "Your database, invoices and backups live in named volumes, so "
+               "they survive the swap.")
+    elif newer:
+        how = ("You're running from source. Fetch the new release, install any "
+               "new requirements, and restart:\n\n"
+               "    git pull && pip install -r requirements.txt\n\n"
+               "then restart the app. The schema migrates itself on startup.")
+    else:
+        how = ""
+    return jsonify({
+        "ok": True,
+        "current": APP_VERSION,
+        "latest": latest or None,
+        "update_available": newer,
+        "is_docker": IS_DOCKER,
+        "release_url": data.get("html_url") or "",
+        "notes": (data.get("body") or "")[:2000],
+        "how_to_update": how,
+    })
+
 @app.route("/api/backup")
 @auth_required([ROLE_ADMIN])
 def backup():
@@ -5034,6 +5167,36 @@ def setup_complete():
     _setup_done = True
     audit(admin_user, "SETUP", "", "first-run setup completed")
     return jsonify({"ok": True})
+
+def _start_session(username, role, display, remember):
+    """Establishes a logged-in session. `remember` decides whether it carries
+    an idle expiry at all: without one it lasts until the user logs out."""
+    session["user"] = username
+    session["role"] = role
+    session["display"] = display
+    session.permanent = True
+    if remember:
+        session.pop("exp", None)
+    else:
+        session["exp"] = time.time() + SHORT_SESSION_SECONDS
+
+@app.before_request
+def _enforce_session_timeout():
+    """The idle timeout, enforced per session rather than app-wide. A session
+    with no "exp" is a "keep me signed in" one and never idles out; the rest
+    slide forward on each request and are dropped once they go stale."""
+    if not session.get("user"):
+        return None
+    exp = session.get("exp")
+    if exp is None:
+        return None
+    if time.time() > float(exp):
+        session.clear()
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Session expired -- please sign in again"}), 401
+        return None  # page loads fall through and land on the login screen
+    session["exp"] = time.time() + SHORT_SESSION_SECONDS
+    return None
 
 @app.before_request
 def _force_setup_first():

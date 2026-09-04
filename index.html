@@ -347,6 +347,18 @@
               <div class="field2"><label>Region</label><select id="uRegion"><option value="UAE">United Arab Emirates</option><option value="US">United States</option><option value="GB">United Kingdom</option><option value="IN">India</option><option value="FR">France</option></select></div>
             </div></div>
             <div class="m-actions"><button class="btn mag" id="saveUsetBtn">✓ SAVE GENERAL</button></div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">VERSION &amp; UPDATES</div>
+              <div class="refcard">
+                <div class="rc-left"><div class="avatar-prev">📦</div></div>
+                <div class="rc-info">
+                  <b>IT-Vault <span id="verCurrent" class="mono">—</span></b><br>
+                  <span id="verInstallKind" class="muted">Checking install type…</span>
+                </div>
+                <div class="spacer"></div>
+                <button class="btn" id="checkUpdateBtn">⟳ CHECK FOR UPDATES</button>
+              </div>
+              <div id="updateResult" style="margin-top:10px"></div>
+            </div>
           </section>
           <!-- MY ACCOUNT -->
           <section class="cfg-sec" data-sec="account" style="display:none">
@@ -986,6 +998,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=202609041a"></script>
+<script src="/app.js?nocache=202609041b"></script>
 </body>
 </html>

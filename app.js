@@ -1264,6 +1264,58 @@ function addScannedAsAsset(i){
   });
 }
 
+/* ---------- version + update check ---------- */
+// Shows the running version and, on demand, asks the server whether a newer
+// release has been published. The check only ever runs on this click -- a
+// self-hosted tool shouldn't reach out on its own -- and nothing is
+// installed from here: a container install is told to pull a new image,
+// a source install to git pull, because those upgrade differently.
+const SPLIT_RE = new RegExp(String.fromCharCode(10) + String.fromCharCode(10));
+async function wireUpdateCheck(){
+  const cur=document.getElementById('verCurrent');
+  const kind=document.getElementById('verInstallKind');
+  const btn=document.getElementById('checkUpdateBtn');
+  const out=document.getElementById('updateResult');
+  if(!cur||!btn) return;
+  try{
+    const r=await api('/api/version');
+    if(r&&r.ok){
+      const j=await r.json();
+      cur.textContent='v'+(j.version||'?');
+      kind.textContent = j.is_docker
+        ? 'Running as a Docker container — updates come from a new image'
+        : 'Running from source';
+    }
+  }catch(e){}
+  btn.onclick=async()=>{
+    btn.disabled=true; out.innerHTML='<span class="muted">Checking for updates…</span>';
+    try{
+      const r=await api('/api/check-update',{method:'POST'});
+      const j=r?await r.json().catch(()=>({})):{};
+      if(!j.ok){
+        out.innerHTML='<span style="color:var(--amber)">'+esc(j.error||'Update check failed.')+'</span>';
+      }else if(j.update_available){
+        const steps=(j.how_to_update||'').split(SPLIT_RE);
+        out.innerHTML='<div class="panel" style="border-color:var(--accent)">'
+          +'<b style="color:var(--accent)">Update available — v'+esc(j.latest)+'</b>'
+          +"<div class=\"muted\" style=\"margin:6px 0\">You're on v"+esc(j.current)+".</div>"
+          +steps.map(sx=>sx.trim().startsWith('docker')||sx.trim().startsWith('git')
+              ? '<pre class="mono" style="background:var(--surface2);padding:10px;border-radius:8px;overflow-x:auto">'+esc(sx.trim())+'</pre>'
+              : '<div style="margin:6px 0">'+esc(sx)+'</div>').join('')
+          +(j.release_url?'<a href="'+esc(j.release_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">Release notes ↗</a>':'')
+          +'</div>';
+      }else{
+        out.innerHTML="<span style=\"color:var(--grn)\">✓ You're on the latest version"
+          +(j.latest?' (v'+esc(j.latest)+')':'')+'.</span>'
+          +(j.note?'<div class="muted" style="margin-top:4px">'+esc(j.note)+'</div>':'');
+      }
+    }catch(e){
+      out.innerHTML='<span style="color:var(--amber)">Update check failed: '+esc(e.message)+'</span>';
+    }
+    btn.disabled=false;
+  };
+}
+
 /* ---------- backup ---------- */
 function fmtBytes(n){
   n=Number(n)||0;
@@ -3077,6 +3129,7 @@ async function loadUserSettings(){
   if (page.dataset._wired) return;
   const mx = g('uMatrix');
   if (mx) mx.onchange = () => { matrixOn = mx.checked; };
+  wireUpdateCheck();
   const sv = g('saveUsetBtn');
   if (sv) sv.onclick = async () => {
     const body = {
