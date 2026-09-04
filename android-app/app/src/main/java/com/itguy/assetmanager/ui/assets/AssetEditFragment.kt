@@ -17,6 +17,7 @@ import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.Repository
 import com.itguy.assetmanager.data.model.*
 import com.itguy.assetmanager.databinding.FragmentAssetEditBinding
 import kotlinx.coroutines.Dispatchers
@@ -132,16 +133,27 @@ class AssetEditFragment : Fragment() {
         lifecycleScope.launch {
             try {
                 val api = ApiClient.api()
-                categories = api.categories().body().orEmpty()
-                manufacturers = api.manufacturers().body().orEmpty()
-                models = api.models().body().orEmpty()
-                locations = api.locations().body().orEmpty()
-                employees = api.listEmployees().body().orEmpty()
+                // Each reference list is fetched independently and tolerates
+                // failure, so the form still opens offline -- spinners just
+                // fall back to the value already on the record.
+                suspend fun <T> safe(block: suspend () -> List<T>): List<T> =
+                    try { block() } catch (e: Exception) { emptyList() }
+                categories = safe { api.categories().body().orEmpty() }
+                manufacturers = safe { api.manufacturers().body().orEmpty() }
+                models = safe { api.models().body().orEmpty() }
+                locations = safe { api.locations().body().orEmpty() }
+                employees = safe { api.listEmployees().body().orEmpty() }.ifEmpty {
+                    com.itguy.assetmanager.data.OfflineCache.loadEmployees().orEmpty()
+                }
 
                 current = if (assetId != null) {
-                    api.getAsset(assetId!!).body() ?: Asset()
+                    // editing: server copy if reachable, else the cached one
+                    try { api.getAsset(assetId!!).body() }
+                    catch (e: Exception) { null }
+                    ?: com.itguy.assetmanager.data.OfflineCache.loadAssets()?.find { it.id == assetId }
+                    ?: Asset()
                 } else Asset(
-                    AssetTag = api.nextAssetTag().body()?.tag.orEmpty(),
+                    AssetTag = try { api.nextAssetTag().body()?.tag.orEmpty() } catch (e: Exception) { "" },
                     Name = arguments?.getString("prefillName").orEmpty(),
                     MacAddress = arguments?.getString("prefillMac").orEmpty(),
                     Type = arguments?.getString("prefillType").orEmpty(),
@@ -523,24 +535,22 @@ class AssetEditFragment : Fragment() {
         b.saveBtn.isEnabled = false
         lifecycleScope.launch {
             try {
-                val api = ApiClient.api()
-                val id = assetId
-                if (id == null) {
-                    val resp = api.createAsset(asset)
-                    val newId = resp.body()?.id
-                    if (resp.isSuccessful && resp.body()?.ok == true && newId != null) {
-                        if (pickedInvoiceUri != null) uploadPickedInvoice(newId)
+                when (val r = Repository.saveAsset(requireContext(), asset, assetId)) {
+                    is Repository.SaveResult.Synced -> {
+                        // an invoice can only be attached to a real server id
+                        val id = r.serverId ?: assetId
+                        if (pickedInvoiceUri != null && id != null) uploadPickedInvoice(id)
                         requireActivity().onBackPressedDispatcher.onBackPressed()
-                    } else {
-                        showFormError(resp)
                     }
-                } else {
-                    val resp = api.updateAsset(id, asset)
-                    if (resp.isSuccessful && resp.body()?.ok == true) {
-                        if (pickedInvoiceUri != null) uploadPickedInvoice(id)
+                    is Repository.SaveResult.Queued -> {
+                        android.widget.Toast.makeText(requireContext(),
+                            "Saved offline — will sync when you're back online" +
+                                (if (pickedInvoiceUri != null) " (invoice uploads once online)" else ""),
+                            android.widget.Toast.LENGTH_LONG).show()
                         requireActivity().onBackPressedDispatcher.onBackPressed()
-                    } else {
-                        showFormError(resp)
+                    }
+                    is Repository.SaveResult.Error -> {
+                        if (_b != null) { b.formError.text = r.message; b.formError.visibility = View.VISIBLE }
                     }
                 }
             } catch (e: Exception) {
@@ -569,7 +579,12 @@ class AssetEditFragment : Fragment() {
                 val id = assetId ?: return@setPositiveButton
                 lifecycleScope.launch {
                     try {
-                        ApiClient.api().deleteAsset(id)
+                        val r = Repository.deleteAsset(requireContext(), id)
+                        if (r is Repository.SaveResult.Queued) {
+                            android.widget.Toast.makeText(requireContext(),
+                                "Deleted offline — will sync when online",
+                                android.widget.Toast.LENGTH_LONG).show()
+                        }
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     } catch (e: Exception) {
                         if (_b != null) { b.formError.text = "Delete failed: ${e.message}"; b.formError.visibility = View.VISIBLE }

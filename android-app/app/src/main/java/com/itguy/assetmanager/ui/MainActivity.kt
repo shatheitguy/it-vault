@@ -6,8 +6,12 @@ import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
+import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Prefs
+import com.itguy.assetmanager.data.SyncManager
+import com.itguy.assetmanager.data.SyncStore
+import kotlinx.coroutines.launch
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
 import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
@@ -31,9 +35,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         Prefs.applyThemeMode()
         super.onCreate(savedInstanceState)
         OfflineCache.init(applicationContext)
+        SyncStore.init(applicationContext)
         if (!Prefs.isLoggedIn) {
             startActivity(Intent(this, LoginActivity::class.java)); finish(); return
         }
+        // Replay anything queued offline as soon as we're up, and keep watching
+        // for the network returning so later edits sync on their own.
+        SyncManager.startAutoSync(applicationContext)
+        lifecycleScope.launch { runCatching { SyncManager.syncNow(applicationContext) } }
 
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)

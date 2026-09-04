@@ -59,7 +59,13 @@ class DirectoryFragment : Fragment(), Refreshable {
                 when (tab) {
                     0 -> {
                         b.searchWrap.visibility = View.VISIBLE
-                        employees = ApiClient.api().listEmployees().body().orEmpty()
+                        if (com.itguy.assetmanager.data.NetworkUtils.isOnline(requireContext())) {
+                            employees = ApiClient.api().listEmployees().body().orEmpty()
+                            com.itguy.assetmanager.data.OfflineCache.saveEmployees(employees)
+                        } else {
+                            employees = com.itguy.assetmanager.data.OfflineCache.loadEmployees().orEmpty()
+                            b.emptyText.text = "📡 Offline — showing cached directory"
+                        }
                         renderEmployees(b.searchInput.text?.toString().orEmpty())
                     }
                     1 -> {
@@ -82,7 +88,17 @@ class DirectoryFragment : Fragment(), Refreshable {
                     }
                 }
             } catch (e: Exception) {
-                if (_b != null) { b.emptyText.text = "Could not load: ${e.message}"; b.emptyText.visibility = View.VISIBLE }
+                if (_b == null) return@launch
+                // network hiccup: fall back to the cached directory on the
+                // Employees tab rather than showing an error
+                val cached = com.itguy.assetmanager.data.OfflineCache.loadEmployees()
+                if (tab == 0 && cached != null) {
+                    employees = cached
+                    renderEmployees(b.searchInput.text?.toString().orEmpty())
+                    b.emptyText.text = "📡 Offline — showing cached directory"
+                } else {
+                    b.emptyText.text = "Could not load: ${e.message}"; b.emptyText.visibility = View.VISIBLE
+                }
             }
         }
     }

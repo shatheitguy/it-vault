@@ -6,6 +6,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.itguy.assetmanager.data.model.Asset
 import com.itguy.assetmanager.data.model.Contract
+import com.itguy.assetmanager.data.model.Employee
 import com.itguy.assetmanager.data.model.DashboardStats
 
 /**
@@ -30,6 +31,9 @@ object OfflineCache {
 
     fun saveContracts(list: List<Contract>) = save("contracts", list)
     fun loadContracts(): List<Contract>? = load("contracts", object : TypeToken<List<Contract>>() {}.type)
+
+    fun saveEmployees(list: List<Employee>) = save("employees", list)
+    fun loadEmployees(): List<Employee>? = load("employees", object : TypeToken<List<Employee>>() {}.type)
 
     fun saveDashboard(stats: DashboardStats) = save("dashboard", stats)
     fun loadDashboard(): DashboardStats? = load("dashboard", DashboardStats::class.java)
