@@ -39,3 +39,6 @@ Thumbs.db
 
 # Local DB dumps (contain password hashes) — never commit
 *_dump.sql
+
+# Release APKs are attached to GitHub Releases, not committed
+*.apk
