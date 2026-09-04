@@ -20,9 +20,11 @@ services:
       retries: 10
 
   web:
-    # Swap `build: .` for `image: ghcr.io/<owner>/<repo>:latest` to run the
-    # published image instead of building from source.
-    build: .
+    # Pull the published image by default. Pin a version for anything real
+    # (":1.6.0"); ":latest" moves under you. To build from a source checkout
+    # instead, comment `image:` out and uncomment `build: .`.
+    image: ghcr.io/shatheitguy/it-vault:${ITVAULT_TAG:-latest}
+    # build: .
     container_name: itvault-web
     restart: unless-stopped
     depends_on:
