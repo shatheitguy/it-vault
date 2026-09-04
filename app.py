@@ -684,10 +684,17 @@ def migrate_schema():
     except Exception:
         pass
     # Branding: organization contact details (shown on QR labels / print footers)
+    # `logo` holds the uploaded logo's raw PNG bytes, embedded straight into
+    # prints/PDFs. It was missing from every schema-creating path -- older
+    # databases happened to carry it, so /api/me and the label code could
+    # SELECT it without complaint, but any FRESH schema (a new install, or a
+    # factory reset rebuilding from code) came up without the column and
+    # failed with "Unknown column 'logo'" on the first request after setup.
     branding_cols = {
         "company_phone": "VARCHAR(60) DEFAULT ''",
         "company_address": "VARCHAR(255) DEFAULT ''",
         "has_letterhead": "TINYINT DEFAULT 0",
+        "logo": "MEDIUMBLOB",
     }
     for col, typ in branding_cols.items():
         try:
