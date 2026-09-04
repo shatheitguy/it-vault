@@ -34,9 +34,12 @@ services:
       DB_NAME: ${DB_NAME:-itguy_assets}
       DB_USER: ${DB_USER:-itguy}
       DB_PASS: ${DB_PASS:-itguypass}
-      ITGUY_ADMIN: ${ITGUY_ADMIN:-admin}
-      ITGUY_ADMIN_PASS: ${ITGUY_ADMIN_PASS:-admin123}
-      ITGUY_SECRET: ${ITGUY_SECRET:-change-me-in-prod}
+      # ITGUY_* are the old names, still read as a fallback so an existing
+      # .env keeps working -- notably the secret, where falling back to a
+      # fresh value would invalidate every session cookie on upgrade.
+      ITVAULT_ADMIN: ${ITVAULT_ADMIN:-${ITGUY_ADMIN:-admin}}
+      ITVAULT_ADMIN_PASS: ${ITVAULT_ADMIN_PASS:-${ITGUY_ADMIN_PASS:-admin123}}
+      ITVAULT_SECRET: ${ITVAULT_SECRET:-${ITGUY_SECRET:-change-me-in-prod}}
     ports:
       - "5000:5000"
     volumes:

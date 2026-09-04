@@ -46,12 +46,26 @@ def save_db_config(h, p, n, u, pw):
     except Exception:
         pass
 SECRET_KEY_PATH = os.path.join(BASE, ".secret_key")
+
+def _env(*names, default=None):
+    """First of `names` that's actually set. Lets settings be renamed to the
+    IT-Vault branding while still honouring the old ITGUY_* names, so an
+    existing deployment doesn't silently change behaviour on upgrade -- for
+    the session secret in particular, ignoring the old name would mint a new
+    one and log every user out."""
+    for n in names:
+        v = os.environ.get(n)
+        if v:
+            return v
+    return default
+
 def _load_or_create_secret():
     """Flask signs session cookies with this. It must never be a hardcoded,
     guessable default -- anyone who knows it can forge an admin session
-    without a password. Prefer ITGUY_SECRET; otherwise generate one and
-    persist it locally so it survives restarts but never lands in git."""
-    env_secret = os.environ.get("ITGUY_SECRET")
+    without a password. Prefer ITVAULT_SECRET (ITGUY_SECRET still honoured);
+    otherwise generate one and persist it locally so it survives restarts but
+    never lands in git."""
+    env_secret = _env("ITVAULT_SECRET", "ITGUY_SECRET")
     if env_secret:
         return env_secret
     try:
@@ -74,8 +88,8 @@ def _load_or_create_secret():
         pass
     return v
 SECRET = _load_or_create_secret()
-ADMIN_USER = os.environ.get("ITGUY_ADMIN", "admin")
-ADMIN_PASS = os.environ.get("ITGUY_ADMIN_PASS", "admin123")
+ADMIN_USER = _env("ITVAULT_ADMIN", "ITGUY_ADMIN", default="admin")
+ADMIN_PASS = _env("ITVAULT_ADMIN_PASS", "ITGUY_ADMIN_PASS", default="admin123")
 
 COLUMNS = ["AssetTag", "Name", "Type", "Serial", "MacAddress", "Location", "Status", "Manufacturer", "Model", "ReceivedBy", "NotesReceived", "Note", "PurchaseDate", "WarrantyMonths", "Price", "EmployeeID", "RequestedBy"]
 INT_COLS = {"WarrantyMonths"}  # columns stored as integers
