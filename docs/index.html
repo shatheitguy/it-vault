@@ -76,6 +76,15 @@
     --lift:0 1px 0 rgba(255,255,255,.03), 0 14px 34px -20px #000;
   }
 
+  /* atmosphere tokens: a faint blueprint grid and a soft accent glow, tuned
+     per theme so neither overwhelms the ground */
+  :root{ --grid:rgba(20,22,26,.05); --glow:rgba(206,35,24,.06); }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){ --grid:rgba(255,255,255,.04); --glow:rgba(255,59,48,.10); }
+  }
+  :root[data-theme="dark"]{ --grid:rgba(255,255,255,.04); --glow:rgba(255,59,48,.10); }
+  :root[data-theme="light"]{ --grid:rgba(20,22,26,.05); --glow:rgba(206,35,24,.06); }
+
   *{box-sizing:border-box}
   body{
     margin:0;
@@ -85,6 +94,18 @@
     font-size:16px;
     line-height:1.6;
     -webkit-font-smoothing:antialiased;
+  }
+  /* A drafting-table grid that a printed asset label would be laid out on,
+     with an accent glow behind the hero, fading out down the page so the
+     lower sections read clean. Sits behind all content. */
+  body::before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(1150px 560px at 82% -10%, var(--glow), transparent 62%),
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 36px 36px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 36px 36px;
+    -webkit-mask-image:linear-gradient(180deg, #000 0%, #000 46%, transparent 82%);
+    mask-image:linear-gradient(180deg, #000 0%, #000 46%, transparent 82%);
   }
   .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
 
@@ -110,6 +131,9 @@
   .top{
     border-bottom:1px solid var(--rule);
     background:var(--ground);
+    background:color-mix(in srgb, var(--ground) 78%, transparent);
+    -webkit-backdrop-filter:saturate(1.4) blur(12px);
+    backdrop-filter:saturate(1.4) blur(12px);
     position:sticky;top:0;z-index:20;
   }
   .top .wrap{display:flex;align-items:center;gap:16px;height:60px}
@@ -336,6 +360,66 @@
     font-family:"IBM Plex Mono",monospace;letter-spacing:.02em;
   }
 
+  /* ---- polish pass ---- */
+
+  /* the second clause of the headline carries the accent, with a hand-drawn
+     underline that sits under the descenders rather than a flat rule */
+  .h-em{position:relative;color:var(--accent);white-space:nowrap}
+  @media (max-width:520px){ .h-em{white-space:normal} }
+  .h-em::after{
+    content:"";position:absolute;left:0;right:0;bottom:-2px;height:3px;
+    background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    border-radius:2px;transform:scaleX(0);transform-origin:left;
+    animation:underline .7s cubic-bezier(.2,.7,.2,1) .55s both;
+  }
+  @keyframes underline{to{transform:scaleX(1)}}
+
+  /* screenshots get a window chrome bar, so they read as the running app
+     rather than loose images */
+  .shot{position:relative;transition:transform .25s ease, box-shadow .25s ease}
+  .shot::before{
+    content:"";display:block;height:30px;background:var(--panel-2);
+    border-bottom:1px solid var(--rule-soft);
+    background-image:
+      radial-gradient(circle 4px at 16px 15px, #e0564b 45%, transparent 47%),
+      radial-gradient(circle 4px at 32px 15px, #e0b24b 45%, transparent 47%),
+      radial-gradient(circle 4px at 48px 15px, #57b98a 45%, transparent 47%);
+    background-repeat:no-repeat;
+  }
+  .shots .shot:hover, .shots-sign .shot:hover{
+    transform:translateY(-3px);
+    box-shadow:0 1px 0 rgba(0,0,0,.04), 0 22px 48px -24px rgba(20,22,26,.5);
+  }
+
+  /* routes and label lift a touch on hover — what's interactive feels so */
+  .route{transition:transform .25s ease, border-color .25s ease}
+  .route:hover{transform:translateY(-2px);border-color:var(--rule)}
+  .cmd{transition:box-shadow .3s ease}
+  .cmd:focus-within, .cmd:hover{box-shadow:0 20px 44px -28px rgba(20,22,26,.55)}
+
+  /* a hairline accent rail on the left of every section label, tying the
+     monospace gutter vocabulary together down the page */
+  .reg .reg-head > .fld{position:relative;padding-left:14px}
+  .reg .reg-head > .fld::before{
+    content:"";position:absolute;left:0;top:1px;bottom:1px;width:3px;
+    background:var(--accent);border-radius:2px;
+  }
+  @media (max-width:720px){ .reg .reg-head > .fld{padding-left:0}
+    .reg .reg-head > .fld::before{display:none} }
+
+  /* one gentle load-in for the hero — from a visible resting state, plays
+     once on load, and off entirely for reduced-motion */
+  @media (prefers-reduced-motion:no-preference){
+    .eyebrow,.hero h1,.lede,.hero .cmd,.label-stage{
+      animation:riseIn .7s cubic-bezier(.2,.7,.2,1) both;
+    }
+    .hero h1{animation-delay:.04s}
+    .label-stage{animation-delay:.10s}
+    .lede{animation-delay:.12s}
+    .hero .cmd{animation-delay:.2s}
+  }
+  @keyframes riseIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   @media (prefers-reduced-motion:reduce){ *{transition:none !important;animation:none !important} }
 </style>
@@ -372,7 +456,7 @@
           <span class="fld">Flask &amp; MariaDB</span><span class="dot"></span>
           <span class="fld">amd64 &amp; arm64</span>
         </div>
-        <h1>Know what you own, and who has it.</h1>
+        <h1>Know what you own, <span class="h-em">and who has it.</span></h1>
         <p class="lede">
           IT-Vault is an asset register and helpdesk for the person who is the
           whole IT department. Track hardware from purchase to disposal, print
