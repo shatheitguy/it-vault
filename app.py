@@ -4562,8 +4562,10 @@ def _dump_section(cur, table):
     upserting rows on top of whatever is there now, then the REPLACE INTOs."""
     return [f"-- == {table} ==", f"DELETE FROM `{table}`;", *_dump_table(cur, table)]
 
-# Every table a factory wipe can touch -- kept in sync with WIPE_TABLES below
-# so an "all"/"assets" backup is always a complete, restorable snapshot.
+# Every business table, so an "all"/"assets" backup is a complete,
+# restorable snapshot. A factory wipe drops whatever the schema actually
+# holds (read from information_schema), so there's no parallel list to
+# keep in sync with this one.
 ASSET_SCOPE_TABLES = [
     "Assets", "Checkouts", "Maintenance", "Contracts", "Employees",
     "Tickets", "TicketReplies", "Manufacturers", "Models", "Categories",
@@ -4614,22 +4616,21 @@ def _run_backup(scope="all"):
     _prune_old_backups()
     return fname
 
-WIPE_TABLES = [
-    "Assets", "Manufacturers", "Models", "Categories", "ContractTypes",
-    "Departments", "Designations", "History", "Contracts", "Locations",
-    "Tickets", "TicketReplies", "Roles", "Employees", "Checkouts",
-    "Maintenance", "AuditLog",
-]
-
 @app.route("/api/admin/wipe", methods=["POST"])
 @auth_required([ROLE_ADMIN])
 def wipe_everything():
     """Danger Zone factory reset: password-gated, phrase-confirmed, takes an
-    automatic full backup first so a wipe is always recoverable. Leaves the
-    Users table's accounts (username/password/role) alone so admins can still
-    log back in afterward, but strips personal fields (email, LDAP/SMTP
-    config, branding) so the instance comes back genuinely blank and ready to
-    reconfigure rather than just missing its assets."""
+    automatic full backup first so a wipe is always recoverable.
+
+    Drops every table -- user accounts included -- rather than emptying them,
+    so the instance comes back exactly like a fresh install: with no logins
+    left, setup_needed() becomes true again and the app returns to the
+    first-run wizard, where a new admin is created. Dropping rather than
+    deleting also clears any stale column defaults the schema had picked up.
+
+    The database and its MySQL user are deliberately NOT dropped: the wizard
+    needs something to connect to, and recreating them would require
+    credentials the app doesn't have."""
     d = request.get_json(force=True) or {}
     pw = d.get("password", "")
     confirm = (d.get("confirm") or "").strip().upper()
@@ -4643,24 +4644,29 @@ def wipe_everything():
     backup_file = _run_backup("all")
     try:
         c = conn(); cur = c.cursor()
-        for t in WIPE_TABLES:
-            cur.execute(f"DELETE FROM `{t}`")
-        cur.execute("DELETE FROM Settings WHERE id=1")
-        cur.execute("INSERT INTO Settings (id, theme) VALUES (1, 'dark')")
-        cur.execute("UPDATE Users SET email=NULL, totp_secret='', totp_enabled=0, email_otp_enabled=0")
+        cur.execute("SELECT TABLE_NAME AS t FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()")
+        tables = [r["t"] for r in cur.fetchall()]
+        cur.execute("SET FOREIGN_KEY_CHECKS=0")
+        for t in tables:
+            cur.execute(f"DROP TABLE IF EXISTS `{t}`")
+        cur.execute("SET FOREIGN_KEY_CHECKS=1")
         c.commit(); c.close()
         for fname in ("logo.png", "letterhead.png"):
             try:
                 open(os.path.join(BASE, fname), "wb").close()
             except Exception:
                 pass
-        c = conn(); cur = c.cursor()
-        cur.execute("INSERT INTO AuditLog (actor, action, asset_id, detail) VALUES (%s,%s,%s,%s)",
-                    (session.get("user"), "FACTORY_RESET", "", f"full wipe -- backup saved as {backup_file}"))
-        c.commit(); c.close()
     except Exception as e:
         return jsonify({"error": f"Wipe failed partway through: {e}. A pre-wipe backup was saved as {backup_file} -- restore it from Backup/Restore."}), 500
-    return jsonify({"ok": True, "backup_file": backup_file})
+    # back to first-run: no schema, no logins, so drop the latch and this
+    # session with it. There's no audit row to write -- the table is gone;
+    # the pre-wipe backup is the record of what was there.
+    global _setup_done
+    _setup_done = False
+    print(f"[itvault] FACTORY RESET by {session.get('user')} -- {len(tables)} tables dropped, "
+          f"pre-wipe backup {backup_file}", flush=True)
+    session.clear()
+    return jsonify({"ok": True, "backup_file": backup_file, "setup_required": True})
 
 @app.route("/api/backup")
 @auth_required([ROLE_ADMIN])

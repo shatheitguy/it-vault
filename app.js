@@ -3317,7 +3317,9 @@ window.loadUserSettings = loadUserSettings;
       if(r&&r.ok){
         toast('💀 EVERYTHING WIPED — backup: '+(j.backup_file||''));
         modal.classList.remove('show');
-        setTimeout(()=>{ window.location.reload(); }, 1200);
+        // the schema and every account are gone, so there's nothing to
+        // reload into -- go straight to the first-run wizard
+        setTimeout(()=>{ window.location.href = j.setup_required ? '/setup' : '/'; }, 1400);
       }else{
         errEl.textContent=j.error||'Wipe failed.';
         goBtn.disabled=false;
