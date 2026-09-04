@@ -26,4 +26,9 @@ EXPOSE 5000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=5 \
     CMD curl -f http://localhost:5000/ || exit 1
 
-CMD ["sh", "-c", "python wait_for_db.py && python serve.py"]
+# serve.py waits for the database itself and, if there isn't one yet, still
+# starts so the first-run setup wizard can ask for one. It must NOT be gated
+# behind wait_for_db.py: that exits non-zero after its timeout, so with no
+# DB_HOST configured the "&&" would stop the app from ever starting and the
+# container would restart-loop with the wizard unreachable.
+CMD ["python", "serve.py"]
