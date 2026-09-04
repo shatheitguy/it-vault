@@ -1,5 +1,9 @@
 # IT-Vault
 
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
+[![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/it-vault)
+[![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)
+
 A self-hosted IT asset & helpdesk manager: track assets, employees, checkouts,
 maintenance history, support tickets (with a public portal + a live wallboard
 monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
@@ -341,5 +345,15 @@ python serve.py   # expects a MariaDB reachable via the DB_* env vars
 
 ## License
 
-Add a license of your choice before treating this as a public template —
-none is currently specified.
+**GNU Affero General Public License v3.0 or later** — see [LICENSE](LICENSE).
+
+In plain terms: run it, anywhere, for anything, including commercially, for
+free. Modify it all you like. The one condition is reciprocity — if you
+modify IT-Vault and let other people use it, whether you ship them a copy
+**or just host it for them over a network**, you have to make your modified
+source available to them under the same licence.
+
+That last part is the difference between the AGPL and the ordinary GPL, and
+it's deliberate: IT-Vault is a web app, so "hosting it" is how it's used.
+
+Copyright (C) 2026 Sharqan Ahamed (Sha The IT Guy)

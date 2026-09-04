@@ -275,6 +275,13 @@
   .foot-links a:hover{color:var(--accent)}
   .sig-line{font-size:13px;color:var(--text-3);max-width:46ch}
   .sig-line b{color:var(--text-2);font-weight:600}
+  .licence-line{
+    flex-basis:100%;margin-top:22px;padding-top:18px;
+    border-top:1px solid var(--rule-soft);
+    font-size:12.5px;line-height:1.6;color:var(--text-3);max-width:78ch;
+  }
+  .licence-line a{color:var(--text-2)}
+  .licence-line a:hover{color:var(--accent)}
 
   /* ---- logo, wherever the name appears ---- */
   .mark-logo{width:27px;height:27px;border-radius:6px;display:block;flex:0 0 27px}
@@ -353,6 +360,7 @@
       <div>
         <div class="eyebrow">
           <span class="fld">Self-hosted</span><span class="dot"></span>
+          <span class="fld">AGPL-3.0</span><span class="dot"></span>
           <span class="fld">Flask &amp; MariaDB</span><span class="dot"></span>
           <span class="fld">amd64 &amp; arm64</span>
         </div>
@@ -769,7 +777,17 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
       <a href="https://github.com/shatheitguy/it-vault/releases">Releases</a>
       <a href="https://github.com/shatheitguy/it-vault/pkgs/container/it-vault">Container image</a>
       <a href="https://github.com/shatheitguy/it-vault#readme">Docs</a>
+      <a href="https://github.com/shatheitguy/it-vault/blob/main/LICENSE">AGPL-3.0</a>
     </div>
+    <p class="licence-line">
+      Free software under the
+      <a href="https://github.com/shatheitguy/it-vault/blob/main/LICENSE">GNU Affero General Public License v3</a>.
+      Run it anywhere, for anything, including commercially, at no cost. The
+      one condition is reciprocity: modify IT-Vault and let others use it &mdash;
+      by shipping it <em>or</em> by hosting it for them &mdash; and your changes
+      have to be available to them too.
+      <span class="mono" style="white-space:nowrap">&copy; 2026 Sharqan Ahamed</span>
+    </p>
   </div>
 </footer>
 
