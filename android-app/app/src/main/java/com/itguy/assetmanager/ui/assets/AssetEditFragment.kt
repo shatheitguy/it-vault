@@ -602,42 +602,21 @@ class AssetEditFragment : Fragment() {
      * separate lines, which is common on printed asset stickers -- and
      * fills the matching fields (e.g. "SNO" -> Serial, "Model" -> Model). */
     private fun applyOcrText(text: String) {
-        val lines = text.lines().map { it.trim() }.filter { it.isNotBlank() }
+        val parsed = LabelParser.parse(text)
 
-        fun findLabeled(aliasesLongestFirst: List<String>): String? {
-            val aliasPattern = aliasesLongestFirst.joinToString("|") { Regex.escape(it) }
-            val sameLine = Regex("""(?i)\b($aliasPattern)\b\.?\s*[:\-]\s*(.+)""")
-            for (line in lines) {
-                sameLine.find(line)?.let { m -> val v = m.groupValues[2].trim(); if (v.isNotBlank()) return v }
-            }
-            for (i in lines.indices) {
-                val norm = lines[i].trimEnd(':').trim()
-                if (aliasesLongestFirst.any { it.equals(norm, ignoreCase = true) } && i + 1 < lines.size) {
-                    val v = lines[i + 1].trim()
-                    if (v.isNotBlank()) return v
-                }
-            }
-            return null
-        }
-
-        val serial = findLabeled(listOf("serial number", "serial no", "serial#", "s/n", "sno", "sn", "serial"))
-        val model = findLabeled(listOf("model number", "model no", "model"))
-        val mfr = findLabeled(listOf("manufacturer", "brand", "make"))
-        var mac = findLabeled(listOf("mac address", "mac id", "mac"))
-        if (mac == null) mac = Regex("""([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}""").find(text)?.value
-
-        val filled = mutableListOf<String>()
-        if (serial != null) { b.fSerial.setText(serial); filled.add("Serial") }
-        if (mac != null) { b.fMacAddress.setText(mac); filled.add("MAC") }
-        if (mfr != null || model != null) {
-            current = current.copy(Manufacturer = mfr ?: current.Manufacturer, Model = model ?: current.Model)
+        parsed.serial?.let { b.fSerial.setText(it) }
+        parsed.mac?.let { b.fMacAddress.setText(it) }
+        if (parsed.manufacturer != null || parsed.model != null) {
+            current = current.copy(
+                Manufacturer = parsed.manufacturer ?: current.Manufacturer,
+                Model = parsed.model ?: current.Model
+            )
             bindManufacturerSpinner()
-            if (mfr != null) filled.add("Manufacturer")
-            if (model != null) filled.add("Model")
         }
 
-        val msg = if (filled.isEmpty()) "Couldn't recognize S/N, Model, or MAC on that label -- try getting closer or better lighting"
-        else "✓ Filled from label: ${filled.joinToString(", ")}"
+        val msg = if (parsed.isEmpty)
+            "Couldn't recognize Serial, Model, or MAC on that label -- try getting closer or better lighting"
+        else "✓ Filled from label: ${parsed.filledNames.joinToString(", ")}"
         android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_LONG).show()
     }
 

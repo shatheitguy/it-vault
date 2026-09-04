@@ -71,6 +71,11 @@ interface ApiService {
     @POST("api/assets/{id}/checkin")
     suspend fun checkinAsset(@Path("id") id: String): Response<OkResponse>
 
+    /** Signed-acknowledgement link for an asset -- same one the web row menu's
+     * SIGN action generates, so the employee can sign on any device. */
+    @GET("api/assets/{id}/sign/link")
+    suspend fun signLink(@Path("id") id: String): Response<SignLinkResponse>
+
     // ---- employees ----
     @GET("api/employees")
     suspend fun listEmployees(): Response<List<Employee>>

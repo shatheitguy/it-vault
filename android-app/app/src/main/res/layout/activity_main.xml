@@ -38,7 +38,7 @@
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:background="@color/surface"
-        app:itemIconTint="@color/muted"
+        app:itemIconTint="@null"
         app:itemTextColor="@color/text"
         app:itemBackground="@drawable/nav_item_bg"
         app:menu="@menu/drawer_menu"

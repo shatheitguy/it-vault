@@ -7,7 +7,10 @@ import androidx.recyclerview.widget.RecyclerView
 import com.itguy.assetmanager.data.model.Asset
 import com.itguy.assetmanager.databinding.ItemAssetBinding
 
-class AssetAdapter(private val onClick: (Asset) -> Unit) : RecyclerView.Adapter<AssetAdapter.VH>() {
+class AssetAdapter(
+    private val onClick: (Asset) -> Unit,
+    private val onLongClick: ((Asset) -> Unit)? = null
+) : RecyclerView.Adapter<AssetAdapter.VH>() {
     private val items = mutableListOf<Asset>()
 
     fun submit(list: List<Asset>) {
@@ -20,12 +23,12 @@ class AssetAdapter(private val onClick: (Asset) -> Unit) : RecyclerView.Adapter<
         return VH(b)
     }
 
-    override fun onBindViewHolder(holder: VH, position: Int) = holder.bind(items[position], onClick)
+    override fun onBindViewHolder(holder: VH, position: Int) = holder.bind(items[position], onClick, onLongClick)
 
     override fun getItemCount() = items.size
 
     class VH(private val b: ItemAssetBinding) : RecyclerView.ViewHolder(b.root) {
-        fun bind(a: Asset, onClick: (Asset) -> Unit) {
+        fun bind(a: Asset, onClick: (Asset) -> Unit, onLongClick: ((Asset) -> Unit)?) {
             b.assetName.text = a.Name.ifBlank { "(unnamed)" }
             val meta = listOfNotNull(
                 "ID: ${a.AssetTag.ifBlank { a.id ?: "" }}".takeIf { a.AssetTag.isNotBlank() || a.id != null },
@@ -37,6 +40,9 @@ class AssetAdapter(private val onClick: (Asset) -> Unit) : RecyclerView.Adapter<
             b.assetStatus.text = a.Status
             b.statusDot.setBackgroundColor(statusColor(a.Status))
             b.root.setOnClickListener { onClick(a) }
+            b.root.setOnLongClickListener {
+                if (onLongClick == null) false else { onLongClick(a); true }
+            }
         }
 
         private fun statusColor(status: String): Int = when (status) {
