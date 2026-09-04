@@ -33,7 +33,7 @@ Flask app (app.py)  ── pymysql ──▶ MariaDB (db: itvault)
         ├─ ldap3     (AD/LDAP employee sync)
         └─ qrcode    (asset QR labels, rendered to PNG)
 
-MariaDB 12.3 on 127.0.0.1:3306  (NOT a Windows service — start manually)
+MariaDB on 127.0.0.1:3306  (install it as a service so it starts at boot)
 ```
 
 ### Processes
@@ -46,11 +46,11 @@ MariaDB 12.3 on 127.0.0.1:3306  (NOT a Windows service — start manually)
 
 ### 3.1 Prerequisites
 - Windows 10/11
-- Python 3.11+ (the app uses the Hermes venv interpreter: `C:\Users\Sha\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe`)
-- MariaDB 12.3 installed at `C:\Program Files\MariaDB 12.3`
+- Python 3.11+ (a virtualenv is recommended: `python -m venv .venv`)
+- MariaDB 10.6+ (any recent release; the examples below use a Windows install path)
 - Python packages: `flask`, `pymysql`, `openpyxl`, `ldap3`, `qrcode`, `pillow`
 
-> ⚠️ The Windows `python3` on PATH is the Microsoft Store shim and **exits code 23** — never use it. Use the venv interpreter above.
+> ⚠️ On Windows, the `python3` on PATH may be the Microsoft Store shim, which exits immediately with code 23. Use your virtualenv's interpreter.
 
 ### 3.2 Start MariaDB
 MariaDB is **not** installed as a Windows service. Start `mysqld` manually:
@@ -70,19 +70,19 @@ Using the MariaDB client:
 
 ```sql
 CREATE DATABASE IF NOT EXISTS itvault CHARACTER SET utf8mb4;
-CREATE USER IF NOT EXISTS 'itvault'@'127.0.0.1' IDENTIFIED BY 'itvaultpass';
+CREATE USER IF NOT EXISTS 'itvault'@'127.0.0.1' IDENTIFIED BY '<a-strong-password>';
 GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'127.0.0.1';
 FLUSH PRIVILEGES;
 ```
 
 ### 3.4 Start the app
 ```bash
-cd C:\Users\Sha\asset-manager
+cd /path/to/it-vault
 # kill any old process on :5000 first
 for pid in $(netstat -ano | grep ":5000" | findstr LISTENING | awk '{print $5}'); do taskkill /PID $pid /F; done
 
 # launch with the venv interpreter (background)
-"C:\Users\Sha\AppData\Local\hermes\hermes-agent\venv\Scripts\python.exe" app.py
+python serve.py
 ```
 
 On first launch `init_db()` auto-creates all tables and seeds the admin user.
@@ -90,7 +90,7 @@ On first launch `init_db()` auto-creates all tables and seeds the admin user.
 ### 3.5 Default login
 - **URL:** `http://127.0.0.1:5000`
 - **Username:** `admin`
-- **Password:** `admin123`
+- **Password:** the one you set in the first-run wizard
 
 > Change these via env vars `ITVAULT_ADMIN` / `ITVAULT_ADMIN_PASS` or in code (`ADMIN_USER`/`ADMIN_PASS`).
 
@@ -106,10 +106,10 @@ All config is read from environment variables (Docker-friendly), with local defa
 | `DB_PORT` | `3306` | MariaDB port |
 | `DB_NAME` | `itvault` | Database name |
 | `DB_USER` | `itvault` | DB user |
-| `DB_PASS` | `itvaultpass` | DB password |
+| `DB_PASS` | _(required)_ | DB password |
 | `ITVAULT_SECRET` | generated + persisted to `.secret_key` | Flask session signing secret |
 | `ITVAULT_ADMIN` | `admin` | Default admin username |
-| `ITVAULT_ADMIN_PASS` | `admin123` | Default admin password |
+| `ITVAULT_ADMIN_PASS` | _(unset)_ | Only for an unattended install; unset means the first-run wizard asks instead |
 
 The older `ITGUY_SECRET` / `ITGUY_ADMIN` / `ITGUY_ADMIN_PASS` names are still
 read when the `ITVAULT_*` ones are unset, so existing deployments keep working.
@@ -326,7 +326,7 @@ Themes apply to:
 | PRINT shows "Not signed yet" after signing | Older build dropped `SignatureData`. Current build includes it in the asset API. Hard-refresh. |
 | Maintenance "ADD" does nothing | Fixed: `#mAdd` must be wired (current build is). |
 | Avatar upload 500 | DB `avatar` column must be `MEDIUMTEXT` (auto-migrated on boot). Route stores base64 data URL. |
-| `python3` exits 23 | It's the Windows Store shim. Use the Hermes venv interpreter. |
+| `python3` exits 23 | It's the Windows Store shim. Use your virtualenv's interpreter. |
 | LDAP sync not running | Configure LDAP in System settings; auto-sync every 30 min. |
 
 ### Logs
@@ -340,7 +340,7 @@ Use Backup/Restore (TOOLS) regularly. Store the `.sql` dump off-host.
 ## 12. File Layout
 
 ```
-C:\Users\Sha\asset-manager\
+it-vault/
 ├── app.py                  # Flask backend + all API routes + DB schema/migrations
 ├── index.html              # SPA shell (sidebar, pages, modals, tables)
 ├── app.js                  # Frontend logic (render, actions, theming, API calls)
@@ -363,4 +363,4 @@ C:\Users\Sha\asset-manager\
 
 ---
 
-*Generated from the current source (`app.py`, `index.html`, `app.js`, `style.css`). For the live running instance use `http://127.0.0.1:5000` (admin / admin123).*
+*Generated from the current source (`app.py`, `index.html`, `app.js`, `style.css`).*
