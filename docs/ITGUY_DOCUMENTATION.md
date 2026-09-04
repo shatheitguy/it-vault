@@ -54,17 +54,33 @@ MariaDB on 127.0.0.1:3306  (you provide it; install it as a service so it
 
 > ⚠️ On Windows, the `python3` on PATH may be the Microsoft Store shim, which exits immediately with code 23. Use your virtualenv's interpreter.
 
-### 3.2 Start MariaDB
-MariaDB is **not** installed as a Windows service. Start `mysqld` manually:
+### 3.2 Get a database running
+IT-Vault ships without one. Any MariaDB 10.6+ or MySQL 8+ works — pick one:
+
+**As a Docker container** (creates the database and user for you):
+
+```bash
+docker volume create itvault_db
+docker run -d --name itvault-db --restart unless-stopped \
+  -e MARIADB_ROOT_PASSWORD='<root-password>' \
+  -e MARIADB_DATABASE=itvault \
+  -e MARIADB_USER=itvault -e MARIADB_PASSWORD='<a-strong-password>' \
+  -v itvault_db:/var/lib/mysql mariadb:11
+```
+
+**On a server or workstation**: `apt install mariadb-server` (Debian/Ubuntu),
+`dnf install mariadb-server` (RHEL family), `brew install mariadb` (macOS), or
+the installer from mariadb.org on Windows. Then `mariadb-secure-installation`.
+
+> ⚠️ On Windows, install it **as a service** so it starts at boot. Started by
+> hand from a console it dies with that session, and IT-Vault then can't reach
+> it — a slow-burning source of "the app was working yesterday".
+
+Verify it's listening:
 
 ```
-"C:\Program Files\MariaDB 12.3\bin\mysqld.exe" --datadir="C:\Program Files\MariaDB 12.3\data"
-```
-
-(Or whatever datadir your install uses.) Verify it is listening:
-
-```
-netstat -ano | findstr :3306
+netstat -ano | findstr :3306      # Windows
+ss -lntp | grep 3306              # Linux
 ```
 
 ### 3.3 Create the database & user (one-time)

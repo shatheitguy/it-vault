@@ -6,19 +6,88 @@ monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
 built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
 for storage.
 
-## Quick start (Docker Compose)
+## Step 1 — get a database
 
-IT-Vault does not ship a database — you point it at your own. Install
-MariaDB (or MySQL) wherever suits you, then create an empty database and a
-user for it:
+IT-Vault ships without one, so it never dictates your database's version,
+backups or retention. Any MariaDB 10.6+ (or MySQL 8+) works. Pick whichever
+of these suits you.
+
+### Option A — MariaDB as a Docker container
+
+Quickest if you already run Docker:
+
+```bash
+docker volume create itvault_db
+
+docker run -d --name itvault-db --restart unless-stopped \
+  -e MARIADB_ROOT_PASSWORD='<a-strong-root-password>' \
+  -e MARIADB_DATABASE=itvault \
+  -e MARIADB_USER=itvault \
+  -e MARIADB_PASSWORD='<a-strong-password>' \
+  -v itvault_db:/var/lib/mysql \
+  mariadb:11
+```
+
+That creates the database and user for you, so you can skip the SQL below.
+Keep the volume — it *is* your data. Don't publish port 3306 unless you
+genuinely need outside access; IT-Vault reaches it over the Docker network.
+
+To let the two containers talk, put them on one network:
+
+```bash
+docker network create itvault-net
+docker network connect itvault-net itvault-db
+```
+
+…then attach IT-Vault to `itvault-net` too, and use **`itvault-db`** as the
+database host.
+
+### Option B — MariaDB on a server or your own machine
+
+Better if you already run a database server, or want it outside Docker.
+
+```bash
+# Debian / Ubuntu
+sudo apt install mariadb-server
+
+# RHEL / Rocky / Fedora
+sudo dnf install mariadb-server && sudo systemctl enable --now mariadb
+
+# macOS
+brew install mariadb && brew services start mariadb
+```
+
+On Windows, use the installer from [mariadb.org/download](https://mariadb.org/download/)
+and **let it install as a service** so it starts at boot — otherwise it dies
+with the session that started it.
+
+Then run `sudo mariadb-secure-installation` (set a root password, remove the
+anonymous users) and create the database:
 
 ```sql
 CREATE DATABASE itvault CHARACTER SET utf8mb4;
 CREATE USER 'itvault'@'%' IDENTIFIED BY '<a-strong-password>';
 GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'%';
+FLUSH PRIVILEGES;
 ```
 
-Then run IT-Vault:
+Restrict the host if you can: `'itvault'@'localhost'` for a database on the
+same machine, or `'itvault'@'172.17.%'` for the Docker bridge, instead of
+`'%'` which allows connections from anywhere.
+
+### Which host does IT-Vault use?
+
+This is the one thing people get wrong. From inside the IT-Vault container,
+`127.0.0.1` means *the container itself*, not your machine:
+
+| Where the database runs | `DB_HOST` |
+|---|---|
+| Docker container on the same network | that container's name, e.g. `itvault-db` |
+| Same machine, outside Docker | `host.docker.internal` |
+| Another server | its hostname or IP |
+| IT-Vault also running outside Docker | `127.0.0.1` |
+
+## Step 2 — run IT-Vault
 
 ```bash
 git clone https://github.com/shatheitguy/it-vault.git
@@ -77,10 +146,6 @@ the UI, not in environment variables.
   upgrades or deletes the server, so your backup and retention policy stays
   yours. Change where it points any time in Settings → Database, or via the
   `DB_*` variables.
-- **Reaching it from the container**: a database on the same machine is
-  `host.docker.internal`; one in another container is that container's
-  service name. `127.0.0.1` refers to the IT-Vault container itself and will
-  not work.
 - **Schema**: created on first start and migrated on every start, so an
   upgrade needs no manual SQL.
 - **Backups**: Settings → Backup / Restore exports and restores archives by
