@@ -122,6 +122,70 @@ tag for anything real; `latest` moves whenever a release is published.
 Keep `/app/data` on a volume: it holds the generated session-signing key and
 the saved database pointer, so an image update doesn't sign everyone out.
 
+## Updating
+
+**Settings → General → Check for Updates** compares your running version
+against the latest published release. When there's a newer one, the panel
+shows what's available, a link to the release notes, and an **UPDATE NOW**
+button.
+
+On a source checkout, that button works out of the box: it pulls the new
+code, installs any new requirements and restarts, then the page reloads
+itself into the new version.
+
+Containers need one extra piece — see below. Until it's set up, the same
+panel gives you the command to run yourself, with a one-click copy:
+
+```bash
+docker compose pull && docker compose up -d
+```
+
+Either way your database is untouched (it isn't ours to touch), invoices,
+backups and the session key live on volumes that survive the swap, and the
+schema migrates itself on start.
+
+### One-click and automatic updates for containers
+
+IT-Vault deliberately cannot replace its own container. Doing that from the
+inside means mounting the host's Docker socket into the app — root-equivalent
+control of the machine, handed to the process that also handles uploads, LDAP
+and SMTP. So instead it asks [Watchtower](https://containrrr.dev/watchtower/)
+to do it: the socket stays with a small single-purpose container, and
+IT-Vault just sends it a request.
+
+Pick a long random token, put it in `.env`:
+
+```
+ITVAULT_WATCHTOWER_TOKEN=<a-long-random-string>
+```
+
+uncomment the `watchtower` service at the bottom of `docker-compose.yml`,
+and bring it up:
+
+```bash
+docker compose up -d
+```
+
+**UPDATE NOW** now works, and Watchtower also checks once a day on its own,
+so releases land even if nobody opens Settings. Drop the `--interval` from
+its `command` to only ever update when you click.
+
+Running the image without compose? Same idea:
+
+```bash
+docker run -d --name watchtower --restart unless-stopped \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e WATCHTOWER_HTTP_API_UPDATE=true \
+  -e WATCHTOWER_HTTP_API_TOKEN=<the-same-token> \
+  containrrr/watchtower --cleanup --interval 86400 itvault
+```
+
+…then start IT-Vault with `-e ITVAULT_WATCHTOWER_TOKEN=<the-same-token>` on
+the same Docker network.
+
+If you'd rather stay deliberate about upgrades, skip Watchtower entirely:
+pin a version in `.env` (`ITVAULT_TAG=1.6.1`) and bump it when you choose.
+
 ## Configuration
 
 Everything is optional (see `.env.example`). `DB_HOST` / `DB_PORT` /

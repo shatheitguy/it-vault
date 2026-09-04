@@ -497,3 +497,31 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   @page{size:50mm 19mm;margin:0}
   #labelPrint{width:50mm;height:19mm}
 }
+
+/* ---- version & one-click update ---- */
+.verbadge{width:42px;height:42px;border-radius:12px;display:grid;place-items:center;
+  font-size:19px;background:var(--surface2);border:1px solid var(--line2);
+  color:var(--muted);transition:color .25s,border-color .25s}
+.verbadge.has-update{color:var(--accent);border-color:var(--accent);
+  animation:verPulse 2.2s ease-out infinite}
+@keyframes verPulse{
+  0%{box-shadow:0 0 0 0 var(--accent-soft)}
+  70%{box-shadow:0 0 0 13px transparent}
+  100%{box-shadow:0 0 0 0 transparent}
+}
+.updcard{border:1px solid var(--accent);border-radius:var(--radius);padding:14px;
+  background:linear-gradient(180deg,var(--accent-soft),transparent 72%)}
+.updhead{display:flex;gap:12px;align-items:center;margin-bottom:13px}
+.updring{width:44px;height:44px;flex:0 0 44px;border-radius:50%;display:grid;
+  place-items:center;font-size:20px;color:var(--accent);background:var(--surface2);
+  border:1px solid var(--accent);animation:verPulse 2.2s ease-out infinite}
+.updver{font-size:17px;letter-spacing:.3px;margin-bottom:2px}
+.updver b{color:var(--accent)}
+.updacts{justify-content:flex-start;flex-wrap:wrap;margin:0 0 9px}
+.updhint{color:var(--muted);font-size:12.5px;line-height:1.55}
+.updlog{background:var(--surface2);border:1px solid var(--line);border-radius:8px;
+  padding:10px;margin:10px 0 0;white-space:pre-wrap;font-size:12px;
+  max-height:220px;overflow:auto}
+.updwarn{color:var(--amber);border-left:2px solid var(--amber);padding-left:10px;
+  line-height:1.5}
+.updacts a.btn{display:inline-flex;align-items:center;text-decoration:none}

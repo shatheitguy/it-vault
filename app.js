@@ -1271,46 +1271,133 @@ function addScannedAsAsset(i){
 // installed from here: a container install is told to pull a new image,
 // a source install to git pull, because those upgrade differently.
 const SPLIT_RE = new RegExp(String.fromCharCode(10) + String.fromCharCode(10));
+function verTag(v){ return 'v'+String(v||'?').replace(/^v/i,''); }
 async function wireUpdateCheck(){
   const cur=document.getElementById('verCurrent');
   const kind=document.getElementById('verInstallKind');
   const btn=document.getElementById('checkUpdateBtn');
   const out=document.getElementById('updateResult');
+  const badge=document.getElementById('verBadge');
   if(!cur||!btn) return;
+  let running='';
   try{
     const r=await api('/api/version');
     if(r&&r.ok){
       const j=await r.json();
-      cur.textContent='v'+(j.version||'?');
+      running=j.version||'';
+      cur.textContent=verTag(j.version);
       kind.textContent = j.is_docker
-        ? 'Running as a Docker container — updates come from a new image'
+        ? 'Running as a Docker container — updates arrive as a new image'
         : 'Running from source';
     }
   }catch(e){}
+
+  /* Poll until the new version answers, then reload into it — so "update
+     now" ends with the user looking at the new version instead of at a dead
+     page they have to work out how to revive. */
+  function waitForRestart(box, from){
+    let tries=0;
+    const tick=async()=>{
+      tries++;
+      try{
+        const r=await fetch('/api/version',{cache:'no-store'});
+        if(r&&r.ok){
+          const j=await r.json().catch(()=>({}));
+          if(j.version && j.version!==from){
+            box.innerHTML=`<b style="color:var(--grn)">✓ Now running ${esc(verTag(j.version))} — reloading…</b>`;
+            setTimeout(()=>location.reload(),1200);
+            return;
+          }
+        }
+      }catch(e){ /* expected while the server is down */ }
+      if(tries>80){
+        box.innerHTML='<span style="color:var(--amber)">Taking longer than expected. Reload the page in a minute — the update may still be finishing.</span>';
+        return;
+      }
+      setTimeout(tick,3000);
+    };
+    setTimeout(tick,4000);
+  }
+
+  async function applyUpdate(nowBtn, live, from){
+    nowBtn.disabled=true;
+    const label=nowBtn.textContent;
+    nowBtn.textContent='⏳ UPDATING…';
+    live.innerHTML='<span class="muted">Pulling the new version — don\'t close this page.</span>';
+    let j={};
+    try{
+      const r=await api('/api/update/apply',{method:'POST'});
+      j=r?await r.json().catch(()=>({})):{};
+    }catch(e){ j={ok:false,error:e.message}; }
+    if(j.ok){
+      live.innerHTML=`<b style="color:var(--grn)">${esc(j.message||'Update applied.')}</b>`;
+      nowBtn.textContent='⏳ RESTARTING…';
+      if(j.restarting) waitForRestart(live, from);
+      return;
+    }
+    nowBtn.disabled=false; nowBtn.textContent=label;
+    live.innerHTML=`<div class="updwarn">${esc(j.error||'Update failed.')}</div>`
+      +(j.log?`<pre class="mono updlog">${esc(j.log)}</pre>`:'');
+  }
+
   btn.onclick=async()=>{
     btn.disabled=true; out.innerHTML='<span class="muted">Checking for updates…</span>';
+    if(badge) badge.classList.remove('has-update');
     try{
       const r=await api('/api/check-update',{method:'POST'});
       const j=r?await r.json().catch(()=>({})):{};
       if(!j.ok){
-        out.innerHTML='<span style="color:var(--amber)">'+esc(j.error||'Update check failed.')+'</span>';
+        out.innerHTML=`<div class="updwarn">${esc(j.error||'Update check failed.')}</div>`;
       }else if(j.update_available){
-        const steps=(j.how_to_update||'').split(SPLIT_RE);
-        out.innerHTML='<div class="panel" style="border-color:var(--accent)">'
-          +'<b style="color:var(--accent)">Update available — v'+esc(j.latest)+'</b>'
-          +"<div class=\"muted\" style=\"margin:6px 0\">You're on v"+esc(j.current)+".</div>"
-          +steps.map(sx=>sx.trim().startsWith('docker')||sx.trim().startsWith('git')
-              ? '<pre class="mono" style="background:var(--surface2);padding:10px;border-radius:8px;overflow-x:auto">'+esc(sx.trim())+'</pre>'
-              : '<div style="margin:6px 0">'+esc(sx)+'</div>').join('')
-          +(j.release_url?'<a href="'+esc(j.release_url)+'" target="_blank" rel="noopener" style="color:var(--accent)">Release notes ↗</a>':'')
-          +'</div>';
+        const cmd=j.update_command||'';
+        if(badge) badge.classList.add('has-update');
+        out.innerHTML=`<div class="updcard">
+            <div class="updhead">
+              <div class="updring">⬆</div>
+              <div>
+                <div class="updver"><span class="muted">${esc(verTag(j.current))}</span> → <b>${esc(verTag(j.latest))}</b></div>
+                <div class="muted">A new version of IT-Vault is ready to install.</div>
+              </div>
+            </div>
+            <div class="m-actions updacts">
+              <button class="btn mag" id="updNowBtn">⬆ UPDATE NOW</button>
+              ${cmd?'<button class="btn ghost sm" id="updCopyBtn">⎘ COPY COMMAND</button>':''}
+              ${j.release_url?`<a class="btn ghost sm" href="${esc(j.release_url)}" target="_blank" rel="noopener">RELEASE NOTES ↗</a>`:''}
+            </div>
+            <div class="updhint">${
+              j.can_one_click
+                ? (j.update_method==='watchtower'
+                    ? 'One click pulls the new image and recreates the container. Your database, invoices and backups are on volumes and are untouched.'
+                    : 'One click pulls the new code, installs any new requirements and restarts. Your database is untouched.')
+                : 'One-click updating needs Watchtower running alongside IT-Vault — a container can\'t replace itself. Click UPDATE NOW for the exact steps, or copy the command and run it yourself.'
+            }</div>
+            ${cmd?`<pre class="mono updlog" id="updCmd">${esc(cmd)}</pre>`:''}
+            <div id="updLive" style="margin-top:8px"></div>
+          </div>`;
+        const live=document.getElementById('updLive');
+        const nowBtn=document.getElementById('updNowBtn');
+        if(nowBtn) nowBtn.onclick=()=>applyUpdate(nowBtn, live, j.current);
+        const cp=document.getElementById('updCopyBtn');
+        if(cp) cp.onclick=async()=>{
+          try{
+            await navigator.clipboard.writeText(cmd);
+            cp.textContent='✓ COPIED';
+            setTimeout(()=>{cp.textContent='⎘ COPY COMMAND';},1800);
+          }catch(e){
+            // the clipboard API needs a secure context; select the text so
+            // the user can copy it by hand rather than getting nothing
+            const pre=document.getElementById('updCmd');
+            if(pre){ const rg=document.createRange(); rg.selectNodeContents(pre);
+              const sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rg); }
+            toast('Copy blocked by the browser — command selected instead');
+          }
+        };
       }else{
-        out.innerHTML="<span style=\"color:var(--grn)\">✓ You're on the latest version"
-          +(j.latest?' (v'+esc(j.latest)+')':'')+'.</span>'
-          +(j.note?'<div class="muted" style="margin-top:4px">'+esc(j.note)+'</div>':'');
+        out.innerHTML=`<span style="color:var(--grn)">✓ You're on the latest version${j.latest?' ('+esc(verTag(j.latest))+')':''}.</span>`
+          +(j.note?`<div class="muted" style="margin-top:4px">${esc(j.note)}</div>`:'');
       }
     }catch(e){
-      out.innerHTML='<span style="color:var(--amber)">Update check failed: '+esc(e.message)+'</span>';
+      out.innerHTML=`<div class="updwarn">Update check failed: ${esc(e.message)}</div>`;
     }
     btn.disabled=false;
   };

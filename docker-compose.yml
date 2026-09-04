@@ -43,6 +43,13 @@ services:
       # Keeps the generated session key and the saved DB pointer outside the
       # image, so replacing the image on update doesn't sign everyone out.
       ITVAULT_DATA_DIR: /app/data
+      # Lets Settings -> General -> Check for Updates offer a working
+      # "UPDATE NOW" button. IT-Vault can't replace its own container -- that
+      # needs the host's Docker socket, which has no business inside a web
+      # app -- so it asks the Watchtower container below to do it. Set the
+      # token to any long random string and use the same one there.
+      ITVAULT_WATCHTOWER_URL: ${ITVAULT_WATCHTOWER_URL:-http://watchtower:8080}
+      ITVAULT_WATCHTOWER_TOKEN: ${ITVAULT_WATCHTOWER_TOKEN:-}
     ports:
       - "5000:5000"
     volumes:
@@ -53,6 +60,28 @@ services:
     # MariaDB installed alongside this container. Harmless on Docker Desktop.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # Optional: one-click and automatic updates. Uncomment, set
+  # ITVAULT_WATCHTOWER_TOKEN in .env, and `docker compose up -d`.
+  #
+  # Watchtower needs the Docker socket to recreate containers. That is
+  # root-equivalent access to the host, which is why it lives here in a
+  # small single-purpose container rather than in IT-Vault itself. It only
+  # ever touches the container named on its command line.
+  #
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: watchtower
+  #   restart: unless-stopped
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     WATCHTOWER_HTTP_API_UPDATE: "true"
+  #     WATCHTOWER_HTTP_API_TOKEN: ${ITVAULT_WATCHTOWER_TOKEN:-}
+  #     WATCHTOWER_CLEANUP: "true"
+  #   # --interval 86400 also checks daily on its own, so updates land even
+  #   # if nobody visits Settings. Drop it to only ever update on request.
+  #   command: --interval 86400 itvault
 
 volumes:
   itvault_data:
