@@ -3,7 +3,7 @@ IT-Vault — Flask + MariaDB backend.
 Roles: admin (full), read-write (assets CRUD), read-only (view + own password).
 Docker-ready. No Access DB.
 """
-import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading
+import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading, sys
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect
@@ -96,7 +96,9 @@ def setup_needed() -> bool:
 # ---- release identity + update checks ----
 def _read_version():
     try:
-        with open(os.path.join(BASE, "VERSION")) as f:
+        # utf-8-sig: a VERSION file saved by a Windows editor carries a BOM,
+        # which strip() leaves in place and version comparisons then choke on
+        with open(os.path.join(BASE, "VERSION"), encoding="utf-8-sig") as f:
             v = f.read().strip()
             if v:
                 return v
@@ -126,6 +128,43 @@ def _in_docker():
         return False
 
 IS_DOCKER = _in_docker()
+
+def _watchtower():
+    """Where to ask Watchtower to apply a container update, or None.
+
+    A container cannot replace itself: that needs the host's Docker socket,
+    and mounting the socket into a web app which also handles uploads, LDAP
+    and SMTP hands it root-equivalent control of the machine. Watchtower
+    already does exactly this job from a small single-purpose container and
+    exposes an HTTP trigger, so IT-Vault asks it to update and never holds
+    the socket itself. Returns (base_url, token)."""
+    token = (_env("ITVAULT_WATCHTOWER_TOKEN", default="") or "").strip()
+    if not token:
+        return None
+    url = (_env("ITVAULT_WATCHTOWER_URL", default="")
+           or "http://watchtower:8080").strip().rstrip("/")
+    return url, token
+
+def _update_method():
+    """How this install can update itself in one click: 'watchtower' for a
+    container with Watchtower reachable, 'source' for a git checkout, or ''
+    when the update has to be applied by hand."""
+    if IS_DOCKER:
+        return "watchtower" if _watchtower() else ""
+    try:
+        return "source" if os.path.isdir(os.path.join(BASE, ".git")) else ""
+    except Exception:
+        return ""
+
+def _restart_self():
+    """Re-exec this process so freshly pulled code takes effect. Delayed so
+    the response reaches the browser before the listening socket closes."""
+    time.sleep(1.5)
+    try:
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception:
+        # a supervisor (systemd, or Docker's restart policy) brings it back
+        os._exit(3)
 
 def _version_tuple(v):
     """'v1.6.0' / '1.6' / '1.6.0-rc1' -> comparable (1,6,0). Any trailing
@@ -4805,16 +4844,29 @@ def check_update():
 
     latest = (data.get("tag_name") or data.get("name") or "").strip()
     newer = bool(latest) and _version_tuple(latest) > _version_tuple(APP_VERSION)
+    # The command is returned separately from the prose so the UI can offer
+    # a one-click copy. It is deliberately NOT executed here: applying it
+    # means replacing the very container this process runs in, which a
+    # container cannot do to itself without being handed the host's Docker
+    # socket -- root-equivalent control of the machine, in exchange for
+    # saving one command. Watchtower (see the README) is the safe way to
+    # make updates hands-off.
+    cmd = ""
+    method = _update_method()
     if newer and IS_DOCKER:
+        cmd = "docker compose pull && docker compose up -d"
         how = ("You're running the container image. Pull the new image and "
                "recreate the container:\n\n"
-               "    docker compose pull && docker compose up -d\n\n"
-               "Your database, invoices and backups live in named volumes, so "
-               "they survive the swap.")
+               f"    {cmd}\n\n"
+               "Your database, invoices and backups live in named volumes, "
+               "so they survive the swap. To have this happen automatically "
+               "whenever a release lands, run Watchtower alongside IT-Vault "
+               "-- the README has the one-liner.")
     elif newer:
-        how = ("You're running from source. Fetch the new release, install any "
-               "new requirements, and restart:\n\n"
-               "    git pull && pip install -r requirements.txt\n\n"
+        cmd = "git pull && pip install -r requirements.txt"
+        how = ("You're running from source. Fetch the new release, install "
+               "any new requirements, and restart:\n\n"
+               f"    {cmd}\n\n"
                "then restart the app. The schema migrates itself on startup.")
     else:
         how = ""
@@ -4827,7 +4879,81 @@ def check_update():
         "release_url": data.get("html_url") or "",
         "notes": (data.get("body") or "")[:2000],
         "how_to_update": how,
+        "update_command": cmd,
+        "update_method": method,
+        "can_one_click": bool(newer and method),
     })
+
+@app.route("/api/update/apply", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def update_apply():
+    """Apply the available update in one click, where that is possible
+    without this process taking control of the host. See _watchtower()."""
+    method = _update_method()
+
+    if method == "watchtower":
+        url, token = _watchtower()
+        import urllib.error, urllib.request
+        req = urllib.request.Request(
+            url + "/v1/update", data=b"", method="POST",
+            headers={"Authorization": "Bearer " + token,
+                     "User-Agent": f"IT-Vault/{APP_VERSION}"})
+        try:
+            # generous timeout: this covers pulling the image layers
+            with urllib.request.urlopen(req, timeout=120) as resp:
+                resp.read()
+        except urllib.error.HTTPError as e:
+            return jsonify({"ok": False,
+                            "error": f"Watchtower refused the request (HTTP {e.code}). "
+                                     "Check ITVAULT_WATCHTOWER_TOKEN matches its "
+                                     "WATCHTOWER_HTTP_API_TOKEN."}), 502
+        except Exception as e:
+            return jsonify({"ok": False,
+                            "error": f"Could not reach Watchtower at {url}: {e}"}), 502
+        audit(session.get("user"), "UPDATE_APPLY", "", f"via=watchtower from={APP_VERSION}")
+        return jsonify({"ok": True, "method": "watchtower", "restarting": True,
+                        "message": "Watchtower is pulling the new image and "
+                                   "recreating IT-Vault. This page reconnects "
+                                   "on its own once the new version is up."})
+
+    if method == "source":
+        steps = []
+        for label, cmd in (("git pull", ["git", "pull", "--ff-only"]),
+                           ("pip install", [sys.executable, "-m", "pip", "install",
+                                            "-q", "-r", "requirements.txt"])):
+            try:
+                pr = subprocess.run(cmd, cwd=BASE, capture_output=True,
+                                    text=True, timeout=600)
+            except Exception as e:
+                return jsonify({"ok": False, "log": "\n\n".join(steps),
+                                "error": f"{label} could not run: {e}"}), 500
+            steps.append(("$ " + " ".join(cmd) + "\n"
+                          + (pr.stdout or "") + (pr.stderr or "")).strip())
+            if pr.returncode != 0:
+                # nothing is restarted on failure, so the running version and
+                # its dependencies stay exactly as they were
+                return jsonify({"ok": False, "log": "\n\n".join(steps),
+                                "error": f"{label} failed -- nothing was restarted, "
+                                         "so the running version is unchanged."}), 500
+        audit(session.get("user"), "UPDATE_APPLY", "", f"via=source from={APP_VERSION}")
+        threading.Thread(target=_restart_self, daemon=True).start()
+        return jsonify({"ok": True, "method": "source", "restarting": True,
+                        "log": "\n\n".join(steps),
+                        "message": "Update pulled. Restarting IT-Vault -- this "
+                                   "page reconnects in a few seconds."})
+
+    if IS_DOCKER:
+        return jsonify({"ok": False, "needs_watchtower": True,
+                        "error": "One-click updating isn't wired up yet. IT-Vault "
+                                 "can't replace its own container, so it asks "
+                                 "Watchtower to do it: start Watchtower with an "
+                                 "HTTP API token (the README has the one-liner) "
+                                 "and set ITVAULT_WATCHTOWER_TOKEN to the same "
+                                 "value. Until then, run the command above."}), 400
+    return jsonify({"ok": False,
+                    "error": "This install isn't a git checkout, so there's "
+                             "nothing to pull. Download the new release and "
+                             "replace the files."}), 400
 
 @app.route("/api/backup")
 @auth_required([ROLE_ADMIN])
