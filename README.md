@@ -84,6 +84,37 @@ own uninstaller.
 
 Prefer to do it yourself? The rest of this README is the manual route.
 
+## Signed handovers, without the paperwork
+
+Handing someone a laptop is normally a form, a signature, a scan, and a folder
+nobody can find a year later. IT-Vault does it in one email:
+
+1. **Assign the asset** to an employee.
+2. **They get an email with a single button** — no account, no login, nothing
+   to install.
+3. **They sign on their phone**: the link opens the asset's details, they type
+   their name and sign with a finger.
+4. **Copies go out by themselves.** A signed PDF is emailed to the employee
+   *and* to every admin account with an address on file.
+5. **It's on the record.** The asset flips to `Checked-Out`, and the
+   signature, signer name and date stay attached to it — viewable and
+   printable later.
+
+The sign page only claims "sent to your inbox" when a copy really went, which
+needs SMTP configured under Settings → Notifications and an email address on
+the employee's record.
+
+Other things that run without being asked:
+
+| | |
+|---|---|
+| Contract expiry alerts | renewal dates watched on a schedule and emailed before they lapse |
+| Scheduled backups | archives on a timer, by scope, on their own volume |
+| LDAP / AD sync | your directory pulled in on a schedule rather than by hand |
+| Warranty watch | anything inside 30 days surfaces on the dashboard on its own |
+| Update checks | the app spots a new release and installs it in one click |
+| Audit trail | every change recorded with who and when, with no opt-in |
+
 ## Step 1 — get a database
 
 IT-Vault ships without one, so it never dictates your database's version,
