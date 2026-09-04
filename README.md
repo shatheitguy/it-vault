@@ -8,78 +8,97 @@ for storage.
 
 ## Quick start (Docker Compose)
 
+IT-Vault does not ship a database — you point it at your own. Install
+MariaDB (or MySQL) wherever suits you, then create an empty database and a
+user for it:
+
+```sql
+CREATE DATABASE itvault CHARACTER SET utf8mb4;
+CREATE USER 'itvault'@'%' IDENTIFIED BY '<a-strong-password>';
+GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'%';
+```
+
+Then run IT-Vault:
+
 ```bash
-git clone https://github.com/<owner>/<repo>.git
-cd <repo>
-cp .env.example .env   # edit the passwords/secret before real use
+git clone https://github.com/shatheitguy/it-vault.git
+cd it-vault
+cp .env.example .env    # optional: fill in the DB_* values
 docker compose up -d
 ```
 
-Open **http://localhost:5000**. On a fresh install this lands on the
-first-run setup wizard: confirm the database connection, then create your
-own administrator account. There is no default password to change afterwards
-— nothing can sign in until you've created that account.
+Open **http://localhost:5000**. A fresh install lands on the first-run setup
+wizard: enter your database connection (it's tested before anything is
+saved), then create your own administrator account. There is no default
+password to change afterwards — nothing can sign in until you make that
+account. The schema builds itself, and migrates itself on upgrade.
 
-This starts two containers:
-- **`db`** — MariaDB 11, schema bootstrapped from `init.sql` on first boot
-- **`web`** — the Flask app, waits for the DB to be healthy before starting
+## Running the published image directly
 
-## Pull the pre-built image instead of building it
-
-Every push to `main` publishes an image to GitHub Container Registry via the
-included Actions workflow (`.github/workflows/docker-publish.yml`):
+Every release publishes to GitHub Container Registry, so you don't need a
+source checkout at all:
 
 ```bash
-docker pull ghcr.io/<owner>/<repo>:main
+docker run -d --name itvault -p 5000:5000 \
+  -v itvault_data:/app/data \
+  -v invoices_data:/app/invoices \
+  -v backups_data:/app/backups \
+  -e ITVAULT_DATA_DIR=/app/data \
+  ghcr.io/shatheitguy/it-vault:1.6.0
 ```
 
-To use it, swap `build: .` for `image: ghcr.io/<owner>/<repo>:main` under the
-`web` service in `docker-compose.yml` and run `docker compose up -d` as
-above — you still need the `db` service from this compose file (or your own
-MariaDB) since the image only contains the app, not the database.
+Then open the setup wizard and enter your database details. Pin a version
+tag for anything real; `latest` moves whenever a release is published.
+
+Keep `/app/data` on a volume: it holds the generated session-signing key and
+the saved database pointer, so an image update doesn't sign everyone out.
 
 ## Configuration
 
-All configuration is environment variables (see `.env.example` for the full
-list with defaults) — `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` /
-`DB_PASS` for the database connection, `ITVAULT_SECRET` for Flask session
-signing, `ITVAULT_ADMIN` / `ITVAULT_ADMIN_PASS` for the first admin account
-(created once, on first DB init — changing these later doesn't touch an
-already-created account). Runtime settings that change *inside* the app —
-branding, theme colors, SMTP, LDAP, ticket SLAs — live in the database via
-Settings → \* in the UI, not in environment variables.
+Everything is optional (see `.env.example`). `DB_HOST` / `DB_PORT` /
+`DB_NAME` / `DB_USER` / `DB_PASS` set the database connection, but you can
+leave them blank and enter it in the setup wizard instead — either way it's
+saved to `/app/data` and reconfigurable later in Settings → Database.
 
-## Database management
+`ITVAULT_ADMIN` / `ITVAULT_ADMIN_PASS` create the first admin without the
+wizard, for unattended installs; unset, the wizard asks. `ITVAULT_SECRET`
+overrides the session-signing key, which is otherwise generated and kept in
+`/app/data` — leave it unset unless you're running several replicas that
+must share one key.
 
-- **Storage**: MariaDB runs in its own container with data on a named Docker
-  volume (`db_data`), so it survives `docker compose down` / image rebuilds —
-  only `docker compose down -v` (or deleting the volume explicitly) destroys
-  it. Uploaded invoices and generated `.sql` backups live on their own
-  volumes (`invoices_data`, `backups_data`) for the same reason.
-- **Schema**: bootstrapped once from `init.sql` on the database's first boot
-  (MariaDB only runs `docker-entrypoint-initdb.d/*` against an empty data
-  directory — it won't re-run on an existing volume). The app itself also
-  runs idempotent `ALTER TABLE`/`CREATE TABLE IF NOT EXISTS` migrations on
-  startup for anything added after the initial schema.
-- **Backups**: the app has a built-in Backup/Restore page (Settings →
-  Backup / Restore, or the sidebar) that exports/imports `.sql` dumps by
-  scope (all data, config-only, or assets-only) — this is the easiest path
-  for day-to-day use. For a raw external backup instead:
-  ```bash
-  docker exec itguy-db mysqldump -u itguy -pitguypass itguy_assets > backup.sql
-  # restore:
-  docker exec -i itguy-db mysql -u itguy -pitguypass itguy_assets < backup.sql
-  ```
-- **Moving to a managed/external database**: point `DB_HOST` (and the other
-  `DB_*` vars) at any reachable MariaDB/MySQL-compatible server and drop the
-  `db` service from `docker-compose.yml` — the app doesn't care whether the
-  database is in the same compose stack or not.
+Runtime settings that change *inside* the app — branding, theme colors,
+SMTP, LDAP, ticket SLAs, roles — live in the database via Settings → \* in
+the UI, not in environment variables.
+
+## Database
+
+- **You own it.** IT-Vault connects to whatever MariaDB/MySQL you give it —
+  bare metal, another container, or a managed instance. It never provisions,
+  upgrades or deletes the server, so your backup and retention policy stays
+  yours. Change where it points any time in Settings → Database, or via the
+  `DB_*` variables.
+- **Reaching it from the container**: a database on the same machine is
+  `host.docker.internal`; one in another container is that container's
+  service name. `127.0.0.1` refers to the IT-Vault container itself and will
+  not work.
+- **Schema**: created on first start and migrated on every start, so an
+  upgrade needs no manual SQL.
+- **Backups**: Settings → Backup / Restore exports and restores archives by
+  scope (everything, config only, or assets only). An "everything" archive
+  includes the uploaded logo and letterhead, which live on disk rather than
+  in the database. Restoring clears each table before repopulating it, so it
+  reverts to that point in time rather than merging.
+- **What's on volumes**: `/app/data` (session key + saved DB pointer),
+  `/app/invoices` (uploaded invoices) and `/app/backups` (generated
+  archives). These survive `docker compose down`; only `down -v` destroys
+  them. Your database lives wherever you installed it and is untouched by
+  any of that.
 
 ## Development (without Docker)
 
 ```bash
 pip install -r requirements.txt
-python app.py   # expects a MariaDB reachable via the DB_* env vars
+python serve.py   # expects a MariaDB reachable via the DB_* env vars
 ```
 
 ## License
