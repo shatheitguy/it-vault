@@ -26,7 +26,7 @@ const I18N={
 const DEFAULT_VISIBLE_COLS=['AssetTag','Name','Type','Serial','Location','Status','EmployeeID'];
 let VISIBLE_COLS = (()=>{
   try{
-    const s=localStorage.getItem('nexus_cols');
+    const s=localStorage.getItem('itvault_cols');
     if(!s) return DEFAULT_VISIBLE_COLS;
     const v=JSON.parse(s);
     if(!Array.isArray(v) || v.length===0) return null;
@@ -37,7 +37,7 @@ function visCols(){
   return (VISIBLE_COLS && VISIBLE_COLS.length) ? COLUMNS.filter(c=>VISIBLE_COLS.includes(c)) : COLUMNS.slice();
 }
 function saveVisCols(){
-  try{ localStorage.setItem('nexus_cols', JSON.stringify(visCols())); }catch(e){}
+  try{ localStorage.setItem('itvault_cols', JSON.stringify(visCols())); }catch(e){}
 }
 function applyLanguage(lang){
   lang=lang||'en'; const d=I18N[lang]||I18N.en;
@@ -358,8 +358,8 @@ async function syncLdap(){
 }
 
 /* ---------- assets ---------- */
-const DEBUG = (location.search.indexOf('debug=1')>=0) || (localStorage.getItem('nexus_debug')==='1');
-if(location.search.indexOf('debug=1')>=0){ try{ localStorage.setItem('nexus_debug','1'); }catch(e){} }
+const DEBUG = (location.search.indexOf('debug=1')>=0) || (localStorage.getItem('itvault_debug')==='1');
+if(location.search.indexOf('debug=1')>=0){ try{ localStorage.setItem('itvault_debug','1'); }catch(e){} }
 function dbg(msg){ if(!DEBUG) return; let d=document.getElementById('dbgBox'); if(!d){d=document.createElement('div');d.id='dbgBox';d.style.cssText='position:fixed;left:8px;bottom:8px;z-index:99999;max-width:60vw;background:#101622;color:#7CFFB2;border:1px solid #2bd6a0;font:12px/1.4 monospace;padding:8px 10px;white-space:pre-wrap;border-radius:6px;opacity:.95';document.body.appendChild(d);} d.textContent='[DBG] '+msg+'\n'+d.textContent; }
 function showAssetError(msg){ try{ const e=document.getElementById('empty'); if(e){ e.style.display='block'; e.style.color='#ff6b8a'; e.style.padding='20px'; e.textContent='⚠ ASSET LOAD FAILED: '+msg; } }catch(_){} }
 function showCustomError(msg){ try{ const e=document.getElementById('cfgCustomSec'); if(e){ let b=document.getElementById('customErr'); if(!b){b=document.createElement('div');b.id='customErr';b.style.cssText='background:#2a0e16;color:#ff6b8a;border:1px solid #ff3860;padding:12px 14px;border-radius:8px;margin:12px 0;font:13px monospace';e.insertBefore(b,e.firstChild);} b.textContent='⚠ CUSTOMIZATION LOAD FAILED: '+msg; } }catch(_){} }
@@ -614,7 +614,7 @@ async function loadUnifiWidgets(force){
 let _unifiTimer=null;
 function startUnifiAutoRefresh(){ stopUnifiAutoRefresh(); _unifiTimer=setInterval(()=>loadUnifiWidgets(), 30000); }
 function stopUnifiAutoRefresh(){ if(_unifiTimer){ clearInterval(_unifiTimer); _unifiTimer=null; } }
-const DASH_LAYOUT_KEY='nexus_dash_layout_v1';
+const DASH_LAYOUT_KEY='itvault_dash_layout_v1';
 function getDashLayout(){ try{ const v=localStorage.getItem(DASH_LAYOUT_KEY); return v?JSON.parse(v):null; }catch(e){ return null; } }
 function applyDashLayout(){
   const order=getDashLayout(); if(!order||!order.length) return;
@@ -1213,7 +1213,7 @@ async function clearAuditLog(){
    shows whatever was last discovered, it doesn't silently re-scan. Scan
    itself always clears the old list first, so there's one button that does
    both "clear" and "rescan". */
-const SCAN_LAST_KEY='nexus_scan_last';
+const SCAN_LAST_KEY='itvault_scan_last';
 function loadLastScan(){ try{ const s=localStorage.getItem(SCAN_LAST_KEY); const v=s?JSON.parse(s):[]; return Array.isArray(v)?v:[]; }catch(e){ return []; } }
 function saveLastScan(devs){ try{ localStorage.setItem(SCAN_LAST_KEY, JSON.stringify(devs)); }catch(e){} }
 let lastScan=loadLastScan();
@@ -2471,22 +2471,22 @@ function repairDashStructure(){
 }
 window.repairDashStructure=repairDashStructure;
 
-// Self-heal: clear any stale/corrupt nexus_* localStorage from older builds so an
+// Self-heal: clear any stale/corrupt itvault_* localStorage from older builds so an
 // old empty-column or bad-layout selection can't blank the UI for returning users.
 (function healStorage(){
   try{
-    const KEEP=new Set(['nexus_dash_layout_v1','nexus_cols','nexus_sess','nexus_scan_last']);
+    const KEEP=new Set(['itvault_dash_layout_v1','itvault_cols','itvault_sess','itvault_scan_last']);
     const bad=[];
     for(let i=localStorage.length-1;i>=0;i--){
       const k=localStorage.key(i);
-      if(k && k.indexOf('nexus_')===0 && !KEEP.has(k)) bad.push(k);
+      if(k && k.indexOf('itvault_')===0 && !KEEP.has(k)) bad.push(k);
     }
     bad.forEach(k=>localStorage.removeItem(k));
-    // also repair nexus_cols if it's empty/invalid
+    // also repair itvault_cols if it's empty/invalid
     try{
-      const c=localStorage.getItem('nexus_cols');
-      if(c){ const v=JSON.parse(c); if(!Array.isArray(v)||v.length===0) localStorage.removeItem('nexus_cols'); }
-    }catch(e){ localStorage.removeItem('nexus_cols'); }
+      const c=localStorage.getItem('itvault_cols');
+      if(c){ const v=JSON.parse(c); if(!Array.isArray(v)||v.length===0) localStorage.removeItem('itvault_cols'); }
+    }catch(e){ localStorage.removeItem('itvault_cols'); }
     if(bad.length) console.log('[ITGUY] healed stale storage keys:', bad);
   }catch(e){}
 })();

@@ -1,20 +1,20 @@
 services:
   db:
     image: mariadb:11
-    container_name: itguy-db
+    container_name: itvault-db
     restart: unless-stopped
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:-rootpass}
-      MARIADB_DATABASE: ${DB_NAME:-itguy_assets}
-      MARIADB_USER: ${DB_USER:-itguy}
-      MARIADB_PASSWORD: ${DB_PASS:-itguypass}
+      MARIADB_DATABASE: ${DB_NAME:-itvault}
+      MARIADB_USER: ${DB_USER:-itvault}
+      MARIADB_PASSWORD: ${DB_PASS:-itvaultpass}
     ports:
       - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_PASS:-itguypass}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_PASS:-itvaultpass}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -23,7 +23,7 @@ services:
     # Swap `build: .` for `image: ghcr.io/<owner>/<repo>:latest` to run the
     # published image instead of building from source.
     build: .
-    container_name: itguy-web
+    container_name: itvault-web
     restart: unless-stopped
     depends_on:
       db:
@@ -31,9 +31,9 @@ services:
     environment:
       DB_HOST: db
       DB_PORT: "3306"
-      DB_NAME: ${DB_NAME:-itguy_assets}
-      DB_USER: ${DB_USER:-itguy}
-      DB_PASS: ${DB_PASS:-itguypass}
+      DB_NAME: ${DB_NAME:-itvault}
+      DB_USER: ${DB_USER:-itvault}
+      DB_PASS: ${DB_PASS:-itvaultpass}
       # ITGUY_* are the old names, still read as a fallback so an existing
       # .env keeps working -- notably the secret, where falling back to a
       # fresh value would invalidate every session cookie on upgrade.

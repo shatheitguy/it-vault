@@ -6,7 +6,7 @@ Docker-ready. No Access DB.
 import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
-from flask import Flask, request, jsonify, Response, session, send_from_directory
+from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect
 import pymysql
 from dbutils.pooled_db import PooledDB
 from openpyxl import Workbook, load_workbook
@@ -19,18 +19,19 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 INVOICE_DIR = os.path.join(BASE, "invoices")
 os.makedirs(INVOICE_DIR, exist_ok=True)
 
-# ---- persistent DB config (nexus_config.json) ----
+# ---- persistent DB config (itvault_config.json) ----
 # Lets you point the app at a different MariaDB container/server from the UI.
-CONFIG_PATH = os.path.join(BASE, "nexus_config.json")
+CONFIG_PATH = os.path.join(BASE, "itvault_config.json")
 def load_config():
-    cfg = {}
+    """An install with no config file lands on the first-run setup wizard,
+    which writes this file once a database has been entered and tested."""
     try:
         if os.path.exists(CONFIG_PATH):
             with open(CONFIG_PATH) as f:
-                cfg = json.load(f) or {}
+                return json.load(f) or {}
     except Exception:
-        cfg = {}
-    return cfg
+        pass
+    return {}
 _cfg = load_config()
 DB_HOST = _cfg.get("db_host", os.environ.get("DB_HOST", "127.0.0.1"))
 DB_PORT = int(_cfg.get("db_port", os.environ.get("DB_PORT", 3306)))
@@ -45,6 +46,43 @@ def save_db_config(h, p, n, u, pw):
             json.dump({"db_host": h, "db_port": int(p), "db_name": n, "db_user": u, "db_pass": pw}, f, indent=2)
     except Exception:
         pass
+# ---- first-run setup state ----
+# The app has to be able to boot with NO working database, otherwise there's
+# nowhere to ask the user for one -- so instead of refusing to start, it
+# serves a setup wizard until a database answers and an admin exists.
+_setup_done = False
+
+def _db_reachable(host=None, port=None, name=None, user=None, pw=None) -> bool:
+    try:
+        c = pymysql.connect(host=host or DB_HOST, port=int(port or DB_PORT),
+                            user=user or DB_USER, password=DB_PASS if pw is None else pw,
+                            database=name or DB_NAME, charset="utf8mb4",
+                            cursorclass=pymysql.cursors.DictCursor, connect_timeout=5)
+        c.close()
+        return True
+    except Exception:
+        return False
+
+def setup_needed() -> bool:
+    """True until there's a database we can reach AND at least one login in
+    it. Latches to False once satisfied so the normal request path isn't
+    paying for a probe on every hit -- and so a later database blip shows as
+    an error rather than silently reopening the setup wizard to the network."""
+    global _setup_done
+    if _setup_done:
+        return False
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM Users")
+        n = (cur.fetchone() or {}).get("n") or 0
+        c.close()
+        if n > 0:
+            _setup_done = True
+            return False
+        return True
+    except Exception:
+        return True
+
 SECRET_KEY_PATH = os.path.join(BASE, ".secret_key")
 
 def _env(*names, default=None):
@@ -379,16 +417,13 @@ def init_db():
         for col, typ in [("app_name","VARCHAR(60) DEFAULT 'IT-Vault'"),("logo_text","VARCHAR(40) DEFAULT 'IT-Vault'"),("matrix_on","BOOLEAN DEFAULT 1")]:
             try: cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
             except Exception: pass
-    # migrate: columns created back when this app was still called "Nexus" kept
-    # that literal string baked in as their MySQL-level DEFAULT forever after --
-    # changing the CREATE TABLE text above does nothing to an already-existing
-    # column, so a Settings reset (factory wipe, or a fresh row insert) kept
-    # silently reintroducing the old branding. Force the default straight, and
-    # repair any row that's still carrying the stale value.
+    # migrate: these columns were created under an older product name, which
+    # stayed baked in as their MySQL-level DEFAULT forever after -- changing
+    # the CREATE TABLE text above does nothing to an already-existing column,
+    # so a Settings reset (factory wipe, or a fresh row insert) kept silently
+    # reintroducing the old branding. Force the default straight.
     for col in ("app_name", "logo_text"):
         try: cur.execute(f"ALTER TABLE Settings ALTER COLUMN {col} SET DEFAULT 'IT-Vault'")
-        except Exception: pass
-        try: cur.execute(f"UPDATE Settings SET {col}='IT-Vault' WHERE LOWER({col})='nexus'")
         except Exception: pass
     # migrate: add ldap settings columns if missing
     for col, typ in [("ldap_server","VARCHAR(255)"),("ldap_domain","VARCHAR(255)"),("ldap_bind_user","VARCHAR(255)"),("ldap_bind_pass","VARCHAR(255)"),("ldap_base_dn","VARCHAR(255)")]:
@@ -548,7 +583,7 @@ def migrate_schema():
     # migrate: accent/accent2 were added back when the default theme was blue
     # (#3b9eff/#7c5cff) -- ADD COLUMN above is a no-op once the column already
     # exists, so that old blue stayed the live MySQL-level default forever
-    # after, the same way the "Nexus" app_name default did. Force it to the
+    # after, the same way the old app_name default did. Force it to the
     # current red Deep Dark preset, and repair any row still on the old blue.
     try: cur.execute("ALTER TABLE Settings ALTER COLUMN accent SET DEFAULT '#ff3b30'")
     except Exception: pass
@@ -4651,9 +4686,6 @@ def list_backups():
     for f in files:
         try:
             # filenames look like itvault_backup_<scope>_<YYYYMMDD>_<HHMMSS>.sql
-            # (older backups made before the app was renamed from Nexus may
-            # still be sitting in this folder as nexus_backup_... -- both
-            # patterns parse the same way since only the prefix differs)
             ts = "_".join(f.rsplit(".", 1)[0].split("_")[-2:])
             dt = datetime.strptime(ts, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
         except Exception:
@@ -4668,7 +4700,7 @@ def list_backups():
         out.append({"file": f, "scope": scope, "created": dt, "size": os.path.getsize(os.path.join(BACKUP_DIR, f))})
     return jsonify(out)
 
-BACKUP_FNAME_RE = re.compile(r"^(?:nexus|itvault)_backup_(all|config|assets)_\d{8}_\d{6}\.(sql|zip)$")
+BACKUP_FNAME_RE = re.compile(r"^itvault_backup_(all|config|assets)_\d{8}_\d{6}\.(sql|zip)$")
 
 @app.route("/api/backups/<fname>/download")
 @auth_required([ROLE_ADMIN])
@@ -4810,6 +4842,178 @@ def _no_cache_frontend(resp):
             resp.headers["Content-Type"] = mt + "; charset=utf-8"
     return resp
 
+
+SETUP_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IT-Vault — Setup</title>
+<style>
+  :root{ --bg:#000000; --card:#0c0f18; --line:#1c2130; --acc:#ff3b30;
+         --txt:#e6edf6; --mut:#8a98b0;
+         --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);background:var(--bg);color:var(--txt);
+       min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+  .card{width:100%;max-width:560px;background:var(--card);border:1px solid var(--line);
+        border-radius:12px;padding:32px}
+  h1{font-size:21px;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--mut);font-size:14px;line-height:1.55;margin:0 0 22px}
+  .steps{display:flex;gap:8px;margin-bottom:22px}
+  .step{flex:1;height:3px;background:var(--line);border-radius:2px}
+  .step.on{background:var(--acc)}
+  label{display:block;font-size:11px;font-weight:700;letter-spacing:.4px;
+        text-transform:uppercase;color:var(--mut);margin:14px 0 6px}
+  input{width:100%;background:#05070c;border:1px solid var(--line);color:var(--txt);
+        border-radius:8px;padding:11px 12px;font-size:14px;font-family:inherit}
+  input:focus{outline:none;border-color:var(--acc)}
+  .row{display:flex;gap:12px}.row>div{flex:1}
+  button{margin-top:22px;width:100%;background:var(--acc);color:#fff;border:0;
+         border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+  button:disabled{opacity:.55;cursor:default}
+  .msg{margin-top:14px;font-size:13.5px;line-height:1.5;display:none}
+  .msg.err{color:#ff6b6b;display:block}.msg.ok{color:#3ddc97;display:block}
+  .msg.info{color:var(--mut);display:block}
+  .hide{display:none}
+</style></head><body>
+<div class="card">
+  <h1>IT-Vault setup</h1>
+  <p class="sub" id="sub">Point this instance at its database. Nothing is stored until the connection works.</p>
+  <div class="steps"><div class="step on" id="s1"></div><div class="step" id="s2"></div></div>
+
+  <div id="stepDb">
+    <div class="row">
+      <div><label>Database host</label><input id="db_host" value="db" placeholder="db"></div>
+      <div style="max-width:120px"><label>Port</label><input id="db_port" value="3306"></div>
+    </div>
+    <label>Database name</label><input id="db_name" value="itvault">
+    <label>Database user</label><input id="db_user" value="itvault">
+    <label>Database password</label><input id="db_pass" type="password">
+    <button id="testBtn">Test connection &amp; continue</button>
+  </div>
+
+  <div id="stepAdmin" class="hide">
+    <label>Admin username</label><input id="ad_user" value="admin" autocomplete="username">
+    <label>Admin password</label><input id="ad_pass" type="password" autocomplete="new-password">
+    <label>Confirm password</label><input id="ad_pass2" type="password" autocomplete="new-password">
+    <button id="finishBtn">Create admin &amp; finish</button>
+  </div>
+
+  <div class="msg" id="msg"></div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const msg=(t,cls)=>{ const m=$('msg'); m.textContent=t; m.className='msg '+(cls||'info'); };
+let dbCfg=null;
+
+$('testBtn').onclick=async()=>{
+  const cfg={ db_host:$('db_host').value.trim(), db_port:parseInt($('db_port').value,10)||3306,
+              db_name:$('db_name').value.trim(), db_user:$('db_user').value.trim(),
+              db_pass:$('db_pass').value };
+  if(!cfg.db_host||!cfg.db_name||!cfg.db_user){ msg('Host, database name and user are required.','err'); return; }
+  $('testBtn').disabled=true; msg('Testing connection…','info');
+  try{
+    const r=await fetch('/api/setup/test-db',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+    const j=await r.json();
+    if(!j.ok){ msg(j.msg||'Could not connect.','err'); $('testBtn').disabled=false; return; }
+    dbCfg=cfg; msg(j.msg||'Connected.','ok');
+    $('stepDb').classList.add('hide'); $('stepAdmin').classList.remove('hide');
+    $('s2').classList.add('on');
+    $('sub').textContent='Create the first administrator account for this instance.';
+  }catch(e){ msg('Could not reach the server: '+e.message,'err'); $('testBtn').disabled=false; }
+};
+
+$('finishBtn').onclick=async()=>{
+  const u=$('ad_user').value.trim(), p=$('ad_pass').value, p2=$('ad_pass2').value;
+  if(!u){ msg('Username is required.','err'); return; }
+  if(p.length<8){ msg('Use at least 8 characters for the admin password.','err'); return; }
+  if(p!==p2){ msg('The two passwords do not match.','err'); return; }
+  $('finishBtn').disabled=true; msg('Creating database schema and admin account…','info');
+  try{
+    const r=await fetch('/api/setup/complete',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(Object.assign({},dbCfg,{admin_user:u,admin_pass:p}))});
+    const j=await r.json();
+    if(!j.ok){ msg(j.error||'Setup failed.','err'); $('finishBtn').disabled=false; return; }
+    msg('Setup complete — taking you to the sign-in page…','ok');
+    setTimeout(()=>{ location.href='/'; }, 1200);
+  }catch(e){ msg('Setup failed: '+e.message,'err'); $('finishBtn').disabled=false; }
+};
+</script></body></html>"""
+
+@app.route("/setup")
+def setup_page():
+    if not setup_needed():
+        return redirect("/")
+    return Response(SETUP_HTML, mimetype="text/html")
+
+@app.route("/api/setup/test-db", methods=["POST"])
+def setup_test_db():
+    """Unauthenticated ON PURPOSE -- there is no account to authenticate
+    against yet. Guarded by setup_needed(), which stops being true the moment
+    a reachable database has a user in it, so this closes permanently after
+    the first successful setup and cannot be reopened over the network."""
+    if not setup_needed():
+        return jsonify({"ok": False, "msg": "Setup has already been completed"}), 403
+    d = request.get_json(force=True) or {}
+    try:
+        c = pymysql.connect(host=d.get("db_host", "db"), port=int(d.get("db_port", 3306)),
+                            user=d.get("db_user", ""), password=d.get("db_pass", ""),
+                            database=d.get("db_name", ""), charset="utf8mb4",
+                            cursorclass=pymysql.cursors.DictCursor, connect_timeout=8)
+        c.close()
+        return jsonify({"ok": True, "msg": f"Connected to {d.get('db_host')}:{d.get('db_port')}/{d.get('db_name')}"})
+    except Exception as e:
+        return jsonify({"ok": False, "msg": str(e)}), 400
+
+@app.route("/api/setup/complete", methods=["POST"])
+def setup_complete():
+    if not setup_needed():
+        return jsonify({"ok": False, "error": "Setup has already been completed"}), 403
+    d = request.get_json(force=True) or {}
+    admin_user = (d.get("admin_user") or "").strip()
+    admin_pass = d.get("admin_pass") or ""
+    if not admin_user:
+        return jsonify({"ok": False, "error": "Admin username is required"}), 400
+    if len(admin_pass) < 8:
+        return jsonify({"ok": False, "error": "Admin password must be at least 8 characters"}), 400
+    try:
+        # persist the DB config first so conn() (and the pool) pick it up
+        save_db_config(d.get("db_host", "db"), int(d.get("db_port", 3306)),
+                       d.get("db_name", ""), d.get("db_user", ""), d.get("db_pass", ""))
+        global _pool_key
+        _pool_key = None  # force the pool to rebuild against the new config
+        init_db()
+        migrate_schema()
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM Users")
+        if (cur.fetchone() or {}).get("n"):
+            # init_db() seeds a default admin when the table is empty; replace
+            # it with the credentials actually chosen here rather than leaving
+            # the well-known default in place
+            cur.execute("DELETE FROM Users")
+        cur.execute("INSERT INTO Users (username, password, role, display, email) VALUES (%s,%s,%s,%s,%s)",
+                    (admin_user, hash_pw(admin_pass), ROLE_ADMIN, admin_user, ""))
+        c.commit(); c.close()
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"Setup failed: {e}"}), 500
+    global _setup_done
+    _setup_done = True
+    audit(admin_user, "SETUP", "", "first-run setup completed")
+    return jsonify({"ok": True})
+
+@app.before_request
+def _force_setup_first():
+    """While unconfigured, send page loads to the wizard. API calls get a
+    JSON 503 instead of an HTML redirect so clients (and the Android app)
+    fail clearly rather than parsing a login page as data."""
+    if not setup_needed():
+        return None
+    p = request.path
+    if p.startswith("/api/setup/") or p == "/setup" or p.startswith("/static/"):
+        return None
+    if p.startswith("/api/"):
+        return jsonify({"error": "IT-Vault is not set up yet", "setup_required": True}), 503
+    if p in ("/", "/index.html", "/login.html"):
+        return redirect("/setup")
+    return None
 
 @app.route("/")
 def index():
