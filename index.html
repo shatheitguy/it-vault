@@ -695,7 +695,7 @@
 <!-- Danger Zone: factory reset confirmation -->
 <div class="modal" id="wipeModal"><div class="modal-box danger-modal" style="width:min(480px,94vw);max-width:480px">
   <h3 style="color:#ff3b30">💀 FACTORY RESET</h3>
-  <p class="sec-hint">This permanently deletes every asset, contract, employee, ticket, and branding setting, and resets everything else to defaults. A full backup is saved automatically first, but this can't be undone from here.</p>
+  <p class="sec-hint">This wipes the database completely — every asset, contract, employee, ticket, branding setting <b>and every login account, including your own</b>. The instance returns to the first-run setup wizard, where you create a new admin from scratch. A full backup is saved automatically first, but this can't be undone from here.</p>
   <div class="field2"><label>Your password</label><input id="wipePassword" type="password" placeholder="Confirm it's really you" autocomplete="current-password"></div>
   <div class="field2"><label>Type <span class="mono">WIPE EVERYTHING</span> to confirm</label><input id="wipeConfirmText" placeholder="WIPE EVERYTHING" autocomplete="off"></div>
   <div id="wipeErr" class="muted" style="color:#ff3b30;min-height:16px"></div>
@@ -986,6 +986,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=202609031e"></script>
+<script src="/app.js?nocache=202609041a"></script>
 </body>
 </html>
