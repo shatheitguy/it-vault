@@ -103,9 +103,12 @@ ROLES = [ROLE_ADMIN, ROLE_EDIT, ROLE_VIEW]
 # Built-in roles' access to the modules a custom role can be scoped to
 # (assets / contracts / directory=Employees / tickets). Admin implicitly
 # passes every module+level check (see auth_required), so it isn't listed.
+# "settings" is 'none' for both built-ins on purpose: configuration has always
+# been admin-only, and defaulting it any higher would hand every existing
+# read-write/read-only account access it doesn't have today.
 BUILTIN_ROLE_PERMS = {
-    ROLE_EDIT: {"assets": "write", "contracts": "write", "directory": "write", "tickets": "write"},
-    ROLE_VIEW: {"assets": "read", "contracts": "read", "directory": "read", "tickets": "read"},
+    ROLE_EDIT: {"assets": "write", "contracts": "write", "directory": "write", "tickets": "write", "settings": "none"},
+    ROLE_VIEW: {"assets": "read", "contracts": "read", "directory": "read", "tickets": "read", "settings": "none"},
 }
 _PERM_ORDER = {"none": 0, "read": 1, "write": 2}
 
@@ -116,14 +119,15 @@ def _role_perms(role_name):
         return BUILTIN_ROLE_PERMS[role_name]
     try:
         c = conn(); cur = c.cursor()
-        cur.execute("SELECT perm_assets, perm_contracts, perm_directory, perm_tickets FROM Roles WHERE name=%s", [role_name])
+        cur.execute("SELECT perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings FROM Roles WHERE name=%s", [role_name])
         r = cur.fetchone(); c.close()
     except Exception:
         r = None
     if not r:
-        return {"assets": "none", "contracts": "none", "directory": "none", "tickets": "none"}
+        return {"assets": "none", "contracts": "none", "directory": "none", "tickets": "none", "settings": "none"}
     return {"assets": r.get("perm_assets") or "none", "contracts": r.get("perm_contracts") or "none",
-            "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none"}
+            "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none",
+            "settings": r.get("perm_settings") or "none"}
 
 def _module_write_allowed(module):
     """For routes that combine GET (read) with POST/PUT/DELETE (write) under
@@ -288,8 +292,16 @@ def init_db():
         perm_assets VARCHAR(10) DEFAULT 'none',
         perm_contracts VARCHAR(10) DEFAULT 'none',
         perm_directory VARCHAR(10) DEFAULT 'none',
-        perm_tickets VARCHAR(10) DEFAULT 'none'
+        perm_tickets VARCHAR(10) DEFAULT 'none',
+        perm_settings VARCHAR(10) DEFAULT 'none'
     )""")
+    # migrate: perm_settings on an existing Roles table (CREATE TABLE IF NOT
+    # EXISTS above does nothing once the table is there)
+    try:
+        cur.execute("SELECT perm_settings FROM Roles LIMIT 1")
+    except Exception:
+        try: cur.execute("ALTER TABLE Roles ADD COLUMN perm_settings VARCHAR(10) DEFAULT 'none'")
+        except Exception: pass
     cur.execute("""CREATE TABLE IF NOT EXISTS Employees (
         _id VARCHAR(40) PRIMARY KEY,
         EmployeeID VARCHAR(255),
@@ -1863,14 +1875,14 @@ PERM_LEVELS = ("none", "read", "write")
 @auth_required([ROLE_ADMIN])
 def list_roles():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets FROM Roles ORDER BY name")
+    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings FROM Roles ORDER BY name")
     rows = cur.fetchall(); c.close()
     return jsonify([dict(r) for r in rows])
 
 def _role_body(d):
     name = (d.get("name") or "").strip()[:50]
     perms = {}
-    for k in ("assets", "contracts", "directory", "tickets"):
+    for k in ("assets", "contracts", "directory", "tickets", "settings"):
         v = (d.get(f"perm_{k}") or "none").lower()
         perms[k] = v if v in PERM_LEVELS else "none"
     return name, perms
@@ -1885,8 +1897,8 @@ def create_role():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT id FROM Roles WHERE name=%s", [name])
     if cur.fetchone(): c.close(); return jsonify({"error": "a role with that name already exists"}), 409
-    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets) VALUES (%s,%s,%s,%s,%s)",
-                (name, perms["assets"], perms["contracts"], perms["directory"], perms["tickets"]))
+    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings) VALUES (%s,%s,%s,%s,%s,%s)",
+                (name, perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], perms["settings"]))
     c.commit(); c.close()
     return jsonify({"ok": True})
 
@@ -1898,8 +1910,8 @@ def update_role(rid):
     cur.execute("SELECT name FROM Roles WHERE id=%s", [rid]); existing = cur.fetchone()
     if not existing: c.close(); return jsonify({"error": "not found"}), 404
     _, perms = _role_body(d)
-    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, perm_tickets=%s WHERE id=%s",
-                (perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], rid))
+    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, perm_tickets=%s, perm_settings=%s WHERE id=%s",
+                (perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], perms["settings"], rid))
     c.commit(); c.close()
     return jsonify({"ok": True})
 
@@ -2135,7 +2147,7 @@ def test_db():
         return jsonify({"ok": False, "msg": str(e)}), 400
 
 @app.route("/api/test-ldap", methods=["POST"])
-@auth_required([ROLE_ADMIN])
+@auth_required(module="settings", level="write")
 def test_ldap():
     d = request.get_json(force=True) or {}
     row = {"ldap_server": d.get("ldap_server", ""), "ldap_domain": d.get("ldap_domain", ""),
@@ -2197,7 +2209,7 @@ def _unifi_request(cfg):
     return devices, clients
 
 @app.route("/api/test-unifi", methods=["POST"])
-@auth_required([ROLE_ADMIN])
+@auth_required(module="settings", level="write")
 def test_unifi():
     d = request.get_json(force=True) or {}
     c = conn(); cur = c.cursor()
@@ -2309,8 +2321,10 @@ def letterhead_file():
                     mimetype="image/png")
 
 @app.route("/api/settings", methods=["GET", "PUT"])
-@auth_required([ROLE_ADMIN])
+@auth_required(module="settings", level="read")
 def settings():
+    if request.method != "GET" and not _module_write_allowed("settings"):
+        return jsonify({"error": "forbidden"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "PUT":
         # accept JSON or multipart FormData (branding uses FormData)
@@ -2696,8 +2710,10 @@ def check_sla_breach(ticket):
         return False
 
 @app.route("/api/tickets", methods=["GET","POST"])
-@auth_required()
+@auth_required(module="tickets", level="read")
 def tickets_api():
+    if request.method != "GET" and not _module_write_allowed("tickets"):
+        return jsonify({"error": "forbidden"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         q = request.args.get("q","").strip(); st = request.args.get("status","")
@@ -2834,8 +2850,10 @@ def portal_status():
     return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps]})
 
 @app.route("/api/tickets/<int:ticket_id>", methods=["GET","PUT","DELETE"])
-@auth_required()
+@auth_required(module="tickets", level="read")
 def ticket_detail(ticket_id):
+    if request.method != "GET" and not _module_write_allowed("tickets"):
+        return jsonify({"error": "forbidden"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); t = cur.fetchone()
@@ -2879,7 +2897,10 @@ def ticket_detail(ticket_id):
     c.commit(); c.close(); return jsonify({"ok": True})
 
 @app.route("/api/tickets/<int:ticket_id>/reply", methods=["POST"])
-@auth_required()
+# read, not write: a role with tickets='none' is correctly shut out, but
+# gating this at write would silently take replying away from built-in
+# read-only staff, who legitimately answer on their own helpdesk threads.
+@auth_required(module="tickets", level="read")
 def ticket_reply(ticket_id):
     d = request.get_json(force=True)
     body = (d.get("body") or "").strip()
@@ -2900,7 +2921,7 @@ def ticket_reply(ticket_id):
 
 # ---------- branding (public, no auth) ----------
 @app.route("/api/ldap/test", methods=["POST"])
-@auth_required([ROLE_ADMIN])
+@auth_required(module="settings", level="write")
 def ldap_test():
     d = request.get_json(force=True)
     row = {
@@ -2945,7 +2966,7 @@ def branding():
                     "company_phone": s.get("company_phone", ""), "company_address": s.get("company_address", "")})
 
 @app.route("/api/logo", methods=["POST"])
-@auth_required([ROLE_ADMIN])
+@auth_required(module="settings", level="write")
 def upload_logo():
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
@@ -3152,7 +3173,7 @@ def notify_ticket_assigned(ticket, assignee_user):
         print("assign notify error:", e); return False
 
 @app.route("/api/settings/smtp-test", methods=["POST"])
-@auth_required([ROLE_ADMIN])
+@auth_required(module="settings", level="write")
 def test_email():
     import smtplib
     from email.message import EmailMessage
@@ -3880,7 +3901,6 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
   <div class="btnrow">
     <button class="btn ghost" id="clearSign" style="display:none">🗑 CLEAR</button>
     <button class="btn ghost" id="viewSign" style="display:none">🖼 VIEW SIGNATURE</button>
-    <button class="btn ghost" id="printSign">🖨 PRINT</button>
     <button class="btn" id="saveSign">✅ SUBMIT ACKNOWLEDGEMENT</button>
   </div>
   <div id="result"></div>
@@ -3971,7 +3991,6 @@ async function load(){
     '</table>';
 }
 document.getElementById('clearSign').addEventListener('click',()=>{clearSig();});
-document.getElementById('printSign').addEventListener('click',()=>{window.print();});
 document.getElementById('viewSign').addEventListener('click',()=>{const sig=(document.querySelector('meta[data-sig]')||{}).content||''; if(!sig){alert('No signature');return;} const w=window.open('','_blank'); w.document.write('<img src="'+sig+'" style="max-width:100%"/>'); });
 document.getElementById('saveSign').addEventListener('click',async()=>{
   const name=document.getElementById('signer').value.trim();

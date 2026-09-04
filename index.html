@@ -427,8 +427,8 @@
           <!-- USERS -->
           <section class="cfg-sec" data-sec="users" style="display:none">
             <div class="panel"><div class="secthead">SYSTEM USERS</div>
-              <p class="sec-hint">Login accounts for this system — Admin, Editor and Read-only. These are the people who sign in to this app. Staff imported from Active Directory are <b>Employees</b>, not system users, and are managed on the Employees page.</p>
-              <div class="m-actions" style="justify-content:flex-start;margin-bottom:10px"><button class="btn" id="cfgAddUser">＋ ADD USER</button></div>
+              <p class="sec-hint">Login accounts for this system — the people who sign in to this app. Besides the built-in Admin / Read-write / Read-only tiers, use <b>Manage Roles</b> to build a custom role with per-module access (e.g. a user who can reach Assets only), then pick it as that user's Role. Staff imported from Active Directory are <b>Employees</b>, not system users, and are managed on the Employees page.</p>
+              <div class="m-actions" style="justify-content:flex-start;margin-bottom:10px"><button class="btn" id="cfgAddUser">＋ ADD USER</button><button class="btn ghost" id="cfgManageRoles" type="button">🛡 MANAGE ROLES</button></div>
               <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Display name</th><th>Email</th><th>2FA</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
             </div>
           </section>
@@ -825,13 +825,15 @@
 <div class="modal" id="rolesModal"><div class="modal-box" style="width:min(680px,94vw);max-width:680px">
   <h3>CUSTOM ROLES</h3>
   <p class="sec-hint" style="margin-top:0">Built-in roles (admin, read-write, read-only) always have full access. Create a custom role to give a user a specific mix, e.g. a "Manager" who can only see Contracts read-only but manage Assets and Directory fully.</p>
-  <div class="tablewrap"><table class="dtable"><thead><tr><th>Role Name</th><th>Assets</th><th>Contracts</th><th>Directory</th><th>Tickets</th><th></th></tr></thead><tbody id="rolesBody"></tbody></table></div>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>Role Name</th><th>Assets</th><th>Contracts</th><th>Directory</th><th>Tickets</th><th>Settings</th><th></th></tr></thead><tbody id="rolesBody"></tbody></table></div>
   <div class="grid2" style="margin-top:12px">
     <div class="field2"><label>Role Name</label><input id="rl_name" placeholder="e.g. Manager"></div>
     <div class="field2"><label>Assets</label><select id="rl_assets"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
     <div class="field2"><label>Contracts</label><select id="rl_contracts"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
     <div class="field2"><label>Directory</label><select id="rl_directory"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
     <div class="field2"><label>Tickets</label><select id="rl_tickets"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select></div>
+    <div class="field2"><label>Settings</label><select id="rl_settings"><option value="none">No access</option><option value="read">Read-only</option><option value="write">Read &amp; write</option></select>
+      <span class="sec-hint" style="display:block;margin-top:4px">Covers configuration only — branding, theme, notifications, SLA, labels, LDAP/UniFi setup. Users, Roles, Backup/Restore, Database and Danger Zone stay admin-only.</span></div>
   </div>
   <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="rl_save">＋ ADD ROLE</button></div>
   <div class="m-actions"><button class="btn ghost" id="rolesClose">CLOSE</button></div>
@@ -984,6 +986,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=202609031c"></script>
+<script src="/app.js?nocache=202609031e"></script>
 </body>
 </html>
