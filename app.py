@@ -19,9 +19,19 @@ BASE = os.path.dirname(os.path.abspath(__file__))
 INVOICE_DIR = os.path.join(BASE, "invoices")
 os.makedirs(INVOICE_DIR, exist_ok=True)
 
+# State that must outlive the code it sits next to: the DB pointer and the
+# session-signing key. In a container the image is replaced on every update,
+# so these live in DATA_DIR, which deployments mount as a volume. Defaults to
+# the app directory, which is what a source checkout wants.
+DATA_DIR = os.environ.get("ITVAULT_DATA_DIR") or BASE
+try:
+    os.makedirs(DATA_DIR, exist_ok=True)
+except Exception:
+    DATA_DIR = BASE
+
 # ---- persistent DB config (itvault_config.json) ----
 # Lets you point the app at a different MariaDB container/server from the UI.
-CONFIG_PATH = os.path.join(BASE, "itvault_config.json")
+CONFIG_PATH = os.path.join(DATA_DIR, "itvault_config.json")
 def load_config():
     """An install with no config file lands on the first-run setup wizard,
     which writes this file once a database has been entered and tested."""
@@ -132,7 +142,7 @@ def _version_tuple(v):
         parts.append(0)
     return tuple(parts)
 
-SECRET_KEY_PATH = os.path.join(BASE, ".secret_key")
+SECRET_KEY_PATH = os.path.join(DATA_DIR, ".secret_key")
 
 def _env(*names, default=None):
     """First of `names` that's actually set. Lets settings be renamed to the

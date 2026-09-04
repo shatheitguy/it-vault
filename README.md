@@ -15,9 +15,10 @@ cp .env.example .env   # edit the passwords/secret before real use
 docker compose up -d
 ```
 
-Open **http://localhost:5000** and sign in with the admin account from your
-`.env` (defaults to `admin` / `admin123` — **change this immediately** if
-this isn't just a local trial).
+Open **http://localhost:5000**. On a fresh install this lands on the
+first-run setup wizard: confirm the database connection, then create your
+own administrator account. There is no default password to change afterwards
+— nothing can sign in until you've created that account.
 
 This starts two containers:
 - **`db`** — MariaDB 11, schema bootstrapped from `init.sql` on first boot

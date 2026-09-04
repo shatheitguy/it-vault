@@ -4,25 +4,32 @@ services:
     container_name: itvault-db
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:-rootpass}
+      # No fallback values on purpose. A compose file that boots with
+      # well-known passwords means every install that skips .env is running
+      # on credentials anyone can read here, so these are required and
+      # compose stops with the message below if they're missing.
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?set DB_ROOT_PASS in .env (copy .env.example and use your own values)}
       MARIADB_DATABASE: ${DB_NAME:-itvault}
       MARIADB_USER: ${DB_USER:-itvault}
-      MARIADB_PASSWORD: ${DB_PASS:-itvaultpass}
-    ports:
-      - "3306:3306"
+      MARIADB_PASSWORD: ${DB_PASS:?set DB_PASS in .env (copy .env.example and use your own values)}
+    # Deliberately NOT published to the host: the app reaches the database
+    # over this compose network, so a port mapping would only expose it to
+    # everything that can route to this machine. To attach a local admin
+    # tool, uncomment the loopback-only mapping below.
+    # ports:
+    #   - "127.0.0.1:3306:3306"
     volumes:
       - db_data:/var/lib/mysql
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_PASS:-itvaultpass}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_PASS}"]
       interval: 5s
       timeout: 3s
       retries: 10
 
   web:
     # Pull the published image by default. Pin a version for anything real
-    # (":1.6.0"); ":latest" moves under you. To build from a source checkout
-    # instead, comment `image:` out and uncomment `build: .`.
+    # (ITVAULT_TAG=1.6.0); ":latest" moves under you. To build from a source
+    # checkout instead, comment `image:` out and uncomment `build: .`.
     image: ghcr.io/shatheitguy/it-vault:${ITVAULT_TAG:-latest}
     # build: .
     container_name: itvault-web
@@ -35,24 +42,31 @@ services:
       DB_PORT: "3306"
       DB_NAME: ${DB_NAME:-itvault}
       DB_USER: ${DB_USER:-itvault}
-      DB_PASS: ${DB_PASS:-itvaultpass}
-      # ITGUY_* are the old names, still read as a fallback so an existing
-      # .env keeps working -- notably the secret, where falling back to a
-      # fresh value would invalidate every session cookie on upgrade.
-      # No default admin password on purpose: left unset, the container comes
-      # up on the first-run setup wizard and you choose the credentials. Set
-      # these in .env only for an unattended install, where the account is
-      # created without anyone visiting the wizard.
+      DB_PASS: ${DB_PASS:?set DB_PASS in .env (copy .env.example and use your own values)}
+      # Session signing key: left unset on purpose. The app generates a strong
+      # random one on first start and keeps it in the data volume, which beats
+      # any value shipped in this file -- a known secret lets anyone forge an
+      # admin session cookie. Set it only to share one key across replicas.
+      # ITVAULT_SECRET: ${ITVAULT_SECRET:-}
+      #
+      # No default admin password either: left unset, the container comes up
+      # on the first-run setup wizard and you choose the credentials. Set
+      # these only for an unattended install, where the account is created
+      # without anyone visiting the wizard.
       ITVAULT_ADMIN: ${ITVAULT_ADMIN:-${ITGUY_ADMIN:-}}
       ITVAULT_ADMIN_PASS: ${ITVAULT_ADMIN_PASS:-${ITGUY_ADMIN_PASS:-}}
-      ITVAULT_SECRET: ${ITVAULT_SECRET:-${ITGUY_SECRET:-change-me-in-prod}}
+      # Keeps the generated session key and the saved DB pointer outside the
+      # image, so replacing the image on update doesn't sign everyone out.
+      ITVAULT_DATA_DIR: /app/data
     ports:
       - "5000:5000"
     volumes:
+      - itvault_data:/app/data
       - invoices_data:/app/invoices
       - backups_data:/app/backups
 
 volumes:
   db_data:
+  itvault_data:
   invoices_data:
   backups_data:
