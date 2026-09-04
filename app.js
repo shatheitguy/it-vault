@@ -1451,6 +1451,7 @@ function roleFormReset(){
   document.getElementById('rl_name').value=''; document.getElementById('rl_name').disabled=false;
   document.getElementById('rl_assets').value='none'; document.getElementById('rl_contracts').value='none';
   document.getElementById('rl_directory').value='none'; document.getElementById('rl_tickets').value='none';
+  document.getElementById('rl_settings').value='none';
   document.getElementById('rl_save').textContent='＋ ADD ROLE';
 }
 async function loadRolesModal(){
@@ -1458,16 +1459,18 @@ async function loadRolesModal(){
   document.getElementById('rolesBody').innerHTML=roles.map(x=>`<tr>
       <td>${esc(x.name)}</td><td>${PERM_LABEL[x.perm_assets]||'No access'}</td><td>${PERM_LABEL[x.perm_contracts]||'No access'}</td>
       <td>${PERM_LABEL[x.perm_directory]||'No access'}</td><td>${PERM_LABEL[x.perm_tickets]||'No access'}</td>
-      <td class="row-actions"><button class="btn sm ghost" onclick="editRoleForm(${x.id},'${esc(x.name)}','${x.perm_assets}','${x.perm_contracts}','${x.perm_directory}','${x.perm_tickets}')">EDIT</button><button class="btn sm danger" onclick="delRole(${x.id})">DEL</button></td>
-    </tr>`).join('')||'<tr><td colspan=6 style="color:var(--muted)">No custom roles yet</td></tr>';
+      <td>${PERM_LABEL[x.perm_settings]||'No access'}</td>
+      <td class="row-actions"><button class="btn sm ghost" onclick="editRoleForm(${x.id},'${esc(x.name)}','${x.perm_assets}','${x.perm_contracts}','${x.perm_directory}','${x.perm_tickets}','${x.perm_settings||'none'}')">EDIT</button><button class="btn sm danger" onclick="delRole(${x.id})">DEL</button></td>
+    </tr>`).join('')||'<tr><td colspan=7 style="color:var(--muted)">No custom roles yet</td></tr>';
   roleFormReset();
   document.getElementById('rolesModal').classList.add('show');
 }
-function editRoleForm(id,name,pa,pc,pd,pt){
+function editRoleForm(id,name,pa,pc,pd,pt,ps){
   editingRoleId=id;
   document.getElementById('rl_name').value=name; document.getElementById('rl_name').disabled=true;
   document.getElementById('rl_assets').value=pa; document.getElementById('rl_contracts').value=pc;
   document.getElementById('rl_directory').value=pd; document.getElementById('rl_tickets').value=pt;
+  document.getElementById('rl_settings').value=ps||'none';
   document.getElementById('rl_save').textContent='✓ UPDATE ROLE';
 }
 async function saveRole(){
@@ -1476,7 +1479,8 @@ async function saveRole(){
     perm_assets: document.getElementById('rl_assets').value,
     perm_contracts: document.getElementById('rl_contracts').value,
     perm_directory: document.getElementById('rl_directory').value,
-    perm_tickets: document.getElementById('rl_tickets').value
+    perm_tickets: document.getElementById('rl_tickets').value,
+    perm_settings: document.getElementById('rl_settings').value
   };
   if(!editingRoleId && !body.name){toast('✕ Role name required');return;}
   const r=editingRoleId
@@ -3136,6 +3140,14 @@ async function loadUserSettings(){
   else {
     toast('✕ User management not available yet');
   }
+  };
+  // Custom roles were only reachable from the legacy Profile -> Users modal,
+  // so per-module access looked like it didn't exist from Settings -> Users
+  // (which is where you'd go looking for it). Same modal, surfaced here too.
+  const rolesBtn = g('cfgManageRoles');
+  if (rolesBtn) rolesBtn.onclick = () => {
+    if (typeof loadRolesModal === 'function') loadRolesModal();
+    else toast('✕ Role management not available yet');
   };
   // System users table — login accounts from the Users table (NOT the employee directory)
   window.loadCfgUsers = async function(){
