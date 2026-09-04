@@ -41,8 +41,8 @@ MariaDB) since the image only contains the app, not the database.
 
 All configuration is environment variables (see `.env.example` for the full
 list with defaults) — `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` /
-`DB_PASS` for the database connection, `ITGUY_SECRET` for Flask session
-signing, `ITGUY_ADMIN` / `ITGUY_ADMIN_PASS` for the first admin account
+`DB_PASS` for the database connection, `ITVAULT_SECRET` for Flask session
+signing, `ITVAULT_ADMIN` / `ITVAULT_ADMIN_PASS` for the first admin account
 (created once, on first DB init — changing these later doesn't touch an
 already-created account). Runtime settings that change *inside* the app —
 branding, theme colors, SMTP, LDAP, ticket SLAs — live in the database via

@@ -92,7 +92,7 @@ On first launch `init_db()` auto-creates all tables and seeds the admin user.
 - **Username:** `admin`
 - **Password:** `admin123`
 
-> Change these via env vars `ITGUY_ADMIN` / `ITGUY_ADMIN_PASS` or in code (`ADMIN_USER`/`ADMIN_PASS`).
+> Change these via env vars `ITVAULT_ADMIN` / `ITVAULT_ADMIN_PASS` or in code (`ADMIN_USER`/`ADMIN_PASS`).
 
 ---
 
@@ -107,9 +107,12 @@ All config is read from environment variables (Docker-friendly), with local defa
 | `DB_NAME` | `itguy_assets` | Database name |
 | `DB_USER` | `itguy` | DB user |
 | `DB_PASS` | `itguypass` | DB password |
-| `ITGUY_SECRET` | `itguy-local-secret-change-me` | Flask session signing secret |
-| `ITGUY_ADMIN` | `admin` | Default admin username |
-| `ITGUY_ADMIN_PASS` | `admin123` | Default admin password |
+| `ITVAULT_SECRET` | generated + persisted to `.secret_key` | Flask session signing secret |
+| `ITVAULT_ADMIN` | `admin` | Default admin username |
+| `ITVAULT_ADMIN_PASS` | `admin123` | Default admin password |
+
+The older `ITGUY_SECRET` / `ITGUY_ADMIN` / `ITGUY_ADMIN_PASS` names are still
+read when the `ITVAULT_*` ones are unset, so existing deployments keep working.
 
 System-wide settings (persisted in the `Settings` table, row id=1) are editable from the **System** page: theme, app name, logo text, matrix animation, SMTP (notifications), language, currency, region, notification toggles, QR/label size, LDAP server credentials.
 
@@ -153,7 +156,7 @@ System-wide settings (persisted in the `Settings` table, row id=1) are editable 
 
 ## 6. Authentication & Roles
 
-Session-based (Flask `session` cookie, signed by `ITGUY_SECRET`).
+Session-based (Flask `session` cookie, signed by `ITVAULT_SECRET`).
 
 | Role | Value | Permissions |
 |---|---|---|
@@ -353,7 +356,7 @@ C:\Users\Sha\asset-manager\
 
 ## 13. Security Notes
 - Passwords hashed (not plaintext) in `Users`.
-- Session cookie signed by `ITGUY_SECRET` — **change it** for any non-local use.
+- Session cookie signed by `ITVAULT_SECRET` — **change it** for any non-local use.
 - Sign-off tokens are JWT-signed + expiring; the sign page is public by design (so recipients can acknowledge without a login).
 - This is a **local** tool; do not expose `:5000` to the internet without a reverse proxy + TLS.
 - Admin user cannot be demoted/deleted if it's the last admin (guard in `/api/users`).
