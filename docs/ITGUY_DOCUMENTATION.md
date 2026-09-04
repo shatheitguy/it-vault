@@ -33,7 +33,9 @@ Flask app (app.py)  ── pymysql ──▶ MariaDB (db: itvault)
         ├─ ldap3     (AD/LDAP employee sync)
         └─ qrcode    (asset QR labels, rendered to PNG)
 
-MariaDB on 127.0.0.1:3306  (install it as a service so it starts at boot)
+MariaDB on 127.0.0.1:3306  (you provide it; install it as a service so it
+                            starts at boot. IT-Vault never manages the
+                            database server, only the schema inside it.)
 ```
 
 ### Processes

@@ -1,58 +1,43 @@
-services:
-  db:
-    image: mariadb:11
-    container_name: itvault-db
-    restart: unless-stopped
-    environment:
-      # No fallback values on purpose. A compose file that boots with
-      # well-known passwords means every install that skips .env is running
-      # on credentials anyone can read here, so these are required and
-      # compose stops with the message below if they're missing.
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASS:?set DB_ROOT_PASS in .env (copy .env.example and use your own values)}
-      MARIADB_DATABASE: ${DB_NAME:-itvault}
-      MARIADB_USER: ${DB_USER:-itvault}
-      MARIADB_PASSWORD: ${DB_PASS:?set DB_PASS in .env (copy .env.example and use your own values)}
-    # Deliberately NOT published to the host: the app reaches the database
-    # over this compose network, so a port mapping would only expose it to
-    # everything that can route to this machine. To attach a local admin
-    # tool, uncomment the loopback-only mapping below.
-    # ports:
-    #   - "127.0.0.1:3306:3306"
-    volumes:
-      - db_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${DB_PASS}"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
+# IT-Vault only. Bring your own MariaDB/MySQL and point this at it.
+#
+# Nothing here provisions a database: install MariaDB wherever you like (bare
+# metal, another container, a managed instance), create an empty database and
+# a user with rights on it, then either fill in the DB_* values below or leave
+# them blank and enter them in the first-run setup wizard at /setup.
+#
+#   CREATE DATABASE itvault CHARACTER SET utf8mb4;
+#   CREATE USER 'itvault'@'%' IDENTIFIED BY '<a-strong-password>';
+#   GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'%';
+#
+# The schema builds itself on first start, and migrates itself on upgrade.
 
+services:
   web:
-    # Pull the published image by default. Pin a version for anything real
-    # (ITVAULT_TAG=1.6.0); ":latest" moves under you. To build from a source
+    # Pull the published image by default. Pin a release for anything real
+    # (ITVAULT_TAG=1.6.0); "latest" moves under you. To build from a source
     # checkout instead, comment `image:` out and uncomment `build: .`.
     image: ghcr.io/shatheitguy/it-vault:${ITVAULT_TAG:-latest}
     # build: .
-    container_name: itvault-web
+    container_name: itvault
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     environment:
-      DB_HOST: db
-      DB_PORT: "3306"
+      # Where your database lives. Blank is fine -- the setup wizard asks.
+      # For a MariaDB running on this same host, use host.docker.internal
+      # (Linux also needs the extra_hosts line below).
+      DB_HOST: ${DB_HOST:-}
+      DB_PORT: ${DB_PORT:-3306}
       DB_NAME: ${DB_NAME:-itvault}
-      DB_USER: ${DB_USER:-itvault}
-      DB_PASS: ${DB_PASS:?set DB_PASS in .env (copy .env.example and use your own values)}
+      DB_USER: ${DB_USER:-}
+      DB_PASS: ${DB_PASS:-}
       # Session signing key: left unset on purpose. The app generates a strong
       # random one on first start and keeps it in the data volume, which beats
-      # any value shipped in this file -- a known secret lets anyone forge an
+      # any value shipped in a file -- a known secret lets anyone forge an
       # admin session cookie. Set it only to share one key across replicas.
       # ITVAULT_SECRET: ${ITVAULT_SECRET:-}
       #
-      # No default admin password either: left unset, the container comes up
-      # on the first-run setup wizard and you choose the credentials. Set
-      # these only for an unattended install, where the account is created
-      # without anyone visiting the wizard.
+      # No default admin password either: left unset, this comes up on the
+      # first-run wizard and you choose the credentials. Set these only for an
+      # unattended install, where the account is created with no wizard.
       ITVAULT_ADMIN: ${ITVAULT_ADMIN:-${ITGUY_ADMIN:-}}
       ITVAULT_ADMIN_PASS: ${ITVAULT_ADMIN_PASS:-${ITGUY_ADMIN_PASS:-}}
       # Keeps the generated session key and the saved DB pointer outside the
@@ -64,9 +49,12 @@ services:
       - itvault_data:/app/data
       - invoices_data:/app/invoices
       - backups_data:/app/backups
+    # Linux only: lets host.docker.internal resolve to the Docker host, for a
+    # MariaDB installed alongside this container. Harmless on Docker Desktop.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 volumes:
-  db_data:
   itvault_data:
   invoices_data:
   backups_data:

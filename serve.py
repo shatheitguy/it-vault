@@ -29,9 +29,9 @@ def wait_for_db(timeout_s: int = 300) -> None:
     never opens its port at all.
 
     Deliberately uses app.conn(), so it honours whatever DB config the app
-    itself resolved (itvault_config.json, then environment). The repo's
-    wait_for_db.py reads environment variables only and defaults to the
-    Docker service name, so it can't stand in for this outside a container.
+    itself resolved -- itvault_config.json (written by the setup wizard)
+    first, then the environment. A wait that only read env vars couldn't see
+    a database configured through the wizard at all.
     """
     deadline = time.time() + timeout_s
     attempt = 0
