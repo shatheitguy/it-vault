@@ -198,6 +198,17 @@ def _db_pool():
                 creator=pymysql, host=DB_HOST, port=DB_PORT, user=DB_USER,
                 password=DB_PASS, database=DB_NAME, charset="utf8mb4",
                 cursorclass=pymysql.cursors.DictCursor,
+                # PyMySQL defaults read_timeout/write_timeout to None, i.e.
+                # a stalled socket blocks that worker thread FOREVER. With
+                # blocking=True below, hung threads keep their connections,
+                # every later request queues behind them, and the whole app
+                # stops responding -- which is what Windows was detecting as
+                # an application hang and force-closing after a few hours.
+                # Bounded waits let a stuck query fail its own request and
+                # release the connection instead of taking the server down.
+                connect_timeout=10,
+                read_timeout=30,
+                write_timeout=30,
                 mincached=0,          # lazy: build connections on demand, so constructing the
                                       # pool itself can't fail (a bad repoint via the DB-settings
                                       # UI then surfaces per-request and recovers once fixed,
