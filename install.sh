@@ -3,18 +3,21 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
 #
-# Starts IT-Vault as a Docker container and prints where to open it. It does
-# NOT install a database: IT-Vault connects to whatever MariaDB/MySQL you give
-# it, so your database version, backups and retention stay yours. The first-run
-# wizard in the browser asks for the connection details.
+# Starts IT-Vault as a Docker container and prints where to open it. If Docker
+# is missing it offers to install it for you.
 #
-# Env vars / flags: --port (5000), --tag (latest), --name (itvault), --dry-run.
+# It does NOT install a database: IT-Vault connects to whatever MariaDB/MySQL
+# you give it, so your database version, backups and retention stay yours. The
+# first-run wizard in the browser asks for the connection details.
+#
+# Flags: --port (5000), --tag (latest), --name (itvault), --yes, --dry-run.
 set -eu
 
 IMAGE="ghcr.io/shatheitguy/it-vault"
 TAG="${ITVAULT_TAG:-latest}"
 NAME="${ITVAULT_NAME:-itvault}"
 PORT="${ITVAULT_PORT:-5000}"
+YES="${ITVAULT_YES:-}"
 DRY=""
 
 while [ $# -gt 0 ]; do
@@ -22,13 +25,14 @@ while [ $# -gt 0 ]; do
         --port)    PORT="${2:?--port needs a value}"; shift 2 ;;
         --tag)     TAG="${2:?--tag needs a value}"; shift 2 ;;
         --name)    NAME="${2:?--name needs a value}"; shift 2 ;;
+        --yes|-y)  YES=1; shift ;;
         --dry-run) DRY=1; shift ;;
         -h|--help)
             # Prints the comment block at the top, so the help text and the
             # documentation can't drift apart. Only works when the script is
             # on disk -- piped through sh, "$0" isn't this file.
             awk 'NR>1 && /^#/ {sub(/^# ?/, ""); print; next} NR>1 {exit}' "$0" \
-                2>/dev/null || say "See https://github.com/shatheitguy/it-vault"
+                2>/dev/null || echo "See https://github.com/shatheitguy/it-vault"
             exit 0 ;;
         *) echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
     esac
@@ -45,57 +49,219 @@ fi
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '%s==>%s %s\n' "$B" "$N" "$*"; }
+
+# The banner is drawn in box characters, which need a UTF-8 locale to survive
+# the trip to the terminal -- otherwise it arrives as mojibake, so a plain
+# ASCII version is used instead.
+banner() {
+    if [ -t 1 ]; then
+        GRN="$(printf '\033[32m')"; DIM="$(printf '\033[2m')"
+    else
+        GRN=''; DIM=''
+    fi
+    printf '%s' "$GRN"
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8*|*utf8*|*UTF8*|*utf-8*)
+            cat <<'ART'
+
+  ██╗████████╗   ██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗
+  ██║╚══██╔══╝   ██║   ██║██╔══██╗██║   ██║██║  ╚══██╔══╝
+  ██║   ██║      ██║   ██║███████║██║   ██║██║     ██║
+  ██║   ██║      ╚██╗ ██╔╝██╔══██║██║   ██║██║     ██║
+  ██║   ██║       ╚████╔╝ ██║  ██║╚██████╔╝███████╗██║
+  ╚═╝   ╚═╝        ╚═══╝  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝
+ART
+            ;;
+        *)
+            cat <<'ART'
+
+  ___ _____   __     __          _ _
+ |_ _|_   _|  \ \   / /_ _ _   _| | |_
+  | |  | |     \ \ / / _` | | | | | __|
+  | |  | |      \ V / (_| | |_| | | |_
+ |___| |_|       \_/ \__,_|\__,_|_|\__|
+ART
+            ;;
+    esac
+    printf '%s' "$N"
+    printf '%s        01001001 01010100  ::  asset register + helpdesk%s\n' "$DIM" "$N"
+    printf '%s               powered by Sha The IT Guy%s\n\n' "$GRN" "$N"
+}
+
 warn() { printf '%s !%s  %s\n' "$Y" "$N" "$*"; }
 die()  { printf '%s ✕%s  %s\n' "$R" "$N" "$*" >&2; exit 1; }
 
+# Piped through `sh`, stdin is the script itself, so a prompt has to read the
+# terminal directly or it silently eats the rest of the script.
+ask() {
+    [ -n "$YES" ] && return 0
+    printf '\n%s %s[y/N]%s ' "$1" "$Y" "$N"
+    ans=""
+    if [ -t 0 ]; then
+        read -r ans || ans=""
+    elif [ -r /dev/tty ]; then
+        read -r ans < /dev/tty || ans=""
+    else
+        say ""
+        warn "Nothing to read an answer from. Re-run with --yes to proceed unattended."
+        return 1
+    fi
+    case "$ans" in
+        y|Y|yes|YES) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Docker needs root unless the user is in the docker group. Rather than
+# assuming, this is set once from what actually works, and every later docker
+# call goes through it.
+DK="docker"
+
+set_docker_prefix() {
+    if docker info >/dev/null 2>&1; then
+        DK="docker"
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1 \
+       && sudo docker info >/dev/null 2>&1; then
+        DK="sudo docker"
+        return 0
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+        DK="sudo docker"
+        return 0
+    fi
+    return 1
+}
+
 run() {
     if [ -n "$DRY" ]; then
-        printf '    %s\n' "$*"
+        printf '    %s %s\n' "$DK" "$*"
     else
-        "$@" >/dev/null
+        # shellcheck disable=SC2086  # $DK is deliberately two words sometimes
+        $DK "$@" >/dev/null
     fi
 }
 
+install_docker() {
+    os="$(uname -s)"
+    case "$os" in
+        Linux)
+            ask "Docker isn't installed. Install it now with Docker's official script?" || die \
+"Nothing was installed. Install Docker yourself and run this again:
+      https://docs.docker.com/engine/install/
+    Or re-run with --yes to install it unattended."
+            command -v curl >/dev/null 2>&1 || die "curl is needed to fetch the Docker installer."
+            step "Installing Docker (https://get.docker.com -- needs root)"
+            if [ "$(id -u)" = "0" ]; then
+                curl -fsSL https://get.docker.com | sh
+            else
+                command -v sudo >/dev/null 2>&1 || die \
+"Installing Docker needs root and sudo isn't available. Run this as root,
+    or install Docker yourself: https://docs.docker.com/engine/install/"
+                curl -fsSL https://get.docker.com | sudo sh
+            fi
+            if command -v systemctl >/dev/null 2>&1; then
+                step "Enabling the Docker service"
+                if [ "$(id -u)" = "0" ]; then
+                    systemctl enable --now docker >/dev/null 2>&1 || true
+                else
+                    sudo systemctl enable --now docker >/dev/null 2>&1 || true
+                fi
+            fi
+            # Group membership only takes effect on a new login, so this run
+            # falls back to sudo rather than telling the user to log out.
+            if [ "$(id -u)" != "0" ] && command -v sudo >/dev/null 2>&1; then
+                sudo usermod -aG docker "$(id -un)" >/dev/null 2>&1 || true
+                warn "Added you to the 'docker' group -- log out and back in to use docker without sudo."
+            fi
+            ;;
+        Darwin)
+            if command -v brew >/dev/null 2>&1; then
+                ask "Docker isn't installed. Install Docker Desktop with Homebrew?" || die \
+"Nothing was installed. Get Docker Desktop and run this again:
+      https://docs.docker.com/desktop/install/mac-install/"
+                step "Installing Docker Desktop (brew install --cask docker)"
+                brew install --cask docker
+                step "Starting Docker Desktop"
+                open -a Docker || true
+                say "    First launch asks you to accept Docker's licence terms."
+            else
+                die \
+"Docker isn't installed, and Homebrew isn't here to install it.
+    Get Docker Desktop, open it once, then run this again:
+      https://docs.docker.com/desktop/install/mac-install/"
+            fi
+            ;;
+        *)
+            die \
+"Docker isn't installed, and this script doesn't know how to install it on
+    $os. Install Docker, then run this again:
+      https://docs.docker.com/get-docker/"
+            ;;
+    esac
+
+    # Docker Desktop on macOS in particular takes a while, and wants a click
+    # on first run, so this waits instead of failing the moment it's absent.
+    step "Waiting for the Docker engine (up to 3 minutes)"
+    i=0
+    while [ "$i" -lt 90 ]; do
+        if command -v docker >/dev/null 2>&1 && set_docker_prefix; then
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 2
+    done
+    die \
+"Docker was installed but its engine isn't answering yet.
+    Start Docker (on macOS: open Docker Desktop and accept the terms), then
+    run this installer again."
+}
+
+banner
+
 # ---- checks ----------------------------------------------------------
 
-if ! command -v docker >/dev/null 2>&1; then
-    # A dry run is for reading the plan before trusting it, so it must work
-    # on a machine that hasn't got Docker yet.
-    if [ -n "$DRY" ]; then
-        warn "Docker isn't installed here -- showing the plan anyway."
-    else
-        die "Docker isn't installed. Get it from
-    https://docs.docker.com/get-docker/  then run this again."
+if [ -n "$DRY" ]; then
+    command -v docker >/dev/null 2>&1 \
+        || warn "Docker isn't installed here -- showing the plan anyway."
+else
+    if ! command -v docker >/dev/null 2>&1; then
+        install_docker
+    elif ! set_docker_prefix; then
+        die \
+"Docker is installed but not reachable. Either it isn't running:
+      sudo systemctl start docker
+    or your user can't talk to it (log out and back in after being added to
+    the 'docker' group)."
     fi
-fi
 
-if [ -z "$DRY" ] && ! docker info >/dev/null 2>&1; then
-    die "Docker is installed but not running (or your user can't reach it).
-    Start Docker, or add yourself to the 'docker' group, then run this again."
-fi
-
-# An existing container is left alone rather than replaced: it owns the data
-# volumes, and recreating it behind the user's back is how people lose things.
-if [ -z "$DRY" ] && docker container inspect "$NAME" >/dev/null 2>&1; then
-    state="$(docker container inspect -f '{{.State.Status}}' "$NAME")"
-    if [ "$state" = "running" ]; then
-        url="$(docker container port "$NAME" 5000/tcp 2>/dev/null | head -1)"
+    # An existing container is left alone rather than replaced: it owns the
+    # data volumes, and recreating it behind the user's back is how people
+    # lose things.
+    # shellcheck disable=SC2086
+    if $DK container inspect "$NAME" >/dev/null 2>&1; then
+        # shellcheck disable=SC2086
+        state="$($DK container inspect -f '{{.State.Status}}' "$NAME")"
+        if [ "$state" = "running" ]; then
+            say ""
+            say "${G}IT-Vault is already running${N} as container '$NAME'."
+            say ""
+            say "  Open it:       http://localhost:$PORT"
+            say "  Update it:     in the app, Settings ▸ General ▸ Check for Updates"
+            say "  Or by hand:    $DK pull $IMAGE:$TAG && $DK rm -f $NAME"
+            say "                 then run this installer again"
+            say "  See its logs:  $DK logs -f $NAME"
+            say ""
+            exit 0
+        fi
+        step "Container '$NAME' exists but is $state -- starting it"
+        run start "$NAME"
         say ""
-        say "${G}IT-Vault is already running${N} as container '$NAME'${url:+ on $url}."
-        say ""
-        say "  Update it:     in the app, Settings ▸ General ▸ Check for Updates"
-        say "  Or by hand:    docker pull $IMAGE:$TAG && docker rm -f $NAME"
-        say "                 then run this installer again"
-        say "  See its logs:  docker logs -f $NAME"
+        say "${G}Started.${N} Open http://localhost:$PORT"
         say ""
         exit 0
     fi
-    step "Container '$NAME' exists but is $state -- starting it"
-    run docker start "$NAME"
-    say ""
-    say "${G}Started.${N} Open http://localhost:$PORT"
-    say ""
-    exit 0
 fi
 
 # ---- install ---------------------------------------------------------
@@ -103,21 +269,23 @@ fi
 step "Pulling $IMAGE:$TAG"
 if [ -n "$DRY" ]; then
     printf '    docker pull %s\n' "$IMAGE:$TAG"
-elif ! docker pull "$IMAGE:$TAG" >/dev/null; then
-    die "Could not pull $IMAGE:$TAG. Check the tag exists and that you can
-    reach ghcr.io."
+else
+    # shellcheck disable=SC2086
+    $DK pull "$IMAGE:$TAG" >/dev/null || die \
+"Could not pull $IMAGE:$TAG. Check the tag exists and that you can reach
+    ghcr.io."
 fi
 
 step "Creating volumes (itvault_data, invoices_data, backups_data)"
-run docker volume create itvault_data
-run docker volume create invoices_data
-run docker volume create backups_data
+run volume create itvault_data
+run volume create invoices_data
+run volume create backups_data
 
 step "Starting container '$NAME' on port $PORT"
 # --add-host is what lets DB_HOST=host.docker.internal reach a database
 # installed on this machine rather than inside the container. Docker Desktop
 # provides it already; on Linux it has to be asked for.
-run docker run -d \
+run run -d \
     --name "$NAME" \
     --restart unless-stopped \
     -p "$PORT:5000" \
@@ -139,10 +307,12 @@ fi
 step "Waiting for IT-Vault to come up"
 i=0
 while [ "$i" -lt 60 ]; do
-    if ! docker container inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null | grep -q true; then
+    # shellcheck disable=SC2086
+    if ! $DK container inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null | grep -q true; then
         say ""
         warn "The container stopped. Its last words:"
-        docker logs --tail 20 "$NAME" 2>&1 | sed 's/^/    /'
+        # shellcheck disable=SC2086
+        $DK logs --tail 20 "$NAME" 2>&1 | sed 's/^/    /'
         die "IT-Vault did not start."
     fi
     if command -v curl >/dev/null 2>&1; then
@@ -176,7 +346,7 @@ say "Then the setup wizard in your browser asks for the connection (host"
 say "${B}itvault-db${N} for the above, or ${B}host.docker.internal${N} for a database installed"
 say "on this machine) and for the admin account you want to create."
 say ""
-say "  Logs:       docker logs -f $NAME"
-say "  Stop:       docker stop $NAME"
-say "  Uninstall:  docker rm -f $NAME     (volumes, and your database, are kept)"
+say "  Logs:       $DK logs -f $NAME"
+say "  Stop:       $DK stop $NAME"
+say "  Uninstall:  $DK rm -f $NAME     (volumes, and your database, are kept)"
 say ""

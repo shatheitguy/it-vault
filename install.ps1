@@ -2,17 +2,24 @@
 #
 #   irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex
 #
-# Starts IT-Vault as a Docker container and prints where to open it. It does
-# NOT install a database: IT-Vault connects to whatever MariaDB/MySQL you give
-# it, so your database version, backups and retention stay yours. The first-run
-# wizard in the browser asks for the connection details.
+# From cmd.exe, wrap it in PowerShell:
+#
+#   powershell -NoProfile -c "irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex"
+#
+# Starts IT-Vault as a Docker container and prints where to open it. If Docker
+# is missing it offers to install Docker Desktop for you (via winget).
+#
+# It does NOT install a database: IT-Vault connects to whatever MariaDB/MySQL
+# you give it, so your database version, backups and retention stay yours. The
+# first-run wizard in the browser asks for the connection details.
 #
 # Configure with environment variables before running (there are no parameters,
 # so the line above works unchanged when piped to iex):
 #
 #   $env:ITVAULT_PORT = "8080"    # host port,      default 5000
-#   $env:ITVAULT_TAG  = "1.6.1"   # image tag,      default latest
+#   $env:ITVAULT_TAG  = "1.6.2"   # image tag,      default latest
 #   $env:ITVAULT_NAME = "myvault" # container name, default itvault
+#   $env:ITVAULT_YES  = "1"       # don't ask before installing Docker
 #   $env:ITVAULT_DRY  = "1"       # print the plan, change nothing
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +29,27 @@ $tag  = if ($env:ITVAULT_TAG)  { $env:ITVAULT_TAG }  else { "latest" }
 $name = if ($env:ITVAULT_NAME) { $env:ITVAULT_NAME } else { "itvault" }
 $port = if ($env:ITVAULT_PORT) { $env:ITVAULT_PORT } else { "5000" }
 $dry  = [bool]$env:ITVAULT_DRY
+$yes  = [bool]$env:ITVAULT_YES
+
+# Deliberately ASCII-only: Windows PowerShell 5.1 decodes a BOM-less UTF-8
+# script as the OEM codepage, so box-drawing characters would arrive as
+# mojibake on exactly the consoles this script is most likely to run in.
+function Show-Banner {
+    $art = @'
+
+  ___ _____   __     __          _ _
+ |_ _|_   _|  \ \   / /_ _ _   _| | |_
+  | |  | |     \ \ / / _` | | | | | __|
+  | |  | |      \ V / (_| | |_| | | |_
+ |___| |_|       \_/ \__,_|\__,_|_|\__|
+'@
+    Write-Host $art -ForegroundColor Green
+    Write-Host "        01001001 01010100  ::  asset register + helpdesk" -ForegroundColor DarkGray
+    Write-Host "               powered by Sha The IT Guy" -ForegroundColor Green
+    Write-Host ""
+}
+
+Show-Banner
 
 function Step($m) { Write-Host "==> " -NoNewline -ForegroundColor White; Write-Host $m }
 function Warn($m) { Write-Host " !  $m" -ForegroundColor Yellow }
@@ -34,18 +62,108 @@ function Invoke-Step {
     if ($LASTEXITCODE -ne 0) { Die "`"$($Cmd -join ' ')`" failed (exit $LASTEXITCODE)." }
 }
 
+function Test-Docker { [bool](Get-Command docker -ErrorAction SilentlyContinue) }
+
+function Test-DockerRunning {
+    if (-not (Test-Docker)) { return $false }
+    docker info 2>$null | Out-Null
+    return ($LASTEXITCODE -eq 0)
+}
+
+# winget puts docker.exe on the machine PATH, but this process started with the
+# old environment. Re-read it so the new install is visible without a restart.
+function Update-PathFromRegistry {
+    $machine = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $user    = [Environment]::GetEnvironmentVariable("Path", "User")
+    $parts = @($machine, $user) | Where-Object { $_ }
+    $env:Path = ($parts -join ";")
+}
+
+function Confirm-Or-Exit($question) {
+    if ($yes) { return }
+    Write-Host ""
+    Write-Host $question -NoNewline
+    Write-Host " [y/N] " -NoNewline -ForegroundColor Yellow
+    $answer = ""
+    try { $answer = Read-Host } catch { $answer = "" }
+    if ($answer -notmatch '^(y|yes)$') {
+        Write-Host ""
+        Write-Host "Nothing was installed. Two ways forward:"
+        Write-Host ""
+        Write-Host "  Install Docker Desktop yourself, then run this again:"
+        Write-Host "    https://docs.docker.com/desktop/install/windows-install/"
+        Write-Host ""
+        Write-Host "  Or skip the asking with:  `$env:ITVAULT_YES = '1'"
+        Write-Host ""
+        exit 1
+    }
+}
+
+function Install-DockerDesktop {
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Die @"
+Docker isn't installed, and winget isn't available to install it for you.
+    Install Docker Desktop by hand, then run this again:
+      https://docs.docker.com/desktop/install/windows-install/
+"@
+    }
+
+    Confirm-Or-Exit "Docker isn't installed. Install Docker Desktop now (about 600 MB)?"
+
+    Step "Installing Docker Desktop via winget -- this takes a few minutes"
+    Write-Host "    Windows will ask for permission; Docker Desktop's own licence"
+    Write-Host "    terms require a paid subscription for larger companies."
+    # Not Invoke-Step: winget's progress output is worth showing, and it uses
+    # non-zero exit codes for outcomes that aren't failures (already installed,
+    # reboot required), so its result is interpreted rather than trusted.
+    winget install --id Docker.DockerDesktop --exact --source winget `
+        --accept-package-agreements --accept-source-agreements
+    $code = $LASTEXITCODE
+
+    Update-PathFromRegistry
+
+    if (-not (Test-Docker)) {
+        Die @"
+Docker Desktop did not finish installing (winget exit $code).
+    Install it by hand, then run this again:
+      https://docs.docker.com/desktop/install/windows-install/
+    If it complains about WSL 2, run 'wsl --install' in an admin
+    PowerShell, reboot, then try again.
+"@
+    }
+
+    Step "Starting Docker Desktop"
+    $exe = "$env:ProgramFiles\Docker\Docker\Docker Desktop.exe"
+    if (Test-Path $exe) { Start-Process -FilePath $exe | Out-Null }
+
+    # The engine takes a while, and the very first launch usually wants the
+    # user to accept the licence in the GUI, so this waits rather than failing
+    # instantly -- but it does give up and say what to do.
+    Step "Waiting for the Docker engine (up to 3 minutes)"
+    foreach ($i in 1..90) {
+        if (Test-DockerRunning) { return }
+        Start-Sleep -Seconds 2
+    }
+    Die @"
+Docker Desktop is installed but its engine hasn't started.
+    Open Docker Desktop, accept the licence terms and let it finish starting,
+    then run this installer again. A fresh WSL 2 setup may need a reboot first.
+"@
+}
+
 # ---- checks ----------------------------------------------------------
 
-if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+if (-not (Test-Docker)) {
     # A dry run is for reading the plan before trusting it, so it has to work
     # on a machine that hasn't got Docker yet.
     if ($dry) { Warn "Docker isn't installed here -- showing the plan anyway." }
-    else { Die "Docker isn't installed. Get Docker Desktop from`n    https://docs.docker.com/desktop/install/windows-install/  then run this again." }
+    else { Install-DockerDesktop }
 }
 
 if (-not $dry) {
-    docker info 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) { Die "Docker is installed but not running. Start Docker Desktop, then run this again." }
+    if (-not (Test-DockerRunning)) {
+        Die "Docker is installed but not running. Start Docker Desktop, wait for it to say 'Engine running', then run this again."
+    }
 
     # An existing container is left alone rather than replaced: it owns the
     # data volumes, and recreating it behind the user's back is how people
@@ -57,6 +175,7 @@ if (-not $dry) {
             Write-Host ""
             Write-Host "IT-Vault is already running as container '$name'." -ForegroundColor Green
             Write-Host ""
+            Write-Host "  Open it:       http://localhost:$port"
             Write-Host "  Update it:     in the app, Settings > General > Check for Updates"
             Write-Host "  Or by hand:    docker pull ${image}:${tag} ; docker rm -f $name"
             Write-Host "                 then run this installer again"

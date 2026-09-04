@@ -12,25 +12,37 @@ for storage.
 curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
 ```
 
-Windows (PowerShell):
+Windows PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex
 ```
 
+From `cmd.exe`, wrap it — `irm` and `iex` are PowerShell, not cmd:
+
+```
+powershell -NoProfile -c "irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex"
+```
+
 That pulls the image, creates the volumes, starts IT-Vault on
 **http://localhost:5000** and waits until it actually answers before telling
-you it worked. It installs **IT-Vault only** — no database, because that's
-yours to choose (it prints the one-liner for a MariaDB container if you want
-one). An existing IT-Vault container is left alone rather than replaced.
+you it worked. **No Docker? It offers to install it** — Docker's own script on
+Linux, Homebrew on macOS, winget on Windows — and waits for the engine to come
+up before carrying on. It asks first unless you pass `--yes`.
+
+It installs **IT-Vault only**. The database stays yours to choose, so the
+installer finishes by printing the MariaDB one-liner if you haven't got one.
+An existing IT-Vault container is started if stopped, and otherwise left
+alone — it owns your data volumes.
 
 Options, as environment variables or flags:
 
 | | |
 |---|---|
 | `--port 8080` / `$env:ITVAULT_PORT` | host port, default 5000 |
-| `--tag 1.6.1` / `$env:ITVAULT_TAG` | image tag, default `latest` |
+| `--tag 1.6.2` / `$env:ITVAULT_TAG` | image tag, default `latest` |
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
+| `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
 
 Piping a script from the internet into a shell is worth being fussy about.
@@ -40,6 +52,35 @@ To read it first:
 curl -fsSLO https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh
 less install.sh && sh install.sh --dry-run && sh install.sh
 ```
+
+`--dry-run` works on a machine with no Docker at all, so you can see exactly
+what would happen before anything does.
+
+### Uninstalling
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/uninstall.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/uninstall.ps1 | iex
+```
+
+It lists what it found, asks once, then removes the container and the image.
+**Your data is not touched by default** — the volumes and your database
+survive, so reinstalling picks up where you left off. It prints exactly what
+it kept and the command to remove each thing later.
+
+To go further:
+
+| | |
+|---|---|
+| `--purge` / `$env:ITVAULT_PURGE` | also delete the volumes: invoices, backups, session key. Permanent. |
+| `--purge-db` / `$env:ITVAULT_PURGE_DB` | also delete the `itvault-db` container and its volume, if you created one from this project's suggested command. That is your whole database. |
+| `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
+
+Docker itself is never removed — use your package manager or Docker Desktop's
+own uninstaller.
 
 Prefer to do it yourself? The rest of this README is the manual route.
 
