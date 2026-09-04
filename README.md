@@ -10,6 +10,32 @@ monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
 built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
 for storage.
 
+## Screenshots
+
+![The IT-Vault dashboard: asset totals, status breakdown, top asset types, recent assets and the open ticket queue](docs/img/dashboard.png)
+
+| The register | Tickets |
+|---|---|
+| [![The asset register, listing hardware with IDs, serials, status and location](docs/img/assets.png)](docs/img/assets.png) | [![The ticket queue with codes, subjects, priorities and status](docs/img/tickets.png)](docs/img/tickets.png) |
+
+<table>
+<tr>
+<td width="45%"><img src="docs/img/sign.png" alt="The asset acknowledgement page: asset details, a name field and a signature pad" width="100%"></td>
+<td>
+
+**What the employee gets.** Assign an asset and they receive one button by
+email — no account, no login. The link opens this page on their phone: they
+check the details, type their name, sign with a finger. On submit a signed
+PDF goes to them *and* to every admin with an address on file, the asset
+flips to `Checked-Out`, and the signature stays attached to it.
+
+</td>
+</tr>
+</table>
+
+*A factory-new install — the theme, layout and branding above are what you
+get on first run. Every asset, name and serial is invented.*
+
 ## Install in one line
 
 ```bash
