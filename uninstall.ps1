@@ -16,7 +16,13 @@
 #   $env:ITVAULT_YES      = "1"   # don't ask
 #   $env:ITVAULT_DRY      = "1"   # print the plan, change nothing
 
-$ErrorActionPreference = "Stop"
+# Continue, not Stop: this script drives docker (a native command) and reads
+# its exit codes explicitly. Under "Stop", redirecting docker's stderr (2>$null)
+# while, say, a container doesn't exist would promote that stderr to a
+# terminating error and abort the cleanup half-done. Every check here is an
+# explicit $LASTEXITCODE test or a try/catch, so Continue is both safe and
+# correct.
+$ErrorActionPreference = "Continue"
 
 $image    = "ghcr.io/shatheitguy/it-vault"
 $name     = if ($env:ITVAULT_NAME) { $env:ITVAULT_NAME } else { "itvault" }

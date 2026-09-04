@@ -64,10 +64,29 @@ function Invoke-Step {
 
 function Test-Docker { [bool](Get-Command docker -ErrorAction SilentlyContinue) }
 
+# Runs a docker command for its exit code only, swallowing all output. The
+# local ErrorActionPreference is the whole point: with the script-level "Stop"
+# in force, redirecting a native command's stderr (2>&1) promotes each line to
+# a terminating error, so a plain `docker info` while the engine is still
+# starting would abort the entire script instead of just reporting "not up
+# yet". Lowering it here keeps the retry loops actually looping.
+function Invoke-DockerQuiet {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$DockerArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $null = & docker @DockerArgs 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 function Test-DockerRunning {
     if (-not (Test-Docker)) { return $false }
-    docker info 2>$null | Out-Null
-    return ($LASTEXITCODE -eq 0)
+    return (Invoke-DockerQuiet 'info')
 }
 
 # winget puts docker.exe on the machine PATH, but this process started with the
@@ -139,15 +158,28 @@ Docker Desktop did not finish installing (winget exit $code).
     # The engine takes a while, and the very first launch usually wants the
     # user to accept the licence in the GUI, so this waits rather than failing
     # instantly -- but it does give up and say what to do.
+    Write-Host "    Docker Desktop's first launch opens a window and asks you to"
+    Write-Host "    accept its terms -- do that if it appears; this keeps waiting."
     Step "Waiting for the Docker engine (up to 3 minutes)"
     foreach ($i in 1..90) {
-        if (Test-DockerRunning) { return }
+        if (Test-DockerRunning) {
+            Write-Host ""
+            Write-Host "Docker engine is up." -ForegroundColor Green
+            return
+        }
         Start-Sleep -Seconds 2
     }
     Die @"
-Docker Desktop is installed but its engine hasn't started.
-    Open Docker Desktop, accept the licence terms and let it finish starting,
-    then run this installer again. A fresh WSL 2 setup may need a reboot first.
+Docker Desktop is installed, but its engine hasn't started within 3 minutes.
+    This is normal on a first install -- it isn't an error you did anything to
+    cause. Finish it off by hand:
+      1. Open Docker Desktop from the Start menu.
+      2. Accept its terms if asked, and wait for the whale icon to say
+         'Engine running' (this can take a few minutes the first time).
+      3. If it asks for WSL 2: run  wsl --install  in an admin PowerShell,
+         reboot, then open Docker Desktop again.
+    Once it says running, re-run the same one-line install command -- it will
+    skip straight past this step.
 "@
 }
 
@@ -168,8 +200,7 @@ if (-not $dry) {
     # An existing container is left alone rather than replaced: it owns the
     # data volumes, and recreating it behind the user's back is how people
     # lose things.
-    docker container inspect $name 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+    if (Invoke-DockerQuiet 'container' 'inspect' $name) {
         $state = (docker container inspect -f "{{.State.Status}}" $name)
         if ($state -eq "running") {
             Write-Host ""
@@ -226,10 +257,16 @@ if ($dry) {
 Step "Waiting for IT-Vault to come up"
 $up = $false
 foreach ($i in 1..60) {
-    if ((docker container inspect -f "{{.State.Running}}" $name 2>$null) -ne "true") {
+    $running = ""
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+    try { $running = (& docker container inspect -f "{{.State.Running}}" $name 2>&1) }
+    catch {} finally { $ErrorActionPreference = $prev }
+    if ("$running".Trim() -ne "true") {
         Write-Host ""
         Warn "The container stopped. Its last words:"
-        docker logs --tail 20 $name 2>&1 | ForEach-Object { Write-Host "    $_" }
+        $prev = $ErrorActionPreference; $ErrorActionPreference = 'SilentlyContinue'
+        try { (& docker logs --tail 20 $name 2>&1) | ForEach-Object { Write-Host "    $_" } }
+        catch {} finally { $ErrorActionPreference = $prev }
         Die "IT-Vault did not start."
     }
     try {
