@@ -27,7 +27,7 @@ Stack: Python 3 (Flask), MariaDB 12.3, Jinja-free server-rendered HTML + vanilla
 Browser (index.html SPA, app.js, style.css, login.html, /sign, /label/<id>, /asset/<id>)
         │  HTTP / JSON API + cookie session
         ▼
-Flask app (app.py)  ── pymysql ──▶ MariaDB (db: itguy_assets)
+Flask app (app.py)  ── pymysql ──▶ MariaDB (db: itvault)
         │
         ├─ openpyxl  (Excel import/export)
         ├─ ldap3     (AD/LDAP employee sync)
@@ -69,9 +69,9 @@ netstat -ano | findstr :3306
 Using the MariaDB client:
 
 ```sql
-CREATE DATABASE IF NOT EXISTS itguy_assets CHARACTER SET utf8mb4;
-CREATE USER IF NOT EXISTS 'itguy'@'127.0.0.1' IDENTIFIED BY 'itguypass';
-GRANT ALL PRIVILEGES ON itguy_assets.* TO 'itguy'@'127.0.0.1';
+CREATE DATABASE IF NOT EXISTS itvault CHARACTER SET utf8mb4;
+CREATE USER IF NOT EXISTS 'itvault'@'127.0.0.1' IDENTIFIED BY 'itvaultpass';
+GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'127.0.0.1';
 FLUSH PRIVILEGES;
 ```
 
@@ -104,9 +104,9 @@ All config is read from environment variables (Docker-friendly), with local defa
 |---|---|---|
 | `DB_HOST` | `127.0.0.1` | MariaDB host |
 | `DB_PORT` | `3306` | MariaDB port |
-| `DB_NAME` | `itguy_assets` | Database name |
-| `DB_USER` | `itguy` | DB user |
-| `DB_PASS` | `itguypass` | DB password |
+| `DB_NAME` | `itvault` | Database name |
+| `DB_USER` | `itvault` | DB user |
+| `DB_PASS` | `itvaultpass` | DB password |
 | `ITVAULT_SECRET` | generated + persisted to `.secret_key` | Flask session signing secret |
 | `ITVAULT_ADMIN` | `admin` | Default admin username |
 | `ITVAULT_ADMIN_PASS` | `admin123` | Default admin password |
@@ -118,7 +118,7 @@ System-wide settings (persisted in the `Settings` table, row id=1) are editable 
 
 ---
 
-## 5. Data Model (MariaDB `itguy_assets`)
+## 5. Data Model (MariaDB `itvault`)
 
 ### Assets
 | Column | Type | Notes |
@@ -184,7 +184,7 @@ Sidebar groups:
 
 Asset table features:
 - Top horizontal scrollbar synced to the table; compact rows.
-- **Columns** popover (▦) to toggle visible columns (persisted in `localStorage` key `nexus_cols`).
+- **Columns** popover (▦) to toggle visible columns (persisted in `localStorage` key `itvault_cols`).
 - Per-row actions (role-gated): **SIGN**, **EDIT**, **CHECKOUT**, **MAINT**, **QR**, **DEL** (and **PRINT**).
 - Search box, filters, bulk actions.
 

@@ -1,5 +1,5 @@
 # --- runtime data / secrets: never commit real org data or credentials ---
-nexus_config.json
+itvault_config.json
 .secret_key
 .env
 *.env
@@ -17,9 +17,9 @@ ui_backup_20260901/
 
 # --- local-machine dev tooling (Windows-path-specific, not portable) ---
 run_server.bat
-start-nexus.bat
+start-itvault.bat
 start_all.bat
-nexus_spawn.py
+itvault_spawn.py
 
 # --- python ---
 __pycache__/
@@ -36,3 +36,6 @@ node_modules/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Local DB dumps (contain password hashes) — never commit
+*_dump.sql

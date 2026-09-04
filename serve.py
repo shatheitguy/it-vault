@@ -29,7 +29,7 @@ def wait_for_db(timeout_s: int = 300) -> None:
     never opens its port at all.
 
     Deliberately uses app.conn(), so it honours whatever DB config the app
-    itself resolved (nexus_config.json, then environment). The repo's
+    itself resolved (itvault_config.json, then environment). The repo's
     wait_for_db.py reads environment variables only and defaults to the
     Docker service name, so it can't stand in for this outside a container.
     """
@@ -52,9 +52,18 @@ def wait_for_db(timeout_s: int = 300) -> None:
 
 
 def main():
-    wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 300)))
-    _app.init_db()
-    _app.migrate_schema()
+    # A brand-new container has no database configured yet, and the setup
+    # wizard is served BY this process -- so a missing database can't be
+    # fatal here or there'd be nowhere to enter one. Wait briefly for a
+    # database that's merely still starting, then start regardless: app.py
+    # serves /setup until one is configured and an admin exists.
+    try:
+        wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+        _app.init_db()
+        _app.migrate_schema()
+    except Exception as e:
+        print(f"[serve] no database yet ({type(e).__name__}) -- starting in setup mode; "
+              f"open /setup to configure one", flush=True)
     _app.start_ldap_scheduler()
     _app.start_backup_scheduler()
     _app.start_contract_expiry_scheduler()
