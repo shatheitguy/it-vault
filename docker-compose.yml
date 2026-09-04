@@ -37,8 +37,12 @@ services:
       # ITGUY_* are the old names, still read as a fallback so an existing
       # .env keeps working -- notably the secret, where falling back to a
       # fresh value would invalidate every session cookie on upgrade.
-      ITVAULT_ADMIN: ${ITVAULT_ADMIN:-${ITGUY_ADMIN:-admin}}
-      ITVAULT_ADMIN_PASS: ${ITVAULT_ADMIN_PASS:-${ITGUY_ADMIN_PASS:-admin123}}
+      # No default admin password on purpose: left unset, the container comes
+      # up on the first-run setup wizard and you choose the credentials. Set
+      # these in .env only for an unattended install, where the account is
+      # created without anyone visiting the wizard.
+      ITVAULT_ADMIN: ${ITVAULT_ADMIN:-${ITGUY_ADMIN:-}}
+      ITVAULT_ADMIN_PASS: ${ITVAULT_ADMIN_PASS:-${ITGUY_ADMIN_PASS:-}}
       ITVAULT_SECRET: ${ITVAULT_SECRET:-${ITGUY_SECRET:-change-me-in-prod}}
     ports:
       - "5000:5000"

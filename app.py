@@ -552,10 +552,21 @@ def init_db():
         cur.execute("INSERT INTO Settings (id, theme) VALUES (1, 'dark')")
     if not os.path.exists(os.path.join(BASE, "logo.png")):
         open(os.path.join(BASE, "logo.png"), "wb").close()  # placeholder
+    # Seed the first admin ONLY for an unattended install, i.e. one where the
+    # password was supplied deliberately via the environment. Seeding
+    # unconditionally meant a restart after a factory reset quietly recreated
+    # the schema AND a well-known default account, skipping the setup wizard
+    # entirely -- undoing the reset and leaving admin/admin123 valid. With no
+    # env password, Users stays empty so setup_needed() stays true and the
+    # wizard asks for credentials instead.
     cur.execute("SELECT COUNT(*) AS n FROM Users")
     if cur.fetchone()["n"] == 0:
-        cur.execute("INSERT INTO Users (username, password, role, display, email) VALUES (%s,%s,%s,%s,%s)",
-                    (ADMIN_USER, hash_pw(ADMIN_PASS), ROLE_ADMIN, "Administrator", ""))
+        if _env("ITVAULT_ADMIN_PASS", "ITGUY_ADMIN_PASS"):
+            cur.execute("INSERT INTO Users (username, password, role, display, email) VALUES (%s,%s,%s,%s,%s)",
+                        (ADMIN_USER, hash_pw(ADMIN_PASS), ROLE_ADMIN, "Administrator", ""))
+        else:
+            print("[itvault] no users and no ITVAULT_ADMIN_PASS set -- "
+                  "first-run setup wizard will create the admin", flush=True)
     c.commit(); c.close()
 
 def migrate_schema():
@@ -4887,11 +4898,11 @@ SETUP_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 
   <div id="stepDb">
     <div class="row">
-      <div><label>Database host</label><input id="db_host" value="db" placeholder="db"></div>
-      <div style="max-width:120px"><label>Port</label><input id="db_port" value="3306"></div>
+      <div><label>Database host</label><input id="db_host" value="__DB_HOST__" placeholder="db"></div>
+      <div style="max-width:120px"><label>Port</label><input id="db_port" value="__DB_PORT__"></div>
     </div>
-    <label>Database name</label><input id="db_name" value="itvault">
-    <label>Database user</label><input id="db_user" value="itvault">
+    <label>Database name</label><input id="db_name" value="__DB_NAME__">
+    <label>Database user</label><input id="db_user" value="__DB_USER__">
     <label>Database password</label><input id="db_pass" type="password">
     <button id="testBtn">Test connection &amp; continue</button>
   </div>
@@ -4948,7 +4959,19 @@ $('finishBtn').onclick=async()=>{
 def setup_page():
     if not setup_needed():
         return redirect("/")
-    return Response(SETUP_HTML, mimetype="text/html")
+    # Prefill from the config this instance already has, so a factory reset
+    # comes back to fields that are correct rather than to the Docker
+    # defaults. The password is deliberately NOT prefilled: while setup is
+    # pending this page is unauthenticated, and putting a live database
+    # password into its HTML would hand it to whoever loads it first.
+    from html import escape
+    cfg = load_config()
+    html = (SETUP_HTML
+            .replace("__DB_HOST__", escape(str(cfg.get("db_host") or os.environ.get("DB_HOST", "db")), quote=True))
+            .replace("__DB_PORT__", escape(str(cfg.get("db_port") or os.environ.get("DB_PORT", "3306")), quote=True))
+            .replace("__DB_NAME__", escape(str(cfg.get("db_name") or os.environ.get("DB_NAME", "itvault")), quote=True))
+            .replace("__DB_USER__", escape(str(cfg.get("db_user") or os.environ.get("DB_USER", "itvault")), quote=True)))
+    return Response(html, mimetype="text/html")
 
 @app.route("/api/setup/test-db", methods=["POST"])
 def setup_test_db():
