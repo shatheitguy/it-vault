@@ -13,13 +13,46 @@ auto-sync, no scheduled backups, no contract-expiry alerts. Hence this
 file rather than a CMD one-liner.
 """
 import os
+import time
 
 from waitress import serve
 
 import app as _app
 
 
+def wait_for_db(timeout_s: int = 300) -> None:
+    """Blocks until the database answers, instead of dying if it isn't up yet.
+
+    init_db()/migrate_schema() below both need the database, so without this
+    a server started while MariaDB is still coming up (or briefly down) exits
+    immediately and stays down until someone restarts it by hand -- the app
+    never opens its port at all.
+
+    Deliberately uses app.conn(), so it honours whatever DB config the app
+    itself resolved (nexus_config.json, then environment). The repo's
+    wait_for_db.py reads environment variables only and defaults to the
+    Docker service name, so it can't stand in for this outside a container.
+    """
+    deadline = time.time() + timeout_s
+    attempt = 0
+    while True:
+        try:
+            c = _app.conn()
+            c.close()
+            if attempt:
+                print(f"[serve] database reachable after {attempt} attempt(s)")
+            return
+        except Exception as e:
+            attempt += 1
+            if time.time() >= deadline:
+                print(f"[serve] database still unreachable after {timeout_s}s -- giving up")
+                raise
+            print(f"[serve] waiting for database ({type(e).__name__}); retry {attempt}...", flush=True)
+            time.sleep(min(5, attempt))
+
+
 def main():
+    wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 300)))
     _app.init_db()
     _app.migrate_schema()
     _app.start_ldap_scheduler()
