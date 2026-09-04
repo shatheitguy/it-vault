@@ -45,6 +45,8 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 .sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px;
   display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:0 16px}
 .sess .sep{opacity:.35}
+.sess .src{color:var(--muted2);text-decoration:none;border-bottom:1px solid transparent}
+.sess .src:hover{color:var(--accent);border-bottom-color:var(--accent)}
 /* animated gradient wordmark -- the credit line, with a bit of shine */
 .pwr{font-weight:800;letter-spacing:.2px;white-space:nowrap;
   background:linear-gradient(90deg,var(--accent),#ff9f45,var(--accent2),var(--accent));
@@ -107,6 +109,10 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
   <span id="sessNote">Session timeout: 5 minutes</span>
   <span class="sep">•</span>
   <span class="pwr">⚡ powered by <b>Sha The IT Guy</b></span>
+  <span class="sep">•</span>
+  <!-- AGPL section 13: anyone using this over a network must be able to get
+       the source, so the offer has to be reachable before signing in too. -->
+  <a class="src" href="https://github.com/shatheitguy/it-vault" target="_blank" rel="noopener">AGPL-3.0 source</a>
 </div>
 <script>
 /* ---- theme preset + branding (follows dashboard customization engine) ---- */
