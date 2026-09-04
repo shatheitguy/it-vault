@@ -367,7 +367,7 @@ it-vault/
 ├── (sign page served inline from app.py: /sign)
 ├── invoices/                # uploaded invoice files
 ├── logo.png                 # app logo (uploadable)
-└── ITGUY_DOCUMENTATION.md   # this file
+└── IT-Vault — Full Documentation.md   # this file
 ```
 
 ---
