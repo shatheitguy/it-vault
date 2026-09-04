@@ -123,6 +123,7 @@ data class UnifiClient(val hostname: String?, val ip: String?, val mac: String?,
 data class UnifiClientsResponse(val clients: List<UnifiClient>?, val error: String?)
 
 data class OkResponse(val ok: Boolean?, val error: String?)
+data class SignLinkResponse(val ok: Boolean?, val token: String?, val url: String?, val error: String?)
 data class IdRequest(val id: Int)
 
 data class ScanDevice(val ip: String, val mac: String?, val type: String?, val host: String?, val vendor: String?)

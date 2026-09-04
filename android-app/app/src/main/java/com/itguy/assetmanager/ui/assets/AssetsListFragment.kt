@@ -28,9 +28,23 @@ class AssetsListFragment : Fragment(), Refreshable {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
-        adapter = AssetAdapter { asset ->
-            (activity as? MainActivity)?.showFragment(AssetEditFragment.newInstance(asset.id), "Edit Asset", addToBackStack = true)
-        }
+        adapter = AssetAdapter(
+            onClick = { asset ->
+                (activity as? MainActivity)?.showFragment(AssetEditFragment.newInstance(asset.id), "Edit Asset", addToBackStack = true)
+            },
+            // long-press = the web UI's row action menu (sign / print / QR / …)
+            onLongClick = { asset ->
+                showAssetActions(
+                    asset,
+                    onEdit = {
+                        (activity as? MainActivity)?.showFragment(
+                            AssetEditFragment.newInstance(asset.id), "Edit Asset", addToBackStack = true
+                        )
+                    },
+                    onChanged = { refresh() }
+                )
+            }
+        )
         b.assetsRecycler.layoutManager = LinearLayoutManager(requireContext())
         b.assetsRecycler.adapter = adapter
 
@@ -49,7 +63,9 @@ class AssetsListFragment : Fragment(), Refreshable {
         load("")
     }
 
-    override fun refresh() { load(b.searchInput.text?.toString().orEmpty()) }
+    // guarded: an action sheet or pull-to-refresh can fire this just as the
+    // view is going away, and `b` would throw on a destroyed binding
+    override fun refresh() { _b?.let { load(it.searchInput.text?.toString().orEmpty()) } }
 
     private fun load(query: String) {
         lifecycleScope.launch {
