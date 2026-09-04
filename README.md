@@ -6,6 +6,43 @@ monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
 built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
 for storage.
 
+## Install in one line
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex
+```
+
+That pulls the image, creates the volumes, starts IT-Vault on
+**http://localhost:5000** and waits until it actually answers before telling
+you it worked. It installs **IT-Vault only** — no database, because that's
+yours to choose (it prints the one-liner for a MariaDB container if you want
+one). An existing IT-Vault container is left alone rather than replaced.
+
+Options, as environment variables or flags:
+
+| | |
+|---|---|
+| `--port 8080` / `$env:ITVAULT_PORT` | host port, default 5000 |
+| `--tag 1.6.1` / `$env:ITVAULT_TAG` | image tag, default `latest` |
+| `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
+| `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
+
+Piping a script from the internet into a shell is worth being fussy about.
+To read it first:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh
+less install.sh && sh install.sh --dry-run && sh install.sh
+```
+
+Prefer to do it yourself? The rest of this README is the manual route.
+
 ## Step 1 — get a database
 
 IT-Vault ships without one, so it never dictates your database's version,
