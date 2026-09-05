@@ -97,17 +97,13 @@
     line-height:1.6;
     -webkit-font-smoothing:antialiased;
   }
-  /* A drafting-table grid that a printed asset label would be laid out on,
-     with an accent glow behind the hero, fading out down the page so the
-     lower sections read clean. Sits behind all content. */
+  /* Soft base glow behind the hero (static), with the animated aurora on top
+     (body::after). No grid -- the movement is the background now. */
   body::before{
     content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-    background:
-      radial-gradient(1150px 560px at 82% -10%, var(--glow), transparent 62%),
-      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 36px 36px,
-      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 36px 36px;
-    -webkit-mask-image:linear-gradient(180deg, #000 0%, #000 46%, transparent 82%);
-    mask-image:linear-gradient(180deg, #000 0%, #000 46%, transparent 82%);
+    background:radial-gradient(1150px 560px at 80% -12%, var(--glow), transparent 60%);
+    -webkit-mask-image:linear-gradient(180deg, #000 0%, #000 50%, transparent 84%);
+    mask-image:linear-gradient(180deg, #000 0%, #000 50%, transparent 84%);
   }
   .wrap{max-width:1080px;margin:0 auto;padding:0 28px}
 
@@ -138,9 +134,10 @@
     backdrop-filter:saturate(1.4) blur(12px);
     position:sticky;top:0;z-index:20;
   }
-  .top .wrap{display:flex;align-items:center;gap:16px;height:60px}
-  .mark{display:flex;align-items:baseline;gap:9px;text-decoration:none}
-  .mark b{font-family:Archivo,sans-serif;font-weight:800;font-size:19px;letter-spacing:-.02em}
+  .top .wrap{display:flex;align-items:center;gap:14px;height:60px}
+  /* center-align so the logo sits level with the wordmark (baseline dropped it) */
+  .mark{display:inline-flex;align-items:center;gap:9px;text-decoration:none;flex:0 0 auto}
+  .mark b{font-family:Archivo,sans-serif;font-weight:800;font-size:19px;letter-spacing:-.02em;line-height:1;white-space:nowrap}
   .mark b span{color:var(--accent)}
   .ver{
     font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;
@@ -335,7 +332,10 @@
   .licence-line a:hover{color:var(--accent)}
 
   /* ---- logo, wherever the name appears ---- */
-  .mark-logo{width:27px;height:27px;border-radius:6px;display:block;flex:0 0 27px}
+  .mark-logo{width:28px;height:28px;border-radius:7px;display:block;flex:0 0 28px;object-fit:cover}
+  /* keep the version chip from crowding the wordmark; push nav to the right */
+  .top .ver{flex:0 0 auto}
+  .top nav{margin-left:auto}
   .foot-logo{width:34px;height:34px;border-radius:7px;display:block;flex:0 0 34px}
   .inline-logo{width:17px;height:17px;border-radius:4px;vertical-align:-3px;margin-right:5px}
 
@@ -451,7 +451,11 @@
     .updacts .btn, .btn{font-size:11px}
     .reg{padding:40px 0}
     .hero{padding:44px 0 8px}
-    .top nav{gap:16px}
+    .top .wrap{gap:10px}
+    .top nav{gap:15px}
+    .mark b{font-size:17px}
+    .ver{display:none}            /* the version chip is desktop-only detail */
+    .top nav a{font-size:13px}
     .label{max-width:100%}
     .updcard{padding:12px}
     .updlog, .route pre{font-size:11.5px}
@@ -462,6 +466,7 @@
   body::after{
     content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
     background:
+<<<<<<< Updated upstream
       radial-gradient(38vw 34vw at 20% 8%, var(--glow), transparent 60%),
       radial-gradient(34vw 30vw at 88% 2%, var(--accent-soft), transparent 62%);
     -webkit-mask-image:linear-gradient(180deg,#000 0%,#000 40%,transparent 75%);
@@ -472,6 +477,20 @@
   @keyframes drift{
     from{transform:translate3d(-2%, -1%, 0) scale(1)}
     to  {transform:translate3d(3%, 2%, 0) scale(1.08)}
+=======
+      radial-gradient(42vw 38vw at 18% 6%, var(--glow), transparent 60%),
+      radial-gradient(38vw 34vw at 90% 0%, var(--accent-soft), transparent 62%),
+      radial-gradient(30vw 26vw at 62% 30%, var(--accent-soft), transparent 66%);
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,#000 44%,transparent 78%);
+    mask-image:linear-gradient(180deg,#000 0%,#000 44%,transparent 78%);
+    animation:drift 24s ease-in-out infinite alternate;
+    will-change:transform;
+  }
+  @keyframes drift{
+    0%  {transform:translate3d(-3%, -1%, 0) scale(1)}
+    50% {transform:translate3d(2%,  2%, 0) scale(1.06)}
+    100%{transform:translate3d(4%, -2%, 0) scale(1.1)}
+>>>>>>> Stashed changes
   }
 
   /* ---- gen-z touch: the accent clause runs a slow gradient sweep ---- */
