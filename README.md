@@ -391,5 +391,5 @@ Copyright (C) 2026 Sharqan Ahamed (Sha The IT Guy)
 - 🌐 Website: [shatheitguy.in](https://shatheitguy.in)
 - 💻 More projects: [github.com/shatheitguy](https://github.com/shatheitguy)
 
-Built and maintained solo. If IT-Vault is useful to you, a ⭐ on the repo is
-appreciated.
+Built and maintained with 💻 and ☕. If IT-Vault is useful to you, a ⭐ on the
+repo is appreciated.
