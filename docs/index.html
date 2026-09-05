@@ -429,11 +429,11 @@
   /* one gentle load-in for the hero — from a visible resting state, plays
      once on load, and off entirely for reduced-motion */
   @media (prefers-reduced-motion:no-preference){
-    .eyebrow,.hero h1,.lede,.hero .cmd,.label-stage{
+    .eyebrow,.hero h1,.lede,.hero .cmd,.term-stage{
       animation:riseIn .7s cubic-bezier(.2,.7,.2,1) both;
     }
     .hero h1{animation-delay:.04s}
-    .label-stage{animation-delay:.10s}
+    .term-stage{animation-delay:.10s}
     .lede{animation-delay:.12s}
     .hero .cmd{animation-delay:.2s}
   }
@@ -457,8 +457,90 @@
     .updlog, .route pre{font-size:11.5px}
   }
 
+  /* ---- animated aurora: two soft accent blobs drifting behind the hero,
+     over the drafting grid. Fixed + masked so it fades out down the page. ---- */
+  body::after{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(38vw 34vw at 20% 8%, var(--glow), transparent 60%),
+      radial-gradient(34vw 30vw at 88% 2%, var(--accent-soft), transparent 62%);
+    -webkit-mask-image:linear-gradient(180deg,#000 0%,#000 40%,transparent 75%);
+    mask-image:linear-gradient(180deg,#000 0%,#000 40%,transparent 75%);
+    animation:drift 22s ease-in-out infinite alternate;
+    will-change:transform;
+  }
+  @keyframes drift{
+    from{transform:translate3d(-2%, -1%, 0) scale(1)}
+    to  {transform:translate3d(3%, 2%, 0) scale(1.08)}
+  }
+
+  /* ---- gen-z touch: the accent clause runs a slow gradient sweep ---- */
+  .h-em{
+    background:linear-gradient(100deg,var(--accent) 0%,var(--accent-2) 30%,var(--accent) 60%,var(--accent-2) 100%);
+    background-size:220% 100%;
+    -webkit-background-clip:text;background-clip:text;
+    -webkit-text-fill-color:transparent;color:var(--accent);
+    animation:sweep 6s linear infinite;
+  }
+  @keyframes sweep{to{background-position:220% 0}}
+  .h-em::after{background:var(--accent)}  /* keep the underline solid, not clipped */
+
+  /* a small live chip in the eyebrow */
+  .chip{
+    display:inline-flex;align-items:center;gap:6px;
+    font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
+    letter-spacing:.1em;text-transform:uppercase;
+    color:var(--accent);background:var(--accent-soft);
+    border:1px solid var(--accent);border-radius:999px;padding:3px 9px;
+  }
+  .pulse-dot{
+    width:7px;height:7px;border-radius:50%;background:var(--accent);flex:0 0 7px;
+    box-shadow:0 0 0 0 var(--accent);animation:pulse 1.8s ease-out infinite;
+  }
+  @keyframes pulse{
+    0%{box-shadow:0 0 0 0 var(--accent-soft)}
+    70%{box-shadow:0 0 0 8px transparent}
+    100%{box-shadow:0 0 0 0 transparent}
+  }
+
+  /* ---- animated install terminal (replaces the static label) ---- */
+  .term-stage{display:flex;flex-direction:column;gap:11px}
+  .term{
+    border:1px solid var(--rule);border-radius:10px;overflow:hidden;
+    background:#0b0d11;box-shadow:var(--lift);
+  }
+  .term-bar{
+    display:flex;align-items:center;gap:7px;padding:9px 13px;
+    background:#15181d;border-bottom:1px solid #22262c;
+  }
+  .term-bar .td{width:11px;height:11px;border-radius:50%;flex:0 0 11px}
+  .td-r{background:#ec5f5a}.td-y{background:#e5b34a}.td-g{background:#5bbd7f}
+  .term-bar i{
+    margin-left:8px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
+    font-style:normal;color:#6b7280;letter-spacing:.03em;
+  }
+  .term-body{padding:15px 15px 17px;min-height:232px}
+  #term{
+    margin:0;font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.75;
+    color:#cfd4dc;white-space:pre-wrap;word-break:break-word;
+  }
+  #term .p{color:#ff6a5f}        /* prompt $ */
+  #term .c{color:#eef0f3}        /* the command */
+  #term .ok{color:#5bbd7f}       /* success */
+  #term .a{color:#e5b34a}        /* ==> steps */
+  #term .m{color:#6b7280}        /* muted / bars */
+  #term .cur{
+    display:inline-block;width:8px;height:15px;vertical-align:-3px;
+    background:#ff6a5f;animation:blink 1.1s steps(1) infinite;
+  }
+  @keyframes blink{50%{opacity:0}}
+  .term-cap{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-3)}
+
   :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-  @media (prefers-reduced-motion:reduce){ *{transition:none !important;animation:none !important} }
+  @media (prefers-reduced-motion:reduce){
+    *{transition:none !important;animation:none !important}
+    .h-em{-webkit-text-fill-color:var(--accent);background:none}
+  }
 </style>
 <style>
   img{max-width:100%}
@@ -488,6 +570,7 @@
     <div class="wrap hero-grid">
       <div>
         <div class="eyebrow">
+          <span class="chip"><span class="pulse-dot"></span>ships in one line</span>
           <span class="fld">Self-hosted</span><span class="dot"></span>
           <span class="fld">AGPL-3.0</span><span class="dot"></span>
           <span class="fld">Flask &amp; MariaDB</span><span class="dot"></span>
@@ -522,28 +605,15 @@
         </div>
       </div>
 
-      <div class="label-stage">
-        <div class="label" aria-label="Example printed asset label">
-          <div class="label-strip"><span>PROPERTY OF</span><span>IT-VAULT</span></div>
-          <div class="label-main">
-            <div class="qr" id="qr"><div class="qr-fallback"></div></div>
-            <div>
-              <div class="label-id">AST-0142</div>
-              <div class="label-model">MacBook Pro 14&#8243;<br>M3 Pro / 18&nbsp;GB / 512&nbsp;GB</div>
-            </div>
+      <div class="term-stage">
+        <div class="term" aria-hidden="true">
+          <div class="term-bar">
+            <span class="td td-r"></span><span class="td td-y"></span><span class="td td-g"></span>
+            <i>itvault — install</i>
           </div>
-          <dl class="label-rows">
-            <div><dt>Serial</dt><dd>C02XK1YZQ6NV</dd></div>
-            <div><dt>Assigned</dt><dd>Priya Raghavan &middot; Finance</dd></div>
-            <div><dt>Status</dt><dd class="pill-out">Checked out &mdash; 2026-02-11</dd></div>
-            <div><dt>Warranty</dt><dd>2027-01-30</dd></div>
-          </dl>
+          <div class="term-body"><pre id="term"></pre></div>
         </div>
-        <p class="label-cap">
-          An example label at the default 50.8&nbsp;&times;&nbsp;50.8&nbsp;mm.
-          The QR is real &mdash; scan it and it opens the repository; on your
-          own labels it opens the asset.
-        </p>
+        <p class="term-cap"><span class="pulse-dot"></span> real output &mdash; this is the whole install</p>
       </div>
     </div>
   </section>
@@ -931,21 +1001,50 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
   </div>
 </footer>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
   (function () {
-    var REPO = 'https://github.com/shatheitguy/it-vault';
-
-    // A printed label's QR is black on white whatever the screen is doing, so
-    // these colours are deliberately literal rather than themed.
-    var host = document.getElementById('qr');
-    if (host && window.QRCode) {
-      host.innerHTML = '';
-      new QRCode(host, {
-        text: REPO, width: 88, height: 88,
-        colorDark: '#14161a', colorLight: '#ffffff',
-        correctLevel: QRCode.CorrectLevel.M
-      });
+    // ---- animated install terminal: types the command, then streams the
+    // output the real installer prints, then loops. Pure DOM, no library. ----
+    var term = document.getElementById('term');
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (term) {
+      var CMD = 'curl -fsSL itvault.sh | sh';
+      var OUT = [
+        ['a', '==> Pulling ghcr.io/shatheitguy/it-vault:latest'],
+        ['m', '    ############################## 100%'],
+        ['a', '==> Creating volumes + starting container'],
+        ['a', '==> Waiting for IT-Vault to come up'],
+        ['ok', '✓ IT-Vault is running'],
+        ['c', '  open http://localhost:5000'],
+        ['m', '  bring your own database — the wizard asks']
+      ];
+      var esc = function (s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;'); };
+      var line = function (cls, txt) {
+        return '<span class="' + cls + '">' + esc(txt) + '</span>\n';
+      };
+      function render(cmdShown, outCount, cursor) {
+        var html = line('p', '$ ').replace('\n','') +
+                   '<span class="c">' + esc(cmdShown) + '</span>' +
+                   (cursor === 'cmd' ? '<span class="cur"></span>' : '') + '\n';
+        for (var i = 0; i < outCount; i++) html += line(OUT[i][0], OUT[i][1]);
+        if (cursor === 'end') html += '<span class="cur"></span>';
+        term.innerHTML = html;
+      }
+      if (reduce) {
+        render(CMD, OUT.length, 'end');   // static final frame, no motion
+      } else {
+        var run = function () {
+          var i = 0, out = 0;
+          (function type() {
+            if (i <= CMD.length) { render(CMD.slice(0, i), 0, 'cmd'); i++; setTimeout(type, 45 + Math.random()*40); return; }
+            (function stream() {
+              if (out < OUT.length) { out++; render(CMD, out, 'end'); setTimeout(stream, out === 2 ? 700 : 520); return; }
+              setTimeout(run, 3800);   // hold, then loop
+            })();
+          })();
+        };
+        run();
+      }
     }
 
     var tabs = [
