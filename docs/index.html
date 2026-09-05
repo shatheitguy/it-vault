@@ -466,18 +466,6 @@
   body::after{
     content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
     background:
-<<<<<<< Updated upstream
-      radial-gradient(38vw 34vw at 20% 8%, var(--glow), transparent 60%),
-      radial-gradient(34vw 30vw at 88% 2%, var(--accent-soft), transparent 62%);
-    -webkit-mask-image:linear-gradient(180deg,#000 0%,#000 40%,transparent 75%);
-    mask-image:linear-gradient(180deg,#000 0%,#000 40%,transparent 75%);
-    animation:drift 22s ease-in-out infinite alternate;
-    will-change:transform;
-  }
-  @keyframes drift{
-    from{transform:translate3d(-2%, -1%, 0) scale(1)}
-    to  {transform:translate3d(3%, 2%, 0) scale(1.08)}
-=======
       radial-gradient(42vw 38vw at 18% 6%, var(--glow), transparent 60%),
       radial-gradient(38vw 34vw at 90% 0%, var(--accent-soft), transparent 62%),
       radial-gradient(30vw 26vw at 62% 30%, var(--accent-soft), transparent 66%);
@@ -490,7 +478,6 @@
     0%  {transform:translate3d(-3%, -1%, 0) scale(1)}
     50% {transform:translate3d(2%,  2%, 0) scale(1.06)}
     100%{transform:translate3d(4%, -2%, 0) scale(1.1)}
->>>>>>> Stashed changes
   }
 
   /* ---- gen-z touch: the accent clause runs a slow gradient sweep ---- */
