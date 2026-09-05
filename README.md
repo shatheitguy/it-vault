@@ -383,3 +383,13 @@ That last part is the difference between the AGPL and the ordinary GPL, and
 it's deliberate: IT-Vault is a web app, so "hosting it" is how it's used.
 
 Copyright (C) 2026 Sharqan Ahamed (Sha The IT Guy)
+
+## Author
+
+**Sharqan Ahamed** — *Sha The IT Guy*
+
+- 🌐 Website: [shatheitguy.in](https://shatheitguy.in)
+- 💻 More projects: [github.com/shatheitguy](https://github.com/shatheitguy)
+
+Built and maintained solo. If IT-Vault is useful to you, a ⭐ on the repo is
+appreciated.
