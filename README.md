@@ -3,12 +3,27 @@
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
 [![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/it-vault)
 [![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)
+[![Android APK](https://img.shields.io/badge/Android-download%20APK-red.svg?logo=android&logoColor=white)](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)
 
 A self-hosted IT asset & helpdesk manager: track assets, employees, checkouts,
 maintenance history, support tickets (with a public portal + a live wallboard
 monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
 built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
 for storage.
+
+## Android app
+
+A native Android companion app — assets, tickets, contracts and the directory on
+your phone, with **offline-first editing** that syncs when you're back online, QR /
+barcode scanning, and **built-in updates** (the app checks for new versions itself,
+no store required). It also picks up your server's own name and logo after login,
+so it wears your branding rather than the defaults.
+
+**[⬇ Download IT-Vault.apk](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)**
+
+Android will warn that the app is from an unknown developer — that's expected for
+any app installed outside the Play Store. Tap **More details → Install anyway**.
+Once installed, the app updates itself from **Settings → Check for updates**.
 
 ## Screenshots
 
