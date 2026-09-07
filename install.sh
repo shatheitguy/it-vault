@@ -4,13 +4,16 @@
 #   curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
 #
 # Starts IT-Vault as a Docker container and prints where to open it. If Docker
-# is missing it offers to install it for you.
+# is missing it offers to install it for you -- and if you'd rather not have
+# Docker at all, it offers to install IT-Vault straight on the host instead
+# (Python + waitress). Nothing dead-ends on declining Docker.
 #
 # It does NOT install a database: IT-Vault connects to whatever MariaDB/MySQL
 # you give it, so your database version, backups and retention stay yours. The
 # first-run wizard in the browser asks for the connection details.
 #
-# Flags: --port (5000), --tag (latest), --name (itvault), --yes, --dry-run.
+# Flags: --port (5000), --tag (latest), --name (itvault), --yes, --dry-run,
+#        --no-docker (install on the host, no Docker), --dir (install path).
 set -eu
 
 IMAGE="ghcr.io/shatheitguy/it-vault"
@@ -18,6 +21,8 @@ TAG="${ITVAULT_TAG:-latest}"
 NAME="${ITVAULT_NAME:-itvault}"
 PORT="${ITVAULT_PORT:-5000}"
 YES="${ITVAULT_YES:-}"
+NO_DOCKER="${ITVAULT_NO_DOCKER:-}"
+DIR="${ITVAULT_DIR:-$HOME/it-vault}"
 DRY=""
 
 while [ $# -gt 0 ]; do
@@ -27,6 +32,8 @@ while [ $# -gt 0 ]; do
         --name)    NAME="${2:?--name needs a value}"; shift 2 ;;
         --yes|-y)  YES=1; shift ;;
         --dry-run) DRY=1; shift ;;
+        --no-docker) NO_DOCKER=1; shift ;;
+        --dir)     DIR="${2:?--dir needs a value}"; shift 2 ;;
         -h|--help)
             # Prints the comment block at the top, so the help text and the
             # documentation can't drift apart. Only works when the script is
@@ -143,11 +150,72 @@ run() {
     fi
 }
 
+# IT-Vault is a Flask app, so it runs perfectly well straight on the host --
+# Docker is just the packaged route. This is the fallback for anyone who says
+# no to installing Docker: same app, run under waitress from a virtualenv.
+install_native() {
+    step "Installing IT-Vault without Docker (Python + waitress)"
+
+    PY=""
+    for c in python3 python; do
+        if command -v "$c" >/dev/null 2>&1; then
+            if "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)' 2>/dev/null; then
+                PY="$c"; break
+            fi
+        fi
+    done
+    [ -n "$PY" ] || die "Python 3.9+ is needed for a no-Docker install and wasn't found.
+    Install Python, then run this again with --no-docker:
+      https://www.python.org/downloads/"
+
+    if [ -n "$DRY" ]; then
+        say "    would install into: $DIR"
+        say "    would run: $PY -m venv .venv && .venv/bin/pip install -r requirements.txt"
+        say "    would start with: .venv/bin/python serve.py"
+        return 0
+    fi
+
+    command -v curl >/dev/null 2>&1 || die "curl is needed to download IT-Vault."
+
+    step "Downloading IT-Vault into $DIR"
+    mkdir -p "$DIR"
+    curl -fsSL https://github.com/shatheitguy/it-vault/archive/refs/heads/main.tar.gz         | tar xz -C "$DIR" --strip-components=1         || die "Couldn't download or unpack IT-Vault into $DIR."
+
+    step "Creating a virtualenv and installing dependencies"
+    ( cd "$DIR" && "$PY" -m venv .venv ) || die "Couldn't create a virtualenv in $DIR/.venv."
+    ( cd "$DIR" && .venv/bin/pip install --quiet --upgrade pip         && .venv/bin/pip install --quiet -r requirements.txt )         || die "Couldn't install the Python dependencies."
+
+    say ""
+    say "${G}IT-Vault is installed at${N} ${B}$DIR${N}"
+    say ""
+    say "It still needs a database -- any MariaDB 10.6+ / MySQL 8+. Point it at one"
+    say "with the DB_* environment variables, then start it:"
+    say ""
+    say "  ${B}cd $DIR${N}"
+    say "  ${B}export DB_HOST=127.0.0.1 DB_USER=itvault DB_PASS=your-password DB_NAME=itvault${N}"
+    say "  ${B}ITVAULT_PORT=$PORT .venv/bin/python serve.py${N}"
+    say ""
+    say "Then open ${B}http://localhost:$PORT${N} for the setup wizard."
+    say ""
+    say "No database yet? Start one in a line (needs Docker) or install MariaDB from"
+    say "your package manager -- see ${B}https://github.com/shatheitguy/it-vault#step-1--get-a-database${N}"
+}
+
+# Called wherever Docker is missing and the user declines to install it: offer
+# the no-Docker route rather than dead-ending on "install Docker yourself".
+offer_native_or_die() {
+    if ask "Install IT-Vault without Docker instead (Python on this machine)?"; then
+        install_native
+        exit 0
+    fi
+    die "$1"
+}
+
 install_docker() {
     os="$(uname -s)"
     case "$os" in
         Linux)
-            ask "Docker isn't installed. Install it now with Docker's official script?" || die \
+            ask "Docker isn't installed. Install it now with Docker's official script?" || offer_native_or_die \
 "Nothing was installed. Install Docker yourself and run this again:
       https://docs.docker.com/engine/install/
     Or re-run with --yes to install it unattended."
@@ -178,7 +246,7 @@ install_docker() {
             ;;
         Darwin)
             if command -v brew >/dev/null 2>&1; then
-                ask "Docker isn't installed. Install Docker Desktop with Homebrew?" || die \
+                ask "Docker isn't installed. Install Docker Desktop with Homebrew?" || offer_native_or_die \
 "Nothing was installed. Get Docker Desktop and run this again:
       https://docs.docker.com/desktop/install/mac-install/"
                 step "Installing Docker Desktop (brew install --cask docker)"
@@ -187,14 +255,14 @@ install_docker() {
                 open -a Docker || true
                 say "    First launch asks you to accept Docker's licence terms."
             else
-                die \
+                offer_native_or_die \
 "Docker isn't installed, and Homebrew isn't here to install it.
     Get Docker Desktop, open it once, then run this again:
       https://docs.docker.com/desktop/install/mac-install/"
             fi
             ;;
         *)
-            die \
+            offer_native_or_die \
 "Docker isn't installed, and this script doesn't know how to install it on
     $os. Install Docker, then run this again:
       https://docs.docker.com/get-docker/"
@@ -221,6 +289,12 @@ install_docker() {
 banner
 
 # ---- checks ----------------------------------------------------------
+
+# --no-docker / ITVAULT_NO_DOCKER: skip Docker entirely and run on the host.
+if [ -n "$NO_DOCKER" ]; then
+    install_native
+    exit 0
+fi
 
 if [ -n "$DRY" ]; then
     command -v docker >/dev/null 2>&1 \

@@ -33,7 +33,11 @@ $dry      = [bool]$env:ITVAULT_DRY
 
 function Step($m) { Write-Host "==> " -NoNewline -ForegroundColor White; Write-Host $m }
 function Warn($m) { Write-Host " !  $m" -ForegroundColor Yellow }
-function Die($m)  { Write-Host " X  $m" -ForegroundColor Red; exit 1 }
+# Piped through `irm | iex` this runs inside the caller's shell, so a bare
+# `exit` would close their window. Stop by throwing a sentinel instead.
+$ITV_STOP = '__ITVAULT_STOP__'
+function Stop-Uninstall { throw $ITV_STOP }
+function Die($m)  { Write-Host " X  $m" -ForegroundColor Red; throw $ITV_STOP }
 function Kept($m) { Write-Host "   . " -NoNewline -ForegroundColor Green; Write-Host $m }
 
 function Show-Banner {
@@ -68,6 +72,8 @@ function Invoke-Quiet {
     # still referenced elsewhere shouldn't abort the rest of the cleanup.
     & $Cmd[0] @($Cmd[1..($Cmd.Length - 1)]) 2>$null | Out-Null
 }
+
+function Invoke-ItVaultUninstall {
 
 Show-Banner
 
@@ -156,7 +162,7 @@ if ($LASTEXITCODE -eq 0 -or $dry) {
 if ($dry) {
     Write-Host ""
     Write-Host "(dry run -- nothing was changed)"
-    exit 0
+    Stop-Uninstall
 }
 
 # ---- what survived ---------------------------------------------------
@@ -178,3 +184,14 @@ Kept "Docker itself, and any other containers or images you run."
 Write-Host "     Uninstall Docker Desktop from Windows Settings > Apps if you"
 Write-Host "     no longer want it."
 Write-Host ""
+
+}
+
+# A sentinel throw means "stop, cleanly"; anything else is a real error. Either
+# way the caller's shell stays open.
+try { Invoke-ItVaultUninstall }
+catch {
+    if ($_.Exception.Message -ne $ITV_STOP) {
+        Write-Host " X  $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
