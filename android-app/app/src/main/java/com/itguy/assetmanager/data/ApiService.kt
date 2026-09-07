@@ -26,6 +26,10 @@ interface ApiService {
     @GET("api/dashboard")
     suspend fun dashboard(): Response<DashboardStats>
 
+    /** Per-deployment branding (app name, logo text, accent). Served without auth. */
+    @GET("api/branding")
+    suspend fun branding(): Response<Map<String, Any>>
+
     // ---- assets ----
     @GET("api/assets")
     suspend fun listAssets(@Query("q") q: String? = null, @Query("order") order: String? = null): Response<List<Asset>>
