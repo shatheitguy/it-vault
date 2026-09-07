@@ -38,8 +38,12 @@ import java.util.concurrent.TimeUnit
  */
 object AppUpdater {
 
-    // Update manifest, served over HTTPS (CDN-cached) from the project's GitHub Pages site.
-    private const val MANIFEST_URL = "https://shatheitguy.github.io/it-vault/app/latest.json"
+    // Update manifest, served over HTTPS. The Pages copy is CDN-cached and fast, but it
+    // can lag a fresh publish, so fall back to the same file straight from the repo.
+    private val MANIFEST_URLS = listOf(
+        "https://shatheitguy.github.io/it-vault/app/latest.json",
+        "https://raw.githubusercontent.com/shatheitguy/it-vault/main/docs/app/latest.json"
+    )
 
     // How often the silent launch check runs.
     private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000  // once per day
@@ -67,14 +71,35 @@ object AppUpdater {
         ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName ?: ""
     }.getOrDefault("")
 
+    /** Last failure reason, so the UI can say something truer than "check your connection". */
+    @Volatile private var lastError: String? = null
+
     private suspend fun fetch(): Manifest? = withContext(Dispatchers.IO) {
-        runCatching {
-            http.newCall(Request.Builder().url(MANIFEST_URL).build()).execute().use { resp ->
-                if (!resp.isSuccessful) return@use null
-                val body = resp.body?.string()?.takeIf { it.isNotBlank() } ?: return@use null
-                gson.fromJson(body, Manifest::class.java)
+        lastError = null
+        for (url in MANIFEST_URLS) {
+            val result = runCatching {
+                http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                    if (!resp.isSuccessful) {
+                        lastError = "update server returned HTTP ${resp.code}"
+                        return@use null
+                    }
+                    val body = resp.body?.string()?.takeIf { it.isNotBlank() }
+                    if (body == null) {
+                        lastError = "empty response from the update server"
+                        return@use null
+                    }
+                    gson.fromJson(body, Manifest::class.java)
+                }
             }
-        }.getOrNull()
+            val m = result.getOrElse { e ->
+                lastError = e.message ?: "network error"
+                null
+            }
+            // A manifest is only usable if it actually carries a version.
+            if (m != null && m.versionCode > 0) return@withContext m
+            if (m != null) lastError = "update manifest was malformed"
+        }
+        null
     }
 
     /** Silent daily check on launch; prompts only for a newer, non-skipped version. */
@@ -98,7 +123,7 @@ object AppUpdater {
             val m = fetch()
             when {
                 m == null ->
-                    onResult("Couldn't check for updates — check your connection and try again.")
+                    onResult("Couldn't check for updates (${lastError ?: "no response"}). Try again in a moment.")
                 m.versionCode > currentVersionCode(activity) -> {
                     onResult("Update available: v${m.versionName}")
                     if (!activity.isFinishing) showUpdateDialog(activity, m, manual = true)
