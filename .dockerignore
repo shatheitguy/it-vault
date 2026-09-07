@@ -22,8 +22,9 @@ ui_backup_20260901/
 android-app/
 *.apk
 
-# Agent/editor workspace
-.claude/
+# Hidden tool/editor state dirs (never needed at runtime)
+.*/
+!.github/
 
 # Local-machine dev tooling, not needed inside the container
 run_server.bat
