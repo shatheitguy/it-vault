@@ -51,6 +51,22 @@ object Prefs {
     val isLoggedIn: Boolean
         get() = serverUrl.isNotBlank() && apiKey.isNotBlank()
 
+    /** Branding pulled from the server after login, so the app wears the
+     *  deployment's own name/logo instead of the bundled IT-Vault defaults. */
+    var brandName: String
+        get() = prefs.getString("brand_name", "") ?: ""
+        set(v) = prefs.edit().putString("brand_name", v).apply()
+
+    /** Epoch millis of the last silent in-app update check (throttled to once a day). */
+    var lastUpdateCheck: Long
+        get() = prefs.getLong("last_update_check", 0L)
+        set(v) = prefs.edit().putLong("last_update_check", v).apply()
+
+    /** A versionCode the user chose to "Skip" so the launch prompt won't nag about it again. */
+    var skippedUpdateCode: Long
+        get() = prefs.getLong("skipped_update_code", 0L)
+        set(v) = prefs.edit().putLong("skipped_update_code", v).apply()
+
     /** "system" (default, follows the device setting), "light", or "dark". */
     var themeMode: String
         get() = prefs.getString("theme_mode", "system") ?: "system"
