@@ -75,6 +75,11 @@ you it worked. **No Docker? It offers to install it** — Docker's own script on
 Linux, Homebrew on macOS, winget on Windows — and waits for the engine to come
 up before carrying on. It asks first unless you pass `--yes`.
 
+**Don't want Docker?** Say no when it offers to install it and it will offer to
+install IT-Vault directly on the machine instead (Python + waitress in a
+virtualenv) -- or skip straight there with `--no-docker`. You bring your own
+database either way.
+
 It installs **IT-Vault only**. The database stays yours to choose, so the
 installer finishes by printing the MariaDB one-liner if you haven't got one.
 An existing IT-Vault container is started if stopped, and otherwise left
@@ -89,6 +94,8 @@ Options, as environment variables or flags:
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
 | `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
+| `--no-docker` / `$env:ITVAULT_NO_DOCKER` | skip Docker and install IT-Vault straight on the host (Python + waitress) |
+| `--dir` / `$env:ITVAULT_DIR` | where a no-Docker install lands, default `~/it-vault` |
 
 Piping a script from the internet into a shell is worth being fussy about.
 To read it first:

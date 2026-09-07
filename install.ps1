@@ -7,7 +7,11 @@
 #   powershell -NoProfile -c "irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex"
 #
 # Starts IT-Vault as a Docker container and prints where to open it. If Docker
-# is missing it offers to install Docker Desktop for you (via winget).
+# is missing it offers to install Docker Desktop for you (via winget) -- and if
+# you'd rather not have Docker at all, it offers to install IT-Vault straight
+# on Windows instead (Python + waitress). Nothing dead-ends on declining.
+#
+# Set $env:ITVAULT_NO_DOCKER = '1' to skip Docker entirely.
 #
 # It does NOT install a database: IT-Vault connects to whatever MariaDB/MySQL
 # you give it, so your database version, backups and retention stay yours. The
@@ -30,6 +34,8 @@ $name = if ($env:ITVAULT_NAME) { $env:ITVAULT_NAME } else { "itvault" }
 $port = if ($env:ITVAULT_PORT) { $env:ITVAULT_PORT } else { "5000" }
 $dry  = [bool]$env:ITVAULT_DRY
 $yes  = [bool]$env:ITVAULT_YES
+$noDocker = [bool]$env:ITVAULT_NO_DOCKER
+$dir  = if ($env:ITVAULT_DIR) { $env:ITVAULT_DIR } else { Join-Path $env:USERPROFILE "it-vault" }
 
 # Deliberately ASCII-only: Windows PowerShell 5.1 decodes a BOM-less UTF-8
 # script as the OEM codepage, so box-drawing characters would arrive as
@@ -53,7 +59,13 @@ Show-Banner
 
 function Step($m) { Write-Host "==> " -NoNewline -ForegroundColor White; Write-Host $m }
 function Warn($m) { Write-Host " !  $m" -ForegroundColor Yellow }
-function Die($m)  { Write-Host " X  $m" -ForegroundColor Red; exit 1 }
+# Piped through `irm | iex` this script runs *inside* the caller's shell, so a
+# bare `exit` would close their window. Everything that needs to stop throws
+# this sentinel instead, and the wrapper at the bottom turns it back into a
+# quiet return to the prompt.
+$ITV_STOP = '__ITVAULT_STOP__'
+function Stop-Install { throw $ITV_STOP }
+function Die($m)  { Write-Host " X  $m" -ForegroundColor Red; throw $ITV_STOP }
 
 function Invoke-Step {
     param([string[]]$Cmd)
@@ -107,23 +119,108 @@ function Confirm-Or-Exit($question) {
     try { $answer = Read-Host } catch { $answer = "" }
     if ($answer -notmatch '^(y|yes)$') {
         Write-Host ""
-        Write-Host "Nothing was installed. Two ways forward:"
+        Write-Host "Docker won't be installed."
+        Write-Host ""
+        Write-Host "IT-Vault can still run directly on Windows (Python + waitress),"
+        Write-Host "with no Docker at all."
+        Write-Host ""
+        Write-Host "Install it that way instead?" -NoNewline
+        Write-Host " [y/N] " -NoNewline -ForegroundColor Yellow
+        $native = ""
+        try { $native = Read-Host } catch { $native = "" }
+        if ($native -match '^(y|yes)$') {
+            Install-Native
+            Stop-Install
+        }
+        Write-Host ""
+        Write-Host "Nothing was installed. Ways forward:"
         Write-Host ""
         Write-Host "  Install Docker Desktop yourself, then run this again:"
         Write-Host "    https://docs.docker.com/desktop/install/windows-install/"
         Write-Host ""
-        Write-Host "  Or skip the asking with:  `$env:ITVAULT_YES = '1'"
+        Write-Host "  Or install without Docker:  `$env:ITVAULT_NO_DOCKER = '1'"
         Write-Host ""
-        exit 1
+        Stop-Install
     }
+}
+
+# IT-Vault is a Flask app, so Docker is only the packaged route -- it runs fine
+# straight on Windows. This is the fallback for anyone who declines Docker.
+function Install-Native {
+    Step "Installing IT-Vault without Docker (Python + waitress)"
+
+    $py = $null
+    foreach ($c in @("python", "python3", "py")) {
+        $cmd = Get-Command $c -ErrorAction SilentlyContinue
+        if ($cmd) {
+            $ok = & $c -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" 2>$null
+            if ($LASTEXITCODE -eq 0) { $py = $c; break }
+        }
+    }
+    if (-not $py) {
+        Die @"
+Python 3.9+ is needed for a no-Docker install and wasn't found.
+    Install Python, then run this again with:  `$env:ITVAULT_NO_DOCKER = '1'
+      https://www.python.org/downloads/
+"@
+    }
+
+    if ($dry) {
+        Write-Host "    would install into: $dir"
+        Write-Host "    would run: $py -m venv .venv; .venv\Scripts\pip install -r requirements.txt"
+        Write-Host "    would start with: .venv\Scripts\python serve.py"
+        return
+    }
+
+    Step "Downloading IT-Vault into $dir"
+    New-Item -ItemType Directory -Force -Path $dir | Out-Null
+    $zip = Join-Path $env:TEMP "it-vault-main.zip"
+    try {
+        Invoke-WebRequest -Uri "https://github.com/shatheitguy/it-vault/archive/refs/heads/main.zip" -OutFile $zip -UseBasicParsing
+        Expand-Archive -Path $zip -DestinationPath $env:TEMP -Force
+        Copy-Item -Path (Join-Path $env:TEMP "it-vault-main\*") -Destination $dir -Recurse -Force
+    } catch {
+        Die "Couldn't download or unpack IT-Vault into $dir. $($_.Exception.Message)"
+    }
+
+    Step "Creating a virtualenv and installing dependencies"
+    Push-Location $dir
+    try {
+        & $py -m venv .venv
+        if ($LASTEXITCODE -ne 0) { Die "Couldn't create a virtualenv in $dir\.venv." }
+        & ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
+        & ".venv\Scripts\pip.exe" install --quiet -r requirements.txt
+        if ($LASTEXITCODE -ne 0) { Die "Couldn't install the Python dependencies." }
+    } finally { Pop-Location }
+
+    Write-Host ""
+    Write-Host "IT-Vault is installed at " -NoNewline; Write-Host $dir -ForegroundColor Green
+    Write-Host ""
+    Write-Host "It still needs a database -- any MariaDB 10.6+ / MySQL 8+. Point it at one"
+    Write-Host "with the DB_* environment variables, then start it:"
+    Write-Host ""
+    Write-Host "  cd $dir" -ForegroundColor White
+    Write-Host "  `$env:DB_HOST='127.0.0.1'; `$env:DB_USER='itvault'; `$env:DB_PASS='your-password'; `$env:DB_NAME='itvault'" -ForegroundColor White
+    Write-Host "  `$env:ITVAULT_PORT='$port'; .venv\Scripts\python.exe serve.py" -ForegroundColor White
+    Write-Host ""
+    Write-Host "Then open http://localhost:$port for the setup wizard."
+    Write-Host ""
+    Write-Host "No database yet? See https://github.com/shatheitguy/it-vault#step-1--get-a-database"
 }
 
 function Install-DockerDesktop {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Warn "Docker isn't installed, and winget isn't available to install it."
+        Write-Host ""
+        Write-Host "Install IT-Vault without Docker instead (Python on this machine)?" -NoNewline
+        Write-Host " [y/N] " -NoNewline -ForegroundColor Yellow
+        $native = ""
+        try { $native = Read-Host } catch { $native = "" }
+        if ($native -match '^(y|yes)$') { Install-Native; Stop-Install }
         Die @"
-Docker isn't installed, and winget isn't available to install it for you.
-    Install Docker Desktop by hand, then run this again:
+Install Docker Desktop by hand, then run this again:
       https://docs.docker.com/desktop/install/windows-install/
+    Or install without Docker:  `$env:ITVAULT_NO_DOCKER = '1'
 "@
     }
 
@@ -183,7 +280,15 @@ Docker Desktop is installed, but its engine hasn't started within 3 minutes.
 "@
 }
 
+function Invoke-ItVaultInstall {
+
 # ---- checks ----------------------------------------------------------
+
+# ITVAULT_NO_DOCKER: skip Docker entirely and run straight on the host.
+if ($noDocker) {
+    Install-Native
+    Stop-Install
+}
 
 if (-not (Test-Docker)) {
     # A dry run is for reading the plan before trusting it, so it has to work
@@ -212,14 +317,14 @@ if (-not $dry) {
             Write-Host "                 then run this installer again"
             Write-Host "  See its logs:  docker logs -f $name"
             Write-Host ""
-            exit 0
+            Stop-Install
         }
         Step "Container '$name' exists but is $state -- starting it"
         Invoke-Step @("docker", "start", $name)
         Write-Host ""
         Write-Host "Started. Open http://localhost:$port" -ForegroundColor Green
         Write-Host ""
-        exit 0
+        Stop-Install
     }
 }
 
@@ -249,7 +354,7 @@ Invoke-Step @(
 if ($dry) {
     Write-Host ""
     Write-Host "(dry run -- nothing was changed)"
-    exit 0
+    Stop-Install
 }
 
 # Wait for the app to answer rather than claiming success the moment
@@ -305,3 +410,14 @@ Write-Host "  Logs:       docker logs -f $name"
 Write-Host "  Stop:       docker stop $name"
 Write-Host "  Uninstall:  docker rm -f $name     (volumes, and your database, are kept)"
 Write-Host ""
+
+}
+
+# Run it. A sentinel throw means "stop, cleanly" -- anything else is a real
+# error worth showing. Either way the caller's shell stays open.
+try { Invoke-ItVaultInstall }
+catch {
+    if ($_.Exception.Message -ne $ITV_STOP) {
+        Write-Host " X  $($_.Exception.Message)" -ForegroundColor Red
+    }
+}
