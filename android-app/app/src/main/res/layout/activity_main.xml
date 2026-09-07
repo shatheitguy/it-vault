@@ -30,15 +30,31 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
+
+        <com.google.android.material.bottomnavigation.BottomNavigationView
+            android:id="@+id/bottomNav"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/surface"
+            app:elevation="0dp"
+            app:itemIconTint="@null"
+            app:itemIconSize="26dp"
+            app:itemTextColor="@color/text"
+            app:labelVisibilityMode="labeled"
+            app:menu="@menu/bottom_nav_menu" />
     </LinearLayout>
 
     <com.google.android.material.navigation.NavigationView
         android:id="@+id/navView"
-        android:layout_width="wrap_content"
+        android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
         android:background="@color/surface"
         app:itemIconTint="@null"
+        app:itemIconSize="26dp"
+        app:itemHorizontalPadding="18dp"
+        app:itemVerticalPadding="8dp"
+        app:itemIconPadding="18dp"
         app:itemTextColor="@color/text"
         app:itemBackground="@drawable/nav_item_bg"
         app:menu="@menu/drawer_menu"

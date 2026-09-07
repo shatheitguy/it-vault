@@ -37,6 +37,22 @@ class SettingsFragment : Fragment() {
         b.exportXmlBtn.setOnClickListener {
             exportLauncher.launch(com.itguy.assetmanager.data.XmlExport.suggestedFileName())
         }
+
+        setupUpdates()
+    }
+
+    private fun setupUpdates() {
+        b.versionText.text =
+            "IT-Vault v${com.itguy.assetmanager.ui.update.AppUpdater.currentVersionName(requireContext())}"
+        b.checkUpdateBtn.setOnClickListener {
+            b.checkUpdateBtn.isEnabled = false
+            showMsg("Checking for updates…")
+            com.itguy.assetmanager.ui.update.AppUpdater.checkManual(requireActivity()) { msg ->
+                if (_b == null) return@checkManual
+                showMsg(msg)
+                b.checkUpdateBtn.isEnabled = true
+            }
+        }
     }
 
     /** SAF: the user picks where the .xml lands (Downloads, Drive, etc.). */
@@ -169,6 +185,8 @@ class SettingsFragment : Fragment() {
             .setPositiveButton("Continue") { _, _ ->
                 Prefs.clear()
                 ApiClient.reset()
+                // don't carry one deployment's name/logo over to the next server
+                com.itguy.assetmanager.data.Branding.clear(requireContext())
                 startActivity(Intent(requireContext(), LoginActivity::class.java))
                 requireActivity().finish()
             }

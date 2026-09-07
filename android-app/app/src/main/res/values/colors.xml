@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="bg">#F4F6FA</color>
+    <!-- Material 3 light palette (brand red accent kept) -->
+    <color name="bg">#F5F7FB</color>
     <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#EDF0F6</color>
     <color name="accent">#FF3B30</color>
     <color name="accent2">#C0392B</color>
-    <color name="text">#16202E</color>
-    <color name="muted">#5D6B82</color>
-    <color name="bar_track">#E4E8F0</color>
+    <color name="accent_container">#FFE3E0</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="text">#141B26</color>
+    <color name="muted">#5C6A80</color>
+    <color name="outline">#DCE1EA</color>
+    <color name="bar_track">#E6EAF1</color>
 </resources>

@@ -7,6 +7,11 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+# Signing material — NEVER commit. The whole keystore/ dir is excluded so that
+# backups and *.properties variants can't slip through on a suffix.
+keystore/
 keystore.properties
-keystore/*.keystore
+keystore.properties.*
+*.keystore
+*.jks
 *.apk
