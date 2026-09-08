@@ -13,7 +13,7 @@ function fmtMoney(v,cur){
 
 // --- i18n: applied to [data-i18n] elements + document.dir for ar ---
 const I18N={
-  en:{Home:'Home',Assets:'Assets',AddAsset:'Add Asset',ImportExcel:'Import Excel',ExportExcel:'Export Excel',AuditLog:'Audit Log',Tickets:'Tickets',Contracts:'Contracts',Locations:'Locations',Trash:'Trash',Customization:'Customization',NetworkScan:'Network Scan',BackupRestore:'Backup / Restore',Settings:'Settings',System:'System',Employees:'Employees',Save:'Save',Add:'Add',Edit:'Edit',Delete:'Delete',Search:'Search',Dashboard:'IT Guy - The Assets Manager'},
+  en:{Home:'Home',Assets:'Assets',AddAsset:'Add Asset',ImportExcel:'Import Excel',ExportExcel:'Export Excel',AuditLog:'Log',Tickets:'Tickets',Contracts:'Contracts',Locations:'Locations',Trash:'Trash',Customization:'Customization',NetworkScan:'Network Scan',BackupRestore:'Backup / Restore',Settings:'Settings',System:'System',Employees:'Employees',Save:'Save',Add:'Add',Edit:'Edit',Delete:'Delete',Search:'Search',Dashboard:'IT Guy - The Assets Manager'},
   ar:{Home:'الرئيسية',Assets:'الأصول',AddAsset:'إضافة أصل',ImportExcel:'استيراد إكسل',ExportExcel:'تصدير إكسل',AuditLog:'سجل التدقيق',Tickets:'التذاكر',Contracts:'العقود',Locations:'المواقع',Trash:'السلة',Customization:'التخصيص',NetworkScan:'فحص الشبكة',BackupRestore:'النسخ الاحتياطي',Settings:'الإعدادات',System:'النظام',Employees:'الموظفون',Save:'حفظ',Add:'إضافة',Edit:'تعديل',Delete:'حذف',Search:'بحث',Dashboard:'IT Guy // مصفوفة الأصول'},
   ta:{Home:'முகப்பு',Assets:'சொத்துகள்',AddAsset:'சொத்து சேர்',ImportExcel:'எக்செல் இறக்குமதி',ExportExcel:'எக்செல் ஏற்றுமதி',AuditLog:'தணிக்கை பதிவு',Tickets:'டிக்கெட்டுகள்',Contracts:'ஒப்பந்தங்கள்',Locations:'இடங்கள்',Trash:'குப்பை',Customization:'தனிப்பயனாக்கம்',NetworkScan:'பிணைய ஸ்கேன்',BackupRestore:'காப்புப்பு',Settings:'அமைப்புகள்',System:'கணினி',Employees:'ஊழியர்கள்',Save:'சேமி',Add:'சேர்',Edit:'திருத்து',Delete:'நீக்கு',Search:'தேடல்',Dashboard:'IT Guy // சொத்து மேட்ரிக்ஸ்'},
   fr:{Home:'Accueil',Assets:'Actifs',AddAsset:'Ajouter',ImportExcel:'Importer Excel',ExportExcel:'Exporter Excel',AuditLog:'Journal',Tickets:'Tickets',Contracts:'Contrats',Locations:'Emplacements',Trash:'Corbeille',Customization:'Personnalisation',NetworkScan:'Scan réseau',BackupRestore:'Sauvegarde',Settings:'Paramètres',System:'Système',Employees:'Employés',Save:'Enregistrer',Add:'Ajouter',Edit:'Modifier',Delete:'Supprimer',Search:'Rechercher',Dashboard:'IT Guy // Matrice'}
@@ -60,6 +60,63 @@ const TICKET_STATUSES=['Open','In Progress','Pending','Resolved','Closed'];
 const PRIORITIES=['Low','Normal','High','Urgent','Emergency'];
 const TICKET_CATEGORIES=['Hardware','Software','Network','Access/Permissions','Email/Communication','Printer','CCTV/Security','Other'];
 let assets=[],sortCol='',sortDir=1,groupBy='',expTimer=null,MY_ROLE=ROLE_VIEW;
+// Per-module rights straight from /api/me. A custom role can grant tickets
+// and nothing else, so the sidebar has to ask about the module rather than
+// guess from the role name.
+let MY_PERMS={};
+// Show only what this user can actually open. A custom role with tickets-only
+// access shouldn't see an Assets link that answers 403, and every user keeps
+// Settings because that is where their own account lives.
+function applyNavPermissions(){
+  const show=(id,on)=>{const el=document.getElementById(id); if(el)el.style.display=on?'':'none';};
+  const admin=MY_ROLE===ROLE_ADMIN;
+
+  // Main
+  show('navAssets',    canSee('assets'));
+  show('navContracts', canSee('contracts'));
+  show('navTickets',   canSee('tickets'));
+
+  // Records -- these are all views over assets/directory
+  show('navDirectory', canSee('directory'));
+  show('navCatalog',   canSee('assets'));
+  show('navTrash',     canSee('assets'));
+  show('navAudit',     admin);              // the log is an admin surface
+
+  // Tools
+  show('navScan',      canSee('assets'));
+  show('navBackup',    admin);
+
+  // Settings stays for everyone: My Account is in there. The page itself
+  // hides the sections a user has no rights to.
+  show('navSettings',  true);
+
+  // Asset-page actions follow the assets module, not the coarse role.
+  show('navAdd',    canWrite('assets'));
+  show('navImport', canWrite('assets'));
+  show('navExport', canSee('assets'));
+
+  // Group headings are noise when everything under them is hidden.
+  const groups=[
+    ['Records', ['navDirectory','navCatalog','navTrash','navAudit']],
+    ['Tools',   ['navScan','navBackup']],
+  ];
+  document.querySelectorAll('.nav-grp').forEach(g=>{
+    const hit=groups.find(([name])=>g.textContent.trim()===name);
+    if(!hit)return;
+    const any=hit[1].some(id=>{const el=document.getElementById(id);return el&&el.style.display!=='none';});
+    g.style.display=any?'':'none';
+  });
+
+  // If the landing page is one they can't see, move them somewhere they can.
+  if(!canSee('assets')&&document.getElementById('page-assets')&&
+     document.getElementById('page-assets').classList.contains('show')){
+    if(canSee('tickets'))showPage('page-tickets'); else showPage('page-dashboard');
+  }
+}
+
+function permOf(m){return (MY_PERMS&&MY_PERMS[m])||'none';}
+function canSee(m){return MY_ROLE===ROLE_ADMIN||permOf(m)!=='none';}
+function canWrite(m){return MY_ROLE===ROLE_ADMIN||permOf(m)==='write';}
 
 const TIMEOUT_MS=5*60*1000;
 let sessEnd=0;
@@ -2230,11 +2287,13 @@ async function openTicket(id){
 
     <div class="tksec"><h4>DESCRIPTION</h4><div class="tkdesc">${esc(t.description||'—')}</div></div>
 
+    <div class="tksec"><h4>HISTORY</h4><div class="tkhist" id="tkHistory"></div></div>
+
     <div class="tksec"><h4>REPLIES</h4>
       <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> · ${esc(rp.author_role)} · ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
     </div>
 
-    ${canEdit()?`
+    ${(MY_ROLE===ROLE_ADMIN)?`
     <div class="tksec tkedit"><h4>EDIT TICKET</h4>
       <div class="tkgrid">
         <label>STATUS
@@ -2281,6 +2340,7 @@ async function openTicket(id){
     </div>`:''}`;
   // "type another..." reveals a free-text box rather than throwing a prompt()
   // dialog at the user, so the typed value is visible before saving.
+  loadTicketHistory(id);
   const catSel=document.getElementById('tkeCategorySel');
   if(catSel){
     catSel.onchange=()=>{
@@ -2293,10 +2353,28 @@ async function openTicket(id){
   const delBtn=document.getElementById('tkDeleteBtn');
   if(delBtn)delBtn.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
   const saveBtn=document.getElementById('tkSaveBtn');
-  if(saveBtn)saveBtn.style.display=canEdit()?'':'none';
+  if(saveBtn)saveBtn.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
   document.getElementById('tkModal').classList.add('show');
 }
 window.openTicketById=(id)=>openTicket(id);
+// Field-change trail for a ticket, rendered like an asset's history: who
+// changed what, from what, when. Loaded after the panel renders so a slow
+// query never holds up the rest of the view.
+async function loadTicketHistory(id){
+  const box=document.getElementById('tkHistory');
+  if(!box)return;
+  box.innerHTML='<div class="muted">Loading…</div>';
+  const r=await api('/api/tickets/'+id+'/history');
+  if(!r||!r.ok){box.innerHTML='<div class="muted">History unavailable.</div>';return;}
+  const rows=await r.json();
+  if(!rows.length){box.innerHTML='<div class="muted">No changes recorded yet.</div>';return;}
+  box.innerHTML=rows.map(h=>`<div class="hrow">
+      <span class="hts">${esc(h.ts||'')}</span>
+      <span class="huser">${esc(h.user||'?')}</span>
+      <span class="hfield">${esc(h.field||'')}</span>
+      <span class="hval"><s>${esc(h.old_val||'—')}</s> &rarr; <b>${esc(h.new_val||'—')}</b></span>
+    </div>`).join('');
+}
 // Full ticket edit. The API already accepts every one of these fields on PUT;
 // the UI simply never offered them, so only status/priority could be changed.
 async function saveTicketEdits(){
@@ -2736,6 +2814,8 @@ window.repairDashStructure=repairDashStructure;
   const me=await fetch('/api/me').then(r=>r.json());
   if(!me.user){location.href='/'+(location.search||'');return;}
   MY_ROLE=me.role;
+  MY_PERMS=me.perms||{};
+  applyNavPermissions();
   window.sessionUser=me.user;
   {const dz=document.getElementById('navDangerZone'); if(dz)dz.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';}
   applyTheme(me.theme||'dark');

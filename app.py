@@ -46,6 +46,36 @@ except Exception:
 
 # ---- persistent DB config (itvault_config.json) ----
 # Lets you point the app at a different MariaDB container/server from the UI.
+# Uploaded branding belongs with the rest of the persistent state, not in the
+# image. Written to BASE it lived in the container's writable layer, so every
+# update -- which replaces the container -- silently wiped the logo and
+# letterhead. (default_logo.png stays in BASE: it ships with the image.)
+LOGO_PATH = os.path.join(DATA_DIR, "logo.png")
+LETTERHEAD_PATH = os.path.join(DATA_DIR, "letterhead.png")
+
+
+def _migrate_branding_to_data_dir():
+    """Move a logo/letterhead left in BASE by an older build into DATA_DIR.
+
+    Runs once, on the first start after upgrading, so an install that already
+    had branding keeps it instead of coming up blank.
+    """
+    if DATA_DIR == BASE:
+        return
+    import shutil
+    for name, dest in (("logo.png", LOGO_PATH), ("letterhead.png", LETTERHEAD_PATH)):
+        src = os.path.join(BASE, name)
+        try:
+            if (os.path.exists(src) and os.path.getsize(src) > 0
+                    and not (os.path.exists(dest) and os.path.getsize(dest) > 0)):
+                shutil.copy2(src, dest)
+                print(f"[itvault] migrated {name} into {DATA_DIR}", flush=True)
+        except Exception as e:
+            print(f"[itvault] could not migrate {name}: {e}", flush=True)
+
+
+_migrate_branding_to_data_dir()
+
 CONFIG_PATH = os.path.join(DATA_DIR, "itvault_config.json")
 def load_config():
     """An install with no config file lands on the first-run setup wizard,
@@ -530,6 +560,13 @@ def init_db():
         field VARCHAR(80), old_val TEXT, new_val TEXT,
         INDEX idx_hist (asset_id)
     )""")
+    # Per-ticket field trail, the same shape as History above so the ticket
+    # view can show "who changed what, when" exactly like an asset does.
+    cur.execute("""CREATE TABLE IF NOT EXISTS TicketHistory (
+        id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT, ts DATETIME, user VARCHAR(80),
+        field VARCHAR(80), old_val TEXT, new_val TEXT,
+        INDEX idx_tkhist (ticket_id)
+    )""")
     # GLPI-style: Contracts (warranty/vendor) and Locations (site tree)
     cur.execute("""CREATE TABLE IF NOT EXISTS Contracts (
         id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(200), vendor VARCHAR(160),
@@ -763,8 +800,8 @@ def init_db():
     cur.execute("SELECT COUNT(*) AS n FROM Settings")
     if cur.fetchone()["n"] == 0:
         cur.execute("INSERT INTO Settings (id, theme) VALUES (1, 'dark')")
-    if not os.path.exists(os.path.join(BASE, "logo.png")):
-        open(os.path.join(BASE, "logo.png"), "wb").close()  # placeholder
+    if not os.path.exists(LOGO_PATH):
+        open(LOGO_PATH, "wb").close()  # placeholder
     # Seed the first admin ONLY for an unattended install, i.e. one where the
     # password was supplied deliberately via the environment. Seeding
     # unconditionally meant a restart after a factory reset quietly recreated
@@ -1210,7 +1247,11 @@ def me():
     cur.execute("SELECT theme, ldap_server, ldap_domain, ldap_bind_user, ldap_base_dn, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, matrix_on, app_name, logo_text, logo, has_letterhead FROM Settings WHERE id=1")
     s = cur.fetchone() or {"theme":"dark"}
     c.close()
+    # The sidebar can only hide what it can't reach if it knows the actual
+    # per-module rights, so send them with the identity rather than making the
+    # UI infer access from the role name (which custom roles make impossible).
     return jsonify({"user": session["user"], "role": session["role"],
+                    "perms": _role_perms(session["role"]),
                     "display": row.get("display", ""), "email": row.get("email", ""),
                     "avatar": row.get("avatar", ""), "api_key": row.get("api_key", ""),
                     "last_login": row.get("last_login", ""),
@@ -2583,7 +2624,7 @@ def _save_letterhead(fileobj):
     data = fileobj.read()
     if not data:
         return False, "empty file"
-    dest = os.path.join(BASE, "letterhead.png")
+    dest = LETTERHEAD_PATH
     try:
         if fname.endswith(".pdf") or data[:4] == b"%PDF":
             import pymupdf
@@ -2604,9 +2645,9 @@ def _save_letterhead(fileobj):
 
 @app.route("/letterhead.png")
 def letterhead_file():
-    p = os.path.join(BASE, "letterhead.png")
+    p = LETTERHEAD_PATH
     if os.path.exists(p) and os.path.getsize(p) > 0:
-        return send_from_directory(BASE, "letterhead.png")
+        return send_from_directory(DATA_DIR, "letterhead.png")
     from flask import Response as _R
     return _R(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x05\x02\x00\x9d\xfd\xa4\x1e\x00\x00\x00\x00IEND\xaeB`\x82",
                     mimetype="image/png")
@@ -2708,14 +2749,14 @@ def settings():
             try:
                 data = logo.read()
                 cur.execute("UPDATE Settings SET logo=%s WHERE id=1", (data,))
-                with open(os.path.join(BASE, "logo.png"), "wb") as fp:
+                with open(LOGO_PATH, "wb") as fp:
                     fp.write(data)
             except Exception:
                 pass
         elif str(d.get("remove_logo", "")).lower() in ("1", "true"):
             cur.execute("UPDATE Settings SET logo=NULL WHERE id=1")
             try:
-                open(os.path.join(BASE, "logo.png"), "wb").close()
+                open(LOGO_PATH, "wb").close()
             except Exception:
                 pass
         if letterhead:
@@ -2728,7 +2769,7 @@ def settings():
         elif str(d.get("remove_letterhead", "")).lower() in ("1", "true"):
             cur.execute("UPDATE Settings SET has_letterhead=0 WHERE id=1")
             try:
-                open(os.path.join(BASE, "letterhead.png"), "wb").close()
+                open(LETTERHEAD_PATH, "wb").close()
             except Exception:
                 pass
         c.commit(); c.close()
@@ -3145,10 +3186,11 @@ def portal_status():
 def ticket_detail(ticket_id):
     if request.method != "GET" and not _module_write_allowed("tickets"):
         return jsonify({"error": "forbidden"}), 403
-    # Editing a ticket is ordinary work; destroying one along with its whole
-    # reply history is not, so deletion is admin-only regardless of module rights.
-    if request.method == "DELETE" and not _is_admin():
-        return jsonify({"error": "Only an admin can delete tickets"}), 403
+    # Changing a ticket's own fields, and deleting one outright, are both
+    # admin-only. Everyone with tickets access can still reply -- that route
+    # is separate -- so the queue keeps working without handing out edit rights.
+    if request.method in ("PUT", "DELETE") and not _is_admin():
+        return jsonify({"error": "Only an admin can modify or delete a ticket"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); t = cur.fetchone()
@@ -3169,6 +3211,22 @@ def ticket_detail(ticket_id):
         if fields:
             params.append(ticket_id)
             cur.execute("UPDATE Tickets SET "+", ".join(fields)+", updated_at=NOW() WHERE id=%s", params)
+        # One row per field that actually changed, so the ticket view can show
+        # the same "who changed what, when" trail an asset has. Compared against
+        # the pre-update snapshot, and only written when the value really moved.
+        who = session.get("user") or "?"
+        for fname in ["subject", "description", "priority", "status", "requester",
+                      "requester_email", "assignee", "asset_id", "due_date",
+                      "sla_hours", "category"]:
+            if fname not in d:
+                continue
+            was = "" if (before or {}).get(fname) is None else str((before or {}).get(fname))
+            now = "" if d[fname] is None else str(d[fname])
+            if was.strip() == now.strip():
+                continue
+            cur.execute("INSERT INTO TicketHistory (ticket_id, ts, user, field, old_val, new_val) "
+                        "VALUES (%s, NOW(), %s, %s, %s, %s)",
+                        [ticket_id, who, fname, was, now])
         c.commit(); c.close()
         # notify on assignment change
         new_assignee = d.get("assignee")
@@ -3190,6 +3248,17 @@ def ticket_detail(ticket_id):
     cur.execute("DELETE FROM Tickets WHERE id=%s", [ticket_id])
     cur.execute("DELETE FROM TicketReplies WHERE ticket_id=%s", [ticket_id])
     c.commit(); c.close(); return jsonify({"ok": True})
+
+@app.route("/api/tickets/<int:ticket_id>/history")
+@auth_required(module="tickets", level="read")
+def ticket_history(ticket_id):
+    """Same shape as /api/assets/<id>/history, so the UI renders it the same."""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT ts, user, field, old_val, new_val FROM TicketHistory "
+                "WHERE ticket_id=%s ORDER BY ts DESC", [ticket_id])
+    rows = cur.fetchall(); c.close()
+    return jsonify([{"ts": str(r["ts"]), "user": r["user"], "field": r["field"],
+                     "old_val": r["old_val"], "new_val": r["new_val"]} for r in rows])
 
 @app.route("/api/tickets/<int:ticket_id>/reply", methods=["POST"])
 # read, not write: a role with tickets='none' is correctly shut out, but
@@ -3271,15 +3340,15 @@ def upload_logo():
     data = f.read()
     if len(data) > 500 * 1024:
         return jsonify({"error": "logo too large (max 500KB)"}), 400
-    with open(os.path.join(BASE, "logo.png"), "wb") as fp:
+    with open(LOGO_PATH, "wb") as fp:
         fp.write(data)
     return jsonify({"ok": True, "logo": "/logo.png"})
 
 @app.route("/logo.png")
 def logo_file():
-    p = os.path.join(BASE, "logo.png")
+    p = LOGO_PATH
     if os.path.exists(p) and os.path.getsize(p) > 0:
-        return send_from_directory(BASE, "logo.png")
+        return send_from_directory(DATA_DIR, "logo.png")
     # no custom logo uploaded yet (fresh install, or right after a wipe) --
     # show the real IT-Vault shield mark instead of a blank/broken image,
     # until an admin uploads their own.
@@ -4399,7 +4468,7 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     # Stacking it inline was the earlier "not aligned" bug: at the story's
     # ~178mm content width, a full A4-shaped image renders ~252mm tall on its
     # own, swallowing almost the entire page before any real content starts.
-    letterhead_path = os.path.join(BASE, "letterhead.png")
+    letterhead_path = LETTERHEAD_PATH
     used_letterhead = os.path.exists(letterhead_path) and os.path.getsize(letterhead_path) > 0
 
     buf = io.BytesIO()
@@ -4412,7 +4481,7 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
 
     bn = brand_name()
     if not used_letterhead:
-        logo_path = os.path.join(BASE, "logo.png")
+        logo_path = LOGO_PATH
         if os.path.exists(logo_path) and os.path.getsize(logo_path) > 0:
             try:
                 from PIL import Image as PILImage
