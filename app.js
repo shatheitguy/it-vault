@@ -2300,87 +2300,100 @@ async function openTicket(id){
   const catList=TICKET_CATEGORIES.slice();
   const curCat=(t.category||'').trim();
   const catKnown=!curCat||catList.indexOf(curCat)>=0;
+  const isAdmin=MY_ROLE===ROLE_ADMIN;
+  const mayQueue=canWrite('tickets');   // status / priority / assignee
+  const ro=(label,value,extra='')=>`<div class="field2" ${extra}><label>${label}</label><input value="${esc(value==null?'':String(value))}" readonly disabled></div>`;
+  // Laid out with the same invbox / grid2 / field2 blocks as the asset form,
+  // so a ticket reads like every other record in the app. Nothing appears
+  // twice: whoever may change a field gets the input, everyone else the
+  // read-only copy of it.
   document.getElementById('tkDetail').innerHTML=`
-    <div class="tkmeta">
-      <div><b>Status</b><span class="tkchip st">${esc(t.status||'—')}</span></div>
-      <div><b>Priority</b><span class="prio ${t.priority}">${esc(t.priority||'—')}</span></div>
-      <div><b>Category</b><span>${esc(curCat||'—')}</span></div>
-      <div><b>Requester</b><span>${esc(t.requester||'—')}${t.requester_email?(' · '+esc(t.requester_email)):''}</span></div>
-      <div><b>Assignee</b><span>${esc(t.assignee||'— Unassigned —')}</span></div>
-      <div><b>Asset</b><span>${esc(t.asset_id||'—')}</span></div>
-      <div><b>Due</b><span>${esc((t.due_date||'').toString().slice(0,10)||'—')} · SLA ${esc(String(t.sla_hours||'—'))}h</span></div>
-      <div><b>Source</b><span>${esc(t.source||'Web')}</span></div>
-    </div>
-
-    <div class="tksec"><h4>DESCRIPTION</h4><div class="tkdesc">${esc(t.description||'—')}</div></div>
-
-    <div class="tksec"><h4>HISTORY</h4><div class="tkhist" id="tkHistory"></div></div>
-
-    <div class="tksec"><h4>REPLIES</h4>
-      <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> · ${esc(rp.author_role)} · ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
-    </div>
-
-    ${(MY_ROLE===ROLE_ADMIN)?`
-    <div class="tksec tkedit"><h4>EDIT TICKET</h4>
-      <div class="tkgrid">
-        <label>STATUS
+    ${mayQueue?`
+    <div class="invbox">
+      <label>QUEUE</label>
+      <div class="grid2">
+        <div class="field2"><label>Status</label>
           <select id="tkStatusUpd">${TICKET_STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
-        </label>
-        <label>PRIORITY
+        </div>
+        <div class="field2"><label>Priority</label>
           <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select>
-        </label>
-        <label>CATEGORY
-          <select id="tkeCategorySel">
-            <option value="">— none —</option>
-            ${catList.map(c=>`<option value="${esc(c)}" ${c===curCat?'selected':''}>${esc(c)}</option>`).join('')}
-            <option value="__custom" ${catKnown?'':'selected'}>＋ type another…</option>
-          </select>
-        </label>
-        <label>ASSIGNEE
-          <input id="tkeAssigneeShow" value="${esc(t.assignee||'')}" readonly title="Use ASSIGN TO IT above">
-        </label>
-        <label class="tkwide ${catKnown?'hide':''}" id="tkeCategoryWrap">CATEGORY (TYPED)
-          <input id="tkeCategory" value="${catKnown?'':esc(curCat)}" placeholder="e.g. Telephony">
-        </label>
-        <label class="tkwide">SUBJECT
-          <input id="tkeSubject" value="${esc(t.subject||'')}">
-        </label>
-        <label>REQUESTER
-          <input id="tkeRequester" value="${esc(t.requester||'')}">
-        </label>
-        <label>REQUESTER EMAIL
-          <input id="tkeRequesterEmail" type="email" value="${esc(t.requester_email||'')}">
-        </label>
-        <label>ASSET ID
-          <input id="tkeAssetId" value="${esc(t.asset_id||'')}">
-        </label>
-        <label>DUE DATE
-          <input id="tkeDueDate" type="date" value="${esc((t.due_date||'').toString().slice(0,10))}">
-        </label>
-        <label>SLA HOURS
-          <input id="tkeSlaHours" type="number" min="1" value="${esc(String(t.sla_hours||''))}">
-        </label>
-        <label class="tkwide">DESCRIPTION
-          <textarea id="tkeDescription" rows="4">${esc(t.description||'')}</textarea>
-        </label>
+        </div>
       </div>
-    </div>`:''}`;
-  // "type another..." reveals a free-text box rather than throwing a prompt()
-  // dialog at the user, so the typed value is visible before saving.
+    </div>`:''}
+
+    <div class="invbox">
+      <label>TICKET DETAILS${isAdmin?'':' <span class="muted" style="font-weight:400">(only an admin can change these)</span>'}</label>
+      <div class="grid2">
+        ${isAdmin?`
+        <div class="field2" style="grid-column:1/-1"><label>Subject</label>
+          <input id="tkeSubject" value="${esc(t.subject||'')}">
+        </div>
+        <div class="field2"><label>Category</label>
+          <select id="tkeCategorySel">
+            <option value="">-- none --</option>
+            ${catList.map(c=>`<option value="${esc(c)}" ${c===curCat?'selected':''}>${esc(c)}</option>`).join('')}
+            <option value="__custom" ${catKnown?'':'selected'}>+ type another...</option>
+          </select>
+        </div>
+        <div class="field2" id="tkeCategoryWrap" ${catKnown?'style="display:none"':''}><label>Category (typed)</label>
+          <input id="tkeCategory" value="${catKnown?'':esc(curCat)}" placeholder="e.g. Telephony">
+        </div>
+        <div class="field2"><label>Requester</label><input id="tkeRequester" value="${esc(t.requester||'')}"></div>
+        <div class="field2"><label>Requester Email</label><input id="tkeRequesterEmail" type="email" value="${esc(t.requester_email||'')}"></div>
+        <div class="field2"><label>Asset ID</label><input id="tkeAssetId" value="${esc(t.asset_id||'')}"></div>
+        <div class="field2"><label>Due Date</label><input id="tkeDueDate" type="date" value="${esc((t.due_date||'').toString().slice(0,10))}"></div>
+        <div class="field2"><label>SLA Hours</label><input id="tkeSlaHours" type="number" min="1" value="${esc(String(t.sla_hours||''))}"></div>`:`
+        ${ro('Subject',t.subject||'-','style="grid-column:1/-1"')}
+        ${mayQueue?'':ro('Status',t.status||'-')}
+        ${mayQueue?'':ro('Priority',t.priority||'-')}
+        ${ro('Category',curCat||'-')}
+        ${ro('Requester',t.requester||'-')}
+        ${ro('Requester Email',t.requester_email||'-')}
+        ${ro('Asset ID',t.asset_id||'-')}
+        ${ro('Due Date',(t.due_date||'').toString().slice(0,10)||'-')}
+        ${ro('SLA Hours',t.sla_hours||'-')}`}
+        <div class="field2"><label>Assignee <span class="muted" style="font-weight:400">(use ASSIGN TO IT above)</span></label>
+          <input value="${esc(t.assignee||'')}" placeholder="-- unassigned --" readonly disabled></div>
+        <div class="field2"><label>Source</label><input value="${esc(t.source||'Web')}" readonly disabled></div>
+      </div>
+    </div>
+
+    <div class="invbox">
+      <label>DESCRIPTION</label>
+      ${isAdmin?`<textarea id="tkeDescription" rows="4">${esc(t.description||'')}</textarea>`
+               :`<textarea rows="4" readonly disabled>${esc(t.description||'')}</textarea>`}
+    </div>
+
+    <div class="invbox">
+      <label>CHANGE HISTORY</label>
+      <div class="tkhist" id="tkHistory"></div>
+    </div>
+
+    <div class="invbox">
+      <label>REPLIES</label>
+      <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> &middot; ${esc(rp.author_role)} &middot; ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
+    </div>`;
   loadTicketHistory(id);
+  // "type another..." reveals a text box rather than throwing a prompt() at
+  // the user, so the typed value is visible before it is saved.
   const catSel=document.getElementById('tkeCategorySel');
   if(catSel){
     catSel.onchange=()=>{
       const wrap=document.getElementById('tkeCategoryWrap');
       const custom=catSel.value==='__custom';
-      if(wrap)wrap.classList.toggle('hide',!custom);
+      if(wrap)wrap.style.display=custom?'':'none';
       if(custom){const i=document.getElementById('tkeCategory'); if(i)i.focus();}
     };
   }
+  // Assigning is queue work, so a tickets-read user shouldn't be shown a
+  // control the server would only refuse.
+  const assignBar=document.querySelector('#tkModal .assignbar');
+  if(assignBar)assignBar.style.display=mayQueue?'':'none';
   const delBtn=document.getElementById('tkDeleteBtn');
-  if(delBtn)delBtn.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+  if(delBtn)delBtn.style.display=isAdmin?'':'none';
+  // Read-write on tickets may move the queue, so they need SAVE CHANGES too.
   const saveBtn=document.getElementById('tkSaveBtn');
-  if(saveBtn)saveBtn.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+  if(saveBtn)saveBtn.style.display=mayQueue?'':'none';
   document.getElementById('tkModal').classList.add('show');
 }
 window.openTicketById=(id)=>openTicket(id);
@@ -2415,7 +2428,10 @@ async function saveTicketEdits(){
   const sla=val('tkeSlaHours'); if(sla)payload.sla_hours=parseInt(sla,10);
   const st=document.getElementById('tkStatusUpd'), pr=document.getElementById('tkPrioUpd');
   if(st)payload.status=st.value; if(pr)payload.priority=pr.value;
-  if(!payload.subject){toast('✕ SUBJECT REQUIRED');return;}
+  // The subject box only exists for an admin; a tickets-write user is saving
+  // status and priority on their own, so don't demand a field they can't see.
+  if(document.getElementById('tkeSubject')&&!payload.subject){toast('✕ SUBJECT REQUIRED');return;}
+  if(!Object.keys(payload).length){toast('✕ NOTHING TO SAVE');return;}
   const r=await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
   if(r&&r.ok){toast('✓ TICKET SAVED');openTicket(curTicketId);await loadTickets();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'save failed'));}
