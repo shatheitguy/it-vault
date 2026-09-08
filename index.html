@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260904b">
+<link rel="stylesheet" href="/style.css?v=20260908a">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -223,24 +223,25 @@
     <!-- New Ticket modal (styled like Add Asset) -->
     <div class="modal" id="tkFormModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
       <h3 id="tkFormTitle">NEW TICKET</h3>
-      <div id="tkFormFields"></div>
+      
+  <div class="modal-scroll"><div id="tkFormFields"></div>
+  </div>
+  
       <div class="m-actions"><button class="btn ghost" id="tkFormCancel">CANCEL</button><button class="btn" id="tkFormSave">CREATE TICKET</button></div>
     </div></div>
 
     <div class="modal" id="tkModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
       <h3 id="tkModalTitle">TICKET</h3>
-      <div class="assignbar">
-        <label>ASSIGN TO IT</label>
-        <select id="tkAssignee"><option value="">— Unassigned —</option></select>
-        <button class="btn sm" id="tkAssignBtn">ASSIGN</button>
-        <span id="tkAssignMsg" class="muted" style="margin-left:6px"></span>
-      </div>
-      <div id="tkDetail"></div>
-      <div class="replybox">
-        <label>REPLY / UPDATE</label>
-        <textarea id="tkReply" rows="3" placeholder="Type a reply…"></textarea>
-        <button class="btn" id="tkReplyBtn">SEND REPLY</button>
-      </div>
+      
+  <div class="modal-scroll">
+        <div id="tkDetail"></div>
+        <div class="replybox">
+          <label>REPLY / UPDATE</label>
+          <textarea id="tkReply" rows="3" placeholder="Type a reply…"></textarea>
+          <button class="btn" id="tkReplyBtn">SEND REPLY</button>
+        </div>
+  </div>
+  
       <div class="m-actions">
         <button class="btn ghost" id="tkModalClose">CLOSE</button>
         <button class="btn" id="tkSaveBtn">SAVE CHANGES</button>
@@ -754,19 +755,22 @@
 <!-- Camera scan modal (QR / barcode -> Add Asset form) -->
 <div class="modal" id="camScanModal"><div class="modal-box" style="width:min(480px,94vw);max-width:480px">
   <h3>SCAN QR / SERIAL NUMBER</h3>
-  <p class="sec-hint" id="camScanHint">Point the camera at a QR code or serial-number barcode. Detected values fill the asset form automatically -- nothing is saved until you hit COMMIT.</p>
-  <div class="camscan-view">
-    <video id="camScanVideo" autoplay playsinline muted></video>
+  
+  <div class="modal-scroll"><p class="sec-hint" id="camScanHint">Point the camera at a QR code or serial-number barcode. Detected values fill the asset form automatically -- nothing is saved until you hit COMMIT.</p>
+    <div class="camscan-view">
+      <video id="camScanVideo" autoplay playsinline muted></video>
+    </div>
+    <canvas id="camScanCanvas" style="display:none"></canvas>
+    <div class="camscan-status" id="camScanStatus"></div>
+    <div class="camscan-upload-row">
+      <button class="btn sm" id="camScanTextBtn" type="button">📄 SCAN TEXT ON LABEL (S/N, Model…)</button>
+    </div>
+    <div class="camscan-upload-row">
+      <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
+      <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
+    </div>
   </div>
-  <canvas id="camScanCanvas" style="display:none"></canvas>
-  <div class="camscan-status" id="camScanStatus"></div>
-  <div class="camscan-upload-row">
-    <button class="btn sm" id="camScanTextBtn" type="button">📄 SCAN TEXT ON LABEL (S/N, Model…)</button>
-  </div>
-  <div class="camscan-upload-row">
-    <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
-    <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
-  </div>
+  
   <div class="m-actions"><button class="btn ghost" id="camScanCancel" type="button">CLOSE</button></div>
 </div></div>
 
@@ -810,21 +814,27 @@
 <!-- Employee modal -->
 <div class="modal" id="empModal"><div class="modal-box">
   <h3 id="empModalTitle">ADD EMPLOYEE</h3>
-  <div class="grid2">
-    <div class="field2"><label>Emp ID</label><input id="e_EmpCode" placeholder="e.g. 1024 or STAFF-045"></div>
-    <div class="field2"><label>Username</label><input id="e_EmployeeID" placeholder="AD/login username, or any unique ID"></div>
-    <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
-    <div class="field2"><label>Department</label><select id="e_Department"><option value="">-- select department --</option></select></div>
-    <div class="field2"><label>Designation</label><select id="e_Designation"><option value="">-- select designation --</option></select></div>
-    <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
+  
+  <div class="modal-scroll"><div class="grid2">
+      <div class="field2"><label>Emp ID</label><input id="e_EmpCode" placeholder="e.g. 1024 or STAFF-045"></div>
+      <div class="field2"><label>Username</label><input id="e_EmployeeID" placeholder="AD/login username, or any unique ID"></div>
+      <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
+      <div class="field2"><label>Department</label><select id="e_Department"><option value="">-- select department --</option></select></div>
+      <div class="field2"><label>Designation</label><select id="e_Designation"><option value="">-- select designation --</option></select></div>
+      <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
+    </div>
   </div>
+  
   <div class="m-actions"><button class="btn ghost" id="empCancel">CANCEL</button><button class="btn" id="empSave">SAVE</button></div>
 </div></div>
 
 <!-- LDAP import modal -->
 <div class="modal" id="ldapModal"><div class="modal-box" style="width:min(520px,94vw);max-width:520px">
   <h3>SYNC EMPLOYEES FROM ACTIVE DIRECTORY</h3>
-  <p class="muted" style="margin-top:0">Pulls all users from your Domain Controller and keeps the employee list in sync automatically (every 30 min).</p>
+  
+  <div class="modal-scroll"><p class="muted" style="margin-top:0">Pulls all users from your Domain Controller and keeps the employee list in sync automatically (every 30 min).</p>
+  </div>
+  
   <div class="m-actions" style="justify-content:flex-start">
     <button class="btn" id="ldapSyncBtn">⇩ SYNC FROM AD NOW</button>
     <button class="btn ghost" id="ldapCancel">CLOSE</button>
@@ -835,10 +845,13 @@
 <!-- Users modal -->
 <div class="modal" id="usersModal"><div class="modal-box">
   <h3>USER MANAGEMENT</h3>
-  <div class="toolbar" style="padding:0 0 12px">
-    <button class="btn" id="addUserBtn">＋ ADD USER</button>
-    <button class="btn ghost" id="manageRolesBtn" type="button">🛡 MANAGE ROLES</button>
+  
+  <div class="modal-scroll"><div class="toolbar" style="padding:0 0 12px">
+      <button class="btn" id="addUserBtn">＋ ADD USER</button>
+      <button class="btn ghost" id="manageRolesBtn" type="button">🛡 MANAGE ROLES</button>
+    </div>
   </div>
+  
   <table id="usersGrid" style="font-size:13px"><thead><tr><th>USER</th><th>ROLE</th><th>DISPLAY</th><th>ACTIONS</th></tr></thead><tbody id="usersBody"></tbody></table>
   <div class="m-actions"><button class="btn ghost" id="usersClose">CLOSE</button></div>
 </div></div>
@@ -872,13 +885,16 @@
 <!-- User edit modal -->
 <div class="modal" id="userModal"><div class="modal-box">
   <h3 id="userModalTitle">ADD USER</h3>
-  <div class="grid2">
-    <div class="field2"><label>Username</label><input id="u_username"></div>
-    <div class="field2"><label>Display name</label><input id="u_display"></div>
-    <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com"></div>
-    <div class="field2"><label>Role</label><select id="u_role"><option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option></select></div>
-    <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="set / change"></div>
+  
+  <div class="modal-scroll"><div class="grid2">
+      <div class="field2"><label>Username</label><input id="u_username"></div>
+      <div class="field2"><label>Display name</label><input id="u_display"></div>
+      <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com"></div>
+      <div class="field2"><label>Role</label><select id="u_role"><option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option></select></div>
+      <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="set / change"></div>
+    </div>
   </div>
+  
   <div class="m-actions"><button class="btn ghost" id="userCancel">CANCEL</button><button class="btn" id="userSave">SAVE</button></div>
 </div></div>
 
@@ -888,23 +904,29 @@
 <!-- Checkout modal -->
 <div class="modal" id="checkoutModal"><div class="modal-box">
   <h3>CHECK OUT ASSET</h3>
-  <div class="field2"><label>Assign to user</label><select id="coUser"></select></div>
-  <div class="field2"><label>Signed Date</label><input id="coSignedDate" type="date"></div>
-  <div class="field2"><label>Expected return</label><input id="coExpected" type="date"></div>
-  <div class="field2"><label>Note</label><input id="coNote" placeholder="e.g. event loan"></div>
+  
+  <div class="modal-scroll"><div class="field2"><label>Assign to user</label><select id="coUser"></select></div>
+    <div class="field2"><label>Signed Date</label><input id="coSignedDate" type="date"></div>
+    <div class="field2"><label>Expected return</label><input id="coExpected" type="date"></div>
+    <div class="field2"><label>Note</label><input id="coNote" placeholder="e.g. event loan"></div>
+  </div>
+  
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('checkoutModal').classList.remove('show')">CANCEL</button><button class="btn" id="coSave">CHECK OUT</button></div>
 </div></div>
 
 <!-- Maintenance modal -->
 <div class="modal" id="maintModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
   <h3>MAINTENANCE / REPAIR LOG</h3>
-  <div class="tablewrap"><table class="dtable"><thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Note</th><th></th></tr></thead><tbody id="maintList"></tbody></table></div>
-  <div class="grid2" style="margin-top:12px">
-    <div class="field2"><label>Date</label><input id="mDate" type="date"></div>
-    <div class="field2"><label>Type</label><input id="mType" placeholder="Repair / Upgrade"></div>
-    <div class="field2"><label>Cost</label><input id="mCost" type="number" step="0.01" placeholder="0.00"></div>
-    <div class="field2"><label>Note</label><input id="mNote" placeholder="what was done"></div>
+  
+  <div class="modal-scroll"><div class="tablewrap"><table class="dtable"><thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Note</th><th></th></tr></thead><tbody id="maintList"></tbody></table></div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="field2"><label>Date</label><input id="mDate" type="date"></div>
+      <div class="field2"><label>Type</label><input id="mType" placeholder="Repair / Upgrade"></div>
+      <div class="field2"><label>Cost</label><input id="mCost" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="field2"><label>Note</label><input id="mNote" placeholder="what was done"></div>
+    </div>
   </div>
+  
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('maintModal').classList.remove('show')">CLOSE</button><button class="btn" id="mAdd">ADD RECORD</button></div>
 </div></div>
 
@@ -928,20 +950,23 @@
 <!-- Network scan modal -->
 <div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
   <h3>NETWORK SCAN — LOCAL DEVICES</h3>
-  <p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep of any subnet with Deep scan. Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
-  <div class="invbox">
-    <label>SCAN OPTIONS</label>
-    <div class="scanrow">
-      <button class="btn" id="scanBtn">⚡ SCAN</button>
-      <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan</span></label>
+  
+  <div class="modal-scroll"><p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep of any subnet with Deep scan. Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
+    <div class="invbox">
+      <label>SCAN OPTIONS</label>
+      <div class="scanrow">
+        <button class="btn" id="scanBtn">⚡ SCAN</button>
+        <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan</span></label>
+      </div>
+      <div class="scan-prefix-row" id="scanPrefixRow" style="display:none">
+        <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22">
+      </div>
+      <p class="muted scan-hint">Deep scan needs a subnet in CIDR form (up to /20, 4096 addresses) and pings every address in it; without it, Scan just reads the ARP table (fast, no subnet needed).</p>
     </div>
-    <div class="scan-prefix-row" id="scanPrefixRow" style="display:none">
-      <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22">
-    </div>
-    <p class="muted scan-hint">Deep scan needs a subnet in CIDR form (up to /20, 4096 addresses) and pings every address in it; without it, Scan just reads the ARP table (fast, no subnet needed).</p>
+    <div id="scanStatus" class="muted scan-status"></div>
+    <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
   </div>
-  <div id="scanStatus" class="muted scan-status"></div>
-  <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
+  
   <div class="m-actions">
     <button class="btn ghost" onclick="document.getElementById('scanModal').classList.remove('show')">CLOSE</button>
   </div>
@@ -1006,16 +1031,19 @@
 <!-- Signature link modal -->
 <div class="modal" id="signModal"><div class="modal-box" style="width:min(500px,94vw);max-width:500px">
   <h3>APPROVAL SIGNATURE LINK</h3>
-  <p>Send this link to the approver. They can sign the asset digitally. Link expires in 7 days.</p>
-  <div class="field2"><label>Signature Link</label><input id="signUrl" readonly style="font-family:var(--mono);font-size:12.5px"></div>
-  <div class="m-actions" style="justify-content:flex-start">
-    <button class="btn" id="signCopyBtn" type="button">📋 COPY LINK</button>
-    <button class="btn ghost" id="signShareBtn" type="button" style="display:none">🔗 SHARE</button>
+  
+  <div class="modal-scroll"><p>Send this link to the approver. They can sign the asset digitally. Link expires in 7 days.</p>
+    <div class="field2"><label>Signature Link</label><input id="signUrl" readonly style="font-family:var(--mono);font-size:12.5px"></div>
+    <div class="m-actions" style="justify-content:flex-start">
+      <button class="btn" id="signCopyBtn" type="button">📋 COPY LINK</button>
+      <button class="btn ghost" id="signShareBtn" type="button" style="display:none">🔗 SHARE</button>
+    </div>
   </div>
+  
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=202609041d"></script>
+<script src="/app.js?nocache=20260908a"></script>
 </body>
 </html>
