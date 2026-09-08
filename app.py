@@ -294,6 +294,19 @@ def _role_perms(role_name):
             "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none",
             "settings": r.get("perm_settings") or "none"}
 
+def _is_admin():
+    """True only for the admin role, for actions that must never fall to an
+    editor -- deletion, chiefly. Mirrors _module_write_allowed()'s
+    session-or-API-key resolution so it holds for the mobile app too."""
+    urole = session.get("role")
+    if not session.get("user"):
+        row = _resolve_session_from_api_key()
+        if not row:
+            return False
+        urole = row["role"]
+    return urole == ROLE_ADMIN
+
+
 def _module_write_allowed(module):
     """For routes that combine GET (read) with POST/PUT/DELETE (write) under
     one decorator -- call this inside the view for the write branches."""
@@ -3052,6 +3065,10 @@ def portal_status():
 def ticket_detail(ticket_id):
     if request.method != "GET" and not _module_write_allowed("tickets"):
         return jsonify({"error": "forbidden"}), 403
+    # Editing a ticket is ordinary work; destroying one along with its whole
+    # reply history is not, so deletion is admin-only regardless of module rights.
+    if request.method == "DELETE" and not _is_admin():
+        return jsonify({"error": "Only an admin can delete tickets"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); t = cur.fetchone()
@@ -4553,7 +4570,10 @@ def _is_real_host(ip, mac):
     224-239) and broadcast entries. Those are not devices and must never show
     up as something you can add as an asset.
     """
-    if mac.lower() in ("ff-ff-ff-ff-ff-ff", "00-00-00-00-00-00"):
+    # Compare on hex digits only, so this holds whichever separator the
+    # platform's neighbour table used (dashes on Windows, colons elsewhere).
+    bare = re.sub(r"[^0-9A-Fa-f]", "", mac or "").lower()
+    if bare in ("ffffffffffff", "000000000000"):
         return False
     parts = ip.split(".")
     if len(parts) != 4:
@@ -4575,23 +4595,84 @@ def _is_real_host(ip, mac):
     return True
 
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def _norm_mac(mac):
+    """One canonical MAC form (aa:bb:cc:dd:ee:ff).
+
+    Windows `arp -a` prints dashes; Linux/macOS and `ip neigh` print colons.
+    Normalising here keeps the broadcast filter and the OUI vendor lookup
+    working identically on every platform.
+    """
+    hexes = re.sub(r"[^0-9A-Fa-f]", "", mac or "").lower()
+    if len(hexes) != 12:
+        return ""
+    return ":".join(hexes[i:i + 2] for i in range(0, 12, 2))
+
+
 def _arp_devices():
-    out = subprocess.run(["arp", "-a"], capture_output=True, text=True).stdout
+    """The neighbour table, on whichever platform we are running.
+
+    The formats differ too much for one regex:
+      Windows  `arp -a`    ->  192.168.0.7    aa-bb-cc-dd-ee-ff   dynamic
+      Linux    `ip neigh`  ->  192.168.0.7 dev eth0 lladdr aa:bb:... REACHABLE
+      Linux    `arp -an`   ->  ? (192.168.0.7) at aa:bb:... [ether] on eth0
+      macOS    `arp -an`   ->  ? (192.168.0.7) at aa:bb:... on en0 ifscope
+    """
     devs = {}
-    for m in re.finditer(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f-]{17})\s+(\w+)", out, re.I):
-        ip, mac, typ = m.group(1), m.group(2), m.group(3)
+
+    def _add(ip, mac, typ):
+        mac = _norm_mac(mac)
         if _is_real_host(ip, mac):
             devs[ip] = {"ip": ip, "mac": mac, "type": typ}
+
+    def _run(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout or ""
+        except Exception:
+            return ""
+
+    if _IS_WINDOWS:
+        out = _run(["arp", "-a"])
+        for m in re.finditer(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F-]{17})\s+(\w+)", out):
+            _add(m.group(1), m.group(2), m.group(3))
+        return devs
+
+    # Linux first: `ip` exists on modern distros even where net-tools (which
+    # provides `arp`) does not -- including slim container images.
+    out = _run(["ip", "neigh", "show"])
+    for m in re.finditer(
+            r"(\d+\.\d+\.\d+\.\d+)\s+.*?lladdr\s+([0-9a-fA-F:]{17})(?:\s+(\w+))?", out):
+        _add(m.group(1), m.group(2), (m.group(3) or "neighbour").lower())
+    if devs:
+        return devs
+
+    # BSD/macOS/net-tools style fallback.
+    out = _run(["arp", "-an"]) or _run(["arp", "-a"])
+    for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F:]{17})", out):
+        _add(m.group(1), m.group(2), "neighbour")
     return devs
 
 def _ping_one(ip):
+    """One ping, cross-platform.
+
+    The flags are not portable: Windows wants `-n <count> -w <ms>`, Linux and
+    macOS want `-c <count> -W <seconds>`. Handing the Windows form to Linux
+    ping means "-n" (numeric output) with no count at all, so it pings forever
+    and the subprocess timeout kills every probe -- which is exactly why a
+    deep scan silently found nothing on Linux.
+    """
+    cmd = (["ping", "-n", "1", "-w", "700", ip] if _IS_WINDOWS
+           else ["ping", "-c", "1", "-W", "1", ip])
     try:
-        r = subprocess.run(["ping", "-n", "1", "-w", "200", ip],
-                           capture_output=True, text=True, timeout=2)
-        # "Reply from" is localised on non-English Windows; TTL= is not, and a
-        # 0 exit code alone is not reliable ("Destination host unreachable").
-        out = r.stdout or ""
-        alive = ("TTL=" in out.upper()) or ("Reply from" in out)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        out = (r.stdout or "").upper()
+        # A zero exit code alone is not reliable on Windows ("Destination host
+        # unreachable" still exits 0), so look for a real echo reply. Every
+        # platform's ping prints a TTL ("TTL=" on Windows, "ttl=" elsewhere).
+        alive = ("TTL=" in out) or ("REPLY FROM" in out) or (
+            r.returncode == 0 and "BYTES FROM" in out)
         return ip if alive else None
     except Exception:
         return None
