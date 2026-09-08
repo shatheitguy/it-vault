@@ -8,13 +8,18 @@
 # Docker at all, it offers to install IT-Vault straight on the host instead
 # (Python + waitress). Nothing dead-ends on declining Docker.
 #
-# It does NOT install a database: IT-Vault connects to whatever MariaDB/MySQL
-# you give it, so your database version, backups and retention stay yours. The
-# first-run wizard in the browser asks for the connection details.
+# It offers to install MariaDB too, asking for the database name, username and
+# password, then creating the network and volume, starting MariaDB, and handing
+# IT-Vault the connection -- so there is no setup wizard to fill in and no
+# GRANT to get wrong. Say no and IT-Vault connects to whatever MariaDB/MySQL
+# you already run instead, with the first-run wizard asking for the details;
+# either way your database version, backups and retention stay yours.
 #
 # Flags: --port (5000), --tag (latest), --name (itvault), --yes, --dry-run,
 #        --no-docker (install on the host, no Docker), --dir (install path),
-#        --with-db (also provision MariaDB and wire it up -- no wizard).
+#        --with-db (install MariaDB without being asked),
+#        --no-db (do not ask, use the browser wizard),
+#        --db-name / --db-user / --db-pass (unattended, implies --with-db).
 set -eu
 
 IMAGE="ghcr.io/shatheitguy/it-vault"
@@ -24,10 +29,15 @@ PORT="${ITVAULT_PORT:-5000}"
 YES="${ITVAULT_YES:-}"
 NO_DOCKER="${ITVAULT_NO_DOCKER:-}"
 WITH_DB="${ITVAULT_WITH_DB:-}"
+NO_DB="${ITVAULT_NO_DB:-}"
 NET="${ITVAULT_NET:-itvault-net}"
 DB_NAME_V="${ITVAULT_DB_NAME:-itvault}"
 DB_USER_V="${ITVAULT_DB_USER:-itvault}"
 DB_CONTAINER="${ITVAULT_DB_NAME_CONTAINER:-itvault-db}"
+# Declared here, not down beside provision_db: anything below the argument
+# parsing would overwrite whatever --db-pass had just set.
+DB_PASS_V="${ITVAULT_DB_PASS:-}"
+DB_ROOT_PASS_V=""
 DIR="${ITVAULT_DIR:-$HOME/it-vault}"
 DRY=""
 
@@ -40,6 +50,10 @@ while [ $# -gt 0 ]; do
         --dry-run) DRY=1; shift ;;
         --no-docker) NO_DOCKER=1; shift ;;
         --with-db) WITH_DB=1; shift ;;
+        --no-db)   WITH_DB=""; NO_DB=1; shift ;;
+        --db-name) WITH_DB=1; DB_NAME_V="${2:?--db-name needs a value}"; shift 2 ;;
+        --db-user) WITH_DB=1; DB_USER_V="${2:?--db-user needs a value}"; shift 2 ;;
+        --db-pass) WITH_DB=1; DB_PASS_V="${2:?--db-pass needs a value}"; shift 2 ;;
         --dir)     DIR="${2:?--dir needs a value}"; shift 2 ;;
         -h|--help)
             # Prints the comment block at the top, so the help text and the
@@ -67,17 +81,10 @@ step() { printf '%s==>%s %s\n' "$B" "$N" "$*"; }
 # The banner is drawn in box characters, which need a UTF-8 locale to survive
 # the trip to the terminal -- otherwise it arrives as mojibake, so a plain
 # ASCII version is used instead.
-banner() {
-    if [ -t 1 ]; then
-        GRN="$(printf '\033[32m')"; DIM="$(printf '\033[2m')"
-    else
-        GRN=''; DIM=''
-    fi
-    printf '%s' "$GRN"
+banner_art() {
     case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
         *UTF-8*|*utf8*|*UTF8*|*utf-8*)
             cat <<'ART'
-
   ██╗████████╗   ██╗   ██╗ █████╗ ██╗   ██╗██╗  ████████╗
   ██║╚══██╔══╝   ██║   ██║██╔══██╗██║   ██║██║  ╚══██╔══╝
   ██║   ██║      ██║   ██║███████║██║   ██║██║     ██║
@@ -88,18 +95,88 @@ ART
             ;;
         *)
             cat <<'ART'
-
-  ___ _____   __     __          _ _
- |_ _|_   _|  \ \   / /_ _ _   _| | |_
-  | |  | |     \ \ / / _` | | | | | __|
-  | |  | |      \ V / (_| | |_| | | |_
- |___| |_|       \_/ \__,_|\__,_|_|\__|
+   ___ _____   __     __          _ _
+  |_ _|_   _|  \ \   / /_ _ _   _| | |_
+   | |  | |     \ \ / / _` | | | | | __|
+   | |  | |      \ V / (_| | |_| | | |_
+  |___| |_|       \_/ \__,_|\__,_|_|\__|
 ART
             ;;
     esac
-    printf '%s' "$N"
-    printf '%s        01001001 01010100  ::  asset register + helpdesk%s\n' "$DIM" "$N"
-    printf '%s               powered by Sha The IT Guy%s\n\n' "$GRN" "$N"
+}
+
+BANNER_SUB1='                  asset register + helpdesk'
+BANNER_SUB2='               powered by Sha The IT Guy'
+
+# IT-Vault's accent is #ff3b30, so the banner is red rather than the green it
+# used to be. The reveal ramps from a dark ember to that accent, which reads
+# as the thing powering up instead of just appearing.
+#
+# Animation is a nicety, never a requirement. It is skipped entirely unless
+# stdout is a terminal, the terminal is wide enough that the art cannot wrap
+# (wrapping would break the cursor-up redraw), and `sleep` accepts fractions
+# -- busybox builds often don't. Any of those failing gives the same banner,
+# drawn once.
+banner() {
+    _cols=0
+    if command -v tput >/dev/null 2>&1; then
+        _cols="$(tput cols 2>/dev/null || echo 0)"
+    fi
+    if [ "${_cols:-0}" -lt 62 ] 2>/dev/null; then
+        _sz="$(stty size 2>/dev/null || echo '')"
+        [ -n "$_sz" ] && _cols="${_sz#* }"
+    fi
+
+    # Counted, not hardcoded: the ASCII fallback is a different height and
+    # the cursor-up redraw has to match whichever art was drawn.
+    _lines="$(banner_art | wc -l | tr -d ' ')"
+    [ "${_lines:-0}" -ge 1 ] 2>/dev/null || _lines=6
+
+    _anim=""
+    if [ -t 1 ] && [ "${_cols:-0}" -ge 62 ] 2>/dev/null && sleep 0.02 2>/dev/null; then
+        case "${TERM:-}" in
+            *256color*|*-truecolor|alacritty|kitty|wezterm|foot|xterm*|screen*|tmux*) _anim=1 ;;
+        esac
+    fi
+
+    if [ -z "$_anim" ]; then
+        # Flat: colour if we're on a terminal at all, nothing if we're piped.
+        if [ -t 1 ]; then printf '\n%s' "$(printf '\033[1;31m')"; else printf '\n'; fi
+        banner_art
+        [ -t 1 ] && printf '%s' "$N"
+        printf '%s\n%s\n\n' "$BANNER_SUB1" "$BANNER_SUB2"
+        return
+    fi
+
+    # dark ember -> the accent, one shade per line as it is revealed
+    _ramp='88 124 160 196 203 203'
+    printf '\n'
+    _i=0
+    banner_art | while IFS= read -r _line; do
+        _i=$((_i + 1))
+        _c=0; _n=0
+        for _s in $_ramp; do
+            _n=$((_n + 1))
+            [ "$_n" -eq "$_i" ] && _c="$_s"
+        done
+        [ "$_c" -eq 0 ] && _c=203
+        printf '\033[38;5;%sm%s\033[0m\n' "$_c" "$_line"
+        sleep 0.03
+    done
+
+    # One shimmer pass over the finished block: back up over it, redraw hot,
+    # then settle on the accent. Two frames is enough to read as a pulse.
+    for _c in 210 203; do
+        printf '\033[%dA' "$_lines"
+        banner_art | while IFS= read -r _line; do
+            printf '\033[38;5;%sm%s\033[0m\n' "$_c" "$_line"
+        done
+        sleep 0.06
+    done
+
+    printf '\033[2m%s\033[0m\n' "$BANNER_SUB1"
+    sleep 0.04
+    printf '\033[38;5;203m%s\033[0m\n\n' "$BANNER_SUB2"
 }
 
 warn() { printf '%s !%s  %s\n' "$Y" "$N" "$*"; }
@@ -126,6 +203,131 @@ ask() {
     esac
 }
 
+# Where a prompt reads from. Piped through `sh` the script itself is on stdin,
+# so reading a prompt from stdin would silently swallow the rest of the script.
+# /dev/tty is the terminal in both cases; empty means there is no terminal at
+# all (CI, a cron job), and every prompt then falls back to its default.
+TTY=""
+if [ -r /dev/tty ]; then TTY=/dev/tty; fi
+
+# openssl if we have it, /dev/urandom otherwise -- no weak fallback.
+gen_pass() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl rand -hex 20
+    else
+        LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 40
+    fi
+}
+
+# Prompt for a value. The prompt goes to stderr and only the answer to stdout,
+# so the caller can capture one without the other.
+#
+# The retry loop is wrapped in a single redirection rather than redirecting
+# each `read`: one open descriptor advances through the input properly, and a
+# capped number of tries means a /dev/tty that isn't really a terminal can't
+# spin here forever.
+ask_line() {
+    _prompt="$1"; _default="${2:-}"; _val=""; _try=0
+    if [ -z "$TTY" ] || [ -n "$YES" ]; then
+        printf '%s' "$_default"
+        return 0
+    fi
+    {
+        while [ "$_try" -lt 6 ]; do
+            _try=$((_try + 1))
+            if [ -n "$_default" ]; then
+                printf '  %s %s[%s]%s: ' "$_prompt" "$Y" "$_default" "$N" >&2
+            else
+                printf '  %s: ' "$_prompt" >&2
+            fi
+            read -r _val || _val=""
+            [ -z "$_val" ] && _val="$_default"
+            case "$_val" in
+                "")
+                    printf '     a value is needed\n' >&2 ;;
+                *[!A-Za-z0-9_]*)
+                    # MariaDB identifiers, and these end up in a docker -e
+                    # value: keeping them boring avoids quoting surprises on
+                    # either side.
+                    printf '     letters, digits and underscores only\n' >&2 ;;
+                *)
+                    printf '%s' "$_val"; return 0 ;;
+            esac
+        done
+        printf '     giving up and using %s\n' "${_default:-nothing}" >&2
+        printf '%s' "$_default"
+    } < "$TTY"
+}
+
+# Prompt for a password without echoing it, and ask again to catch typos.
+# Entering nothing accepts the generated default, which is the sane choice.
+ask_secret() {
+    _prompt="$1"; _default="${2:-}"; _v=""; _v2=""; _saved=""; _try=0
+    if [ -z "$TTY" ] || [ -n "$YES" ]; then
+        printf '%s' "$_default"
+        return 0
+    fi
+    {
+        while [ "$_try" -lt 6 ]; do
+            _try=$((_try + 1))
+            printf '  %s %s[Enter = generate one]%s: ' "$_prompt" "$Y" "$N" >&2
+            # stdin is the terminal inside this block, so stty needs no
+            # redirection of its own -- and it is saved and restored rather
+            # than assumed, so a failure can't leave echo switched off.
+            _saved="$(stty -g 2>/dev/null || printf '')"
+            [ -n "$_saved" ] && stty -echo 2>/dev/null || true
+            read -r _v || _v=""
+            [ -n "$_saved" ] && stty "$_saved" 2>/dev/null || true
+            printf '\n' >&2
+            if [ -z "$_v" ]; then
+                printf '%s' "$_default"; return 0
+            fi
+            case "$_v" in
+                *[!A-Za-z0-9_@%+=:,./-]*)
+                    printf '     no spaces or quotes please -- letters, digits and _@%%+=:,./- are fine\n' >&2
+                    continue ;;
+            esac
+            if [ "${#_v}" -lt 8 ]; then
+                printf '     at least 8 characters\n' >&2
+                continue
+            fi
+            printf '  confirm: ' >&2
+            [ -n "$_saved" ] && stty -echo 2>/dev/null || true
+            read -r _v2 || _v2=""
+            [ -n "$_saved" ] && stty "$_saved" 2>/dev/null || true
+            printf '\n' >&2
+            if [ "$_v" != "$_v2" ]; then
+                printf '     those did not match\n' >&2
+                continue
+            fi
+            printf '%s' "$_v"; return 0
+        done
+        printf '     too many tries -- using a generated password\n' >&2
+        printf '%s' "$_default"
+    } < "$TTY"
+}
+
+# Asked before anything is pulled, because "install a database too" is what
+# most people actually want and the manual route -- network, volume, CREATE
+# USER, GRANT, and the 1045 that follows a missed step -- is where installs
+# die. Declining is fine: the browser wizard then asks for a server you run.
+db_prompt() {
+    say ""
+    say "${B}Database${N}"
+    say "  IT-Vault needs MariaDB or MySQL. It can install one here as a container"
+    say "  and wire itself up, or you can point it at a server you already run."
+    ask "Install MariaDB here and connect IT-Vault to it?" || return 1
+    say ""
+    DB_NAME_V="$(ask_line 'Database name    ' "$DB_NAME_V")"
+    DB_USER_V="$(ask_line 'Database username' "$DB_USER_V")"
+    DB_PASS_V="$(ask_secret 'Database password' "$(gen_pass)")"
+    say ""
+    say "    database  ${B}${DB_NAME_V}${N}"
+    say "    username  ${B}${DB_USER_V}${N}"
+    say "    password  ${B}set${N}"
+    return 0
+}
+
 # Docker needs root unless the user is in the docker group. Rather than
 # assuming, this is set once from what actually works, and every later docker
 # call goes through it.
@@ -150,7 +352,16 @@ set_docker_prefix() {
 
 run() {
     if [ -n "$DRY" ]; then
-        printf '    %s %s\n' "$DK" "$*"
+        # Quoted where it matters: printing --health-cmd's value as bare
+        # words made the dry run read as a different command from the real one.
+        printf '    %s' "$DK"
+        for _a in "$@"; do
+            case "$_a" in
+                *[!A-Za-z0-9_./:=-]*) printf " '%s'" "$_a" ;;
+                *) printf ' %s' "$_a" ;;
+            esac
+        done
+        printf '\n'
     else
         # shellcheck disable=SC2086  # $DK is deliberately two words sometimes
         $DK "$@" >/dev/null
@@ -160,7 +371,6 @@ run() {
 # --with-db: stand up MariaDB and hand IT-Vault the connection, so there is no
 # network to create, no user to GRANT, no volume to reason about and no setup
 # wizard to fill in. Everything the manual route gets wrong is done here once.
-DB_PASS_V=""
 
 provision_db() {
     # A shared user-defined network is what makes container-name DNS work, so
@@ -185,13 +395,15 @@ provision_db() {
         return 1
     fi
 
-    # openssl if we have it, /dev/urandom otherwise -- no weak fallback.
-    if command -v openssl >/dev/null 2>&1; then
-        DB_PASS_V="$(openssl rand -hex 20)"
-    else
-        DB_PASS_V="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 40)"
-    fi
+    # Whatever was entered at the prompt (or passed with --db-pass) is kept;
+    # only an unattended run generates one.
+    [ -n "$DB_PASS_V" ] || DB_PASS_V="$(gen_pass)"
     [ -n "$DB_PASS_V" ] || die "Could not generate a database password."
+    # root gets its own password, never the application user's -- the app only
+    # ever needs its own database, so handing it root's credentials would be
+    # giving away far more than it uses.
+    DB_ROOT_PASS_V="$(gen_pass)"
+    [ -n "$DB_ROOT_PASS_V" ] || die "Could not generate a database root password."
 
     step "Creating volume itvault_db"
     run volume create itvault_db
@@ -201,12 +413,12 @@ provision_db() {
         --name "$DB_CONTAINER" \
         --network "$NET" \
         --restart unless-stopped \
-        -e MARIADB_ROOT_PASSWORD="$DB_PASS_V" \
+        -e MARIADB_ROOT_PASSWORD="$DB_ROOT_PASS_V" \
         -e MARIADB_DATABASE="$DB_NAME_V" \
         -e MARIADB_USER="$DB_USER_V" \
         -e MARIADB_PASSWORD="$DB_PASS_V" \
         -v itvault_db:/var/lib/mysql \
-        --health-cmd "mariadb-admin ping -h 127.0.0.1 -u root -p$DB_PASS_V --silent" \
+        --health-cmd "healthcheck.sh --connect --innodb_initialized" \
         --health-interval 5s --health-timeout 5s --health-retries 20 \
         mariadb:11
 
@@ -409,6 +621,20 @@ else
             say "                 then run this installer again"
             say "  See its logs:  $DK logs -f $NAME"
             say ""
+            # Someone who installed without a database and now wants one is
+            # otherwise stuck: this installer won't recreate a container that
+            # owns their volumes, so point at the two steps that do the job.
+            if ! $DK network inspect "$NET" >/dev/null 2>&1; then
+                say "  To add a database to this install:"
+                say "    ${B}$DK rm -f $NAME${N}   ${Y}# volumes are kept${N}"
+                say "    then run this installer again and say yes to MariaDB"
+                say ""
+            else
+                say "  MariaDB is already on the '$NET' network. If IT-Vault can't see it:"
+                say "    ${B}$DK network connect $NET $NAME${N}"
+                say "    then point Settings ▸ Database at host ${B}$DB_CONTAINER${N}"
+                say ""
+            fi
             exit 0
         fi
         step "Container '$NAME' exists but is $state -- starting it"
@@ -421,6 +647,12 @@ else
 fi
 
 # ---- install ---------------------------------------------------------
+
+# Asked here rather than after the pull, so the install is not waiting on a
+# download before it knows what it is building.
+if [ -z "$WITH_DB" ] && [ -z "$NO_DB" ]; then
+    if db_prompt; then WITH_DB=1; fi
+fi
 
 step "Pulling $IMAGE:$TAG"
 if [ -n "$DRY" ]; then

@@ -954,17 +954,49 @@
       <div class="reg-head">
         <span class="fld">Install</span>
         <div>
-          <h2>Three ways in.</h2>
+          <h2>One step, database included.</h2>
           <p>
-            All of them expect a database you already have. If you don't have
-            one yet, the installer prints the MariaDB one-liner for you.
+            The installer offers to set up MariaDB alongside IT-Vault. It asks
+            for the database name, username and password, then creates the
+            network and volume, starts MariaDB, and connects IT-Vault to it
+            &mdash; no setup wizard, no <code>GRANT</code>, no
+            <code>1045 Access denied</code>. Say no and it points at a database
+            you already run instead. Linux and macOS today; the Windows
+            installer starts IT-Vault and lets the browser wizard ask.
           </p>
         </div>
       </div>
 
       <div class="routes">
         <div class="route">
-          <div class="route-h"><b>One line</b><span class="fld">Fastest</span></div>
+          <div class="route-h"><b>IT-Vault + MariaDB</b><span class="fld">One step</span></div>
+          <pre><span class="sig"># Linux server -- this is the whole thing</span>
+<b>curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh</b>
+
+<span class="sig"># it asks, you answer, it builds:</span>
+Install MariaDB here and connect IT-Vault to it? <b>[y/N]</b> y
+
+  Database name     [itvault]: <b>itvault</b>
+  Database username [itvault]: <b>itvault</b>
+  Database password [Enter = generate one]:
+  confirm:
+
+<span class="sig"># then, without being asked again:</span>
+==&gt; Creating network 'itvault-net'
+==&gt; Creating volume itvault_db
+==&gt; Starting MariaDB as 'itvault-db'
+==&gt; Waiting for MariaDB to finish initialising
+==&gt; Starting container 'itvault' on port 5000
+
+<span class="sig"># open http://localhost:5000 and create the admin account. done.</span>
+
+<span class="sig"># unattended, no questions:</span>
+curl -fsSL .../install.sh | sh -s -- \
+  --db-name itvault --db-user itvault --db-pass '<b>something-long</b>'</pre>
+        </div>
+
+        <div class="route">
+          <div class="route-h"><b>One line</b><span class="fld">Bring your own DB</span></div>
           <pre><span class="sig"># Linux / macOS</span>
 <b>curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh</b>
 
@@ -973,6 +1005,9 @@
 
 <span class="sig"># From cmd.exe -- irm and iex are PowerShell, so wrap it</span>
 <b>powershell -NoProfile -c "irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex"</b>
+
+<span class="sig"># --no-db skips the database question and uses the browser wizard</span>
+<b>curl -fsSL .../install.sh | sh -s -- --no-db</b>
 
 <span class="sig"># Read it first, if you'd rather (and you'd be right to)</span>
 curl -fsSLO https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh
