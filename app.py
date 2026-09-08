@@ -156,7 +156,7 @@ def _fit_png(data, max_edge=BRAND_MAX_EDGE, max_bytes=BRAND_MAX_BYTES):
     return best
 
 
-def _brand_store(col, path, data):
+def _brand_store(col, path, data, cur=None):
     """Save branding to the database, and cache it on disk if we can.
 
     Returns (ok, error). Only the database write decides that: the file is a
@@ -164,7 +164,26 @@ def _brand_store(col, path, data):
     never succeed. Failing the upload over it -- or swallowing a real database
     error so the upload merely looks like it worked -- is what made this
     impossible to diagnose from the UI.
+
+    Pass `cur` when the caller already has a transaction open on Settings
+    id=1, and the write joins it instead of opening a connection of its own.
+    That is not tidiness: /api/settings updates that row and holds the lock
+    until it returns, so a second connection writing the same row deadlocked
+    against its own request and sat there until innodb_lock_wait_timeout.
+    The caller owns the commit in that case.
     """
+    if cur is not None:
+        try:
+            cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
+        except Exception as e:
+            print(f"[itvault] could not store {col}: {e}", flush=True)
+            return False, _brand_store_help(col, e)
+        try:
+            with open(path, "wb") as fp:
+                fp.write(data)
+        except Exception as e:
+            print(f"[itvault] {col} stored but not cached at {path}: {e}", flush=True)
+        return True, None
     c = None
     try:
         c = conn(); cur = c.cursor()
@@ -3252,7 +3271,7 @@ def unifi_clients():
     return jsonify({"clients": out, "error": _unifi_cache["error"]})
 
 # ---------- settings (admin) ----------
-def _save_letterhead(fileobj):
+def _save_letterhead(fileobj, cur=None):
     """Normalize an uploaded letterhead (PDF or image) to a single PNG.
 
     A PDF's first page is rasterized (via PyMuPDF) so every print/PDF surface
@@ -3295,7 +3314,7 @@ def _save_letterhead(fileobj):
     # someone uploaded can't decide whether the save succeeds.
     png = _fit_png(png)
     print(f"[itvault] branding: letterhead {fname!r} -> {len(png)}B PNG", flush=True)
-    ok, err = _brand_store("letterhead", LETTERHEAD_PATH, png)
+    ok, err = _brand_store("letterhead", LETTERHEAD_PATH, png, cur=cur)
     if not ok:
         print(f"[itvault] branding: letterhead NOT saved: {err}", flush=True)
     return ok, err
@@ -3423,7 +3442,9 @@ def settings():
                                          f"WebP or HEIC image -- convert it and try again"}), 400
             data = _fit_png(data, LOGO_MAX_EDGE, LOGO_MAX_BYTES)
             print(f"[itvault] branding: logo stored as {len(data)}B", flush=True)
-            ok, err = _brand_store("logo", LOGO_PATH, data)
+            # cur, not a new connection: this request already holds the lock
+            # on Settings id=1 from the UPDATE above.
+            ok, err = _brand_store("logo", LOGO_PATH, data, cur=cur)
             if not ok:
                 c.commit(); c.close()
                 return jsonify({"error": err or "could not save the logo"}), 500
@@ -3434,7 +3455,7 @@ def settings():
             except Exception:
                 pass
         if letterhead:
-            ok, err = _save_letterhead(letterhead)
+            ok, err = _save_letterhead(letterhead, cur=cur)
             if ok:
                 cur.execute("UPDATE Settings SET has_letterhead=1 WHERE id=1")
             else:
