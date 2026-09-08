@@ -169,7 +169,17 @@ def _brand_store(col, path, data):
     try:
         c = conn(); cur = c.cursor()
         cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
+        # An UPDATE matching no row is a success that changed nothing. If the
+        # Settings row is missing there is no error to see, and the image
+        # simply never appears -- so the row count is checked, not assumed.
+        touched = cur.rowcount
         c.commit()
+        if touched == 0:
+            cur.execute("SELECT COUNT(*) AS n FROM Settings WHERE id=1")
+            if not (cur.fetchone() or {}).get("n"):
+                print(f"[itvault] {col}: no Settings row with id=1 -- nothing was saved", flush=True)
+                return False, ("This database has no settings row yet. Restart IT-Vault so it "
+                               "can create one, then try the upload again.")
     except Exception as e:
         # Rolled back and released explicitly rather than relying on the
         # request teardown: this also runs from the scheduled jobs, which have
@@ -3284,7 +3294,11 @@ def _save_letterhead(fileobj):
     # Bounded before it goes anywhere near the database, so the size of what
     # someone uploaded can't decide whether the save succeeds.
     png = _fit_png(png)
-    return _brand_store("letterhead", LETTERHEAD_PATH, png)
+    print(f"[itvault] branding: letterhead {fname!r} -> {len(png)}B PNG", flush=True)
+    ok, err = _brand_store("letterhead", LETTERHEAD_PATH, png)
+    if not ok:
+        print(f"[itvault] branding: letterhead NOT saved: {err}", flush=True)
+    return ok, err
 
 @app.route("/letterhead.png")
 def letterhead_file():
@@ -3307,6 +3321,14 @@ def settings():
             d = request.form.to_dict()
             logo = request.files.get("logo") if "logo" in request.files else None
             letterhead = request.files.get("letterhead") if "letterhead" in request.files else None
+            # Logged because a branding upload that silently does nothing is
+            # indistinguishable, from the outside, from one the server never
+            # received. An empty files list here means the browser did not
+            # send the file, and no server-side change would ever fix that.
+            print(f"[itvault] branding PUT: form={sorted(d.keys())} "
+                  f"files={sorted(request.files.keys())} "
+                  f"logo={getattr(logo, 'filename', None)!r} "
+                  f"letterhead={getattr(letterhead, 'filename', None)!r}", flush=True)
         else:
             d = request.get_json(force=True) or {}
             logo = None
@@ -3393,10 +3415,14 @@ def settings():
             # that could not be saved still answered {"ok": true} and left the
             # admin re-uploading it forever with nothing to go on.
             data = logo.read()
-            if not _sniff_image(data)[0]:
+            sniffed = _sniff_image(data)[0]
+            print(f"[itvault] branding: logo {logo.filename!r} {len(data)}B sniffed={sniffed}", flush=True)
+            if not sniffed:
                 c.commit(); c.close()
-                return jsonify({"error": "that logo isn't a PNG, JPEG, GIF, WebP or HEIC image"}), 400
+                return jsonify({"error": f"{logo.filename or 'that file'} isn't a PNG, JPEG, GIF, "
+                                         f"WebP or HEIC image -- convert it and try again"}), 400
             data = _fit_png(data, LOGO_MAX_EDGE, LOGO_MAX_BYTES)
+            print(f"[itvault] branding: logo stored as {len(data)}B", flush=True)
             ok, err = _brand_store("logo", LOGO_PATH, data)
             if not ok:
                 c.commit(); c.close()
