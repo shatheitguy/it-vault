@@ -308,6 +308,40 @@ def save_db_config(h, p, n, u, pw):
             json.dump({"db_host": h, "db_port": int(p), "db_name": n, "db_user": u, "db_pass": pw}, f, indent=2)
     except Exception:
         pass
+def persist_env_db_config():
+    """Record environment-provided database credentials in the config file.
+
+    install.sh passes DB_HOST/DB_NAME/DB_USER/DB_PASS as container
+    environment, and that is the ONLY place they live. So `docker rm -f
+    itvault` followed by a plain `docker run` loses them and the setup wizard
+    asks for a database again -- on an install that already had a perfectly
+    good one. Recording them changes nothing about how they resolve, since
+    load_config() already takes precedence over the environment; it just
+    means the pointer outlives the container that was told it.
+
+    Only ever called once the database has actually answered, so a typo in
+    the environment is never written down as though it worked. An existing
+    entry is left alone: a value set through Settings is the user's, not the
+    environment's.
+    """
+    if _cfg.get("db_host"):
+        return False
+    if not (os.environ.get("DB_HOST") or os.environ.get("DB_NAME")):
+        return False
+    before = os.path.exists(CONFIG_PATH)
+    save_db_config(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS)
+    if os.path.exists(CONFIG_PATH):
+        _cfg["db_host"] = DB_HOST
+        print(f"[itvault] database pointer saved to {CONFIG_PATH} -- it now "
+              f"survives the container being replaced", flush=True)
+        return True
+    print(f"[itvault] could not write {CONFIG_PATH}"
+          + ("" if before else " (directory not writable?)")
+          + " -- the database pointer will be lost when this container is "
+            "replaced, and the setup wizard will ask again", flush=True)
+    return False
+
+
 # ---- first-run setup state ----
 # The app has to be able to boot with NO working database, otherwise there's
 # nowhere to ask the user for one -- so instead of refusing to start, it
