@@ -19,7 +19,8 @@
 #        --no-docker (install on the host, no Docker), --dir (install path),
 #        --with-db (install MariaDB without being asked),
 #        --no-db (do not ask, use the browser wizard),
-#        --db-name / --db-user / --db-pass (unattended, implies --with-db).
+#        --db-name / --db-user / --db-pass (unattended, implies --with-db),
+#        --db-image (database image, default mariadb:latest).
 set -eu
 
 IMAGE="ghcr.io/shatheitguy/it-vault"
@@ -34,6 +35,12 @@ NET="${ITVAULT_NET:-itvault-net}"
 DB_NAME_V="${ITVAULT_DB_NAME:-itvault}"
 DB_USER_V="${ITVAULT_DB_USER:-itvault}"
 DB_CONTAINER="${ITVAULT_DB_NAME_CONTAINER:-itvault-db}"
+# Tracks upstream by default. Safe for a fresh install, because the volume is
+# created in the same breath as the container -- whatever "latest" is that day
+# initialises it, and the two agree. What it cannot do is start a newer major
+# against a data directory an older one wrote, so provision_db() checks for
+# that before starting anything. Pin it (mariadb:12, mysql:8, ...) to opt out.
+DB_IMAGE="${ITVAULT_DB_IMAGE:-mariadb:latest}"
 # Declared here, not down beside provision_db: anything below the argument
 # parsing would overwrite whatever --db-pass had just set.
 DB_PASS_V="${ITVAULT_DB_PASS:-}"
@@ -54,6 +61,7 @@ while [ $# -gt 0 ]; do
         --db-name) WITH_DB=1; DB_NAME_V="${2:?--db-name needs a value}"; shift 2 ;;
         --db-user) WITH_DB=1; DB_USER_V="${2:?--db-user needs a value}"; shift 2 ;;
         --db-pass) WITH_DB=1; DB_PASS_V="${2:?--db-pass needs a value}"; shift 2 ;;
+        --db-image) DB_IMAGE="${2:?--db-image needs a value}"; shift 2 ;;
         --dir)     DIR="${2:?--dir needs a value}"; shift 2 ;;
         -h|--help)
             # Prints the comment block at the top, so the help text and the
@@ -372,6 +380,53 @@ run() {
 # network to create, no user to GRANT, no volume to reason about and no setup
 # wizard to fill in. Everything the manual route gets wrong is done here once.
 
+# The MariaDB major version that last wrote the data directory. The server
+# records it in the datadir itself, so reading it needs no database running --
+# just a throwaway container with the volume mounted. Empty means the volume
+# is new (or not a MariaDB datadir), which is the normal case.
+_db_volume_version() {
+    $DK run --rm -v itvault_db:/d --entrypoint sh "$DB_IMAGE" -c \
+        'cat /d/mariadb_upgrade_info 2>/dev/null || cat /d/mysql_upgrade_info 2>/dev/null' \
+        2>/dev/null | head -n 1 | tr -d '\r\n' | sed 's/-MariaDB$//'
+}
+
+# What the image we are about to run actually is, asked of the image rather
+# than parsed out of its tag -- "latest" says nothing about the version.
+_db_image_version() {
+    $DK run --rm --entrypoint mariadbd "$DB_IMAGE" --version 2>/dev/null \
+        | sed -n 's/.*Ver \([0-9][0-9.]*\).*/\1/p' | head -n 1
+}
+
+# A data directory written by one major and started by another is upgraded in
+# place, one way, with no prompt -- or the server refuses and the container
+# restart-loops. With DB_IMAGE following "latest" that can happen without
+# anyone choosing it, so it is checked here instead of discovered afterwards.
+#
+# Only reachable when the volume already exists and holds data, which means an
+# earlier install whose container was removed but whose volume was kept -- the
+# exact thing this script's own "docker rm -f itvault-db" hint leaves behind.
+_check_db_volume_major() {
+    [ -n "$DRY" ] && return 0
+    $DK volume inspect itvault_db >/dev/null 2>&1 || return 0
+    have="$(_db_volume_version)"
+    [ -n "$have" ] || return 0
+    want="$(_db_image_version)"
+    [ -n "$want" ] || return 0
+    [ "${have%%.*}" = "${want%%.*}" ] && return 0
+    say ""
+    warn "The itvault_db volume holds MariaDB ${have} data, but $DB_IMAGE is ${want}."
+    say  "    Starting a different major version against it rewrites the data"
+    say  "    directory in place, and that cannot be undone."
+    say  ""
+    say  "    Keep the version that wrote it:"
+    say  "      ${B}--db-image mariadb:${have%%.*}${N}"
+    say  ""
+    say  "    Or, if you do mean to upgrade, back the volume up first:"
+    say  "      ${B}docker run --rm -v itvault_db:/d -v \$PWD:/b busybox tar czf /b/itvault_db.tgz -C /d .${N}"
+    say  ""
+    return 1
+}
+
 provision_db() {
     # A shared user-defined network is what makes container-name DNS work, so
     # the app can reach the database as "itvault-db" without publishing 3306
@@ -405,6 +460,8 @@ provision_db() {
     DB_ROOT_PASS_V="$(gen_pass)"
     [ -n "$DB_ROOT_PASS_V" ] || die "Could not generate a database root password."
 
+    _check_db_volume_major || return 1
+
     step "Creating volume itvault_db"
     run volume create itvault_db
 
@@ -420,7 +477,7 @@ provision_db() {
         -v itvault_db:/var/lib/mysql \
         --health-cmd "healthcheck.sh --connect --innodb_initialized" \
         --health-interval 5s --health-timeout 5s --health-retries 20 \
-        mariadb:11
+        "$DB_IMAGE"
 
     [ -n "$DRY" ] && return 0
 
