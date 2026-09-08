@@ -237,6 +237,7 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 
 /* compact data tables inside modals (audit, maintenance, scan, backups) */
 .modal-box .tablewrap{border-radius:var(--radius);max-height:min(46vh,380px);box-shadow:none;max-width:100%}
+.modal-box .tablewrap.noscroll{max-height:none;overflow:visible}
 /* backups list: fixed metadata columns that never wrap/reflow, one compact
    kebab-menu button for actions instead of a row of buttons -- a long
    filename plus 3 buttons was forcing the date/size columns to wrap
@@ -531,15 +532,19 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 /* permission tree: one column per module group, leaves as checkboxes. A role
    is assembled from these rather than from a level per module, so the list
    has to stay scannable at ~40 leaves. */
-.permtree{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-.permgrp{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:12px 13px}
+.permtree{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+  gap:10px;align-items:start}
+.permgrp{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:9px 11px 10px}
 .permhead{display:flex;align-items:center;justify-content:space-between;gap:8px;
-  padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--line)}
-.permhead .chk span{font-family:var(--font);font-weight:650;font-size:12px;
-  letter-spacing:.4px;text-transform:uppercase;color:var(--txt)}
-.permcount{font-family:var(--font);font-size:10.5px;color:var(--muted);white-space:nowrap}
-.permitems{display:flex;flex-direction:column;gap:7px}
-.permitem span{font-size:12.5px;color:var(--muted)}
+  padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.permhead .chk{gap:7px}
+.permhead .chk span{font-family:var(--font);font-weight:650;font-size:11px;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--txt);line-height:1.25}
+.permcount{font-family:var(--font);font-size:10px;color:var(--muted);white-space:nowrap}
+.permitems{display:flex;flex-direction:column;gap:3px}
+.permitem{gap:7px;padding:1px 0}
+.permitem input{width:14px;height:14px}
+.permitem span{font-size:12px;line-height:1.3;color:var(--muted)}
 .permitem input:checked + span{color:var(--txt)}
 .permnote{font-style:normal;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
   color:var(--amber);border:1px solid var(--amber);border-radius:4px;padding:0 3px;
@@ -547,6 +552,37 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 .permtag{display:inline-block;font-family:var(--font);font-size:10.5px;padding:2px 7px;
   border-radius:20px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
 @media(max-width:560px){.permtree{grid-template-columns:minmax(0,1fr)}}
+
+/* Phones. The 64px icon rail from the 980px breakpoint is fine on a tablet
+   but eats a sixth of a 375px screen, which left 283px for the content --
+   the tables were containing their own overflow correctly, they just had
+   almost nowhere to do it. Narrowing the rail and the gutters gives roughly
+   40px back, and tighter cells fit another column before anyone has to
+   scroll sideways. */
+@media(max-width:560px){
+  .side{flex:0 0 48px;width:48px;padding:12px 4px}
+  .logo img{width:26px;height:26px}
+  .nav a{padding:9px 0}
+  .nav a span.ni{font-size:15px}
+  .main{padding:12px 9px}
+  .topbar h2{font-size:17px}
+  .crumb{font-size:9.5px}
+  thead th{padding:9px 9px;font-size:10px}
+  tbody td{padding:8px 9px}
+  table{font-size:12.5px}
+  .dtable thead th,.tbl thead th{padding:8px 9px}
+  /* one comfortable row of buttons rather than four cramped ones */
+  .m-actions{flex-wrap:wrap}
+  .m-actions .btn{flex:1 1 auto;min-height:42px}
+  .modal-box{padding:14px 13px}
+  .invbox{padding:11px}
+  .kpis,.stats{grid-template-columns:minmax(0,1fr)}
+  /* the count and the search box were sharing a line and squeezing each other */
+  .toolbar{gap:8px}
+  .toolbar input[type=search],.toolbar input[type=text]{flex:1 1 100%}
+}
+/* the roles list is short; a scroll frame around three rows is just noise */
+#rolesBody td{padding-top:7px;padding-bottom:7px}
 
 /* ticket photos: a grid of thumbnails, each a link to the full-size image.
    Same shape as the portal's picker so a photo looks the same to the person

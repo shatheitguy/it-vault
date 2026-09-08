@@ -22,6 +22,7 @@ import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threadin
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect, make_response
+from flask import g, has_request_context
 import pymysql
 from dbutils.pooled_db import PooledDB
 from openpyxl import Workbook, load_workbook
@@ -101,6 +102,54 @@ def _brand_blob(col):
         return None
 
 
+# What we are willing to push into a single INSERT. A PDF page rasterized at
+# 144dpi can be several megabytes, and sending that to a database over a slow
+# or TLS-wrapped link is what made the letterhead save time out.
+BRAND_MAX_BYTES = 3 * 1024 * 1024
+BRAND_MAX_EDGE = 1600
+
+
+def _fit_png(data, max_edge=BRAND_MAX_EDGE, max_bytes=BRAND_MAX_BYTES):
+    """Bring a rendered image within something one statement can carry.
+
+    1600px is already more than the print surfaces use (A4 at 144dpi is
+    1191px wide), so the cap costs nothing visible; if the result is still
+    over budget it steps down until it fits.
+
+    Every candidate is measured and the smallest kept, and the original wins
+    if nothing beat it -- re-encoding at a smaller size is not guaranteed to
+    produce fewer bytes (downscaling averages neighbouring pixels, which can
+    cost more entropy than the dropped pixels saved), and returning something
+    larger than what came in would defeat the point. Without PIL, or on any
+    failure, the input is returned untouched rather than losing the upload.
+    """
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(data))
+        w, h = img.size
+    except Exception:
+        return data
+    if w <= max_edge and h <= max_edge and len(data) <= max_bytes:
+        return data
+    best = data
+    for edge in (max_edge, 1200, 900, 700):
+        if edge >= max(w, h) and len(data) <= max_bytes:
+            continue
+        try:
+            im = PILImage.open(io.BytesIO(data))
+            im.thumbnail((edge, edge))
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, format="PNG", optimize=True)
+            cand = buf.getvalue()
+        except Exception:
+            break
+        if len(cand) < len(best):
+            best = cand
+        if len(best) <= max_bytes:
+            break
+    return best
+
+
 def _brand_store(col, path, data):
     """Save branding to the database, and cache it on disk if we can.
 
@@ -110,15 +159,25 @@ def _brand_store(col, path, data):
     error so the upload merely looks like it worked -- is what made this
     impossible to diagnose from the UI.
     """
-    err = None
+    c = None
     try:
         c = conn(); cur = c.cursor()
         cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
-        c.commit(); c.close()
+        c.commit()
     except Exception as e:
-        err = _brand_store_help(col, e)
+        # Rolled back and released explicitly rather than relying on the
+        # request teardown: this also runs from the scheduled jobs, which have
+        # no request to tear down. Leaving it open held the lock on Settings
+        # id=1 and made every later settings save time out too.
+        if c is not None:
+            try: c.rollback()
+            except Exception: pass
         print(f"[itvault] could not store {col} in the database: {e}", flush=True)
-        return False, err
+        return False, _brand_store_help(col, e)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
     try:
         with open(path, "wb") as fp:
             fp.write(data)
@@ -140,6 +199,12 @@ def _brand_store_help(col, exc):
     if code == 1153 or "max_allowed_packet" in msg:
         return ("The image is larger than the database will accept in one statement. "
                 "Use a smaller file, or raise max_allowed_packet on the server.")
+    if code in (2013, 2006) or "Lost connection" in msg or "timed out" in msg:
+        return ("The database stopped responding while the image was being saved. "
+                "That usually means the file is large and the connection to the "
+                "database is slow -- try a smaller image. If it keeps happening, "
+                "raise ITVAULT_DB_TIMEOUT (currently "
+                f"{DB_TIMEOUT}s) or move the database closer to the app.")
     return f"Database rejected the upload: {msg}"
 
 
@@ -221,6 +286,14 @@ DB_PORT = int(_cfg.get("db_port", os.environ.get("DB_PORT", 3306)))
 DB_NAME = _cfg.get("db_name", os.environ.get("DB_NAME", "itguy_assets"))
 DB_USER = _cfg.get("db_user", os.environ.get("DB_USER", "itguy"))
 DB_PASS = _cfg.get("db_pass", os.environ.get("DB_PASS", "itguypass"))
+# How long a query may stall before the request gives up on it. A bound is
+# essential (see the pool below), but 30s is not always enough for a large
+# letterhead going over a slow or TLS-wrapped link, so it is raisable without
+# rebuilding the image.
+try:
+    DB_TIMEOUT = max(5, int(os.environ.get("ITVAULT_DB_TIMEOUT") or 30))
+except Exception:
+    DB_TIMEOUT = 30
 def save_db_config(h, p, n, u, pw):
     global DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS = h, int(p), n, u, pw
@@ -864,6 +937,33 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 _unifi_cache = {"ts": 0, "devices": [], "clients": [], "error": None}
 _UNIFI_CACHE_TTL = 20
 
+@app.teardown_request
+def _release_db_connections(exc):
+    """Give every pooled connection back at the end of the request.
+
+    A query that raises -- a socket timeout above all -- used to leave the
+    connection checked out mid-transaction, so whatever row it had written
+    stayed locked. The next request touching that row then blocked until it
+    timed out as well, and one slow write turned into every later write
+    failing. Rolling back on the way out keeps a failure with the request
+    that caused it.
+
+    Views that close their own connection are unaffected: PooledDB's close()
+    is a no-op once the connection has been returned.
+    """
+    conns = None
+    try:
+        conns = g.pop("_db_conns", None)
+    except Exception:
+        return
+    for c in conns or []:
+        if exc is not None:
+            try: c.rollback()
+            except Exception: pass
+        try: c.close()
+        except Exception: pass
+
+
 @app.after_request
 def _no_cache(resp):
     # Prevent stale JS/HTML caching so dashboard always re-renders fresh
@@ -919,8 +1019,8 @@ def _db_pool():
                 # Bounded waits let a stuck query fail its own request and
                 # release the connection instead of taking the server down.
                 connect_timeout=10,
-                read_timeout=30,
-                write_timeout=30,
+                read_timeout=DB_TIMEOUT,
+                write_timeout=DB_TIMEOUT,
                 mincached=0,          # lazy: build connections on demand, so constructing the
                                       # pool itself can't fail (a bad repoint via the DB-settings
                                       # UI then surfaces per-request and recovers once fixed,
@@ -939,7 +1039,16 @@ def _db_pool():
         return _pool_obj
 
 def conn():
-    return _db_pool().connection()
+    c = _db_pool().connection()
+    # Remembered for the request teardown below. A view that raises before its
+    # own c.close() would otherwise hand the connection back to nobody, with
+    # its transaction still open and the rows it touched still locked.
+    if has_request_context():
+        try:
+            g.setdefault("_db_conns", []).append(c)
+        except Exception:
+            pass
+    return c
 
 def init_db():
     c = conn(); cur = c.cursor()
@@ -3107,9 +3216,11 @@ def _save_letterhead(fileobj):
     reported as a bad file.
     """
     fname = (fileobj.filename or "").lower()
-    data = fileobj.read()
+    data = fileobj.read(24 * 1024 * 1024 + 1)
     if not data:
         return False, "empty file"
+    if len(data) > 24 * 1024 * 1024:
+        return False, "that file is over 24MB -- please use a smaller one"
     try:
         if fname.endswith(".pdf") or data[:4] == b"%PDF":
             import pymupdf
@@ -3130,6 +3241,9 @@ def _save_letterhead(fileobj):
             return False, "that file isn't a PDF or an image (PNG, JPEG, GIF, WebP)"
     except Exception as e:
         return False, f"could not read that file: {e}"
+    # Bounded before it goes anywhere near the database, so the size of what
+    # someone uploaded can't decide whether the save succeeds.
+    png = _fit_png(png)
     return _brand_store("letterhead", LETTERHEAD_PATH, png)
 
 @app.route("/letterhead.png")
