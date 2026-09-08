@@ -2213,40 +2213,83 @@ async function openTicket(id){
     const sel=document.getElementById('tkAssignee');
     sel.innerHTML='<option value="">— Unassigned —</option>'+users.map(u=>`<option ${u.username===t.assignee?'selected':''}>${esc(u.username)}</option>`).join('');
   }catch(e){}
+  const catList=TICKET_CATEGORIES.slice();
+  const curCat=(t.category||'').trim();
+  const catKnown=!curCat||catList.indexOf(curCat)>=0;
   document.getElementById('tkDetail').innerHTML=`
     <div class="tkmeta">
-      <div><b>Priority:</b> <span class="prio ${t.priority}">${esc(t.priority)}</span></div>
-      <div><b>Status:</b> ${esc(t.status)}</div>
-      <div><b>Category:</b> ${esc(t.category||'—')}</div>
-      <div><b>Requester:</b> ${esc(t.requester||'—')} ${t.requester_email?('('+esc(t.requester_email)+')'):''}</div>
-      <div><b>Assignee:</b> ${esc(t.assignee||'—')}</div>
-      <div><b>Source:</b> ${esc(t.source||'Web')}</div>
-      <div><b>Asset:</b> ${esc(t.asset_id||'—')}</div>
-      <div><b>Due:</b> ${esc(t.due_date||'—')} <b>SLA:</b> ${t.sla_hours}h</div>
+      <div><b>Status</b><span class="tkchip st">${esc(t.status||'—')}</span></div>
+      <div><b>Priority</b><span class="prio ${t.priority}">${esc(t.priority||'—')}</span></div>
+      <div><b>Category</b><span>${esc(curCat||'—')}</span></div>
+      <div><b>Requester</b><span>${esc(t.requester||'—')}${t.requester_email?(' · '+esc(t.requester_email)):''}</span></div>
+      <div><b>Assignee</b><span>${esc(t.assignee||'— Unassigned —')}</span></div>
+      <div><b>Asset</b><span>${esc(t.asset_id||'—')}</span></div>
+      <div><b>Due</b><span>${esc((t.due_date||'').toString().slice(0,10)||'—')} · SLA ${esc(String(t.sla_hours||'—'))}h</span></div>
+      <div><b>Source</b><span>${esc(t.source||'Web')}</span></div>
     </div>
-    <div class="tkdesc">${esc(t.description||'')}</div>
+
+    <div class="tksec"><h4>DESCRIPTION</h4><div class="tkdesc">${esc(t.description||'—')}</div></div>
+
+    <div class="tksec"><h4>REPLIES</h4>
+      <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> · ${esc(rp.author_role)} · ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
+    </div>
+
     ${canEdit()?`
-    <div class="tkedit">
-      <label>SUBJECT <input id="tkeSubject" value="${esc(t.subject||'')}"></label>
-      <label>DESCRIPTION <textarea id="tkeDescription" rows="3">${esc(t.description||'')}</textarea></label>
-      <div class="tkedit-row">
-        <label>CATEGORY <input id="tkeCategory" value="${esc(t.category||'')}"></label>
-        <label>REQUESTER <input id="tkeRequester" value="${esc(t.requester||'')}"></label>
+    <div class="tksec tkedit"><h4>EDIT TICKET</h4>
+      <div class="tkgrid">
+        <label>STATUS
+          <select id="tkStatusUpd">${TICKET_STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
+        </label>
+        <label>PRIORITY
+          <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select>
+        </label>
+        <label>CATEGORY
+          <select id="tkeCategorySel">
+            <option value="">— none —</option>
+            ${catList.map(c=>`<option value="${esc(c)}" ${c===curCat?'selected':''}>${esc(c)}</option>`).join('')}
+            <option value="__custom" ${catKnown?'':'selected'}>＋ type another…</option>
+          </select>
+        </label>
+        <label>ASSIGNEE
+          <input id="tkeAssigneeShow" value="${esc(t.assignee||'')}" readonly title="Use ASSIGN TO IT above">
+        </label>
+        <label class="tkwide ${catKnown?'hide':''}" id="tkeCategoryWrap">CATEGORY (TYPED)
+          <input id="tkeCategory" value="${catKnown?'':esc(curCat)}" placeholder="e.g. Telephony">
+        </label>
+        <label class="tkwide">SUBJECT
+          <input id="tkeSubject" value="${esc(t.subject||'')}">
+        </label>
+        <label>REQUESTER
+          <input id="tkeRequester" value="${esc(t.requester||'')}">
+        </label>
+        <label>REQUESTER EMAIL
+          <input id="tkeRequesterEmail" type="email" value="${esc(t.requester_email||'')}">
+        </label>
+        <label>ASSET ID
+          <input id="tkeAssetId" value="${esc(t.asset_id||'')}">
+        </label>
+        <label>DUE DATE
+          <input id="tkeDueDate" type="date" value="${esc((t.due_date||'').toString().slice(0,10))}">
+        </label>
+        <label>SLA HOURS
+          <input id="tkeSlaHours" type="number" min="1" value="${esc(String(t.sla_hours||''))}">
+        </label>
+        <label class="tkwide">DESCRIPTION
+          <textarea id="tkeDescription" rows="4">${esc(t.description||'')}</textarea>
+        </label>
       </div>
-      <div class="tkedit-row">
-        <label>REQUESTER EMAIL <input id="tkeRequesterEmail" type="email" value="${esc(t.requester_email||'')}"></label>
-        <label>ASSET ID <input id="tkeAssetId" value="${esc(t.asset_id||'')}"></label>
-      </div>
-      <div class="tkedit-row">
-        <label>DUE DATE <input id="tkeDueDate" type="date" value="${esc((t.due_date||'').toString().slice(0,10))}"></label>
-        <label>SLA HOURS <input id="tkeSlaHours" type="number" min="1" value="${esc(String(t.sla_hours||''))}"></label>
-      </div>
-    </div>`:''}
-    <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> · ${esc(rp.author_role)} · ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
-    <div class="tkactions">
-      <label>Status <select id="tkStatusUpd">${TICKET_STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></label>
-      <label>Priority <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select></label>
-    </div>`;
+    </div>`:''}`;
+  // "type another..." reveals a free-text box rather than throwing a prompt()
+  // dialog at the user, so the typed value is visible before saving.
+  const catSel=document.getElementById('tkeCategorySel');
+  if(catSel){
+    catSel.onchange=()=>{
+      const wrap=document.getElementById('tkeCategoryWrap');
+      const custom=catSel.value==='__custom';
+      if(wrap)wrap.classList.toggle('hide',!custom);
+      if(custom){const i=document.getElementById('tkeCategory'); if(i)i.focus();}
+    };
+  }
   const delBtn=document.getElementById('tkDeleteBtn');
   if(delBtn)delBtn.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
   const saveBtn=document.getElementById('tkSaveBtn');
@@ -2260,10 +2303,13 @@ async function saveTicketEdits(){
   if(!curTicketId){return;}
   const val=id=>{const el=document.getElementById(id);return el?el.value.trim():undefined;};
   const payload={};
-  const map={tkeSubject:'subject',tkeDescription:'description',tkeCategory:'category',
+  const map={tkeSubject:'subject',tkeDescription:'description',
              tkeRequester:'requester',tkeRequesterEmail:'requester_email',
              tkeAssetId:'asset_id',tkeDueDate:'due_date'};
   for(const [el,field] of Object.entries(map)){const v=val(el);if(v!==undefined)payload[field]=v;}
+  // category: the dropdown, or the typed box when "type another..." is picked
+  const catSel=document.getElementById('tkeCategorySel');
+  if(catSel)payload.category=(catSel.value==='__custom')?(val('tkeCategory')||''):catSel.value;
   const sla=val('tkeSlaHours'); if(sla)payload.sla_hours=parseInt(sla,10);
   const st=document.getElementById('tkStatusUpd'), pr=document.getElementById('tkPrioUpd');
   if(st)payload.status=st.value; if(pr)payload.priority=pr.value;
@@ -2286,8 +2332,12 @@ async function sendReply(){
   if(!curTicketId)return;
   const body=document.getElementById('tkReply').value.trim(); if(!body){toast('✕ empty');return;}
   const r=await api('/api/tickets/'+curTicketId+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body})});
-  const su=document.getElementById('tkStatusUpd').value, pr=document.getElementById('tkPrioUpd').value;
-  await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:su,priority:pr})});
+  // Only editors get the status/priority controls, so a read-only replier
+  // shouldn't hit a null here -- and shouldn't send an empty update either.
+  const stEl=document.getElementById('tkStatusUpd'), prEl=document.getElementById('tkPrioUpd');
+  if(stEl&&prEl){
+    await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:stEl.value,priority:prEl.value})});
+  }
   if(r&&r.ok){document.getElementById('tkReply').value='';openTicket(curTicketId);await loadTickets();toast('✓ REPLY SENT');}
 }
 async function openNewTicket(){
