@@ -525,3 +525,14 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 .updwarn{color:var(--amber);border-left:2px solid var(--amber);padding-left:10px;
   line-height:1.5}
 .updacts a.btn{display:inline-flex;align-items:center;text-decoration:none}
+
+/* ---- ticket edit panel (admin/editor) ---- */
+.tkedit{margin-top:14px;padding-top:14px;border-top:1px solid var(--border,rgba(255,255,255,.08));
+  display:flex;flex-direction:column;gap:10px}
+.tkedit label{display:flex;flex-direction:column;gap:4px;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted,#8a93a6);flex:1}
+.tkedit input,.tkedit textarea{font:inherit;padding:8px 10px;border-radius:8px;
+  border:1px solid var(--border,rgba(255,255,255,.14));background:var(--comp-bg,#121826);
+  color:var(--text,#f5f6fa);text-transform:none;letter-spacing:normal}
+.tkedit-row{display:flex;gap:10px;flex-wrap:wrap}
+@media(max-width:560px){.tkedit-row{flex-direction:column}}
