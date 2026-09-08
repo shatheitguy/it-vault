@@ -135,10 +135,6 @@ banner() {
         [ -n "$_sz" ] && _cols="${_sz#* }"
     fi
 
-    # Counted, not hardcoded: the ASCII fallback is a different height and
-    # the cursor-up redraw has to match whichever art was drawn.
-    _lines="$(banner_art | wc -l | tr -d ' ')"
-    [ "${_lines:-0}" -ge 1 ] 2>/dev/null || _lines=6
 
     _anim=""
     if [ -t 1 ] && [ "${_cols:-0}" -ge 62 ] 2>/dev/null && sleep 0.02 2>/dev/null; then
@@ -172,15 +168,11 @@ banner() {
         sleep 0.03
     done
 
-    # One shimmer pass over the finished block: back up over it, redraw hot,
-    # then settle on the accent. Two frames is enough to read as a pulse.
-    for _c in 210 203; do
-        printf '\033[%dA' "$_lines"
-        banner_art | while IFS= read -r _line; do
-            printf '\033[38;5;%sm%s\033[0m\n' "$_c" "$_line"
-        done
-        sleep 0.06
-    done
+    # No second pass over the finished block. Redrawing it needed the cursor
+    # moved back up over the art, which renders as one banner on screen but
+    # leaves every frame behind in scrollback and in any captured log -- the
+    # install output showed the banner three times. The reveal above is
+    # animation enough and only ever writes each line once.
 
     printf '\033[2m%s\033[0m\n' "$BANNER_SUB1"
     sleep 0.04
@@ -793,22 +785,39 @@ done
 say ""
 say "${G}IT-Vault is running.${N}  Open ${B}http://localhost:$PORT${N}"
 say ""
-say "${B}You still need a database.${N} IT-Vault doesn't ship one -- point it at any"
-say "MariaDB 10.6+ or MySQL 8+ and it builds its own schema. Don't have one yet?"
-say ""
-say "    docker volume create itvault_db"
-say "    docker run -d --name itvault-db --restart unless-stopped \\"
-say "      -e MARIADB_ROOT_PASSWORD='<a-strong-root-password>' \\"
-say "      -e MARIADB_DATABASE=itvault \\"
-say "      -e MARIADB_USER=itvault -e MARIADB_PASSWORD='<a-strong-password>' \\"
-say "      -v itvault_db:/var/lib/mysql mariadb:11"
-say "    docker network create itvault-net"
-say "    docker network connect itvault-net itvault-db"
-say "    docker network connect itvault-net $NAME"
-say ""
-say "Then the setup wizard in your browser asks for the connection (host"
-say "${B}itvault-db${N} for the above, or ${B}host.docker.internal${N} for a database installed"
-say "on this machine) and for the admin account you want to create."
+# Only for an install that has NO database. Printing "you still need a
+# database" right after provisioning one -- with instructions to go and
+# create it -- is worse than saying nothing, and that is what it did.
+if [ -n "$DB_ENV" ]; then
+    say "${G}MariaDB is set up and connected.${N} No setup wizard to fill in --"
+    say "open it and create your admin account."
+    say ""
+    say "    database   ${B}$DB_NAME_V${N} on container ${B}$DB_CONTAINER${N} (network $NET)"
+    say "    username   ${B}$DB_USER_V${N}"
+    say ""
+    say "  Change it later in Settings ▸ Database. The credentials are in the"
+    say "  container's environment:  ${B}$DK inspect $NAME${N}"
+else
+    say "${B}You still need a database.${N} IT-Vault doesn't ship one -- point it at any"
+    say "MariaDB 10.6+ or MySQL 8+ and it builds its own schema. Don't have one yet?"
+    say ""
+    say "  Re-run this installer and say yes when it offers to install MariaDB,"
+    say "  and it does all of the below for you. By hand:"
+    say ""
+    say "    docker network create itvault-net"
+    say "    docker volume create itvault_db"
+    say "    docker run -d --name itvault-db --restart unless-stopped \\"
+    say "      --network itvault-net \\"
+    say "      -e MARIADB_ROOT_PASSWORD='<a-strong-root-password>' \\"
+    say "      -e MARIADB_DATABASE=itvault \\"
+    say "      -e MARIADB_USER=itvault -e MARIADB_PASSWORD='<a-strong-password>' \\"
+    say "      -v itvault_db:/var/lib/mysql $DB_IMAGE"
+    say "    docker network connect itvault-net $NAME"
+    say ""
+    say "Then the setup wizard in your browser asks for the connection (host"
+    say "${B}itvault-db${N} for the above, or ${B}host.docker.internal${N} for a database installed"
+    say "on this machine) and for the admin account you want to create."
+fi
 say ""
 say "  Logs:       $DK logs -f $NAME"
 say "  Stop:       $DK stop $NAME"
