@@ -601,6 +601,24 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 /* the roles list is short; a scroll frame around three rows is just noise */
 #rolesBody td{padding-top:7px;padding-bottom:7px}
 
+/* Heartbeat: monitor status pulled from Uptime Kuma. A dot plus the word, not a
+   colour alone -- the state has to survive being read by someone who cannot
+   distinguish red from green. */
+.hbdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
+  vertical-align:middle;background:var(--muted2)}
+.hbdot.up{background:var(--grn)}
+.hbdot.down{background:var(--red);box-shadow:0 0 0 3px rgba(255,107,107,.18)}
+.hbdot.pending{background:var(--amber)}
+.hbdot.maintenance{background:var(--cyan)}
+.hbcounts{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
+.hbpill{font-family:var(--font);font-size:10.5px;font-weight:650;letter-spacing:.03em;
+  text-transform:uppercase;padding:2px 8px;border-radius:20px;white-space:nowrap;
+  background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.hbpill.up{color:var(--grn);border-color:var(--grn)}
+.hbpill.down{color:var(--red);border-color:var(--red)}
+.hbpill.pending{color:var(--amber);border-color:var(--amber)}
+.hbpill.maintenance{color:var(--cyan);border-color:var(--cyan)}
+
 /* ticket photos: a grid of thumbnails, each a link to the full-size image.
    Same shape as the portal's picker so a photo looks the same to the person
    who sent it and the person fixing it. */

@@ -857,6 +857,7 @@ FEATURE_GROUPS = [
     ]},
     {"key": "tools", "label": "Tools and records", "module": None, "items": [
         ("tools.scan",    "Network scan",                     "admin_only"),
+        ("tools.heartbeat",     "Heartbeat (Uptime Kuma status)",       "admin_only"),
         ("tools.audit",   "Audit log",                        "admin_only"),
         ("tools.backup",  "Backup and restore",               "admin_only"),
         ("tools.monitor", "Monitor screen",                   "admin_only"),
@@ -868,7 +869,7 @@ FEATURE_GROUPS = [
 # them. read-write can scan the network, read the audit log and open the
 # monitor; both built-ins can open the monitor; backup/restore stays admin.
 BUILTIN_EXTRA_FEATURES = {
-    ROLE_EDIT: {"tools.scan", "tools.audit", "tools.monitor",
+    ROLE_EDIT: {"tools.scan", "tools.heartbeat", "tools.audit", "tools.monitor",
                 "directory.reflists", "assets.import"},
     ROLE_VIEW: {"tools.monitor"},
 }
@@ -1530,6 +1531,10 @@ def migrate_schema():
     unifi_cols = {
         "unifi_enabled": "BOOLEAN DEFAULT 0",
         "unifi_host": "VARCHAR(200) DEFAULT ''",
+        "kuma_enabled": "TINYINT DEFAULT 0",
+        "kuma_url": "VARCHAR(200) DEFAULT ''",
+        "kuma_api_key": "VARCHAR(200) DEFAULT ''",
+        "kuma_verify_ssl": "TINYINT DEFAULT 0",
         "unifi_port": "INT DEFAULT 443",
         "unifi_site": "VARCHAR(80) DEFAULT 'default'",
         "unifi_user": "VARCHAR(120) DEFAULT ''",
@@ -3237,6 +3242,189 @@ def _unifi_refresh(force=False):
 
 _UNIFI_TYPE_LABELS = {"uap": "Access Point", "usw": "Switch", "ugw": "Gateway", "udm": "Gateway", "uxg": "Gateway"}
 
+# ---------- Heartbeat: live monitor status pulled from Uptime Kuma ----------
+# Uptime Kuma already does the polling, the retries and the notifications, and
+# does them well. Rebuilding that here would duplicate a tool most people
+# running IT-Vault already have. So this reads its Prometheus endpoint and
+# shows the result next to the network scan: the scan tells you what is on the
+# network, Heartbeat tells you what is currently answering.
+#
+# /metrics is a plain GET secured by HTTP Basic. Kuma accepts an API key as
+# the password (with any username) and disables user/password auth once a key
+# exists, so the key is the documented path and the only one offered here.
+_kuma_cache = {"ts": 0, "monitors": [], "error": None}
+_KUMA_CACHE_TTL = 20
+
+# Kuma's status numbers, from its own source: 0 down, 1 up, 2 pending
+# (retrying before it commits to "down"), 3 under maintenance.
+_KUMA_STATUS = {0: "down", 1: "up", 2: "pending", 3: "maintenance"}
+
+
+def _kuma_parse_metrics(text):
+    """Prometheus exposition text -> one dict per monitor.
+
+    Kuma emits several series per monitor, keyed by the same label set:
+      monitor_status{monitor_name="Router",monitor_type="ping",...} 1
+      monitor_response_time{...} 3
+      monitor_cert_days_remaining{...} 61
+    so they are collected by name rather than assumed to arrive in any order.
+    """
+    label_re = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
+    line_re = re.compile(r"^([a-zA-Z_:][\w:]*)\{(.*)\}\s+([^\s]+)\s*$")
+    by_key = {}
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = line_re.match(line)
+        if not m:
+            continue
+        series, labels_s, value = m.group(1), m.group(2), m.group(3)
+        if not series.startswith("monitor_"):
+            continue
+        labels = {k: v.replace('\\"', '"') for k, v in label_re.findall(labels_s)}
+        name = labels.get("monitor_name") or ""
+        if not name:
+            continue
+        key = (name, labels.get("monitor_type", ""), labels.get("monitor_hostname", ""),
+               labels.get("monitor_url", ""))
+        rec = by_key.setdefault(key, {
+            "name": name,
+            "type": labels.get("monitor_type") or "",
+            # Kuma writes the literal string "null" for labels that do not
+            # apply to a monitor type, which must not reach the UI as text.
+            "target": (labels.get("monitor_hostname") or "").strip(),
+            "url": (labels.get("monitor_url") or "").strip(),
+            "port": (labels.get("monitor_port") or "").strip(),
+            "status": "unknown", "response_ms": None, "cert_days": None,
+        })
+        for f in ("target", "url", "port"):
+            if rec[f].lower() in ("null", "none"):
+                rec[f] = ""
+        try:
+            num = float(value)
+        except ValueError:
+            continue
+        if series == "monitor_status":
+            rec["status"] = _KUMA_STATUS.get(int(num), "unknown")
+        elif series == "monitor_response_time":
+            # -1 is Kuma's "no measurement yet"
+            rec["response_ms"] = None if num < 0 else int(round(num))
+        elif series == "monitor_cert_days_remaining":
+            rec["cert_days"] = int(round(num))
+    out = list(by_key.values())
+    # down first, then pending/maintenance, then up -- the useful order when
+    # something is wrong, and stable alphabetically within each group
+    rank = {"down": 0, "pending": 1, "maintenance": 2, "up": 3, "unknown": 4}
+    out.sort(key=lambda m: (rank.get(m["status"], 5), m["name"].lower()))
+    return out
+
+
+def _kuma_fetch(cfg):
+    """GET Kuma's /metrics and parse it. Raises with a readable message.
+
+    Uses urllib rather than requests so this works regardless of what is
+    installed -- the UniFi integration's requests import is exactly the kind
+    of dependency that goes missing in a slim image.
+    """
+    import base64
+    import ssl
+    import urllib.error
+    import urllib.request
+
+    url = (cfg.get("kuma_url") or "").strip().rstrip("/")
+    key = (cfg.get("kuma_api_key") or "").strip()
+    if not url:
+        raise Exception("Uptime Kuma URL is required")
+    if not re.match(r"^https?://", url):
+        url = "http://" + url
+    if not key:
+        raise Exception("An Uptime Kuma API key is required "
+                        "(Kuma: Settings > API Keys > Add API Key)")
+
+    req = urllib.request.Request(url + "/metrics", method="GET")
+    # any username, the API key as the password -- Kuma's documented scheme
+    req.add_header("Authorization", "Basic " +
+                   base64.b64encode(f":{key}".encode()).decode())
+    ctx = None
+    if url.startswith("https://") and not cfg.get("kuma_verify_ssl"):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+    try:
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
+            body = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise Exception("Uptime Kuma rejected the API key -- check it is "
+                            "current and has not been revoked")
+        raise Exception(f"Uptime Kuma returned HTTP {e.code} for /metrics")
+    except urllib.error.URLError as e:
+        raise Exception(f"Could not reach {url} -- {e.reason}")
+    if "monitor_status" not in body:
+        raise Exception("That URL answered but did not look like Uptime Kuma's "
+                        "/metrics endpoint")
+    return _kuma_parse_metrics(body)
+
+
+def _kuma_cfg():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT kuma_enabled, kuma_url, kuma_api_key, kuma_verify_ssl "
+                "FROM Settings WHERE id=1")
+    cfg = cur.fetchone() or {}
+    c.close()
+    return cfg
+
+
+def _kuma_refresh(force=False):
+    now = time.time()
+    if not force and (now - _kuma_cache["ts"]) < _KUMA_CACHE_TTL:
+        return
+    cfg = _kuma_cfg()
+    if not cfg.get("kuma_enabled"):
+        _kuma_cache.update(ts=now, monitors=[], error="not_configured")
+        return
+    try:
+        _kuma_cache.update(ts=now, monitors=_kuma_fetch(cfg), error=None)
+    except Exception as e:
+        _kuma_cache.update(ts=now, monitors=[], error=str(e))
+
+
+@app.route("/api/heartbeat")
+@feature_required("tools.heartbeat")
+def heartbeat_monitors():
+    """What Uptime Kuma's latest heartbeat says about each monitor."""
+    _kuma_refresh(force=request.args.get("force") == "1")
+    mons = _kuma_cache["monitors"]
+    counts = {k: 0 for k in ("up", "down", "pending", "maintenance", "unknown")}
+    for m in mons:
+        counts[m["status"]] = counts.get(m["status"], 0) + 1
+    return jsonify({"monitors": mons, "counts": counts,
+                    "error": _kuma_cache["error"],
+                    "checked_at": int(_kuma_cache["ts"])})
+
+
+@app.route("/api/test-kuma", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def test_kuma():
+    """Settings button: prove the URL and key work before saving them."""
+    d = request.get_json(force=True) or {}
+    cfg = _kuma_cfg()
+    # an empty key in the form means "keep the stored one", same as the other
+    # integrations, so a test does not require retyping it
+    merged = {
+        "kuma_url": (d.get("kuma_url") or cfg.get("kuma_url") or ""),
+        "kuma_api_key": (d.get("kuma_api_key") or cfg.get("kuma_api_key") or ""),
+        "kuma_verify_ssl": d.get("kuma_verify_ssl", cfg.get("kuma_verify_ssl")),
+    }
+    try:
+        mons = _kuma_fetch(merged)
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 400
+    up = sum(1 for m in mons if m["status"] == "up")
+    return jsonify({"ok": True, "monitors": len(mons), "up": up,
+                    "message": f"Connected -- {len(mons)} monitor(s), {up} up"})
+
 @app.route("/api/unifi/devices")
 @auth_required()
 def unifi_devices():
@@ -3353,7 +3541,7 @@ def settings():
             logo = None
             letterhead = None
         # load current row so partial saves (e.g. branding only) don't reset other fields
-        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
+        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl, kuma_enabled, kuma_url, kuma_api_key, kuma_verify_ssl FROM Settings WHERE id=1")
         cur0 = cur.fetchone() or {}
         def gv(k, fb):
             return d.get(k) if (k in d and d.get(k) not in (None, "")) else cur0.get(k, fb)
@@ -3403,6 +3591,16 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
+        if any(k in d for k in ("kuma_enabled", "kuma_url", "kuma_api_key", "kuma_verify_ssl")):
+            cur.execute("""UPDATE Settings SET kuma_enabled=%s, kuma_url=%s,
+                          kuma_api_key=%s, kuma_verify_ssl=%s WHERE id=1""",
+                        (bool(d.get("kuma_enabled", cur0.get("kuma_enabled", False))),
+                         (d.get("kuma_url", cur0.get("kuma_url", "")) or "").strip()[:200],
+                         # blank means keep the stored key, so saving anything
+                         # else in this section does not wipe it
+                         (d.get("kuma_api_key") or cur0.get("kuma_api_key", "") or "")[:200],
+                         bool(d.get("kuma_verify_ssl", cur0.get("kuma_verify_ssl", False)))))
+            _kuma_cache["ts"] = 0
         if any(k in d for k in ("company_phone", "company_address")):
             cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
             br0 = cur.fetchone() or {}
@@ -3484,11 +3682,14 @@ def settings():
                                           "auto_assign_roundrobin","notify_on_create","notify_on_resolve","notify_on_reply",
                                           "unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user",
                                           "unifi_is_os","unifi_verify_ssl",
+                                          "kuma_enabled","kuma_url","kuma_verify_ssl",
                                           "backup_schedule","backup_scope","backup_retain","backup_last_run",
                                           "company_phone","company_address","has_letterhead"]} | {
                 "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME, "db_user": DB_USER,
                 "ldap_bind_pass_set": bool(s.get("ldap_bind_pass")),
                 "unifi_pass_set": bool(s.get("unifi_pass")),
+                # the key itself never round-trips to the browser
+                "kuma_api_key_set": bool(s.get("kuma_api_key")),
                 "db_pass_set": bool(DB_PASS)})
 
 # ---------- contracts / locations (GLPI-style) ----------
