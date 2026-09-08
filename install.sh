@@ -105,7 +105,7 @@ ART
     esac
 }
 
-BANNER_SUB1='                  asset register + helpdesk'
+BANNER_SUB1='             IT Asset register + Helpdesk'
 BANNER_SUB2='               powered by Sha The IT Guy'
 
 # IT-Vault's accent is #ff3b30, so the banner is red rather than the green it
