@@ -143,7 +143,7 @@
       <div id="statusResult"></div>
     </div>
 
-    <div class="foot">Powered by <span id="fName">IT-Vault</span> — your IT asset &amp; support portal</div>
+    <div class="foot">⚡ powered by <b>Sha The IT Guy</b></div>
   </div>
 <script>
 (function(){
@@ -204,7 +204,6 @@
     var shortName = b.logo_text || b.app_name || 'IT-Vault';
     document.getElementById('appName').textContent = shortName + ' Request Portal';
     document.title = shortName + ' Request Portal';
-    if(b.app_name) document.getElementById('fName').textContent=b.app_name;
     if(b.logo){ document.getElementById('logo').src='/logo.png?t='+Date.now(); }
     applyPortalTheme(b);
   }).catch(function(){});
