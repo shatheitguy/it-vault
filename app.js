@@ -1881,6 +1881,8 @@ document.getElementById('sharePortalBtn').onclick=async()=>{
   catch(e){ window.prompt('Copy portal link:', j.url); }
 };
 document.getElementById('tkModalClose').onclick=()=>document.getElementById('tkModal').classList.remove('show');
+document.getElementById('tkSaveBtn').onclick=saveTicketEdits;
+document.getElementById('tkDeleteBtn').onclick=deleteTicket;
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
 document.getElementById('newContractBtn').onclick=()=>openContractModal(null);
 document.getElementById('ctSearch').oninput=renderContracts;
@@ -2223,14 +2225,63 @@ async function openTicket(id){
       <div><b>Due:</b> ${esc(t.due_date||'—')} <b>SLA:</b> ${t.sla_hours}h</div>
     </div>
     <div class="tkdesc">${esc(t.description||'')}</div>
+    ${canEdit()?`
+    <div class="tkedit">
+      <label>SUBJECT <input id="tkeSubject" value="${esc(t.subject||'')}"></label>
+      <label>DESCRIPTION <textarea id="tkeDescription" rows="3">${esc(t.description||'')}</textarea></label>
+      <div class="tkedit-row">
+        <label>CATEGORY <input id="tkeCategory" value="${esc(t.category||'')}"></label>
+        <label>REQUESTER <input id="tkeRequester" value="${esc(t.requester||'')}"></label>
+      </div>
+      <div class="tkedit-row">
+        <label>REQUESTER EMAIL <input id="tkeRequesterEmail" type="email" value="${esc(t.requester_email||'')}"></label>
+        <label>ASSET ID <input id="tkeAssetId" value="${esc(t.asset_id||'')}"></label>
+      </div>
+      <div class="tkedit-row">
+        <label>DUE DATE <input id="tkeDueDate" type="date" value="${esc((t.due_date||'').toString().slice(0,10))}"></label>
+        <label>SLA HOURS <input id="tkeSlaHours" type="number" min="1" value="${esc(String(t.sla_hours||''))}"></label>
+      </div>
+    </div>`:''}
     <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> · ${esc(rp.author_role)} · ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
     <div class="tkactions">
       <label>Status <select id="tkStatusUpd">${TICKET_STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></label>
       <label>Priority <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select></label>
     </div>`;
+  const delBtn=document.getElementById('tkDeleteBtn');
+  if(delBtn)delBtn.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+  const saveBtn=document.getElementById('tkSaveBtn');
+  if(saveBtn)saveBtn.style.display=canEdit()?'':'none';
   document.getElementById('tkModal').classList.add('show');
 }
 window.openTicketById=(id)=>openTicket(id);
+// Full ticket edit. The API already accepts every one of these fields on PUT;
+// the UI simply never offered them, so only status/priority could be changed.
+async function saveTicketEdits(){
+  if(!curTicketId){return;}
+  const val=id=>{const el=document.getElementById(id);return el?el.value.trim():undefined;};
+  const payload={};
+  const map={tkeSubject:'subject',tkeDescription:'description',tkeCategory:'category',
+             tkeRequester:'requester',tkeRequesterEmail:'requester_email',
+             tkeAssetId:'asset_id',tkeDueDate:'due_date'};
+  for(const [el,field] of Object.entries(map)){const v=val(el);if(v!==undefined)payload[field]=v;}
+  const sla=val('tkeSlaHours'); if(sla)payload.sla_hours=parseInt(sla,10);
+  const st=document.getElementById('tkStatusUpd'), pr=document.getElementById('tkPrioUpd');
+  if(st)payload.status=st.value; if(pr)payload.priority=pr.value;
+  if(!payload.subject){toast('✕ SUBJECT REQUIRED');return;}
+  const r=await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r&&r.ok){toast('✓ TICKET SAVED');openTicket(curTicketId);await loadTickets();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'save failed'));}
+}
+// Deletion is admin-only and enforced server-side too -- this just hides the
+// button for everyone else rather than letting them discover a 403.
+async function deleteTicket(){
+  if(!curTicketId)return;
+  if(MY_ROLE!==ROLE_ADMIN){toast('✕ ADMIN ONLY');return;}
+  if(!confirm('Delete this ticket and its entire reply history? This cannot be undone.'))return;
+  const r=await api('/api/tickets/'+curTicketId,{method:'DELETE'});
+  if(r&&r.ok){document.getElementById('tkModal').classList.remove('show');curTicketId=null;toast('✓ TICKET DELETED');await loadTickets();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
+}
 async function sendReply(){
   if(!curTicketId)return;
   const body=document.getElementById('tkReply').value.trim(); if(!body){toast('✕ empty');return;}
