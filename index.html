@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260908b">
+<link rel="stylesheet" href="/style.css?v=20260908c">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -544,6 +544,16 @@
               <label class="toggle"><input type="checkbox" id="unifi_verify_ssl"><span>Verify SSL certificate</span></label>
               <div class="m-actions" style="justify-content:flex-start"><button class="btn ghost" id="unifiTestBtn" type="button">⚡ TEST CONNECTION</button><span id="unifiTestMsg" class="muted" style="margin-left:8px"></span></div>
             </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">UPTIME KUMA (HEARTBEAT)</div>
+              <p class="muted" style="margin:0 0 12px">Shows live monitor status under <b>Network Scan &rarr; Heartbeat</b>. Uptime Kuma keeps doing the polling, the retries and the alerting; IT-Vault only reads it. Create a key in Kuma under <b>Settings &rarr; API Keys</b>. Use <b>Test</b> before saving.</p>
+              <label class="toggle" style="margin-bottom:12px"><input type="checkbox" id="kuma_enabled"><span>Enabled</span></label>
+              <div class="grid2">
+                <div class="field2" style="grid-column:1/-1"><label>Uptime Kuma URL</label><input id="kuma_url" placeholder="http://192.168.0.7:3001"></div>
+                <div class="field2" style="grid-column:1/-1"><label>API Key</label><input id="kuma_api_key" type="password" placeholder="leave blank to keep current"></div>
+              </div>
+              <label class="toggle" style="margin-top:6px"><input type="checkbox" id="kuma_verify_ssl"><span>Verify SSL certificate (only if Kuma has a valid one)</span></label>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn ghost" id="kumaTestBtn" type="button">&#9735; TEST CONNECTION</button><span id="kumaTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
             <div class="m-actions"><button class="btn mag" id="saveUnifiBtn">✓ SAVE UNIFI</button></div>
           </section>
           <!-- BRANDING -->
@@ -968,6 +978,18 @@
     </div>
     <div id="scanStatus" class="muted scan-status"></div>
     <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
+
+    <!-- Heartbeat: what Uptime Kuma's latest check says. The scan tells you what
+         the network; this tells you what is answering right now. -->
+    <div class="invbox" id="hbWrap">
+      <label>HEARTBEAT <span class="muted" style="font-weight:400">&mdash; live status from Uptime Kuma</span></label>
+      <div class="scanrow">
+        <button class="btn" id="hbBtn" type="button">&#9851; REFRESH</button>
+        <span id="hbCounts" class="hbcounts"></span>
+      </div>
+      <div id="hbStatus" class="muted scan-status"></div>
+      <div class="tablewrap" id="hbTableWrap" style="display:none"><table class="dtable"><thead><tr><th>STATUS</th><th>MONITOR</th><th>TYPE</th><th>TARGET</th><th>RESPONSE</th><th>CERT</th></tr></thead><tbody id="hbBody"></tbody></table></div>
+    </div>
   </div>
   
   <div class="m-actions">
@@ -1047,6 +1069,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260908a"></script>
+<script src="/app.js?nocache=20260908c"></script>
 </body>
 </html>

@@ -1354,6 +1354,13 @@ function openScan(){
   document.getElementById('scanStatus').textContent='';
   document.getElementById('scanModal').classList.add('show');
   renderScan(lastScan);
+  // Heartbeat is a separate permission, so a role can have the scan without it.
+  const pw=document.getElementById('hbWrap');
+  if(pw){
+    const may=canDo('tools.heartbeat');
+    pw.style.display=may?'':'none';
+    if(may)loadHeartbeat(false);
+  }
 }
 async function doScan(){
   const prefix=document.getElementById('scanPrefix').value.trim();
@@ -2041,6 +2048,55 @@ document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
 document.getElementById('navScan').onclick=openScan;
 document.getElementById('scanBtn').onclick=doScan;
+
+// ---- Heartbeat: live monitor status, read from Uptime Kuma ----
+// Uptime Kuma does the polling and the alerting; this only shows what it
+// currently thinks, next to the scan that found the devices in the first
+// place. Down first, because that is why anyone opens this.
+async function loadHeartbeat(force){
+  const body = document.getElementById('hbBody');
+  const wrap = document.getElementById('hbTableWrap');
+  const st = document.getElementById('hbStatus');
+  const counts = document.getElementById('hbCounts');
+  if(!body) return;
+  st.textContent = 'checking…'; counts.textContent = '';
+  const r = await api('/api/heartbeat' + (force ? '?force=1' : ''));
+  if(!r){ st.textContent = ''; return; }              // api() already reported it
+  if(r.status === 403){
+    st.textContent = 'No access to Heartbeat.';
+    wrap.style.display = 'none'; return;
+  }
+  const j = await r.json().catch(()=>({}));
+  if(j.error === 'not_configured'){
+    st.innerHTML = 'Not set up yet — add your Uptime Kuma URL and API key in '
+      + '<b>Settings ▸ UniFi Controller ▸ Uptime Kuma</b>.';
+    wrap.style.display = 'none'; return;
+  }
+  if(j.error){
+    st.textContent = '✕ ' + j.error;
+    wrap.style.display = 'none'; return;
+  }
+  const mons = j.monitors || [];
+  if(!mons.length){
+    st.textContent = 'Connected, but Uptime Kuma has no monitors yet.';
+    wrap.style.display = 'none'; return;
+  }
+  const c = j.counts || {};
+  counts.innerHTML = ['down','pending','maintenance','up']
+    .filter(k => c[k]).map(k => `<span class="hbpill ${k}">${c[k]} ${k}</span>`).join(' ');
+  st.textContent = '';
+  wrap.style.display = '';
+  body.innerHTML = mons.map(m => `<tr>
+      <td><span class="hbdot ${m.status}"></span>${esc(m.status)}</td>
+      <td>${esc(m.name)}</td>
+      <td>${esc(m.type||'—')}</td>
+      <td class="mono">${esc(m.target || m.url || '—')}${m.port?(':'+esc(m.port)):''}</td>
+      <td>${m.response_ms==null?'—':esc(String(m.response_ms))+' ms'}</td>
+      <td>${m.cert_days==null?'—':esc(String(m.cert_days))+' d'}</td>
+    </tr>`).join('');
+}
+const _hbBtn = document.getElementById('hbBtn');
+if(_hbBtn) _hbBtn.onclick = () => loadHeartbeat(true);
 document.getElementById('scanDeep').onchange=e=>{
   const row=document.getElementById('scanPrefixRow');
   row.style.display=e.target.checked?'':'none';
@@ -3594,6 +3650,15 @@ async function loadUserSettings(){
   if (g('unifi_pass')) g('unifi_pass').value = '';
   if (g('unifi_is_os')) g('unifi_is_os').checked = (s.unifi_is_os == null ? true : !!s.unifi_is_os);
   if (g('unifi_verify_ssl')) g('unifi_verify_ssl').checked = !!s.unifi_verify_ssl;
+  // Uptime Kuma (Heartbeat). The key never comes back from the server, so the
+  // stays blank and its placeholder says what blank means.
+  if (g('kuma_enabled')) g('kuma_enabled').checked = !!s.kuma_enabled;
+  if (g('kuma_url')) g('kuma_url').value = s.kuma_url || '';
+  if (g('kuma_api_key')) {
+    g('kuma_api_key').value = '';
+    g('kuma_api_key').placeholder = s.kuma_api_key_set ? 'leave blank to keep current' : 'paste the key from Uptime Kuma';
+  }
+  if (g('kuma_verify_ssl')) g('kuma_verify_ssl').checked = !!s.kuma_verify_ssl;
   // SLA policy fields
   if (g('sla_low')) g('sla_low').value = s.sla_low || 72;
   if (g('sla_normal')) g('sla_normal').value = s.sla_normal || 24;
@@ -3787,17 +3852,31 @@ async function loadUserSettings(){
   const j = r ? await r.json().catch(()=>({})) : {};
   m.textContent = (j.ok? '✓ ' : '✕ ') + (j.msg||''); m.style.color = j.ok? 'var(--grn)':'var(--red)';
   };
+  const kt = g('kumaTestBtn');
+  if (kt) kt.onclick = async () => {
+    const m = g('kumaTestMsg'); m.textContent = 'testing…'; m.style.color = 'var(--muted)';
+    const body = {kuma_url: g('kuma_url').value.trim(), kuma_verify_ssl: g('kuma_verify_ssl').checked};
+    if (g('kuma_api_key').value) body.kuma_api_key = g('kuma_api_key').value;
+    const r = await api('/api/test-kuma', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const j = r ? await r.json().catch(()=>({})) : {};
+    m.textContent = (j.ok ? '✓ ' : '✕ ') + (j.message || j.error || 'failed');
+    m.style.color = j.ok ? 'var(--grn)' : 'var(--red)';
+  };
   const su = g('saveUnifiBtn');
   if (su) su.onclick = async () => {
   const body = {
+    kuma_enabled: g('kuma_enabled') ? g('kuma_enabled').checked : false,
+    kuma_url: g('kuma_url') ? g('kuma_url').value.trim() : '',
+    kuma_verify_ssl: g('kuma_verify_ssl') ? g('kuma_verify_ssl').checked : false,
     unifi_enabled: g('unifi_enabled').checked,
     unifi_host: g('unifi_host').value.trim(), unifi_port: parseInt(g('unifi_port').value||'443', 10),
     unifi_site: g('unifi_site').value.trim(), unifi_user: g('unifi_user').value.trim(),
     unifi_is_os: g('unifi_is_os').checked, unifi_verify_ssl: g('unifi_verify_ssl').checked
   };
   if (g('unifi_pass').value) body.unifi_pass = g('unifi_pass').value;
+  if (g('kuma_api_key') && g('kuma_api_key').value) body.kuma_api_key = g('kuma_api_key').value;
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  if (r && r.ok){ toast('✓ UNIFI SAVED'); loadUnifiWidgets(true); }
+  if (r && r.ok){ toast('✓ INTEGRATIONS SAVED'); loadUnifiWidgets(true); if (g('kuma_api_key')) g('kuma_api_key').value = ''; }
   else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'save failed')); }
   };
   // Asset Label save button
