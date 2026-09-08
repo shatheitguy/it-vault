@@ -905,6 +905,47 @@
           updates arrive with no clicks at all.
         </p>
       </div>
+
+      <div class="route" style="margin-top:22px">
+        <div class="route-h"><b>Updating by hand</b><span class="fld">docker run</span></div>
+        <pre><span class="sig"># 1. get the new image -- this alone changes nothing that's running</span>
+<b>docker pull ghcr.io/shatheitguy/it-vault:latest</b>
+
+<span class="sig"># 2. recreate the container. `docker restart` will NOT update it:</span>
+<span class="sig">#    a container is bound to the image it was created from.</span>
+<b>docker rm -f itvault</b>
+<b>docker run -d --name itvault --restart unless-stopped \
+  -p 5000:5000 \
+  -e ITVAULT_DATA_DIR=/app/data \
+  -e DB_HOST=itvault-db -e DB_NAME=itvault \
+  -e DB_USER=itvault -e DB_PASS=&lt;your-password&gt; \
+  -v itvault_data:/app/data \
+  -v invoices_data:/app/invoices \
+  -v backups_data:/app/backups \
+  ghcr.io/shatheitguy/it-vault:latest</b>
+
+<span class="sig"># 3. confirm what's actually running</span>
+<b>docker exec itvault cat VERSION</b></pre>
+        <p class="fine">
+          Removing the <em>container</em> is safe. Removing its <em>volumes</em> is
+          not: <code>itvault_data</code> holds the saved database pointer and the
+          session key, so keep all three <code>-v</code> flags or you will come
+          back to the setup wizard. Passing the <code>DB_*</code> values on the
+          command line is belt and braces &mdash; then the connection is declared
+          in the command itself and can't be lost at all. Forgotten your flags?
+          <code>docker inspect itvault</code> prints them before you replace it.
+        </p>
+      </div>
+
+      <div class="route" style="margin-top:14px">
+        <div class="route-h"><b>Updating with compose</b><span class="fld">Two commands</span></div>
+        <pre><b>docker compose pull</b>
+<b>docker compose up -d</b></pre>
+        <p class="fine">
+          Compose recreates only what changed and reuses your volumes, so there
+          are no flags to remember. This is the route worth switching to.
+        </p>
+      </div>
     </div>
   </section>
 
