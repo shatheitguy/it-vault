@@ -305,6 +305,45 @@ Either way your database is untouched (it isn't ours to touch), invoices,
 backups and the session key live on volumes that survive the swap, and the
 schema migrates itself on start.
 
+### Updating a plain `docker run` install
+
+Without compose, one thing first: **`docker restart` does not update
+anything.** Restarting reuses the image the container was created from, so it
+comes back on exactly the version it was already running. Updating means
+pulling the new image and recreating the container:
+
+```bash
+docker pull ghcr.io/shatheitguy/it-vault:latest
+
+docker rm -f itvault
+docker run -d --name itvault --restart unless-stopped \
+  -p 5000:5000 \
+  -e ITVAULT_DATA_DIR=/app/data \
+  -v itvault_data:/app/data \
+  -v invoices_data:/app/invoices \
+  -v backups_data:/app/backups \
+  ghcr.io/shatheitguy/it-vault:latest
+```
+
+Removing the *container* is safe. Removing its *volumes* is not:
+`itvault_data` holds the saved database pointer and the generated session key,
+so keep all three `-v` flags exactly as they were, or you will come back to
+the setup wizard with everyone signed out.
+
+Add back any other flags your install uses — `--network`, a different
+`--port`, `ITVAULT_WATCHTOWER_TOKEN`. If you can't remember them, read them
+off the running container before you remove it:
+
+```bash
+docker inspect itvault --format '{{range .Config.Env}}{{println .}}{{end}}'
+```
+
+Then check the new version is actually live:
+
+```bash
+docker exec itvault cat VERSION
+```
+
 ### One-click and automatic updates for containers
 
 IT-Vault deliberately cannot replace its own container. Doing that from the
@@ -343,6 +382,17 @@ docker run -d --name watchtower --restart unless-stopped \
 
 …then start IT-Vault with `-e ITVAULT_WATCHTOWER_TOKEN=<the-same-token>` on
 the same Docker network.
+
+That last part matters: `ITVAULT_WATCHTOWER_URL` defaults to
+`http://watchtower:8080`, and that name only resolves on a user-defined Docker
+network, so both containers have to share one. If IT-Vault runs with
+`--network host` — which the network scanner needs in order to see your LAN —
+the name won't resolve at all. Publish Watchtower's port with `-p 8080:8080`
+and point IT-Vault at it instead:
+
+```
+ITVAULT_WATCHTOWER_URL=http://127.0.0.1:8080
+```
 
 If you'd rather stay deliberate about upgrades, skip Watchtower entirely:
 pin a version in `.env` (`ITVAULT_TAG=1.6.1`) and bump it when you choose.
