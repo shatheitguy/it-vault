@@ -523,6 +523,31 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   line-height:1.5}
 .updacts a.btn{display:inline-flex;align-items:center;text-decoration:none}
 
+/* a read-only value that sits in a .field2 where an input would go */
+.ro{background:var(--bg1);border:1px solid var(--line);border-radius:8px;
+  padding:9px 11px;font-size:13px;color:var(--muted);min-height:38px;
+  display:flex;align-items:center;overflow-wrap:anywhere}
+
+/* permission tree: one column per module group, leaves as checkboxes. A role
+   is assembled from these rather than from a level per module, so the list
+   has to stay scannable at ~40 leaves. */
+.permtree{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
+.permgrp{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:12px 13px}
+.permhead{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding-bottom:8px;margin-bottom:8px;border-bottom:1px solid var(--line)}
+.permhead .chk span{font-family:var(--font);font-weight:650;font-size:12px;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--txt)}
+.permcount{font-family:var(--font);font-size:10.5px;color:var(--muted);white-space:nowrap}
+.permitems{display:flex;flex-direction:column;gap:7px}
+.permitem span{font-size:12.5px;color:var(--muted)}
+.permitem input:checked + span{color:var(--txt)}
+.permnote{font-style:normal;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--amber);border:1px solid var(--amber);border-radius:4px;padding:0 3px;
+  margin-left:4px;opacity:.85}
+.permtag{display:inline-block;font-family:var(--font);font-size:10.5px;padding:2px 7px;
+  border-radius:20px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+@media(max-width:560px){.permtree{grid-template-columns:minmax(0,1fr)}}
+
 /* ticket photos: a grid of thumbnails, each a link to the full-size image.
    Same shape as the portal's picker so a photo looks the same to the person
    who sent it and the person fixing it. */

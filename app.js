@@ -64,17 +64,29 @@ let assets=[],sortCol='',sortDir=1,groupBy='',expTimer=null,MY_ROLE=ROLE_VIEW;
 // and nothing else, so the sidebar has to ask about the module rather than
 // guess from the role name.
 let MY_PERMS={};
-// Show only what this user can actually open. A custom role with tickets-only
-// access shouldn't see an Assets link that answers 403, and every user keeps
-// Settings because that is where their own account lives.
-// Settings is reachable by everyone, because their own account lives in it --
-// but a role with no settings rights has no business seeing Users, LDAP, the
-// database pointer or the Danger Zone. Those sections answer 403 anyway, so
-// showing them just advertises what the user can't do.
-const SETTINGS_ALWAYS = ['account', 'general'];
+// The individual permissions this role was granted (see FEATURE_GROUPS in
+// app.py). Read through canDo() rather than directly.
+let MY_FEATURES=[];
+// Each settings section maps to one catalogue leaf, so a role can be given
+// Branding and nothing else. My Account is everyone's -- it is where their own
+// password and avatar live -- and the admin-only sections (Users, Database,
+// Danger Zone) have no leaf on purpose: granting those is granting admin.
+const SETTINGS_ALWAYS = ['account'];
+const SETTINGS_FEATURE = {
+  general: 'settings.general',
+  branding: 'settings.branding',
+  custom:   'settings.branding',
+  notif:    'settings.email',
+  sla:      'settings.sla',
+  label:    'settings.labels',
+  ldap:     'settings.ldap',
+  unifi:    'settings.unifi',
+};
 function applySettingsPermissions(){
-  const full = MY_ROLE===ROLE_ADMIN || permOf('settings')!=='none';
-  const allowed = full ? null : SETTINGS_ALWAYS;   // null = everything
+  const secOk = sec => SETTINGS_ALWAYS.indexOf(sec)>=0
+    || (SETTINGS_FEATURE[sec] ? canDo(SETTINGS_FEATURE[sec]) : MY_ROLE===ROLE_ADMIN);
+  const allowed = MY_ROLE===ROLE_ADMIN ? null
+    : [...document.querySelectorAll('#cfgNav .cfgitem')].map(b=>b.dataset.sec).filter(secOk);
   document.querySelectorAll('#cfgNav .cfgitem').forEach(btn=>{
     const ok = !allowed || allowed.indexOf(btn.dataset.sec)>=0;
     btn.style.display = ok ? '' : 'none';
@@ -94,9 +106,11 @@ function applySettingsPermissions(){
   }
 }
 
+// Show only what this user can actually open. A role granted tickets and
+// nothing else shouldn't see an Assets link that answers 403, and everyone
+// keeps Settings because their own account lives in there.
 function applyNavPermissions(){
   const show=(id,on)=>{const el=document.getElementById(id); if(el)el.style.display=on?'':'none';};
-  const admin=MY_ROLE===ROLE_ADMIN;
 
   // Main
   show('navAssets',    canSee('assets'));
@@ -105,22 +119,23 @@ function applyNavPermissions(){
 
   // Records -- these are all views over assets/directory
   show('navDirectory', canSee('directory'));
-  show('navCatalog',   canSee('assets'));
-  show('navTrash',     canSee('assets'));
-  show('navAudit',     admin);              // the log is an admin surface
+  show('navAudit',     canDo('tools.audit'));
 
   // Tools
-  show('navScan',      canSee('assets'));
-  show('navBackup',    admin);
+  show('navScan',      canDo('tools.scan'));
+  show('navBackup',    canDo('tools.backup'));
 
   // Settings stays for everyone: My Account is in there. The page itself
   // hides the sections a user has no rights to.
   show('navSettings',  true);
 
-  // Asset-page actions follow the assets module, not the coarse role.
-  show('navAdd',    canWrite('assets'));
-  show('navImport', canWrite('assets'));
-  show('navExport', canSee('assets'));
+  // Asset-page actions follow their own permission, so a role can be allowed
+  // to add an asset without also being allowed to bulk-import or export one.
+  show('navAdd',    canDo('assets.create'));
+  show('navImport', canDo('assets.import'));
+  show('navExport', canDo('assets.export'));
+  show('navCatalog', canDo('assets.catalog'));
+  show('navTrash',   canDo('assets.trash'));
 
   // Group headings are noise when everything under them is hidden.
   const groups=[
@@ -144,6 +159,10 @@ function applyNavPermissions(){
 function permOf(m){return (MY_PERMS&&MY_PERMS[m])||'none';}
 function canSee(m){return MY_ROLE===ROLE_ADMIN||permOf(m)!=='none';}
 function canWrite(m){return MY_ROLE===ROLE_ADMIN||permOf(m)==='write';}
+// One catalogue leaf, e.g. canDo('tickets.delete'). The module helpers above
+// answer "can they reach this area at all"; this answers "may they do this
+// one thing", which is what a role built from individual permissions needs.
+function canDo(f){return MY_ROLE===ROLE_ADMIN||MY_FEATURES.indexOf(f)>=0;}
 
 const TIMEOUT_MS=5*60*1000;
 let sessEnd=0;
@@ -1667,56 +1686,126 @@ async function delUser(un){
 }
 
 /* ---------- custom roles (Assets/Contracts/Directory/Tickets read/write) ---------- */
-const PERM_LABEL={none:'No access',read:'Read-only',write:'Read & write'};
+// Roles are built from individual permissions rather than one level per
+// module, so an admin can grant exactly one thing -- "reply to tickets" and
+// nothing else. The module columns the rest of the app checks are derived
+// server-side from whatever is ticked here, so the two can't drift.
+let FEATURE_CATALOGUE=[];
 let editingRoleId=null;
+
+async function loadFeatureCatalogue(){
+  if(FEATURE_CATALOGUE.length)return FEATURE_CATALOGUE;
+  const r=await api('/api/features');
+  FEATURE_CATALOGUE=r?await r.json():[];
+  return FEATURE_CATALOGUE;
+}
+
+function renderPermTree(granted){
+  const have=new Set(granted||[]);
+  document.getElementById('rl_tree').innerHTML=FEATURE_CATALOGUE.map(g=>`
+    <div class="permgrp">
+      <div class="permhead">
+        <label class="chk"><input type="checkbox" class="permall" data-grp="${g.key}"
+          ${g.items.every(i=>have.has(i.key))?'checked':''}><span>${esc(g.label)}</span></label>
+        <span class="permcount" id="pc_${g.key}"></span>
+      </div>
+      <div class="permitems">
+        ${g.items.map(i=>`<label class="chk permitem">
+          <input type="checkbox" class="permleaf" data-grp="${g.key}" value="${i.key}"
+            ${have.has(i.key)?'checked':''}>
+          <span>${esc(i.label)}${i.level==='admin_only'?' <em class="permnote">extra</em>':''}</span>
+        </label>`).join('')}
+      </div>
+    </div>`).join('');
+  // group header toggles everything under it; leaves keep the header honest
+  document.querySelectorAll('#rl_tree .permall').forEach(box=>{
+    box.onchange=()=>{
+      document.querySelectorAll(`#rl_tree .permleaf[data-grp="${box.dataset.grp}"]`)
+        .forEach(l=>{l.checked=box.checked;});
+      updatePermCounts();
+    };
+  });
+  document.querySelectorAll('#rl_tree .permleaf').forEach(l=>{ l.onchange=updatePermCounts; });
+  updatePermCounts();
+}
+
+function updatePermCounts(){
+  FEATURE_CATALOGUE.forEach(g=>{
+    const leaves=[...document.querySelectorAll(`#rl_tree .permleaf[data-grp="${g.key}"]`)];
+    const on=leaves.filter(l=>l.checked).length;
+    const el=document.getElementById('pc_'+g.key);
+    if(el)el.textContent=on?`${on} of ${leaves.length}`:'no access';
+    const all=document.querySelector(`#rl_tree .permall[data-grp="${g.key}"]`);
+    if(all){all.checked=on===leaves.length; all.indeterminate=on>0&&on<leaves.length;}
+  });
+  const total=document.querySelectorAll('#rl_tree .permleaf:checked').length;
+  const t=document.getElementById('rl_total');
+  if(t)t.textContent=total?`${total} permission${total===1?'':'s'} selected`:'Nothing selected yet';
+}
+
+function checkedFeatures(){
+  return [...document.querySelectorAll('#rl_tree .permleaf:checked')].map(l=>l.value);
+}
+
 function roleFormReset(){
   editingRoleId=null;
-  document.getElementById('rl_name').value=''; document.getElementById('rl_name').disabled=false;
-  document.getElementById('rl_assets').value='none'; document.getElementById('rl_contracts').value='none';
-  document.getElementById('rl_directory').value='none'; document.getElementById('rl_tickets').value='none';
-  document.getElementById('rl_settings').value='none';
-  document.getElementById('rl_save').textContent='＋ ADD ROLE';
+  const n=document.getElementById('rl_name');
+  n.value=''; n.disabled=false;
+  renderPermTree([]);
+  document.getElementById('rl_save').textContent='+ ADD ROLE';
 }
+
+// A role's grants are the summary people actually want in the list: "6
+// permissions" tells you more than five repetitions of "No access".
+function roleSummary(x){
+  const n=(x.features||[]).length;
+  if(!n)return '<span class="muted">no access</span>';
+  const byGrp={};
+  (x.features||[]).forEach(f=>{const g=f.split('.')[0];byGrp[g]=(byGrp[g]||0)+1;});
+  return Object.keys(byGrp).sort().map(g=>`<span class="permtag">${esc(g)} ${byGrp[g]}</span>`).join(' ');
+}
+
 async function loadRolesModal(){
+  await loadFeatureCatalogue();
   const r=await api('/api/roles'); const roles=r?await r.json():[];
   document.getElementById('rolesBody').innerHTML=roles.map(x=>`<tr>
-      <td>${esc(x.name)}</td><td>${PERM_LABEL[x.perm_assets]||'No access'}</td><td>${PERM_LABEL[x.perm_contracts]||'No access'}</td>
-      <td>${PERM_LABEL[x.perm_directory]||'No access'}</td><td>${PERM_LABEL[x.perm_tickets]||'No access'}</td>
-      <td>${PERM_LABEL[x.perm_settings]||'No access'}</td>
-      <td class="row-actions"><button class="btn sm ghost" onclick="editRoleForm(${x.id},'${esc(x.name)}','${x.perm_assets}','${x.perm_contracts}','${x.perm_directory}','${x.perm_tickets}','${x.perm_settings||'none'}')">EDIT</button><button class="btn sm danger" onclick="delRole(${x.id})">DEL</button></td>
-    </tr>`).join('')||'<tr><td colspan=7 style="color:var(--muted)">No custom roles yet</td></tr>';
+      <td>${esc(x.name)}</td>
+      <td>${roleSummary(x)}</td>
+      <td class="row-actions">
+        <button class="btn sm ghost" onclick='editRoleForm(${JSON.stringify(x.id)},${JSON.stringify(x.name)},${JSON.stringify(x.features||[])})'>EDIT</button>
+        <button class="btn sm danger" onclick="delRole(${x.id})">DEL</button>
+      </td>
+    </tr>`).join('')||'<tr><td colspan=3 style="color:var(--muted)">No custom roles yet</td></tr>';
   roleFormReset();
   document.getElementById('rolesModal').classList.add('show');
 }
-function editRoleForm(id,name,pa,pc,pd,pt,ps){
+
+function editRoleForm(id,name,features){
   editingRoleId=id;
-  document.getElementById('rl_name').value=name; document.getElementById('rl_name').disabled=true;
-  document.getElementById('rl_assets').value=pa; document.getElementById('rl_contracts').value=pc;
-  document.getElementById('rl_directory').value=pd; document.getElementById('rl_tickets').value=pt;
-  document.getElementById('rl_settings').value=ps||'none';
+  const n=document.getElementById('rl_name');
+  n.value=name; n.disabled=true;
+  renderPermTree(features||[]);
   document.getElementById('rl_save').textContent='✓ UPDATE ROLE';
+  document.getElementById('rl_name').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
+
 async function saveRole(){
-  const body={
-    name: document.getElementById('rl_name').value.trim(),
-    perm_assets: document.getElementById('rl_assets').value,
-    perm_contracts: document.getElementById('rl_contracts').value,
-    perm_directory: document.getElementById('rl_directory').value,
-    perm_tickets: document.getElementById('rl_tickets').value,
-    perm_settings: document.getElementById('rl_settings').value
-  };
+  const body={name:document.getElementById('rl_name').value.trim(), features:checkedFeatures()};
   if(!editingRoleId && !body.name){toast('✕ Role name required');return;}
+  if(!body.features.length && !confirm('This role has no permissions at all. Save it anyway?'))return;
   const r=editingRoleId
     ? await api('/api/roles/'+editingRoleId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     : await api('/api/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ ROLE SAVED');loadRolesModal();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
+
 async function delRole(id){
   if(!confirm('Delete this custom role?'))return;
   const r=await api('/api/roles/'+id,{method:'DELETE'});
   if(r&&r.ok){toast('✓ ROLE DELETED');loadRolesModal();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
+
 document.getElementById('manageRolesBtn').onclick=loadRolesModal;
 document.getElementById('rolesClose').onclick=()=>document.getElementById('rolesModal').classList.remove('show');
 document.getElementById('rl_save').onclick=saveRole;
@@ -2300,8 +2389,8 @@ async function openTicket(id){
   const catList=TICKET_CATEGORIES.slice();
   const curCat=(t.category||'').trim();
   const catKnown=!curCat||catList.indexOf(curCat)>=0;
-  const isAdmin=MY_ROLE===ROLE_ADMIN;
-  const mayQueue=canWrite('tickets');   // status / priority / assignee
+  const isAdmin=canDo('tickets.edit');   // may change the ticket's details
+  const mayQueue=canDo('tickets.queue'); // status / priority / assignee
   const ro=(label,value,extra='')=>`<div class="field2" ${extra}><label>${label}</label><input value="${esc(value==null?'':String(value))}" readonly disabled></div>`;
   // Laid out with the same invbox / grid2 / field2 blocks as the asset form,
   // so a ticket reads like every other record in the app. Nothing appears
@@ -2322,7 +2411,7 @@ async function openTicket(id){
     </div>`:''}
 
     <div class="invbox">
-      <label>TICKET DETAILS${isAdmin?'':' <span class="muted" style="font-weight:400">(only an admin can change these)</span>'}</label>
+      <label>TICKET DETAILS${isAdmin?'':' <span class="muted" style="font-weight:400">(you cannot change these)</span>'}</label>
       <div class="grid2">
         ${isAdmin?`
         <div class="field2" style="grid-column:1/-1"><label>Subject</label>
@@ -2394,7 +2483,7 @@ async function openTicket(id){
   const assignBar=document.querySelector('#tkModal .assignbar');
   if(assignBar)assignBar.style.display=mayQueue?'':'none';
   const delBtn=document.getElementById('tkDeleteBtn');
-  if(delBtn)delBtn.style.display=isAdmin?'':'none';
+  if(delBtn)delBtn.style.display=canDo('tickets.delete')?'':'none';
   // Read-write on tickets may move the queue, so they need SAVE CHANGES too.
   const saveBtn=document.getElementById('tkSaveBtn');
   if(saveBtn)saveBtn.style.display=mayQueue?'':'none';
@@ -2429,8 +2518,8 @@ async function deleteTicketPhoto(attId){
 // Rendered as a block of thumbnails; clicking one opens the full-size image
 // in a new tab rather than building a lightbox nobody asked for.
 function ticketPhotosHtml(atts,ticketId){
-  const isAdmin=MY_ROLE===ROLE_ADMIN;
-  const canAdd=canWrite('tickets');
+  const mayDelete=canDo('tickets.delete');
+  const canAdd=canDo('tickets.photos');
   if(!atts.length&&!canAdd)return '';
   const kb=n=>n>=1048576?((n/1048576).toFixed(1)+' MB'):(Math.max(1,Math.round(n/1024))+' KB');
   const thumbs=atts.map(a=>{
@@ -2439,7 +2528,7 @@ function ticketPhotosHtml(atts,ticketId){
       <a href="${u}" target="_blank" rel="noopener" title="${esc(a.filename)} &middot; ${kb(a.size)} &middot; ${esc(a.uploaded_by)}">
         <img src="${u}" alt="${esc(a.filename)}" loading="lazy">
       </a>
-      ${isAdmin?`<button type="button" class="x" title="Delete photo" onclick="deleteTicketPhoto(${a.id})">&times;</button>`:''}
+      ${mayDelete?`<button type="button" class="x" title="Delete photo" onclick="deleteTicketPhoto(${a.id})">&times;</button>`:''}
       <div class="nm">${esc(a.filename)}</div>
     </div>`;
   }).join('');
@@ -2913,6 +3002,7 @@ window.repairDashStructure=repairDashStructure;
   if(!me.user){location.href='/'+(location.search||'');return;}
   MY_ROLE=me.role;
   MY_PERMS=me.perms||{};
+  MY_FEATURES=me.features||[];
   applyNavPermissions();
   applySettingsPermissions();
   window.sessionUser=me.user;
