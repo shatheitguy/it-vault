@@ -2474,11 +2474,6 @@ async function openTicket(id){
     ${ticketPhotosHtml(atts,id)}
 
     <div class="invbox">
-      <label>CHANGE HISTORY</label>
-      <div class="tkhist" id="tkHistory"></div>
-    </div>
-
-    <div class="invbox">
       <label>REPLIES</label>
       <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> &middot; ${esc(rp.author_role)} &middot; ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
     </div>`;
