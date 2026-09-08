@@ -51,6 +51,81 @@ flips to `Checked-Out`, and the signature stays attached to it.
 *A factory-new install — the theme, layout and branding above are what you
 get on first run. Every asset, name and serial is invented.*
 
+## Install IT-Vault and a database, in one step
+
+On a Linux server (or macOS) this is the whole thing. The Windows
+installer doesn't set up a database yet -- there, IT-Vault starts on its
+own and the browser wizard asks for a MariaDB/MySQL you point it at:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
+```
+
+It asks whether to install MariaDB alongside IT-Vault, then asks for three
+things and does the rest:
+
+```
+Database
+
+  IT-Vault needs MariaDB or MySQL. It can install one here as a container
+  and wire itself up, or you can point it at a server you already run.
+
+Install MariaDB here and connect IT-Vault to it? [y/N] y
+
+  Database name     [itvault]: itvault
+  Database username [itvault]: itvault
+  Database password [Enter = generate one]:
+  confirm:
+
+    database  itvault
+    username  itvault
+    password  set
+```
+
+From those answers it creates the `itvault-net` network and the `itvault_db`
+volume, starts MariaDB on that network, waits for it to finish initialising,
+and starts IT-Vault already connected with the credentials in place — so
+there is no setup wizard to fill in, no `CREATE USER`, no `GRANT`, and none
+of the `1045 Access denied` that a missed step produces. Press Enter at the
+password prompt and it generates a strong one; MariaDB's own `root` password
+is always generated separately and is never the one the application uses.
+
+Open **http://localhost:5000** and create the admin account. That's it.
+
+Say **no** to the database question and IT-Vault starts on its own, with the
+first-run wizard in the browser asking for a MariaDB/MySQL you already run.
+Either way the database is yours — IT-Vault never upgrades or deletes it, so
+your version, backups and retention policy stay your decision.
+
+To skip the questions entirely — for a scripted or unattended install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh -s -- \
+  --db-name itvault --db-user itvault --db-pass 'choose-something-long'
+```
+
+Or `--with-db --yes` to accept every default with a generated password, and
+`--no-db` to skip the question and use the browser wizard.
+
+### What it creates
+
+Nothing hidden — the same four objects you would create by hand:
+
+| | |
+|---|---|
+| network `itvault-net` | lets IT-Vault reach the database by container name, so port 3306 is never published to your LAN |
+| volume `itvault_db` | MariaDB's data directory |
+| container `itvault-db` | `mariadb:11`, on that network, with a healthcheck |
+| container `itvault` | IT-Vault, on that network, with `DB_HOST=itvault-db` already set |
+
+`--dry-run` prints all of it and changes nothing, on a machine with no Docker
+at all:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh
+less install.sh && sh install.sh --dry-run
+```
+
 ## Install in one line
 
 ```bash
@@ -80,10 +155,12 @@ install IT-Vault directly on the machine instead (Python + waitress in a
 virtualenv) -- or skip straight there with `--no-docker`. You bring your own
 database either way.
 
-It installs **IT-Vault only**. The database stays yours to choose, so the
-installer finishes by printing the MariaDB one-liner if you haven't got one.
-An existing IT-Vault container is started if stopped, and otherwise left
-alone — it owns your data volumes.
+It offers to install **MariaDB** too — see
+[Install IT-Vault and a database, in one step](#install-it-vault-and-a-database-in-one-step)
+above. Decline and the database stays yours to point at, and the installer
+finishes by printing the MariaDB one-liner if you haven't got one. An existing
+IT-Vault container is started if stopped, and otherwise left alone — it owns
+your data volumes.
 
 Options, as environment variables or flags:
 
@@ -94,7 +171,9 @@ Options, as environment variables or flags:
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
 | `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
-| `--with-db` / `$env:ITVAULT_WITH_DB` | also provision MariaDB, wire it up and skip the setup wizard |
+| `--with-db` / `$env:ITVAULT_WITH_DB` | install MariaDB without being asked, wire it up and skip the setup wizard *(install.sh only)* |
+| `--no-db` / `$env:ITVAULT_NO_DB` | don't ask about MariaDB; use the browser wizard *(install.sh only)* |
+| `--db-name` / `--db-user` / `--db-pass` | answer the database questions up front, implies `--with-db` *(install.sh only)* |
 | `--no-docker` / `$env:ITVAULT_NO_DOCKER` | skip Docker and install IT-Vault straight on the host (Python + waitress) |
 | `--dir` / `$env:ITVAULT_DIR` | where a no-Docker install lands, default `~/it-vault` |
 
