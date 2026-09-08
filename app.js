@@ -2289,7 +2289,7 @@ let curTicketId=null;
 async function openTicket(id){
   curTicketId=id;
   const r=await api('/api/tickets/'+id); if(!r)return; const d=await r.json();
-  const t=d.ticket, reps=d.replies||[];
+  const t=d.ticket, reps=d.replies||[], atts=d.attachments||[];
   document.getElementById('tkModalTitle').textContent=t.code+' · '+t.subject;
   // populate assignee select from Users
   try{
@@ -2364,6 +2364,8 @@ async function openTicket(id){
                :`<textarea rows="4" readonly disabled>${esc(t.description||'')}</textarea>`}
     </div>
 
+    ${ticketPhotosHtml(atts,id)}
+
     <div class="invbox">
       <label>CHANGE HISTORY</label>
       <div class="tkhist" id="tkHistory"></div>
@@ -2374,6 +2376,8 @@ async function openTicket(id){
       <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> &middot; ${esc(rp.author_role)} &middot; ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
     </div>`;
   loadTicketHistory(id);
+  const photoIn=document.getElementById('tkPhotoInput');
+  if(photoIn)photoIn.onchange=()=>{uploadTicketPhotos(photoIn.files);};
   // "type another..." reveals a text box rather than throwing a prompt() at
   // the user, so the typed value is visible before it is saved.
   const catSel=document.getElementById('tkeCategorySel');
@@ -2397,6 +2401,60 @@ async function openTicket(id){
   document.getElementById('tkModal').classList.add('show');
 }
 window.openTicketById=(id)=>openTicket(id);
+// Photos a requester attached from the portal, plus a way for whoever is
+// working the ticket to add their own (the repair, the replaced part). The
+// bytes are fetched one at a time by their own route, so a ticket with four
+// photos doesn't bloat the detail response.
+async function uploadTicketPhotos(files){
+  if(!curTicketId||!files||!files.length)return;
+  const fd=new FormData();
+  Array.prototype.forEach.call(files,f=>fd.append('photos',f,f.name));
+  const r=await api('/api/tickets/'+curTicketId+'/attachments',{method:'POST',body:fd});
+  if(!r){toast('✕ upload failed');return;}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){toast('✕ '+(j.error||'upload failed'));return;}
+  if(j.warnings&&j.warnings.length)toast('⚠ '+j.warnings.join('; '));
+  else toast('✓ '+j.saved+' PHOTO'+(j.saved===1?'':'S')+' ADDED');
+  openTicket(curTicketId);
+}
+
+async function deleteTicketPhoto(attId){
+  if(!curTicketId)return;
+  if(!confirm('Delete this photo? It cannot be recovered.'))return;
+  const r=await api('/api/tickets/'+curTicketId+'/attachments/'+attId,{method:'DELETE'});
+  if(r&&r.ok){toast('✓ PHOTO DELETED');openTicket(curTicketId);}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
+}
+
+// Rendered as a block of thumbnails; clicking one opens the full-size image
+// in a new tab rather than building a lightbox nobody asked for.
+function ticketPhotosHtml(atts,ticketId){
+  const isAdmin=MY_ROLE===ROLE_ADMIN;
+  const canAdd=canWrite('tickets');
+  if(!atts.length&&!canAdd)return '';
+  const kb=n=>n>=1048576?((n/1048576).toFixed(1)+' MB'):(Math.max(1,Math.round(n/1024))+' KB');
+  const thumbs=atts.map(a=>{
+    const u='/api/tickets/'+ticketId+'/attachments/'+a.id;
+    return `<div class="shot">
+      <a href="${u}" target="_blank" rel="noopener" title="${esc(a.filename)} &middot; ${kb(a.size)} &middot; ${esc(a.uploaded_by)}">
+        <img src="${u}" alt="${esc(a.filename)}" loading="lazy">
+      </a>
+      ${isAdmin?`<button type="button" class="x" title="Delete photo" onclick="deleteTicketPhoto(${a.id})">&times;</button>`:''}
+      <div class="nm">${esc(a.filename)}</div>
+    </div>`;
+  }).join('');
+  return `
+    <div class="invbox">
+      <label>PHOTOS${atts.length?` <span class="muted" style="font-weight:400">(${atts.length})</span>`:''}</label>
+      ${atts.length?`<div class="shots">${thumbs}</div>`:'<p class="muted" style="margin:0">No photos attached.</p>'}
+      ${canAdd?`<div style="margin-top:12px">
+        <input type="file" id="tkPhotoInput" accept="image/*" multiple style="display:none">
+        <button type="button" class="btn sm ghost" onclick="document.getElementById('tkPhotoInput').click()">+ ADD PHOTO</button>
+        <span class="muted" style="margin-left:8px;font-size:11.5px">JPEG, PNG, GIF, WebP or HEIC &middot; up to 4MB each &middot; 4 per ticket</span>
+      </div>`:''}
+    </div>`;
+}
+
 // Field-change trail for a ticket, rendered like an asset's history: who
 // changed what, from what, when. Loaded after the panel renders so a slow
 // query never holds up the rest of the view.

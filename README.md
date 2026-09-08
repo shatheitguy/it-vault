@@ -415,6 +415,28 @@ Runtime settings that change *inside* the app — branding, theme colors,
 SMTP, LDAP, ticket SLAs, roles — live in the database via Settings → \* in
 the UI, not in environment variables.
 
+### If branding won't save, or the database pointer keeps resetting
+
+Symptoms: uploading a letterhead returns `Permission denied`, an uploaded
+logo never appears, or the setup wizard asks for the database again after
+every update.
+
+All three are the same cause. Docker seeds a *new* named volume from the
+directory it shadows — ownership included — but if that directory isn't in
+the image it creates the volume empty and owned by `root`. IT-Vault runs as
+uid 1000, so nothing can be written into `/app/data`. Images from this commit
+onward ship the directory, so new installs are fine; a volume created by an
+older image keeps its root ownership and needs fixing once:
+
+```bash
+docker run --rm -v itvault_data:/data alpine chown -R 1000:1000 /data
+```
+
+Then restart IT-Vault. Nothing is lost either way — branding and settings are
+stored in the database, and `/app/data` is only a cache for them — but the
+session key and the saved database pointer do need a writable volume. The
+startup log prints this same command if the directory isn't writable.
+
 ## Database
 
 - **You own it.** IT-Vault connects to whatever MariaDB/MySQL you give it —
@@ -426,10 +448,11 @@ the UI, not in environment variables.
   upgrade needs no manual SQL.
 - **Backups**: Settings → Backup / Restore exports and restores archives by
   scope (everything, config only, or assets only). An "everything" archive
-  includes the uploaded logo and letterhead, which live on disk rather than
-  in the database. Restoring clears each table before repopulating it, so it
-  reverts to that point in time rather than merging.
-- **What's on volumes**: `/app/data` (session key + saved DB pointer),
+  includes the uploaded logo and letterhead, which are stored in the database
+  (with a copy on disk as a cache). Restoring clears each table before
+  repopulating it, so it reverts to that point in time rather than merging.
+- **What's on volumes**: `/app/data` (session key, saved DB pointer, and a
+  cache of the uploaded branding),
   `/app/invoices` (uploaded invoices) and `/app/backups` (generated
   archives). These survive `docker compose down`; only `down -v` destroys
   them. Your database lives wherever you installed it and is untouched by

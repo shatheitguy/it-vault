@@ -66,6 +66,30 @@
   .badge.s_Pending{background:rgba(138,152,176,.16);color:var(--mut)}
   .badge.s_Resolved{background:rgba(61,220,151,.16);color:#5fe0ac}
   .badge.s_Closed{background:rgba(138,152,176,.16);color:var(--mut)}
+  /* photo attachments: a phone camera is the fastest bug report there is,
+     so the picker is a big tap target and every pick gets a thumbnail the
+     visitor can remove before they submit. */
+  .drop{margin-top:6px;border:1px dashed var(--line);border-radius:10px;background:var(--comp2);
+    padding:18px 14px;text-align:center;cursor:pointer;transition:.15s}
+  .drop:hover,.drop.over{border-color:var(--acc);background:var(--comp)}
+  .drop .di{font-size:22px;line-height:1;margin-bottom:6px}
+  .drop .dt{font-size:13.5px;color:var(--txt)}
+  .drop .dh{font-size:12px;color:var(--mut2);margin-top:4px}
+  .shots{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  .shot{position:relative;width:78px;height:78px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line);background:var(--comp2)}
+  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  .shot .x{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;
+    border:0;margin:0;padding:0;background:rgba(0,0,0,.66);color:#fff;font-size:13px;
+    line-height:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .shot .x:hover{background:var(--red)}
+  .shot .nm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;
+    font-size:9.5px;padding:2px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .warn{margin-top:10px;font-size:12.5px;color:var(--amber);line-height:1.5}
+  .atts{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+  .atts a{display:block;width:78px;height:78px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line)}
+  .atts img{width:100%;height:100%;object-fit:cover;display:block}
 </style>
 </head>
 <body>
@@ -96,6 +120,15 @@
           </div>
         </div>
         <label>Description</label><textarea id="description" required placeholder="Describe the issue or request in detail..."></textarea>
+        <label>Photos <span style="color:var(--mut2)">- optional, up to 4</span></label>
+        <div class="drop" id="drop">
+          <div class="di">&#128247;</div>
+          <div class="dt" id="dropText">Add a photo (optional)</div>
+          <div class="dh">A picture of the error, the screen or the device. JPEG, PNG, GIF, WebP or HEIC, up to 4MB each.</div>
+        </div>
+        <input type="file" id="photos" accept="image/*" multiple style="display:none">
+        <div class="shots" id="shots"></div>
+        <div class="warn" id="photoWarn"></div>
         <button id="submit" type="submit">Submit ticket</button>
       </form>
       <div class="msg" id="msg"></div>
@@ -191,6 +224,71 @@
     document.getElementById('newTicketView').style.display = 'none';
   };
 
+  /* ---- photo attachments ----
+     Files are held in a list of our own rather than read back off the input,
+     because assigning to input.files is not portable and a visitor who picks
+     three photos in two goes expects to end up with three, not the last two.
+     "capture" is deliberately absent from the input: on a phone the OS menu
+     already offers Camera alongside Photos, and forcing capture takes the
+     existing-screenshot option away. */
+  var PHOTO_MAX = 4, PHOTO_MAX_BYTES = 4 * 1024 * 1024;
+  var picked = [];
+  var drop = document.getElementById('drop');
+  var fileInput = document.getElementById('photos');
+  var shots = document.getElementById('shots');
+  var photoWarn = document.getElementById('photoWarn');
+
+  function renderShots(){
+    shots.innerHTML = '';
+    picked.forEach(function(f, i){
+      var d = document.createElement('div'); d.className = 'shot';
+      var img = document.createElement('img'); img.alt = f.name;
+      // object URLs are revoked on submit/reset so a long-lived form doesn't
+      // pin every photo the visitor ever picked in memory
+      img.src = f._url = URL.createObjectURL(f);
+      var x = document.createElement('button');
+      x.type = 'button'; x.className = 'x'; x.title = 'Remove'; x.textContent = '×';
+      x.onclick = function(){ releaseUrls([f]); picked.splice(i, 1); renderShots(); };
+      var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = f.name;
+      d.appendChild(img); d.appendChild(x); d.appendChild(nm);
+      shots.appendChild(d);
+    });
+    document.getElementById('dropText').textContent = picked.length
+      ? (picked.length + ' photo' + (picked.length > 1 ? 's' : '') + ' attached - add another')
+      : 'Add a photo (optional)';
+  }
+  function releaseUrls(list){
+    (list || []).forEach(function(f){ if(f._url){ try{ URL.revokeObjectURL(f._url); }catch(e){} f._url = null; } });
+  }
+  function addFiles(list){
+    var msgs = [];
+    Array.prototype.forEach.call(list || [], function(f){
+      if(picked.length >= PHOTO_MAX){ msgs.push('Up to ' + PHOTO_MAX + ' photos.'); return; }
+      if(!/^image\//i.test(f.type||'') && !/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.name||'')){
+        msgs.push(f.name + ' is not an image.'); return;
+      }
+      if(f.size > PHOTO_MAX_BYTES){ msgs.push(f.name + ' is over 4MB.'); return; }
+      if(picked.some(function(p){ return p.name === f.name && p.size === f.size; })) return;
+      picked.push(f);
+    });
+    // deduped: picking six photos at once shouldn't repeat "Up to 4" six times
+    photoWarn.textContent = msgs.length ? msgs.filter(function(m,i){return msgs.indexOf(m)===i;}).join(' ') : '';
+    renderShots();
+  }
+  drop.onclick = function(){ fileInput.click(); };
+  fileInput.onchange = function(){ addFiles(fileInput.files); fileInput.value = ''; };
+  ['dragenter','dragover'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); });
+  });
+  drop.addEventListener('drop', function(e){
+    if(e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+  function clearPhotos(){ releaseUrls(picked); picked = []; photoWarn.textContent = ''; renderShots(); }
+  renderShots();
+
   // Submit ticket
   document.getElementById('f').addEventListener('submit', function(e) {
     e.preventDefault();
@@ -205,10 +303,28 @@
       description: document.getElementById('description').value.trim(),
       token: token
     };
-    fetch('/api/portal/tickets', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)})
+    // Photos force multipart; without them the request stays JSON so nothing
+    // changes for the Android app or anyone posting to this endpoint directly.
+    var req;
+    if(picked.length){
+      var fd = new FormData();
+      Object.keys(body).forEach(function(k){ fd.append(k, body[k]); });
+      picked.forEach(function(f){ fd.append('photos', f, f.name); });
+      req = fetch('/api/portal/tickets', {method:'POST', body: fd});
+    } else {
+      req = fetch('/api/portal/tickets', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    }
+    req
       .then(function(r){return r.json().then(function(j){return {r:r, j:j}})})
       .then(function(d){
-        if(d.r.ok){ msg.className='msg ok'; msg.textContent='✓ Ticket '+d.j.code+' submitted! Our IT team has been assigned and you\'ll get email updates.'; document.getElementById('f').reset(); }
+        if(d.r.ok){
+          msg.className='msg ok';
+          var txt = '✓ Ticket '+d.j.code+' submitted! Our IT team has been assigned and you\'ll get email updates.';
+          if(d.j.photos) txt += ' '+d.j.photos+' photo'+(d.j.photos>1?'s':'')+' attached.';
+          if(d.j.photo_warnings && d.j.photo_warnings.length) txt += ' Not attached: '+d.j.photo_warnings.join('; ')+'.';
+          msg.textContent = txt;
+          document.getElementById('f').reset(); clearPhotos();
+        }
         else { msg.className='msg err'; msg.textContent='✕ '+(d.j.error||'Submission failed'); }
       })
       .catch(function(){ msg.className='msg err'; msg.textContent='✕ Network error'; })
@@ -220,7 +336,7 @@
   var pollTimer = null;
   var lastReplyCount = null;
   function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
-  function renderStatus(t, reps, opts){
+  function renderStatus(t, reps, atts, opts){
     opts = opts || {};
     var result = document.getElementById('statusResult');
     var prioClass = t.priority || 'Normal';
@@ -238,6 +354,16 @@
       '<div class="status-row"><b>Due</b><span>'+(t.due_date||'—')+'</span></div>' +
       '<div class="status-row"><b>Created</b><span>'+(t.created_at||'')+'</span></div>' +
       '<div class="status-row"><b>Updated</b><span>'+(t.updated_at||'')+'</span></div>';
+    if(atts && atts.length){
+      html += '<div class="replies"><b style="color:var(--mut);font-size:12px;text-transform:uppercase">Photos ('+atts.length+')</b><div class="atts">';
+      atts.forEach(function(a){
+        // served through the ticket code, which is the same key that got the
+        // visitor this far -- opening in a new tab lets them see it full size
+        var u = '/api/portal/attachments/'+encodeURIComponent(t.code)+'/'+a.id;
+        html += '<a href="'+u+'" target="_blank" rel="noopener" title="'+(a.filename||'photo')+'"><img src="'+u+'" alt=""></a>';
+      });
+      html += '</div></div>';
+    }
     if(reps.length) {
       html += '<div class="replies"><b style="color:var(--mut);font-size:12px;text-transform:uppercase">Replies ('+reps.length+')</b>';
       reps.forEach(function(rp){
@@ -262,7 +388,7 @@
           if(!silent) result.innerHTML='<div class="msg err" style="display:block">✕ '+(d.j.error||'Not found')+'</div>';
           return;
         }
-        renderStatus(d.j.ticket, d.j.replies || [], {silent: silent});
+        renderStatus(d.j.ticket, d.j.replies || [], d.j.attachments || [], {silent: silent});
         if(!pollTimer){ pollTimer = setInterval(function(){ lookupTicket(code, true); }, 15000); }
       })
       .catch(function(){ if(!silent) result.innerHTML='<div class="msg err" style="display:block">✕ Network error</div>'; });
