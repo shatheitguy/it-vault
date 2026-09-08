@@ -844,21 +844,29 @@
 </div></div>
 
 <!-- Roles modal (custom per-module permissions, e.g. "Manager") -->
-<div class="modal" id="rolesModal"><div class="modal-box" style="width:min(760px,94vw);max-width:760px">
-  <h3>CUSTOM ROLES</h3>
-  <p class="sec-hint" style="margin-top:0">The built-in roles (admin, read-write, read-only) are fixed. A custom role is
-  built from individual permissions, so you can grant exactly one thing &mdash; "reply to tickets" and nothing else &mdash;
-  and tick more as you need them. Permissions marked <em class="permnote">extra</em> are ones the built-in read-write role
-  doesn't get by default. Users, Roles, Database and the Danger Zone stay admin-only: granting those is granting admin.</p>
-  <div class="tablewrap"><table class="dtable"><thead><tr><th>Role Name</th><th>Permissions</th><th></th></tr></thead><tbody id="rolesBody"></tbody></table></div>
-  <div class="grid2" style="margin-top:14px">
-    <div class="field2"><label>Role Name</label><input id="rl_name" placeholder="e.g. Helpdesk"></div>
-    <div class="field2"><label>Selected</label><div class="ro" id="rl_total">Nothing selected yet</div></div>
+<div class="modal" id="rolesModal"><div class="modal-box" style="width:min(900px,96vw);max-width:900px">
+  <h3>USER ROLES</h3>
+  <!-- Everything between the title and the buttons lives in ONE scroll
+       container. Left as direct children of .modal-box they each picked up
+       "overflow:auto; flex:1 1 auto" from the generic rule, so the modal grew
+       five scrollbars and clipped the name field to half its height. -->
+  <div class="modal-scroll">
+    <p class="sec-hint" style="margin-top:0">Built-in roles (admin, read-write, read-only) are fixed. A custom role is
+    assembled from individual permissions, so you can grant one thing and nothing else. <em class="permnote">extra</em>
+    marks permissions the read-write role doesn't get by default. Users, Roles, Database and the Danger Zone stay
+    admin-only &mdash; granting those is granting admin.</p>
+    <div class="tablewrap noscroll"><table class="dtable"><thead><tr><th>Role Name</th><th>Permissions</th><th></th></tr></thead><tbody id="rolesBody"></tbody></table></div>
+    <div class="grid2" style="margin-top:14px">
+      <div class="field2"><label>Role Name</label><input id="rl_name" placeholder="e.g. Helpdesk"></div>
+      <div class="field2"><label>Selected</label><div class="ro" id="rl_total">Nothing selected yet</div></div>
+    </div>
+    <div class="secthead" style="margin-top:14px">PERMISSIONS</div>
+    <div id="rl_tree" class="permtree"></div>
   </div>
-  <div class="secthead" style="margin-top:14px">PERMISSIONS</div>
-  <div id="rl_tree" class="permtree"></div>
-  <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="rl_save">+ ADD ROLE</button></div>
-  <div class="m-actions"><button class="btn ghost" id="rolesClose">CLOSE</button></div>
+  <div class="m-actions">
+    <button class="btn ghost" id="rolesClose">CLOSE</button>
+    <button class="btn" id="rl_save">+ ADD ROLE</button>
+  </div>
 </div></div>
 
 <!-- User edit modal -->
