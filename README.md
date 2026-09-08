@@ -115,7 +115,7 @@ Nothing hidden — the same four objects you would create by hand:
 |---|---|
 | network `itvault-net` | lets IT-Vault reach the database by container name, so port 3306 is never published to your LAN |
 | volume `itvault_db` | MariaDB's data directory |
-| container `itvault-db` | `mariadb:11`, on that network, with a healthcheck |
+| container `itvault-db` | `mariadb:latest`, on that network, with a healthcheck. Override with `--db-image` (e.g. `mariadb:12`, `mysql:8`) |
 | container `itvault` | IT-Vault, on that network, with `DB_HOST=itvault-db` already set |
 
 `--dry-run` prints all of it and changes nothing, on a machine with no Docker
@@ -174,6 +174,7 @@ Options, as environment variables or flags:
 | `--with-db` / `$env:ITVAULT_WITH_DB` | install MariaDB without being asked, wire it up and skip the setup wizard *(install.sh only)* |
 | `--no-db` / `$env:ITVAULT_NO_DB` | don't ask about MariaDB; use the browser wizard *(install.sh only)* |
 | `--db-name` / `--db-user` / `--db-pass` | answer the database questions up front, implies `--with-db` *(install.sh only)* |
+| `--db-image` / `$env:ITVAULT_DB_IMAGE` | database image, default `mariadb:latest`; pin it (`mariadb:12`) to stay on one major *(install.sh only)* |
 | `--no-docker` / `$env:ITVAULT_NO_DOCKER` | skip Docker and install IT-Vault straight on the host (Python + waitress) |
 | `--dir` / `$env:ITVAULT_DIR` | where a no-Docker install lands, default `~/it-vault` |
 
@@ -266,12 +267,22 @@ docker run -d --name itvault-db --restart unless-stopped \
   -e MARIADB_USER=itvault \
   -e MARIADB_PASSWORD='<a-strong-password>' \
   -v itvault_db:/var/lib/mysql \
-  mariadb:11
+  mariadb:latest
 ```
 
 That creates the database and user for you, so you can skip the SQL below.
 Keep the volume — it *is* your data. Don't publish port 3306 unless you
 genuinely need outside access; IT-Vault reaches it over the Docker network.
+
+A note on `mariadb:latest`, because it is not the same call as for IT-Vault's
+own image. A fresh install is fine: the volume is created in the same breath
+as the container, so whatever `latest` is that day initialises it and the two
+agree. What you must not do is point a *newer* major at a data directory an
+older one wrote — MariaDB rewrites the directory in place, one way, with no
+prompt. So if you keep the volume and recreate the container later, pin the
+version that wrote it (`mariadb:12`, say) rather than taking whatever `latest`
+has become. `install.sh` checks that for you and stops rather than letting you
+find out afterwards; by hand it is on you.
 
 To let the two containers talk, put them on one network:
 
