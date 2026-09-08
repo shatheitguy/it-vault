@@ -90,7 +90,7 @@ Options, as environment variables or flags:
 | | |
 |---|---|
 | `--port 8080` / `$env:ITVAULT_PORT` | host port, default 5000 |
-| `--tag 1.6.6` / `$env:ITVAULT_TAG` | image tag, default `latest` |
+| `--tag 1.7.0` / `$env:ITVAULT_TAG` | image tag, default `latest` |
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
 | `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
@@ -275,11 +275,12 @@ docker run -d --name itvault -p 5000:5000 \
   -v invoices_data:/app/invoices \
   -v backups_data:/app/backups \
   -e ITVAULT_DATA_DIR=/app/data \
-  ghcr.io/shatheitguy/it-vault:1.6.0
+  ghcr.io/shatheitguy/it-vault:latest
 ```
 
-Then open the setup wizard and enter your database details. Pin a version
-tag for anything real; `latest` moves whenever a release is published.
+Then open the setup wizard and enter your database details. `latest` follows
+`main`, so a pull always brings down the current build; pin a version tag
+instead if you want to stay on a fixed one.
 
 Keep `/app/data` on a volume: it holds the generated session-signing key and
 the saved database pointer, so an image update doesn't sign everyone out.
