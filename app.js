@@ -200,7 +200,37 @@ function drawMatrix(){
 function esc(v){return(v==null?'':String(v)).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function statusClass(s){s=(s||'').toLowerCase();return s==='reserved'?'s-reserved':s==='retired'?'s-retired':s==='lost/stolen'?'s-lost':'s-default';}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
-async function api(u,opt){const r=await fetch(u,opt);if(r.status===401){location.href='/';return null;}return r;}
+// Every request in the app goes through here, which makes it the one place
+// that can guarantee a failure is never silent. fetch() REJECTS on a dropped
+// connection, a reset by a proxy or tunnel, or a mixed-content block -- and an
+// async click handler that rejects shows the user absolutely nothing. That is
+// what "I press save and nothing happens" was: not a server that refused the
+// request, but a request whose failure had nowhere to go.
+async function api(u,opt){
+  let r;
+  try{
+    r=await fetch(u,opt);
+  }catch(e){
+    toast('✕ NO RESPONSE FROM SERVER — '+((e&&e.message)||'connection failed'));
+    console.error('api() failed',u,e);
+    return null;
+  }
+  if(r.status===401){location.href='/';return null;}
+  return r;
+}
+
+// A failing response is not necessarily JSON. Anything in front of the app --
+// a reverse proxy, a Cloudflare tunnel -- answers with HTML, and calling
+// r.json() on that threw inside the very branch meant to report the error, so
+// the user saw nothing. Falls back to the status line, which is always there.
+async function apiError(r){
+  if(!r) return 'no response';
+  try{
+    const j=await r.json();
+    if(j && j.error) return j.error;
+  }catch(e){}
+  return ('HTTP '+r.status+' '+(r.statusText||'')).trim();
+}
 function canEdit(){return MY_ROLE===ROLE_ADMIN||MY_ROLE===ROLE_EDIT;}
 function toggleSelectAll(checked){
   document.querySelectorAll('.row-chk').forEach(cb=>{cb.checked=checked;});
@@ -1158,7 +1188,7 @@ function fillEmpDeptDesig(empId){
 async function delInvoice(id){
   if(!confirm('Remove invoice file?'))return;
   const r=await api('/api/assets/'+id+'/invoice',{method:'DELETE'});
-  if(r&&r.ok){toast('✕ INVOICE REMOVED');await openModal(id);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✕ INVOICE REMOVED');await openModal(id);}else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveModal(){
   const row={};COLUMNS.forEach(c=>{const el=document.getElementById('f_'+c);row[c]=el?el.value.trim():'';});
@@ -1182,7 +1212,7 @@ async function saveModal(){
         if(!r2||!r2.ok){const j=await r2.json().catch(()=>({}));toast('✕ invoice: '+(j.error||'upload failed'));}
       }
       toast('✓ ADDED');closeModal();load();loadDashboard();
-    }else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+    }else if(r){toast('✕ '+await apiError(r));}
   }
 }
 function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;closeCamScan();}
@@ -1195,12 +1225,12 @@ async function doCheckout(){
   const note=document.getElementById('coNote').value.trim();
   if(!user){toast('Select user');return;}
   const r=await api('/api/assets/'+coAsset+'/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,signed_date:signedDate,expected,note})});
-  if(r&&r.ok){document.getElementById('checkoutModal').classList.remove('show');toast('✓ CHECKED OUT');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){document.getElementById('checkoutModal').classList.remove('show');toast('✓ CHECKED OUT');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function checkinAsset(id){
   if(!confirm('CHECK IN this asset?'))return;
   const r=await api('/api/assets/'+id+'/checkin',{method:'POST'});
-  if(r&&r.ok){toast('✓ CHECKED IN');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ CHECKED IN');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 let maintAsset=null;
 async function openMaint(id){
@@ -1214,12 +1244,12 @@ async function addMaint(){
   const body={mtype:document.getElementById('mType').value.trim(),cost:document.getElementById('mCost').value,note:document.getElementById('mNote').value.trim(),date:document.getElementById('mDate').value};
   if(!body.mtype){toast('Type required');return;}
   const r=await api('/api/assets/'+maintAsset+'/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){toast('✓ LOGGED');openMaint(maintAsset);load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ LOGGED');openMaint(maintAsset);load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function delMaint(mid){
   if(!mid)return;
   const r=await api('/api/assets/'+maintAsset+'/maintenance?id='+mid,{method:'DELETE'});
-  if(r&&r.ok){toast('✓ REMOVED');openMaint(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ REMOVED');openMaint(maintAsset);}else if(r){toast('✕ '+await apiError(r));}
 }
 function openQR(id){window.open('/label/'+id,'_blank');}
 
@@ -1238,12 +1268,12 @@ async function addMaintInline(){
   const body={mtype:document.getElementById('mType2').value.trim(),cost:document.getElementById('mCost2').value,note:document.getElementById('mNote2').value.trim(),date:document.getElementById('mDate2').value};
   if(!body.mtype){toast('Type required');return;}
   const r=await api('/api/assets/'+maintAsset+'/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();await openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();await openModal(maintAsset);}else if(r){toast('✕ '+await apiError(r));}
 }
 async function delMaintInline(mid){
   if(!mid)return;
   const r=await api('/api/assets/'+maintAsset+'/maintenance?id='+mid,{method:'DELETE'});
-  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();await openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();await openModal(maintAsset);}else if(r){toast('✕ '+await apiError(r));}
 }
 document.getElementById('mAdd2').onclick=addMaintInline;
 async function printAsset(id){
@@ -1555,7 +1585,7 @@ async function doRestore(){
   if(!confirm('Restore "'+file.name+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
   const fd=new FormData();fd.append('file',file);
   const r=await api('/api/restore',{method:'POST',body:fd});
-  if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function restoreFromBackup(file){
   if(!confirm('Restore "'+file+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
@@ -1682,7 +1712,7 @@ async function addUser(){
 async function delUser(un){
   if(!confirm('DELETE USER?'))return;
   const r=await api('/api/users/'+encodeURIComponent(un),{method:'DELETE'});
-  if(r&&r.ok){toast('✓ User deleted');if(window.loadCfgUsers)loadCfgUsers();if(document.getElementById('usersModal').classList.contains('show'))openUsers();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ User deleted');if(window.loadCfgUsers)loadCfgUsers();if(document.getElementById('usersModal').classList.contains('show'))openUsers();}else if(r){toast('✕ '+await apiError(r));}
 }
 
 /* ---------- custom roles (Assets/Contracts/Directory/Tickets read/write) ---------- */
@@ -1858,7 +1888,7 @@ async function saveLdap(){
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LDAP SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function testLdap(){
   const body={
@@ -1881,13 +1911,13 @@ async function saveSettings(){
   const body={matrix_on:(document.getElementById('matrixOn')||{checked:false}).checked?1:0,smtp_host:document.getElementById('s_host').value.trim(),smtp_port:parseInt(document.getElementById('s_port').value||'587',10),smtp_from:document.getElementById('s_from').value.trim(),smtp_user:document.getElementById('s_user').value.trim(),smtp_pass:document.getElementById('s_pass').value,notify_new:document.getElementById('uNew').checked?1:0,notify_delete:document.getElementById('uDel').checked?1:0};
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ SETTINGS SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveProfile(){
   const body={display:document.getElementById('pDisplay').value.trim(),email:document.getElementById('p_email').value.trim()};
   const r=await api('/api/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ PROFILE SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveBrand(){
   const fd=new FormData();fd.append('app_name',document.getElementById('b_name').value.trim());fd.append('logo_text',document.getElementById('b_logoText').value.trim());
@@ -1895,7 +1925,7 @@ async function saveBrand(){
   const logo=document.getElementById('b_logo').files[0]; if(logo)fd.append('logo',logo);
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ BRAND SAVED');document.getElementById('b_logo').value='';applyBranding();}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveLetterhead(){
   const f=document.getElementById('b_letterhead').files[0];
@@ -1917,7 +1947,7 @@ async function removeLogo(){
   const fd=new FormData();fd.append('app_name',document.getElementById('b_name').value.trim());fd.append('logo_text',document.getElementById('b_logoText').value.trim());fd.append('remove_logo','1');
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ LOGO REMOVED');document.getElementById('b_logo').value='';applyBranding();}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function applyBranding(){
   const me=await fetch('/api/me').then(r=>r.json());
@@ -1954,7 +1984,7 @@ async function saveLabel(){
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LABEL SETTINGS SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 
 /* ---------- events ---------- */
