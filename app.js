@@ -2069,14 +2069,7 @@ document.getElementById('tkFormSave').onclick=saveNewTicket;
 document.getElementById('tkSearch').oninput=loadTickets;
 document.getElementById('tkStatus').onchange=loadTickets;
 document.getElementById('tkReplyBtn').onclick=sendReply;
-document.getElementById('tkAssignBtn').onclick=async()=>{
-  if(!curTicketId)return;
-  const a=document.getElementById('tkAssignee').value;
-  const m=document.getElementById('tkAssignMsg'); m.textContent='saving…';
-  const r=await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignee:a})});
-  if(r&&r.ok){ m.textContent='✓ assigned'+(a?' → '+a:''); m.style.color='var(--grn)'; openTicket(curTicketId); await loadTickets(); toast('✓ ASSIGNED'+(a?' to '+a:'')); }
-  else { m.textContent='✕ failed'; m.style.color='var(--red)'; }
-};
+
 document.getElementById('openMonitorBtn').onclick=()=>window.open('/monitor','_blank');
 document.getElementById('sharePortalBtn').onclick=async()=>{
   const r=await api('/api/portal/link'); if(!r){toast('✕ error');return;} const j=await r.json();
@@ -2410,12 +2403,6 @@ async function openTicket(id){
   const r=await api('/api/tickets/'+id); if(!r)return; const d=await r.json();
   const t=d.ticket, reps=d.replies||[], atts=d.attachments||[];
   document.getElementById('tkModalTitle').textContent=t.code+' · '+t.subject;
-  // populate assignee select from Users
-  try{
-    const users=await getUsersCached();
-    const sel=document.getElementById('tkAssignee');
-    sel.innerHTML='<option value="">— Unassigned —</option>'+users.map(u=>`<option ${u.username===t.assignee?'selected':''}>${esc(u.username)}</option>`).join('');
-  }catch(e){}
   const catList=TICKET_CATEGORIES.slice();
   const curCat=(t.category||'').trim();
   const catKnown=!curCat||catList.indexOf(curCat)>=0;
@@ -2436,6 +2423,9 @@ async function openTicket(id){
         </div>
         <div class="field2"><label>Priority</label>
           <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select>
+        </div>
+        <div class="field2" style="grid-column:1/-1"><label>Assigned to</label>
+          <select id="tkAssignee"><option value="">-- unassigned --</option></select>
         </div>
       </div>
     </div>`:''}
@@ -2471,8 +2461,6 @@ async function openTicket(id){
         ${ro('Asset ID',t.asset_id||'-')}
         ${ro('Due Date',(t.due_date||'').toString().slice(0,10)||'-')}
         ${ro('SLA Hours',t.sla_hours||'-')}`}
-        <div class="field2"><label>Assignee <span class="muted" style="font-weight:400">(use ASSIGN TO IT above)</span></label>
-          <input value="${esc(t.assignee||'')}" placeholder="-- unassigned --" readonly disabled></div>
         <div class="field2"><label>Source</label><input value="${esc(t.source||'Web')}" readonly disabled></div>
       </div>
     </div>
@@ -2495,6 +2483,16 @@ async function openTicket(id){
       <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> &middot; ${esc(rp.author_role)} &middot; ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
     </div>`;
   loadTicketHistory(id);
+  // the assignee select is rendered as part of the panel, so it is filled
+  // after the markup exists rather than before it
+  const asel=document.getElementById('tkAssignee');
+  if(asel){
+    try{
+      const users=await getUsersCached();
+      asel.innerHTML='<option value="">-- unassigned --</option>'+
+        users.map(u=>`<option ${u.username===t.assignee?'selected':''}>${esc(u.username)}</option>`).join('');
+    }catch(e){}
+  }
   const photoIn=document.getElementById('tkPhotoInput');
   if(photoIn)photoIn.onchange=()=>{uploadTicketPhotos(photoIn.files);};
   // "type another..." reveals a text box rather than throwing a prompt() at
@@ -2508,10 +2506,6 @@ async function openTicket(id){
       if(custom){const i=document.getElementById('tkeCategory'); if(i)i.focus();}
     };
   }
-  // Assigning is queue work, so a tickets-read user shouldn't be shown a
-  // control the server would only refuse.
-  const assignBar=document.querySelector('#tkModal .assignbar');
-  if(assignBar)assignBar.style.display=mayQueue?'':'none';
   const delBtn=document.getElementById('tkDeleteBtn');
   if(delBtn)delBtn.style.display=canDo('tickets.delete')?'':'none';
   // Read-write on tickets may move the queue, so they need SAVE CHANGES too.
@@ -2604,7 +2598,11 @@ async function saveTicketEdits(){
   if(catSel)payload.category=(catSel.value==='__custom')?(val('tkeCategory')||''):catSel.value;
   const sla=val('tkeSlaHours'); if(sla)payload.sla_hours=parseInt(sla,10);
   const st=document.getElementById('tkStatusUpd'), pr=document.getElementById('tkPrioUpd');
+  const as=document.getElementById('tkAssignee');
   if(st)payload.status=st.value; if(pr)payload.priority=pr.value;
+  // assignee travels with the rest: the standalone ASSIGN button and its
+  // separate request are gone, so one save does the whole queue.
+  if(as)payload.assignee=as.value;
   // The subject box only exists for an admin; a tickets-write user is saving
   // status and priority on their own, so don't demand a field they can't see.
   if(document.getElementById('tkeSubject')&&!payload.subject){toast('✕ SUBJECT REQUIRED');return;}
