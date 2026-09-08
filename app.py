@@ -107,6 +107,12 @@ def _brand_blob(col):
 # or TLS-wrapped link is what made the letterhead save time out.
 BRAND_MAX_BYTES = 3 * 1024 * 1024
 BRAND_MAX_EDGE = 1600
+# A logo is a mark in a sidebar and on a printed label, never a page: no
+# surface renders it above a couple of hundred pixels. Shrinking an
+# oversized one is a better answer than refusing it, which is what a hard
+# 500KB cap did -- and it is the same treatment the letterhead gets.
+LOGO_MAX_EDGE = 512
+LOGO_MAX_BYTES = 400 * 1024
 
 
 def _fit_png(data, max_edge=BRAND_MAX_EDGE, max_bytes=BRAND_MAX_BYTES):
@@ -3355,10 +3361,8 @@ def settings():
             data = logo.read()
             if not _sniff_image(data)[0]:
                 c.commit(); c.close()
-                return jsonify({"error": "that logo isn't a PNG, JPEG, GIF or WebP image"}), 400
-            if len(data) > 500 * 1024:
-                c.commit(); c.close()
-                return jsonify({"error": "logo too large (max 500KB)"}), 400
+                return jsonify({"error": "that logo isn't a PNG, JPEG, GIF, WebP or HEIC image"}), 400
+            data = _fit_png(data, LOGO_MAX_EDGE, LOGO_MAX_BYTES)
             ok, err = _brand_store("logo", LOGO_PATH, data)
             if not ok:
                 c.commit(); c.close()
@@ -4055,11 +4059,12 @@ def upload_logo():
     f = request.files["file"]
     if not f.filename:
         return jsonify({"error": "no file"}), 400
-    data = f.read()
-    if len(data) > 500 * 1024:
-        return jsonify({"error": "logo too large (max 500KB)"}), 400
+    data = f.read(24 * 1024 * 1024 + 1)
+    if len(data) > 24 * 1024 * 1024:
+        return jsonify({"error": "that file is over 24MB -- please use a smaller one"}), 400
     if not _sniff_image(data)[0]:
-        return jsonify({"error": "that file isn't a PNG, JPEG, GIF or WebP image"}), 400
+        return jsonify({"error": "that file isn't a PNG, JPEG, GIF, WebP or HEIC image"}), 400
+    data = _fit_png(data, LOGO_MAX_EDGE, LOGO_MAX_BYTES)
     # Database first: the file is a cache that a container replacement takes
     # with it, which is how branding used to disappear on update.
     ok, err = _brand_store("logo", LOGO_PATH, data)
