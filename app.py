@@ -5576,8 +5576,15 @@ def _norm_mac(mac):
 
     Windows `arp -a` prints dashes; Linux/macOS and `ip neigh` print colons.
     Normalising here keeps the broadcast filter and the OUI vendor lookup
-    working identically on every platform.
+    working identically on every platform. macOS also drops leading zeros --
+    "90:9:d0:2f:bd:da" for what Linux prints as "90:09:d0:2f:bd:da" -- so
+    each octet is padded rather than the whole string being counted, which
+    used to throw away any macOS address with a single-digit octet.
     """
+    raw = (mac or "").strip()
+    parts = re.split(r"[:\-]", raw)
+    if len(parts) == 6 and all(re.fullmatch(r"[0-9A-Fa-f]{1,2}", p) for p in parts):
+        return ":".join(p.rjust(2, "0").lower() for p in parts)
     hexes = re.sub(r"[^0-9A-Fa-f]", "", mac or "").lower()
     if len(hexes) != 12:
         return ""
@@ -5608,7 +5615,7 @@ def _arp_devices():
 
     if _IS_WINDOWS:
         out = _run(["arp", "-a"])
-        for m in re.finditer(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F-]{17})\s+(\w+)", out):
+        for m in re.finditer(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{1,2}(?:-[0-9a-fA-F]{1,2}){5})\s+(\w+)", out):
             _add(m.group(1), m.group(2), m.group(3))
         return devs
 
@@ -5616,14 +5623,14 @@ def _arp_devices():
     # provides `arp`) does not -- including slim container images.
     out = _run(["ip", "neigh", "show"])
     for m in re.finditer(
-            r"(\d+\.\d+\.\d+\.\d+)\s+.*?lladdr\s+([0-9a-fA-F:]{17})(?:\s+(\w+))?", out):
+            r"(\d+\.\d+\.\d+\.\d+)\s+.*?lladdr\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})(?:\s+(\w+))?", out):
         _add(m.group(1), m.group(2), (m.group(3) or "neighbour").lower())
     if devs:
         return devs
 
     # BSD/macOS/net-tools style fallback.
     out = _run(["arp", "-an"]) or _run(["arp", "-a"])
-    for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F:]{17})", out):
+    for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})", out):
         _add(m.group(1), m.group(2), "neighbour")
     return devs
 

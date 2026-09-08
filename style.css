@@ -217,8 +217,12 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 /* Anything still sitting directly under .modal-box is a header or a footer:
    it keeps its height and never scrolls. */
 .modal-box > *:not(.modal-scroll){flex:0 0 auto}
-/* A table inside the one scroll area must not open a second one. */
-.modal-box .modal-scroll .tablewrap{max-height:none;overflow:visible}
+/* A table inside the one scroll area must not open a second VERTICAL
+   scrollbar -- but it still needs the horizontal one, or a table wider than
+   the modal is simply clipped with no way to reach the rest of it. Dropping
+   the height cap is what removes the vertical scroll: with no max-height the
+   wrapper grows to fit its rows, so overflow-y never triggers. */
+.modal-box .modal-scroll .tablewrap{max-height:none;overflow-x:auto;overflow-y:visible}
 .camscan-view{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 .camscan-view video{width:100%;height:100%;object-fit:cover}
 .camscan-status{margin-top:10px;font-family:var(--font);font-size:13px;color:var(--muted);min-height:18px;flex:0 0 auto}
