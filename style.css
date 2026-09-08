@@ -202,11 +202,27 @@ tbody tr.group-head:hover td{background:var(--bg1)}
   padding-bottom:12px;border-bottom:1px solid var(--line)}
 .modal-box > .modal-title-row{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 clamp(12px,1.6vw,18px);padding-bottom:12px;border-bottom:1px solid var(--line)}
 .modal-box > .modal-title-row h3{margin:0;padding:0;border:0;color:var(--accent);font-family:var(--font);font-size:clamp(15px,1.4vw,17px);font-weight:650;letter-spacing:-.01em}
-.modal-box > *:not(h3):not(.m-actions):not(.modal-title-row){overflow:auto;flex:1 1 auto;min-height:0}
-.camscan-view{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;flex:0 0 auto!important}
+/* One scroll area per modal, and only one. This used to read
+   ".modal-box > *:not(h3):not(.m-actions):not(.modal-title-row)", which gave
+   EVERY direct child overflow:auto and flex:1 1 auto -- so a modal with a
+   header bar, a body and a reply box grew three scrollbars that each clipped
+   their own content and fought over the same 90vh. Every modal now wraps its
+   body in .modal-scroll, so this applies exactly once. */
+.modal-box > .modal-scroll{overflow-y:auto;overflow-x:hidden;flex:1 1 auto;min-height:0;
+  display:flex;flex-direction:column;gap:12px;
+  /* room for the scrollbar so panels don't run underneath it, and a stable
+     gutter so content doesn't shift sideways when it appears */
+  padding-right:8px;scrollbar-gutter:stable}
+.modal-box > .modal-scroll > *{margin-bottom:0}
+/* Anything still sitting directly under .modal-box is a header or a footer:
+   it keeps its height and never scrolls. */
+.modal-box > *:not(.modal-scroll){flex:0 0 auto}
+/* A table inside the one scroll area must not open a second one. */
+.modal-box .modal-scroll .tablewrap{max-height:none;overflow:visible}
+.camscan-view{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 .camscan-view video{width:100%;height:100%;object-fit:cover}
-.camscan-status{margin-top:10px;font-family:var(--font);font-size:13px;color:var(--muted);min-height:18px;flex:0 0 auto!important}
-.camscan-upload-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;flex:0 0 auto!important;overflow:visible!important}
+.camscan-status{margin-top:10px;font-family:var(--font);font-size:13px;color:var(--muted);min-height:18px;flex:0 0 auto}
+.camscan-upload-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;flex:0 0 auto}
 .modal-box .m-actions{flex:0 0 auto;position:sticky;bottom:0;background:var(--surface);display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
 .invbox{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
 .invbox label{display:block;font-family:var(--font);font-weight:700;letter-spacing:.6px;color:var(--muted);
@@ -245,7 +261,7 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 #backupModal .dtable td,#backupModal .dtable th{white-space:nowrap;padding-left:9px;padding-right:9px}
 #backupModal .dtable td:first-child{color:var(--text)}
 .muted{color:var(--muted)}
-.m-actions .muted,.toolbar .muted,.assignbar .muted,.dash-tools .muted{font-size:12.5px}
+.m-actions .muted,.toolbar .muted,.dash-tools .muted{font-size:12.5px}
 
 .dtable,.tbl{font-size:12.5px}
 .dtable thead th,.tbl thead th{padding:9px 12px}
@@ -309,9 +325,6 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .repmeta{color:var(--muted);font-size:11px;margin-bottom:4px}
 .replybox label{display:block;font-family:var(--font);font-weight:600;letter-spacing:.6px;color:var(--muted);margin-bottom:6px}
 .replybox textarea{width:100%;background:var(--bg1);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:9px;font-family:var(--font);resize:vertical}
-.assignbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg1);border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin:4px 0 14px}
-.assignbar label{font-family:var(--font);font-weight:700;letter-spacing:.6px;color:var(--muted);font-size:12px}
-.assignbar select{flex:1;min-width:160px;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
 .rowassign{background:var(--bg1);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:13px;max-width:150px}
 .loclist{list-style:none;padding:0;max-width:480px}
 .loclist li{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--surface)}
