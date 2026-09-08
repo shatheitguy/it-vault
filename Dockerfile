@@ -10,9 +10,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Runtime dirs the app writes to (invoices, backups, a generated logo
-# placeholder) — created up front and owned by the non-root user below.
-RUN mkdir -p invoices backups \
+# Runtime dirs the app writes to (invoices, backups, and /app/data for the
+# uploaded branding, the saved DB pointer and the session key) -- created up
+# front and owned by the non-root user below.
+#
+# /app/data MUST exist in the image. Docker seeds a fresh named volume from
+# the directory it shadows, ownership included; when that directory is
+# absent it creates the volume empty and root-owned instead, and this
+# container runs as uid 1000. That is why uploaded branding failed to save
+# and the database pointer was forgotten on every update.
+RUN mkdir -p invoices backups data \
     && useradd -m -u 1000 itguy \
     && chown -R itguy:itguy /app
 USER itguy
