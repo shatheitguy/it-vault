@@ -287,6 +287,9 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .field2 label{font-family:var(--font);font-weight:600;letter-spacing:.5px;color:var(--muted);font-size:11px;text-transform:uppercase}
 .field2 input,.field2 select,.field2 textarea{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 11px;font-family:var(--font);font-size:13px;min-height:38px}
 .field2 input:focus,.field2 select:focus,.field2 textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.field2 input:disabled,.field2 select:disabled,.field2 textarea:disabled,
+.invbox input:disabled,.invbox select:disabled,.invbox textarea:disabled{
+  opacity:.62;cursor:not-allowed;background:var(--surface2)}
 .brandfoot{margin-top:14px;color:var(--muted);font-size:11px;font-family:var(--font)}
 .count{font-family:var(--font);color:var(--muted);font-size:12.5px;white-space:nowrap;margin-right:2px}
 
@@ -298,9 +301,6 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .prio.Urgent{background:rgba(255,107,107,.16);color:#ff9b9b}
 .prio.Emergency{background:rgba(255,107,107,.25);color:#ff8585}
 .status.s_Open{color:var(--accent)}.status.s_InProgress{color:var(--amber)}.status.s_Pending{color:var(--muted2)}.status.s_Resolved{color:var(--grn)}.status.s_Closed{color:var(--muted)}
-.tkmeta{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:13px;margin-bottom:12px}
-.tkmeta b{color:var(--muted);font-weight:600}
-.tkdesc{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13px;white-space:pre-wrap;margin-bottom:12px}
 .tkreplies{display:flex;flex-direction:column;gap:8px;max-height:240px;overflow:auto;margin-bottom:12px}
 .rep{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px}
 .rep.agent{border-left:3px solid var(--accent)}
@@ -312,9 +312,6 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .assignbar label{font-family:var(--font);font-weight:700;letter-spacing:.6px;color:var(--muted);font-size:12px}
 .assignbar select{flex:1;min-width:160px;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
 .rowassign{background:var(--bg1);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:13px;max-width:150px}
-.tkactions{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
-.tkactions label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
-.tkactions select,.tkactions input{background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 9px}
 .loclist{list-style:none;padding:0;max-width:480px}
 .loclist li{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--surface)}
 
@@ -526,43 +523,11 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   line-height:1.5}
 .updacts a.btn{display:inline-flex;align-items:center;text-decoration:none}
 
-/* ================= ticket detail: tidy, no duplicated fields ================= */
-/* Facts at a glance -- a label/value grid instead of a run of bold: lines. */
-.tkmeta{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px 18px;
-  padding:14px 16px;border-radius:12px;background:var(--comp-bg,#121826);
-  border:1px solid var(--border,rgba(255,255,255,.08))}
-.tkmeta>div{display:flex;flex-direction:column;gap:3px;min-width:0}
-.tkmeta b{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--muted,#8a93a6);font-weight:700}
-.tkmeta span{font-size:13.5px;color:var(--text,#f5f6fa);overflow-wrap:anywhere}
-.tkchip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;
-  background:var(--bg,#0a0d13);border:1px solid var(--border,rgba(255,255,255,.12));width:fit-content}
-
-/* Each block gets a heading, so description / replies / edit stay separate. */
-.tksec{margin-top:18px}
-.tksec>h4{margin:0 0 8px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--accent,#ff3b30);font-weight:700}
-.tkdesc{padding:12px 14px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;
-  background:var(--comp-bg,#121826);border:1px solid var(--border,rgba(255,255,255,.08))}
-
-/* The edit panel: one two-column grid, no repeats of the facts above. */
-.tkgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px}
-.tkgrid label{display:flex;flex-direction:column;gap:5px;min-width:0;
-  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted,#8a93a6);font-weight:700}
-.tkgrid .tkwide{grid-column:1 / -1}
-.tkgrid input,.tkgrid select,.tkgrid textarea{font:inherit;font-size:13.5px;padding:9px 11px;
-  border-radius:9px;text-transform:none;letter-spacing:normal;
-  border:1px solid var(--border,rgba(255,255,255,.14));background:var(--bg,#0a0d13);
-  color:var(--text,#f5f6fa)}
-.tkgrid textarea{resize:vertical;min-height:88px}
-.tkgrid input:focus,.tkgrid select:focus,.tkgrid textarea:focus{outline:none;
-  border-color:var(--accent,#ff3b30)}
-.tkgrid input[readonly]{opacity:.65;cursor:not-allowed}
-.tkgrid .hide{display:none}
-@media(max-width:620px){.tkgrid{grid-template-columns:1fr}}
-
-/* ticket history reuses .hist from the asset trail; this only gives it a
-   scrollable frame inside the modal so a long trail can't push the panel. */
-.tkhist{max-height:210px;overflow:auto;border-radius:12px;padding:4px 2px;
-  background:var(--comp-bg,#121826);border:1px solid var(--border,rgba(255,255,255,.08))}
-.tkhist .muted{padding:10px 12px}
+/* ticket detail: the modal reuses the asset form's invbox / grid2 / field2
+   blocks, so all that is left here is a scroll frame for the change trail --
+   it reuses .hist from the asset history and only needs to be stopped from
+   stretching the modal when a ticket has been through a lot of hands. */
+.tkhist{max-height:210px;min-height:46px;overflow:auto;border-radius:8px;padding:4px 10px;
+  background:var(--bg1);border:1px solid var(--line)}
+.tkhist .hist:last-child{border-bottom:none}
+.tkhist .muted{padding:10px 2px}
