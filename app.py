@@ -651,6 +651,202 @@ def _module_write_allowed(module):
         return True
     return _PERM_ORDER.get(_role_perms(urole).get(module, "none"), 0) >= _PERM_ORDER["write"]
 
+# ---------- granular permissions ----------
+# A role's five module levels (none/read/write) are coarse: "write on assets"
+# also means import, export, delete and the trash. This catalogue breaks each
+# module into the individual things a person can actually do, so a role can be
+# given one of them and nothing else.
+#
+# Each leaf declares the module it belongs to and the level it implies, and the
+# module columns on Roles are DERIVED from the granted leaves when a role is
+# saved. Every existing module+level check therefore keeps working untouched --
+# the leaves refine what a module already allows, they never reach past it.
+#
+# "admin_only" leaves are the ones a coarse module level never granted in the
+# first place (the audit log, the network scan, backup/restore). They stay
+# refused unless explicitly granted to a role, and they are enforced with
+# _feature_allowed() at the route rather than by a module level.
+FEATURE_GROUPS = [
+    {"key": "assets", "label": "Assets", "module": "assets", "items": [
+        ("assets.view",     "View assets",                  "read"),
+        ("assets.create",   "Add an asset",                  "write"),
+        ("assets.edit",     "Edit an asset",                 "write"),
+        ("assets.delete",   "Delete an asset",               "write"),
+        ("assets.checkout", "Check out / check in",          "write"),
+        ("assets.import",   "Import from Excel",             "write"),
+        ("assets.export",   "Export to Excel",               "read"),
+        ("assets.labels",   "Print QR labels",               "read"),
+        ("assets.catalog",  "Product catalog",               "read"),
+        ("assets.trash",    "Trash (restore / purge)",       "write"),
+    ]},
+    {"key": "contracts", "label": "Contracts", "module": "contracts", "items": [
+        ("contracts.view",   "View contracts",               "read"),
+        ("contracts.create", "Add a contract",               "write"),
+        ("contracts.edit",   "Edit a contract",              "write"),
+        ("contracts.delete", "Delete a contract",            "write"),
+        ("contracts.print",  "Print / export",               "read"),
+    ]},
+    {"key": "directory", "label": "Directory (Employees)", "module": "directory", "items": [
+        ("directory.view",     "View employees",             "read"),
+        ("directory.create",   "Add an employee",            "write"),
+        ("directory.edit",     "Edit an employee",           "write"),
+        ("directory.delete",   "Delete an employee",         "write"),
+        ("directory.ldap",     "Sync from Active Directory", "write"),
+        ("directory.reflists", "Departments / designations / locations", "admin_only"),
+    ]},
+    {"key": "tickets", "label": "Tickets", "module": "tickets", "items": [
+        ("tickets.view",   "View tickets",                   "read"),
+        ("tickets.create", "Raise a ticket",                 "write"),
+        ("tickets.reply",  "Reply to a ticket",              "write"),
+        ("tickets.queue",  "Set status, priority, assignee", "write"),
+        ("tickets.edit",   "Edit a ticket's details",        "admin_only"),
+        ("tickets.photos", "Add photos",                     "write"),
+        ("tickets.delete", "Delete a ticket",                "admin_only"),
+    ]},
+    {"key": "settings", "label": "Settings", "module": "settings", "items": [
+        ("settings.general",  "General (name, language, currency)", "write"),
+        ("settings.branding", "Branding (logo, letterhead, theme)", "write"),
+        ("settings.email",    "Email / SMTP",                "write"),
+        ("settings.sla",      "Ticket SLAs and automation",   "write"),
+        ("settings.labels",   "QR labels",                    "write"),
+        ("settings.ldap",     "LDAP / Active Directory",      "write"),
+        ("settings.unifi",    "UniFi",                        "write"),
+        ("settings.portal",   "Support portal",               "write"),
+    ]},
+    {"key": "tools", "label": "Tools and records", "module": None, "items": [
+        ("tools.scan",    "Network scan",                     "admin_only"),
+        ("tools.audit",   "Audit log",                        "admin_only"),
+        ("tools.backup",  "Backup and restore",               "admin_only"),
+        ("tools.monitor", "Monitor screen",                   "admin_only"),
+    ]},
+]
+
+# Reaches outside the module levels that the built-in roles already have
+# today, so moving these routes onto feature checks takes nothing away from
+# them. read-write can scan the network, read the audit log and open the
+# monitor; both built-ins can open the monitor; backup/restore stays admin.
+BUILTIN_EXTRA_FEATURES = {
+    ROLE_EDIT: {"tools.scan", "tools.audit", "tools.monitor",
+                "directory.reflists", "assets.import"},
+    ROLE_VIEW: {"tools.monitor"},
+}
+
+# flat lookups
+FEATURE_LEVEL = {k: lvl for g in FEATURE_GROUPS for (k, _lbl, lvl) in g["items"]}
+FEATURE_MODULE = {k: g["module"] for g in FEATURE_GROUPS for (k, _l, _v) in g["items"]}
+ALL_FEATURES = list(FEATURE_LEVEL.keys())
+
+
+def _features_from_modules(perms):
+    """Everything a role with these module levels could already do.
+
+    Used for the built-in roles and for a custom role saved before this
+    catalogue existed, so nobody loses access on upgrade. admin_only leaves
+    are never included -- a module level never granted them.
+    """
+    out = set()
+    for key, lvl in FEATURE_LEVEL.items():
+        if lvl == "admin_only":
+            continue
+        mod = FEATURE_MODULE.get(key)
+        have = (perms or {}).get(mod, "none")
+        if _PERM_ORDER.get(have, 0) >= _PERM_ORDER.get(lvl, 2):
+            out.add(key)
+    return out
+
+
+def _modules_from_features(granted):
+    """Derive the five module levels from a set of granted leaves.
+
+    A module is 'write' if any write-level leaf under it is granted, 'read' if
+    only read-level ones are, 'none' if none are. This keeps the coarse
+    columns -- which every existing route check reads -- in step with the
+    leaves an admin actually ticked.
+    """
+    perms = {"assets": "none", "contracts": "none", "directory": "none",
+             "tickets": "none", "settings": "none"}
+    for key in granted:
+        mod = FEATURE_MODULE.get(key)
+        lvl = FEATURE_LEVEL.get(key)
+        if mod not in perms or lvl not in ("read", "write"):
+            continue
+        if lvl == "write":
+            perms[mod] = "write"
+        elif perms[mod] == "none":
+            perms[mod] = "read"
+    return perms
+
+
+def _role_features(role_name):
+    """The set of feature keys a role may use."""
+    if role_name == ROLE_ADMIN:
+        return set(ALL_FEATURES)
+    if role_name in BUILTIN_ROLE_PERMS:
+        return (_features_from_modules(BUILTIN_ROLE_PERMS[role_name])
+                | BUILTIN_EXTRA_FEATURES.get(role_name, set()))
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT perm_assets, perm_contracts, perm_directory, perm_tickets, "
+                    "perm_settings, perms_json FROM Roles WHERE name=%s", [role_name])
+        r = cur.fetchone(); c.close()
+    except Exception:
+        return set()
+    if not r:
+        return set()
+    raw = r.get("perms_json")
+    if raw:
+        try:
+            stored = json.loads(raw)
+            if isinstance(stored, dict):
+                return {k for k, v in stored.items() if v and k in FEATURE_LEVEL}
+            if isinstance(stored, list):
+                return {k for k in stored if k in FEATURE_LEVEL}
+        except Exception:
+            pass
+    # saved before the catalogue existed -- fall back to what its module
+    # levels already allowed, so the upgrade takes nothing away
+    return _features_from_modules({
+        "assets": r.get("perm_assets") or "none", "contracts": r.get("perm_contracts") or "none",
+        "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none",
+        "settings": r.get("perm_settings") or "none"})
+
+
+def feature_required(key):
+    """Gate a route on one catalogue leaf.
+
+    Used for the things a module level never expressed -- the network scan,
+    the audit log, backup/restore -- which were previously pinned to the
+    built-in roles and so unreachable by any custom role however it was
+    configured.
+    """
+    from functools import wraps
+    def deco(f):
+        @wraps(f)
+        def wrap(*a, **k):
+            if not session.get("user") and not _resolve_session_from_api_key():
+                return jsonify({"error": "unauthorized"}), 401
+            if not _feature_allowed(key):
+                return jsonify({"error": "forbidden"}), 403
+            return f(*a, **k)
+        return wrap
+    return deco
+
+
+def _feature_allowed(key):
+    """Can the current caller do this one thing? Mirrors
+    _module_write_allowed()'s session-or-API-key resolution, so it holds for
+    the mobile app too."""
+    urole = session.get("role")
+    if not session.get("user"):
+        row = _resolve_session_from_api_key()
+        if not row:
+            return False
+        urole = row["role"]
+    if urole == ROLE_ADMIN:
+        return True
+    return key in _role_features(urole)
+
+
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
 # Flask's session lifetime is a single app-wide value, so it can't express
@@ -846,6 +1042,14 @@ def init_db():
         cur.execute("SELECT perm_settings FROM Roles LIMIT 1")
     except Exception:
         try: cur.execute("ALTER TABLE Roles ADD COLUMN perm_settings VARCHAR(10) DEFAULT 'none'")
+        except Exception: pass
+    # migrate: per-feature grants (see FEATURE_GROUPS). A role saved before
+    # this column existed leaves it NULL, and _role_features() then derives
+    # its leaves from the module columns, so the upgrade takes nothing away.
+    try:
+        cur.execute("SELECT perms_json FROM Roles LIMIT 1")
+    except Exception:
+        try: cur.execute("ALTER TABLE Roles ADD COLUMN perms_json TEXT")
         except Exception: pass
     cur.execute("""CREATE TABLE IF NOT EXISTS Employees (
         _id VARCHAR(40) PRIMARY KEY,
@@ -1485,6 +1689,7 @@ def me():
     # UI infer access from the role name (which custom roles make impossible).
     return jsonify({"user": session["user"], "role": session["role"],
                     "perms": _role_perms(session["role"]),
+                    "features": sorted(_role_features(session["role"])),
                     "display": row.get("display", ""), "email": row.get("email", ""),
                     "avatar": row.get("avatar", ""), "api_key": row.get("api_key", ""),
                     "last_login": row.get("last_login", ""),
@@ -2073,7 +2278,7 @@ def contract_types_api():
         return jsonify({"ok": True})
 
 @app.route("/api/departments", methods=["GET", "POST", "DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("directory.reflists")
 def departments_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -2090,7 +2295,7 @@ def departments_api():
         return jsonify({"ok": True})
 
 @app.route("/api/designations", methods=["GET", "POST", "DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("directory.reflists")
 def designations_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -2127,7 +2332,7 @@ def models_api():
         return jsonify({"ok": True})
 
 @app.route("/api/import", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("assets.import")
 def import_excel():
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
@@ -2285,7 +2490,7 @@ def import_directory():
     return jsonify({"ok": True, "departments": added_dep, "locations": added_loc, "designations": added_des})
 
 @app.route("/api/export")
-@auth_required()
+@feature_required("assets.export")
 def export_excel():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=0 ORDER BY Name")
@@ -2436,36 +2641,73 @@ def delete_user(u):
 
 PERM_LEVELS = ("none", "read", "write")
 
+@app.route("/api/features")
+@auth_required([ROLE_ADMIN])
+def list_features():
+    """The permission catalogue the role editor renders."""
+    return jsonify([{"key": g["key"], "label": g["label"], "module": g["module"],
+                     "items": [{"key": k, "label": lbl, "level": lvl}
+                               for (k, lbl, lvl) in g["items"]]}
+                    for g in FEATURE_GROUPS])
+
+
 @app.route("/api/roles")
 @auth_required([ROLE_ADMIN])
 def list_roles():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings FROM Roles ORDER BY name")
+    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets, "
+                "perm_settings, perms_json FROM Roles ORDER BY name")
     rows = cur.fetchall(); c.close()
-    return jsonify([dict(r) for r in rows])
+    out = []
+    for r in rows:
+        d = {k: v for k, v in dict(r).items() if k != "perms_json"}
+        # resolved rather than raw, so a legacy role reports the leaves it
+        # actually has rather than an empty list
+        d["features"] = sorted(_role_features(r["name"]))
+        out.append(d)
+    return jsonify(out)
+
 
 def _role_body(d):
+    """Read a role off the wire.
+
+    Feature leaves are authoritative when present, and the module columns are
+    derived from them -- one source of truth, so the coarse levels every
+    existing route check reads can never drift from what the admin ticked.
+    Callers that still send only perm_* (the Android app, scripts) keep
+    working: their module levels are expanded into the matching leaves.
+    """
     name = (d.get("name") or "").strip()[:50]
-    perms = {}
-    for k in ("assets", "contracts", "directory", "tickets", "settings"):
-        v = (d.get(f"perm_{k}") or "none").lower()
-        perms[k] = v if v in PERM_LEVELS else "none"
-    return name, perms
+    if isinstance(d.get("features"), list):
+        granted = {k for k in d["features"] if k in FEATURE_LEVEL}
+        perms = _modules_from_features(granted)
+    else:
+        perms = {}
+        for k in ("assets", "contracts", "directory", "tickets", "settings"):
+            v = (d.get(f"perm_{k}") or "none").lower()
+            perms[k] = v if v in PERM_LEVELS else "none"
+        granted = _features_from_modules(perms)
+    return name, perms, sorted(granted)
+
 
 @app.route("/api/roles", methods=["POST"])
 @auth_required([ROLE_ADMIN])
 def create_role():
     d = request.get_json(force=True) or {}
-    name, perms = _role_body(d)
+    name, perms, granted = _role_body(d)
     if not name: return jsonify({"error": "name required"}), 400
     if name in ROLES: return jsonify({"error": "that name is a built-in role"}), 409
     c = conn(); cur = c.cursor()
     cur.execute("SELECT id FROM Roles WHERE name=%s", [name])
     if cur.fetchone(): c.close(); return jsonify({"error": "a role with that name already exists"}), 409
-    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings) VALUES (%s,%s,%s,%s,%s,%s)",
-                (name, perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], perms["settings"]))
+    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings, perms_json) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (name, perms["assets"], perms["contracts"], perms["directory"],
+                 perms["tickets"], perms["settings"], json.dumps(granted)))
     c.commit(); c.close()
-    return jsonify({"ok": True})
+    audit(session.get("user"), "ROLE", name, f"created with {len(granted)} permission(s)")
+    return jsonify({"ok": True, "features": granted})
+
 
 @app.route("/api/roles/<int:rid>", methods=["PUT"])
 @auth_required([ROLE_ADMIN])
@@ -2474,11 +2716,14 @@ def update_role(rid):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT name FROM Roles WHERE id=%s", [rid]); existing = cur.fetchone()
     if not existing: c.close(); return jsonify({"error": "not found"}), 404
-    _, perms = _role_body(d)
-    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, perm_tickets=%s, perm_settings=%s WHERE id=%s",
-                (perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], perms["settings"], rid))
+    _, perms, granted = _role_body(d)
+    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, "
+                "perm_tickets=%s, perm_settings=%s, perms_json=%s WHERE id=%s",
+                (perms["assets"], perms["contracts"], perms["directory"],
+                 perms["tickets"], perms["settings"], json.dumps(granted), rid))
     c.commit(); c.close()
-    return jsonify({"ok": True})
+    audit(session.get("user"), "ROLE", existing["name"], f"updated to {len(granted)} permission(s)")
+    return jsonify({"ok": True, "features": granted})
 
 @app.route("/api/roles/<int:rid>", methods=["DELETE"])
 @auth_required([ROLE_ADMIN])
@@ -3124,7 +3369,7 @@ def empty_contracts_trash():
     return jsonify({"ok": True, "deleted": len(rows)})
 
 @app.route("/api/locations", methods=["GET","POST","DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("directory.reflists")
 def locations_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -3462,8 +3707,8 @@ def ticket_detail(ticket_id):
         return jsonify({"error": "forbidden"}), 403
     # Deleting a ticket destroys its replies and its trail, so that is
     # admin-only outright.
-    if request.method == "DELETE" and not _is_admin():
-        return jsonify({"error": "Only an admin can delete a ticket"}), 403
+    if request.method == "DELETE" and not _feature_allowed("tickets.delete"):
+        return jsonify({"error": "You don't have permission to delete a ticket"}), 403
     # Editing a ticket's content is admin-only, but working the queue is not:
     # moving status and priority is what anyone with tickets write does every
     # day (the reply box sends exactly that), so those two stay open and only
@@ -3473,8 +3718,8 @@ def ticket_detail(ticket_id):
         # control for it -- so it sits with status and priority.
         _queue_only = {"status", "priority", "assignee"}
         _touched = {k for k in (request.get_json(silent=True) or {}).keys()}
-        if not _touched.issubset(_queue_only) and not _is_admin():
-            return jsonify({"error": "Only an admin can change a ticket's details. "
+        if not _touched.issubset(_queue_only) and not _feature_allowed("tickets.edit"):
+            return jsonify({"error": "You don't have permission to change a ticket's details. "
                                      "You can still reply, and set status and priority."}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -3553,8 +3798,8 @@ def ticket_attachments(ticket_id):
     Adding is queue work -- an engineer photographing the repair belongs in
     the same bucket as replying -- so it needs tickets write, not admin.
     """
-    if request.method == "POST" and not _module_write_allowed("tickets"):
-        return jsonify({"error": "forbidden"}), 403
+    if request.method == "POST" and not _feature_allowed("tickets.photos"):
+        return jsonify({"error": "You don't have permission to add photos"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "POST":
         files = request.files.getlist("photos") or request.files.getlist("file")
@@ -3579,8 +3824,8 @@ def ticket_attachments(ticket_id):
 def ticket_attachment_one(ticket_id, att_id):
     """Serve or remove one photo. Deleting destroys evidence, so it is
     admin-only, like deleting the ticket itself."""
-    if request.method == "DELETE" and not _is_admin():
-        return jsonify({"error": "Only an admin can delete a photo"}), 403
+    if request.method == "DELETE" and not _feature_allowed("tickets.delete"):
+        return jsonify({"error": "You don't have permission to delete a photo"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "DELETE":
         cur.execute("SELECT filename FROM TicketAttachments WHERE id=%s AND ticket_id=%s",
@@ -4053,7 +4298,7 @@ def maintenance(a_id):
 
 # ---------- audit log ----------
 @app.route("/api/audit")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("tools.audit")
 def audit_log():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM AuditLog ORDER BY ts DESC LIMIT 100"); rows = cur.fetchall(); c.close()
@@ -5199,7 +5444,7 @@ def _resolve_host(ip):
         return ip, ""
 
 @app.route("/api/scan")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("tools.scan")
 def network_scan():
     prefix = (request.args.get("prefix") or "").strip()
     deep = request.args.get("deep", "0") == "1"
@@ -5569,7 +5814,7 @@ def update_apply():
                              "replace the files."}), 400
 
 @app.route("/api/backup")
-@auth_required([ROLE_ADMIN])
+@feature_required("tools.backup")
 def backup():
     scope = (request.args.get("scope") or "all").lower()
     if scope not in ("config", "assets", "all"):
@@ -5582,7 +5827,7 @@ def backup():
                                 download_name=fname)
 
 @app.route("/api/backups")
-@auth_required([ROLE_ADMIN])
+@feature_required("tools.backup")
 def list_backups():
     # newest-first by actual file time, not filename string -- sorting by name
     # put every "config" backup ahead of a same-day "all" one since "c" > "a".
