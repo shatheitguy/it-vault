@@ -523,6 +523,22 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   line-height:1.5}
 .updacts a.btn{display:inline-flex;align-items:center;text-decoration:none}
 
+/* ticket photos: a grid of thumbnails, each a link to the full-size image.
+   Same shape as the portal's picker so a photo looks the same to the person
+   who sent it and the person fixing it. */
+.shots{display:flex;flex-wrap:wrap;gap:10px}
+.shot{position:relative;width:84px;height:84px;border-radius:8px;overflow:hidden;
+  border:1px solid var(--line);background:var(--bg1)}
+.shot a{display:block;width:100%;height:100%}
+.shot img{width:100%;height:100%;object-fit:cover;display:block}
+.shot .x{position:absolute;top:3px;right:3px;width:20px;height:20px;padding:0;
+  border:0;border-radius:50%;background:rgba(0,0,0,.66);color:#fff;font-size:14px;
+  line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.shot .x:hover{background:var(--red)}
+.shot .nm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);
+  color:#fff;font-size:9.5px;padding:2px 4px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;pointer-events:none}
+
 /* ticket detail: the modal reuses the asset form's invbox / grid2 / field2
    blocks, so all that is left here is a scroll frame for the change trail --
    it reuses .hist from the asset history and only needs to be stopped from

@@ -21,7 +21,7 @@ Docker-ready. No Access DB.
 import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading, sys
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
-from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect
+from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect, make_response
 import pymysql
 from dbutils.pooled_db import PooledDB
 from openpyxl import Workbook, load_workbook
@@ -54,6 +54,37 @@ LOGO_PATH = os.path.join(DATA_DIR, "logo.png")
 LETTERHEAD_PATH = os.path.join(DATA_DIR, "letterhead.png")
 
 
+def _dir_writable(path):
+    """Can this process actually create a file in here?
+
+    os.access() consults the mode bits and gets this wrong often enough to be
+    useless -- a root-owned Docker volume mounted under a non-root USER is
+    exactly the case it misreports. So try it for real.
+    """
+    probe = os.path.join(path, ".itvault_write_probe")
+    try:
+        with open(probe, "wb") as fp:
+            fp.write(b"1")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+# A named volume is created empty and root-owned unless the image already
+# contains the directory it shadows, and the container runs as uid 1000. When
+# that happens every write in here fails, which used to take the uploaded
+# branding, the saved database pointer and the session key down with it.
+# Nothing may depend on this being True.
+DATA_DIR_WRITABLE = _dir_writable(DATA_DIR)
+if not DATA_DIR_WRITABLE:
+    print(f"[itvault] WARNING: {DATA_DIR} is not writable by this process "
+          f"(uid {os.getuid() if hasattr(os, 'getuid') else '?'}). Branding and "
+          f"settings are still safe -- they live in the database -- but fix the "
+          f"volume with:  docker run --rm -v itvault_data:/data alpine "
+          f"chown -R 1000:1000 /data", flush=True)
+
+
 def _brand_blob(col):
     """The stored logo/letterhead bytes, or None.
 
@@ -71,25 +102,54 @@ def _brand_blob(col):
 
 
 def _brand_store(col, path, data):
-    """Write branding to both the database (durable) and the file (fast)."""
+    """Save branding to the database, and cache it on disk if we can.
+
+    Returns (ok, error). Only the database write decides that: the file is a
+    convenience, and on an install whose data volume is root-owned it can
+    never succeed. Failing the upload over it -- or swallowing a real database
+    error so the upload merely looks like it worked -- is what made this
+    impossible to diagnose from the UI.
+    """
+    err = None
     try:
         c = conn(); cur = c.cursor()
         cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
         c.commit(); c.close()
     except Exception as e:
+        err = _brand_store_help(col, e)
         print(f"[itvault] could not store {col} in the database: {e}", flush=True)
+        return False, err
     try:
         with open(path, "wb") as fp:
             fp.write(data)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[itvault] {col} saved to the database but not cached at {path}: {e}", flush=True)
+    return True, None
+
+
+def _brand_store_help(col, exc):
+    """Turn a driver error on a branding write into something actionable."""
+    msg = str(exc)
+    code = exc.args[0] if getattr(exc, "args", None) else None
+    if code in (1406, 1366) or "Data too long" in msg or "Incorrect string value" in msg:
+        return (f"The Settings.{col} column can't hold image data on this database. "
+                f"Run:  ALTER TABLE Settings MODIFY {col} MEDIUMBLOB;")
+    if code == 1054 or "Unknown column" in msg:
+        return (f"This database has no Settings.{col} column. Restart IT-Vault so it "
+                f"can add it, or run:  ALTER TABLE Settings ADD COLUMN {col} MEDIUMBLOB;")
+    if code == 1153 or "max_allowed_packet" in msg:
+        return ("The image is larger than the database will accept in one statement. "
+                "Use a smaller file, or raise max_allowed_packet on the server.")
+    return f"Database rejected the upload: {msg}"
 
 
 def _brand_restore(col, path):
     """Re-create the on-disk cache from the database when it's missing.
 
     Called by the serving routes, so the first request after an update quietly
-    repopulates the file instead of showing a blank logo.
+    repopulates the file instead of showing a blank logo. Returns False when
+    there is nothing stored OR the cache can't be written -- callers fall back
+    to serving the bytes straight out of the database.
     """
     if os.path.exists(path) and os.path.getsize(path) > 0:
         return True
@@ -104,6 +164,23 @@ def _brand_restore(col, path):
     except Exception:
         return False
 
+
+def _brand_send(col, path, filename):
+    """Serve branding from the disk cache, or straight from the database.
+
+    The database path is what keeps the logo visible on an install whose data
+    volume the app can't write to -- there, the cache never materializes and
+    every request would otherwise fall through to the default mark.
+    """
+    if _brand_restore(col, path) and os.path.exists(path) and os.path.getsize(path) > 0:
+        return send_from_directory(DATA_DIR, filename)
+    data = _brand_blob(col)
+    if not data:
+        return None
+    resp = make_response(bytes(data))
+    resp.headers["Content-Type"] = "image/png"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
 
 def _migrate_branding_to_data_dir():
     """Move a logo/letterhead left in BASE by an older build into DATA_DIR.
@@ -375,6 +452,99 @@ def _role_perms(role_name):
             "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none",
             "settings": r.get("perm_settings") or "none"}
 
+# ---------- ticket photo attachments ----------
+# A phone camera is the fastest bug report there is, so the portal lets a
+# requester attach one. That endpoint is public, so nothing the browser says
+# about the file is trusted: the type is read back out of the bytes and only
+# real raster images are kept. SVG is deliberately absent -- it is a script
+# carrier, and these are served from the app's own origin.
+ATTACH_MAX_BYTES = 4 * 1024 * 1024
+ATTACH_MAX_PER_TICKET = 4
+# Signatures as hex, so the table stays readable next to the byte counts.
+_IMAGE_MAGIC = (
+    (bytes.fromhex("ffd8ff"), "image/jpeg", "jpg"),
+    (bytes.fromhex("89504e470d0a1a0a"), "image/png", "png"),
+    (b"GIF87a", "image/gif", "gif"),
+    (b"GIF89a", "image/gif", "gif"),
+)
+
+def _sniff_image(data):
+    """Return (mimetype, extension) for real image bytes, else (None, None).
+
+    The signature is read from the file itself; a .png that is really a zip,
+    or an SVG renamed to .jpg, does not get through."""
+    if not data or len(data) < 12:
+        return None, None
+    for magic, mime, ext in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime, ext
+    # RIFF....WEBP -- the size field sits between the two markers
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    # ISO-BMFF: HEIC/HEIF, which is what an iPhone hands over by default
+    if data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand in (b"heic", b"heix", b"hevc", b"heim", b"heis", b"hevm", b"mif1", b"msf1"):
+            return "image/heic", "heic"
+    return None, None
+
+def _store_ticket_photos(cur, ticket_id, files, uploaded_by):
+    """Validate and save uploaded photos. Returns (saved, [skip reasons])."""
+    saved, skipped = 0, []
+    cur.execute("SELECT COUNT(*) AS n FROM TicketAttachments WHERE ticket_id=%s", [ticket_id])
+    have = (cur.fetchone() or {}).get("n", 0) or 0
+    for f in files:
+        if not f or not getattr(f, "filename", ""):
+            continue
+        if have + saved >= ATTACH_MAX_PER_TICKET:
+            skipped.append(f"{f.filename}: only {ATTACH_MAX_PER_TICKET} photos per ticket")
+            continue
+        data = f.read(ATTACH_MAX_BYTES + 1)
+        if len(data) > ATTACH_MAX_BYTES:
+            skipped.append(f"{f.filename}: over {ATTACH_MAX_BYTES // (1024 * 1024)}MB")
+            continue
+        mime, ext = _sniff_image(data)
+        if not mime:
+            skipped.append(f"{f.filename}: not a JPEG, PNG, GIF, WebP or HEIC image")
+            continue
+        # The stored name is ours, not theirs -- a filename from a public form
+        # has no business steering a path or a header.
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(f.filename or ""))[:180] or ("photo." + ext)
+        cur.execute("""INSERT INTO TicketAttachments (ticket_id, filename, mimetype, size, uploaded_by, data)
+                       VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (ticket_id, name, mime, len(data), (uploaded_by or "portal")[:80], data))
+        saved += 1
+    return saved, skipped
+
+def _ticket_hist(cur, ticket_id, who, field, old_val, new_val):
+    """One row on a ticket's change trail. Same shape as an asset's history,
+    which is what lets the UI render both with the same markup."""
+    cur.execute("INSERT INTO TicketHistory (ticket_id, ts, user, field, old_val, new_val) "
+                "VALUES (%s, NOW(), %s, %s, %s, %s)",
+                [ticket_id, who, field, old_val, new_val])
+
+
+def _attachment_rows(cur, ticket_id):
+    """Metadata only -- the bytes are fetched one at a time by their own route."""
+    cur.execute("""SELECT id, filename, mimetype, size, uploaded_by, created_at
+                   FROM TicketAttachments WHERE ticket_id=%s ORDER BY id""", [ticket_id])
+    # Built key by key rather than dict(row), so the image bytes can never
+    # ride along into a JSON response if this SELECT is ever widened.
+    return [{"id": r["id"], "filename": r.get("filename") or "photo",
+             "mimetype": r.get("mimetype") or "", "size": r.get("size") or 0,
+             "uploaded_by": r.get("uploaded_by") or "",
+             "created_at": str(r.get("created_at") or "")} for r in cur.fetchall()]
+
+def _attachment_response(row):
+    """Send image bytes with the type WE sniffed, never the uploader's, and
+    tell the browser not to second-guess it."""
+    resp = make_response(row["data"])
+    resp.headers["Content-Type"] = row.get("mimetype") or "application/octet-stream"
+    resp.headers["Content-Disposition"] = "inline; filename=\"%s\"" % (row.get("filename") or "photo")
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return resp
+
 def _is_admin():
     """True only for the admin role, for actions that must never fall to an
     editor -- deletion, chiefly. Mirrors _module_write_allowed()'s
@@ -640,6 +810,17 @@ def init_db():
         id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT, author VARCHAR(80), author_role VARCHAR(20),
         body TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_tk (ticket_id)
+    )""")
+    # Photos a requester attaches to a ticket. The bytes live in the database
+    # rather than on disk: a container replaced by "docker pull" takes its
+    # writable layer with it, and losing the photo of a broken screen along
+    # with it is exactly the class of bug that moved branding in here too.
+    cur.execute("""CREATE TABLE IF NOT EXISTS TicketAttachments (
+        id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT,
+        filename VARCHAR(255), mimetype VARCHAR(60), size INT DEFAULT 0,
+        uploaded_by VARCHAR(80), created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        data MEDIUMBLOB,
+        INDEX idx_tkatt (ticket_id)
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
@@ -2668,44 +2849,49 @@ def unifi_clients():
 
 # ---------- settings (admin) ----------
 def _save_letterhead(fileobj):
-    """Normalizes an uploaded letterhead (PDF or image) to a single PNG at
-    BASE/letterhead.png -- a PDF's first page is rasterized (via PyMuPDF) so
-    every print/PDF surface in the app can just <img src=/letterhead.png>
-    or embed the same PNG, regardless of what format was uploaded."""
+    """Normalize an uploaded letterhead (PDF or image) to a single PNG.
+
+    A PDF's first page is rasterized (via PyMuPDF) so every print/PDF surface
+    in the app can just <img src=/letterhead.png> or embed the same PNG, no
+    matter what was uploaded.
+
+    The conversion happens entirely in memory and the result goes to the
+    database. It used to render straight onto DATA_DIR/letterhead.png, so on
+    an install whose data volume the app can't write to, a perfectly good
+    upload came back as "[Errno 13] Permission denied" -- a storage problem
+    reported as a bad file.
+    """
     fname = (fileobj.filename or "").lower()
     data = fileobj.read()
     if not data:
         return False, "empty file"
-    dest = LETTERHEAD_PATH
     try:
         if fname.endswith(".pdf") or data[:4] == b"%PDF":
             import pymupdf
             doc = pymupdf.open(stream=data, filetype="pdf")
             if doc.page_count < 1:
+                doc.close()
                 return False, "PDF has no pages"
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))  # ~144dpi
-            pix.save(dest)
+            png = pix.tobytes("png")
             doc.close()
-        else:
+        elif _sniff_image(data)[0]:
             from PIL import Image as PILImage
-            img = PILImage.open(io.BytesIO(data)).convert("RGB")
-            img.save(dest, format="PNG")
-        try:
-            with open(dest, "rb") as fp:
-                _brand_store("letterhead", dest, fp.read())
-        except Exception:
-            pass
-        return True, None
+            buf = io.BytesIO()
+            PILImage.open(io.BytesIO(data)).convert("RGB").save(buf, format="PNG")
+            png = buf.getvalue()
+        else:
+            return False, "that file isn't a PDF or an image (PNG, JPEG, GIF, WebP)"
     except Exception as e:
-        return False, str(e)
+        return False, f"could not read that file: {e}"
+    return _brand_store("letterhead", LETTERHEAD_PATH, png)
 
 @app.route("/letterhead.png")
 def letterhead_file():
-    p = LETTERHEAD_PATH
-    _brand_restore("letterhead", p)      # rebuild the cache after a container swap
-    if os.path.exists(p) and os.path.getsize(p) > 0:
-        return send_from_directory(DATA_DIR, "letterhead.png")
+    sent = _brand_send("letterhead", LETTERHEAD_PATH, "letterhead.png")
+    if sent is not None:
+        return sent
     from flask import Response as _R
     return _R(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x05\x02\x00\x9d\xfd\xa4\x1e\x00\x00\x00\x00IEND\xaeB`\x82",
                     mimetype="image/png")
@@ -2804,13 +2990,20 @@ def settings():
                            d.get("db_name", DB_NAME), d.get("db_user", DB_USER),
                            d.get("db_pass", DB_PASS))
         if logo:
-            try:
-                data = logo.read()
-                cur.execute("UPDATE Settings SET logo=%s WHERE id=1", (data,))
-                with open(LOGO_PATH, "wb") as fp:
-                    fp.write(data)
-            except Exception:
-                pass
+            # This used to be wrapped in "except Exception: pass", so a logo
+            # that could not be saved still answered {"ok": true} and left the
+            # admin re-uploading it forever with nothing to go on.
+            data = logo.read()
+            if not _sniff_image(data)[0]:
+                c.commit(); c.close()
+                return jsonify({"error": "that logo isn't a PNG, JPEG, GIF or WebP image"}), 400
+            if len(data) > 500 * 1024:
+                c.commit(); c.close()
+                return jsonify({"error": "logo too large (max 500KB)"}), 400
+            ok, err = _brand_store("logo", LOGO_PATH, data)
+            if not ok:
+                c.commit(); c.close()
+                return jsonify({"error": err or "could not save the logo"}), 500
         elif str(d.get("remove_logo", "")).lower() in ("1", "true"):
             cur.execute("UPDATE Settings SET logo=NULL WHERE id=1")
             try:
@@ -3179,8 +3372,18 @@ def portal_create_ticket():
                 (subject, requester, description))
     dup = cur.fetchone()
     if dup:
+        # A double-tapped submit button lands here. The ticket already exists,
+        # so attach the photos to it rather than losing them.
+        saved, skipped = 0, []
+        if photos:
+            try:
+                saved, skipped = _store_ticket_photos(cur, dup["id"], photos, "portal")
+                c.commit()
+            except Exception as e:
+                print("portal photo error:", e)
         c.close()
-        return jsonify({"ok": True, "id": dup["id"], "code": dup["code"]})
+        return jsonify({"ok": True, "id": dup["id"], "code": dup["code"],
+                        "photos": saved, "photo_warnings": skipped})
     code = ticket_code()
     priority = (d.get("priority") or "Normal") or "Normal"
     category = d.get("category","") or ""
@@ -3194,12 +3397,23 @@ def portal_create_ticket():
                  requester, (d.get("requester_email") or "").strip(),
                  assignee, due_date, sla_hours, category))
     tid = cur.lastrowid
+    # A photo that fails validation must not cost the visitor their ticket --
+    # the text is the part nobody can reconstruct, so it is committed either
+    # way and the rejected files come back as warnings.
+    saved, skipped = 0, []
+    if photos:
+        try:
+            saved, skipped = _store_ticket_photos(cur, tid, photos, "portal")
+        except Exception as e:
+            print("portal photo error:", e)
+            skipped.append("photos could not be saved")
     c.commit(); c.close()
     ticket = {"id": tid, "code": code, "subject": subject, "priority": priority, "requester": d.get("requester",""), "requester_email": d.get("requester_email",""), "category": category}
     try: notify_ticket_created(ticket)
     except Exception as e: print("notify created error:", e)
     notify_requester_ticket_created(ticket)
-    return jsonify({"ok": True, "code": code, "id": tid})
+    return jsonify({"ok": True, "code": code, "id": tid,
+                    "photos": saved, "photo_warnings": skipped})
 
 @app.route("/portal")
 def portal_page():
@@ -3236,8 +3450,10 @@ def portal_status():
     if not t:
         c.close(); return jsonify({"error": "Ticket not found. Check the code."}), 404
     cur.execute("SELECT * FROM TicketReplies WHERE ticket_id=%s ORDER BY created_at", [t["id"]])
-    reps = cur.fetchall(); c.close()
-    return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps]})
+    reps = cur.fetchall()
+    atts = _attachment_rows(cur, t["id"])
+    c.close()
+    return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps], "attachments": atts})
 
 @app.route("/api/tickets/<int:ticket_id>", methods=["GET","PUT","DELETE"])
 @auth_required(module="tickets", level="read")
@@ -3265,7 +3481,9 @@ def ticket_detail(ticket_id):
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); t = cur.fetchone()
         if not t: c.close(); return jsonify({"error":"not found"}), 404
         cur.execute("SELECT * FROM TicketReplies WHERE ticket_id=%s ORDER BY created_at", [ticket_id]); reps = cur.fetchall()
-        c.close(); return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps]})
+        atts = _attachment_rows(cur, ticket_id)
+        c.close()
+        return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps], "attachments": atts})
     if request.method == "PUT":
         d = request.get_json(force=True)
         # fetch current to detect changes
@@ -3293,9 +3511,7 @@ def ticket_detail(ticket_id):
             now = "" if d[fname] is None else str(d[fname])
             if was.strip() == now.strip():
                 continue
-            cur.execute("INSERT INTO TicketHistory (ticket_id, ts, user, field, old_val, new_val) "
-                        "VALUES (%s, NOW(), %s, %s, %s, %s)",
-                        [ticket_id, who, fname, was, now])
+            _ticket_hist(cur, ticket_id, who, fname, was, now)
         c.commit(); c.close()
         # notify on assignment change
         new_assignee = d.get("assignee")
@@ -3328,6 +3544,80 @@ def ticket_history(ticket_id):
     rows = cur.fetchall(); c.close()
     return jsonify([{"ts": str(r["ts"]), "user": r["user"], "field": r["field"],
                      "old_val": r["old_val"], "new_val": r["new_val"]} for r in rows])
+
+@app.route("/api/tickets/<int:ticket_id>/attachments", methods=["GET", "POST"])
+@auth_required(module="tickets", level="read")
+def ticket_attachments(ticket_id):
+    """Metadata for a ticket's photos, and a way for an agent to add more.
+
+    Adding is queue work -- an engineer photographing the repair belongs in
+    the same bucket as replying -- so it needs tickets write, not admin.
+    """
+    if request.method == "POST" and not _module_write_allowed("tickets"):
+        return jsonify({"error": "forbidden"}), 403
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        files = request.files.getlist("photos") or request.files.getlist("file")
+        if not files:
+            c.close(); return jsonify({"error": "no file"}), 400
+        saved, skipped = _store_ticket_photos(cur, ticket_id, files,
+                                              session.get("user") or "agent")
+        if saved:
+            _ticket_hist(cur, ticket_id, session.get("user") or "agent",
+                         "attachment", "", f"added {saved} photo(s)")
+        c.commit()
+        rows = _attachment_rows(cur, ticket_id)
+        c.close()
+        return jsonify({"ok": True, "saved": saved, "warnings": skipped, "attachments": rows})
+    rows = _attachment_rows(cur, ticket_id)
+    c.close()
+    return jsonify(rows)
+
+
+@app.route("/api/tickets/<int:ticket_id>/attachments/<int:att_id>", methods=["GET", "DELETE"])
+@auth_required(module="tickets", level="read")
+def ticket_attachment_one(ticket_id, att_id):
+    """Serve or remove one photo. Deleting destroys evidence, so it is
+    admin-only, like deleting the ticket itself."""
+    if request.method == "DELETE" and not _is_admin():
+        return jsonify({"error": "Only an admin can delete a photo"}), 403
+    c = conn(); cur = c.cursor()
+    if request.method == "DELETE":
+        cur.execute("SELECT filename FROM TicketAttachments WHERE id=%s AND ticket_id=%s",
+                    (att_id, ticket_id))
+        row = cur.fetchone()
+        if not row:
+            c.close(); return jsonify({"error": "not found"}), 404
+        cur.execute("DELETE FROM TicketAttachments WHERE id=%s AND ticket_id=%s", (att_id, ticket_id))
+        _ticket_hist(cur, ticket_id, session.get("user") or "agent",
+                     "attachment", row.get("filename") or "photo", "deleted")
+        c.commit(); c.close()
+        return jsonify({"ok": True})
+    cur.execute("""SELECT filename, mimetype, data FROM TicketAttachments
+                   WHERE id=%s AND ticket_id=%s""", (att_id, ticket_id))
+    row = cur.fetchone(); c.close()
+    if not row or not row.get("data"):
+        return jsonify({"error": "not found"}), 404
+    return _attachment_response(row)
+
+
+@app.route("/api/portal/attachments/<code>/<int:att_id>")
+def portal_attachment(code, att_id):
+    """Public read of a photo, gated on the ticket code.
+
+    The code is already the only thing standing between a visitor and their
+    ticket in /api/portal/status, so this adds no new exposure -- but the
+    photo is still reachable only through the ticket it was attached to.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("""SELECT a.filename, a.mimetype, a.data
+                   FROM TicketAttachments a JOIN Tickets t ON t.id = a.ticket_id
+                   WHERE t.code=%s AND a.id=%s""", ((code or "").strip().upper(), att_id))
+    row = cur.fetchone(); c.close()
+    if not row or not row.get("data"):
+        return jsonify({"error": "not found"}), 404
+    return _attachment_response(row)
+
 
 @app.route("/api/tickets/<int:ticket_id>/reply", methods=["POST"])
 # read, not write: a role with tickets='none' is correctly shut out, but
@@ -3409,17 +3699,20 @@ def upload_logo():
     data = f.read()
     if len(data) > 500 * 1024:
         return jsonify({"error": "logo too large (max 500KB)"}), 400
+    if not _sniff_image(data)[0]:
+        return jsonify({"error": "that file isn't a PNG, JPEG, GIF or WebP image"}), 400
     # Database first: the file is a cache that a container replacement takes
     # with it, which is how branding used to disappear on update.
-    _brand_store("logo", LOGO_PATH, data)
+    ok, err = _brand_store("logo", LOGO_PATH, data)
+    if not ok:
+        return jsonify({"error": err or "could not save the logo"}), 500
     return jsonify({"ok": True, "logo": "/logo.png"})
 
 @app.route("/logo.png")
 def logo_file():
-    p = LOGO_PATH
-    _brand_restore("logo", p)      # rebuild the cache after a container swap
-    if os.path.exists(p) and os.path.getsize(p) > 0:
-        return send_from_directory(DATA_DIR, "logo.png")
+    sent = _brand_send("logo", LOGO_PATH, "logo.png")
+    if sent is not None:
+        return sent
     # no custom logo uploaded yet (fresh install, or right after a wipe) --
     # show the real IT-Vault shield mark instead of a blank/broken image,
     # until an admin uploads their own.
