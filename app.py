@@ -307,6 +307,86 @@ def _is_admin():
     return urole == ROLE_ADMIN
 
 
+def _data_dir_persistent():
+    """Is DATA_DIR on a mounted volume, or will it die with the container?
+
+    A container started without `-v itvault_data:/app/data` keeps
+    itvault_config.json in its writable layer, so replacing the container --
+    which is exactly how you update it -- silently throws away the database
+    pointer and the session key, and the next start lands on the setup wizard.
+    Better to say so up front than let someone find out mid-upgrade.
+    """
+    if not IS_DOCKER:
+        return True
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) > 4 and parts[4] == DATA_DIR:
+                    return True
+        return False
+    except Exception:
+        return True          # never cry wolf on a platform we can't inspect
+
+
+def _db_error_help(exc, host=""):
+    """A driver error, rewritten as something a person can act on.
+
+    pymysql surfaces the server's raw text -- "Access denied for user
+    'x'@'172.17.0.1'" -- which says what happened but not what to do, and the
+    two commonest causes under Docker are invisible from it: a grant that
+    doesn't cover the container's source address, and a pre-existing volume
+    that made MariaDB skip creating the user at all.
+    """
+    raw = str(exc)
+    code = exc.args[0] if getattr(exc, "args", None) and isinstance(exc.args[0], int) else None
+    nl = "\n"
+
+    if code == 1045:                                   # bad credentials / no grant
+        m = re.search(r"'([^']*)'@'([^']*)'", raw)
+        user, from_host = (m.group(1), m.group(2)) if m else ("", "")
+        u = user or "itvault"
+        tips = []
+        if from_host and re.match(r"^(172\.(1[6-9]|2\d|3[01])\.|10\.|192\.168\.)", from_host):
+            tips.append(
+                "MariaDB sees this login arriving from " + from_host + " -- Docker's address, "
+                "not localhost -- and a MariaDB user is per-host. Grant it for that range:" + nl
+                + "    CREATE USER '" + u + "'@'%' IDENTIFIED BY '<password>';" + nl
+                + "    GRANT ALL PRIVILEGES ON <database>.* TO '" + u + "'@'%';" + nl
+                + "    FLUSH PRIVILEGES;")
+        tips.append(
+            "If the database runs in a container you re-created over an EXISTING volume, "
+            "MariaDB skipped its own setup and kept the old password -- the MARIADB_USER / "
+            "MARIADB_PASSWORD you passed were ignored. Those only apply to a brand-new volume.")
+        return ("Wrong username or password, or that user is not allowed to connect from here."
+                + nl + nl + (nl + nl).join(tips))
+
+    if code == 2003:                                   # connection refused
+        return ("Nothing is listening on " + (host or "that host") + ":3306 yet." + nl + nl
+                + "A database container needs 10-20 seconds to initialise before it accepts "
+                "connections -- if you have just started it, wait and try again." + nl + nl
+                + "Otherwise check the host: from inside this container 127.0.0.1 means the "
+                "container itself. Use the database container's name on a shared Docker "
+                "network, or host.docker.internal for a database on the Docker host.")
+
+    if code == 2005:                                   # name does not resolve
+        return ("The name '" + host + "' does not resolve from inside this container." + nl + nl
+                + "Container names only resolve on a user-defined Docker network, so both "
+                "containers have to share one. For a database on the Docker host, use "
+                "host.docker.internal instead.")
+
+    if code == 1049:                                   # no such database
+        return ("That database does not exist yet. Create it, then try again:" + nl
+                + "    CREATE DATABASE <name> CHARACTER SET utf8mb4;")
+
+    if code == 1044:                                   # connected, no rights
+        return ("The user connected, but has no rights on that database:" + nl
+                + "    GRANT ALL PRIVILEGES ON <database>.* TO '<user>'@'%';" + nl
+                + "    FLUSH PRIVILEGES;")
+
+    return raw
+
+
 def _module_write_allowed(module):
     """For routes that combine GET (read) with POST/PUT/DELETE (write) under
     one decorator -- call this inside the view for the write branches."""
@@ -2355,7 +2435,7 @@ def test_db():
         c.close()
         return jsonify({"ok": True, "msg": f"Connected to {h}:{p}/{n}"})
     except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)}), 400
+        return jsonify({"ok": False, "msg": _db_error_help(e, h)}), 400
 
 @app.route("/api/test-ldap", methods=["POST"])
 @auth_required(module="settings", level="write")
@@ -4894,6 +4974,10 @@ def version_info():
         "version": APP_VERSION,
         "is_docker": IS_DOCKER,
         "repo": update_repo(),
+        # False when DATA_DIR isn't a mounted volume: the saved database
+        # pointer and session key would be lost the moment this container is
+        # replaced, which is exactly how an update works.
+        "data_persistent": _data_dir_persistent(),
     })
 
 @app.route("/api/check-update", methods=["POST"])
@@ -5362,7 +5446,7 @@ def setup_test_db():
         c.close()
         return jsonify({"ok": True, "msg": f"Connected to {d.get('db_host')}:{d.get('db_port')}/{d.get('db_name')}"})
     except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)}), 400
+        return jsonify({"ok": False, "msg": _db_error_help(e, d.get("db_host", ""))}), 400
 
 @app.route("/api/setup/complete", methods=["POST"])
 def setup_complete():

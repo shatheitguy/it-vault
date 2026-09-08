@@ -66,7 +66,33 @@ def wait_for_db(timeout_s: int = 300) -> None:
             time.sleep(min(5, attempt))
 
 
+def _warn_if_data_not_persistent():
+    """Say so, loudly, before anything is lost.
+
+    Without `-v itvault_data:/app/data` the saved database pointer and the
+    session key live in the container's writable layer, so replacing the
+    container -- which is how an update happens -- throws them away and the
+    next start comes up on the setup wizard with everyone signed out. That is
+    a miserable thing to discover mid-upgrade, so it goes in the log on every
+    boot instead.
+    """
+    try:
+        if _app.IS_DOCKER and not _app._data_dir_persistent():
+            bar = "!" * 72
+            print(bar, flush=True)
+            print("[serve] WARNING: " + _app.DATA_DIR + " is NOT a mounted volume.", flush=True)
+            print("[serve] The saved database settings and session key will be LOST when this",
+                  flush=True)
+            print("[serve] container is replaced -- which is exactly how updating works.",
+                  flush=True)
+            print("[serve] Re-create it with:  -v itvault_data:/app/data", flush=True)
+            print(bar, flush=True)
+    except Exception:
+        pass          # a warning must never be the thing that stops startup
+
+
 def main():
+    _warn_if_data_not_persistent()
     # A brand-new container has no database configured yet, and the setup
     # wizard is served BY this process -- so a missing database can't be
     # fatal here or there'd be nowhere to enter one. Wait briefly for a

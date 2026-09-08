@@ -13,7 +13,8 @@
 # first-run wizard in the browser asks for the connection details.
 #
 # Flags: --port (5000), --tag (latest), --name (itvault), --yes, --dry-run,
-#        --no-docker (install on the host, no Docker), --dir (install path).
+#        --no-docker (install on the host, no Docker), --dir (install path),
+#        --with-db (also provision MariaDB and wire it up -- no wizard).
 set -eu
 
 IMAGE="ghcr.io/shatheitguy/it-vault"
@@ -22,6 +23,11 @@ NAME="${ITVAULT_NAME:-itvault}"
 PORT="${ITVAULT_PORT:-5000}"
 YES="${ITVAULT_YES:-}"
 NO_DOCKER="${ITVAULT_NO_DOCKER:-}"
+WITH_DB="${ITVAULT_WITH_DB:-}"
+NET="${ITVAULT_NET:-itvault-net}"
+DB_NAME_V="${ITVAULT_DB_NAME:-itvault}"
+DB_USER_V="${ITVAULT_DB_USER:-itvault}"
+DB_CONTAINER="${ITVAULT_DB_NAME_CONTAINER:-itvault-db}"
 DIR="${ITVAULT_DIR:-$HOME/it-vault}"
 DRY=""
 
@@ -33,6 +39,7 @@ while [ $# -gt 0 ]; do
         --yes|-y)  YES=1; shift ;;
         --dry-run) DRY=1; shift ;;
         --no-docker) NO_DOCKER=1; shift ;;
+        --with-db) WITH_DB=1; shift ;;
         --dir)     DIR="${2:?--dir needs a value}"; shift 2 ;;
         -h|--help)
             # Prints the comment block at the top, so the help text and the
@@ -148,6 +155,81 @@ run() {
         # shellcheck disable=SC2086  # $DK is deliberately two words sometimes
         $DK "$@" >/dev/null
     fi
+}
+
+# --with-db: stand up MariaDB and hand IT-Vault the connection, so there is no
+# network to create, no user to GRANT, no volume to reason about and no setup
+# wizard to fill in. Everything the manual route gets wrong is done here once.
+DB_PASS_V=""
+
+provision_db() {
+    # A shared user-defined network is what makes container-name DNS work, so
+    # the app can reach the database as "itvault-db" without publishing 3306
+    # to the LAN at all.
+    if ! $DK network inspect "$NET" >/dev/null 2>&1; then
+        step "Creating network '$NET'"
+        run network create "$NET"
+    else
+        say "    network '$NET' already exists -- reusing it"
+    fi
+
+    if $DK inspect "$DB_CONTAINER" >/dev/null 2>&1; then
+        # Its credentials were baked into its volume on first init and we
+        # cannot read them back, so adopting it would only produce the 1045
+        # everyone hits. Say so plainly instead.
+        say ""
+        warn "A container named '$DB_CONTAINER' already exists, so its password isn't ours to know."
+        say "    Point IT-Vault at it through the setup wizard, or remove it first:"
+        say "      ${B}docker rm -f $DB_CONTAINER${N}   ${Y}# keeps the itvault_db volume${N}"
+        say ""
+        return 1
+    fi
+
+    # openssl if we have it, /dev/urandom otherwise -- no weak fallback.
+    if command -v openssl >/dev/null 2>&1; then
+        DB_PASS_V="$(openssl rand -hex 20)"
+    else
+        DB_PASS_V="$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 40)"
+    fi
+    [ -n "$DB_PASS_V" ] || die "Could not generate a database password."
+
+    step "Creating volume itvault_db"
+    run volume create itvault_db
+
+    step "Starting MariaDB as '$DB_CONTAINER' (not published to the network)"
+    run run -d \
+        --name "$DB_CONTAINER" \
+        --network "$NET" \
+        --restart unless-stopped \
+        -e MARIADB_ROOT_PASSWORD="$DB_PASS_V" \
+        -e MARIADB_DATABASE="$DB_NAME_V" \
+        -e MARIADB_USER="$DB_USER_V" \
+        -e MARIADB_PASSWORD="$DB_PASS_V" \
+        -v itvault_db:/var/lib/mysql \
+        --health-cmd "mariadb-admin ping -h 127.0.0.1 -u root -p$DB_PASS_V --silent" \
+        --health-interval 5s --health-timeout 5s --health-retries 20 \
+        mariadb:11
+
+    [ -n "$DRY" ] && return 0
+
+    # MariaDB runs a temporary server on no port at all while it initialises,
+    # so connecting during that window is refused. Waiting here is what turns
+    # the usual "Errno 111" race into a non-event.
+    step "Waiting for MariaDB to finish initialising"
+    i=0
+    while [ "$i" -lt 60 ]; do
+        h="$($DK inspect -f '{{.State.Health.Status}}' "$DB_CONTAINER" 2>/dev/null || echo starting)"
+        [ "$h" = "healthy" ] && break
+        i=$((i + 1)); sleep 2
+        [ $((i % 5)) -eq 0 ] && say "    still initialising (${i}0s)..."
+    done
+    if [ "$h" != "healthy" ]; then
+        warn "MariaDB hasn't reported healthy yet. IT-Vault waits for it on start, so this"
+        say  "    usually still works -- check: ${B}docker logs $DB_CONTAINER${N}"
+    else
+        say "    database ready"
+    fi
+    return 0
 }
 
 # IT-Vault is a Flask app, so it runs perfectly well straight on the host --
@@ -350,6 +432,15 @@ else
     ghcr.io."
 fi
 
+DB_ENV=""
+NET_ARG=""
+if [ -n "$WITH_DB" ]; then
+    if provision_db; then
+        DB_ENV=1
+        NET_ARG="$NET"
+    fi
+fi
+
 step "Creating volumes (itvault_data, invoices_data, backups_data)"
 run volume create itvault_data
 run volume create invoices_data
@@ -359,7 +450,9 @@ step "Starting container '$NAME' on port $PORT"
 # --add-host is what lets DB_HOST=host.docker.internal reach a database
 # installed on this machine rather than inside the container. Docker Desktop
 # provides it already; on Linux it has to be asked for.
-run run -d \
+# Assembled rather than inlined, so --with-db can add the network and the
+# connection without a second near-identical docker run to keep in step.
+set -- run -d \
     --name "$NAME" \
     --restart unless-stopped \
     -p "$PORT:5000" \
@@ -367,8 +460,16 @@ run run -d \
     -v invoices_data:/app/invoices \
     -v backups_data:/app/backups \
     -e ITVAULT_DATA_DIR=/app/data \
-    --add-host host.docker.internal:host-gateway \
-    "$IMAGE:$TAG"
+    --add-host host.docker.internal:host-gateway
+if [ -n "$NET_ARG" ]; then
+    set -- "$@" --network "$NET_ARG"
+fi
+if [ -n "$DB_ENV" ]; then
+    set -- "$@" \
+        -e DB_HOST="$DB_CONTAINER" -e DB_PORT=3306 \
+        -e DB_NAME="$DB_NAME_V" -e DB_USER="$DB_USER_V" -e DB_PASS="$DB_PASS_V"
+fi
+run "$@" "$IMAGE:$TAG"
 
 if [ -n "$DRY" ]; then
     say ""
