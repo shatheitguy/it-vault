@@ -54,6 +54,57 @@ LOGO_PATH = os.path.join(DATA_DIR, "logo.png")
 LETTERHEAD_PATH = os.path.join(DATA_DIR, "letterhead.png")
 
 
+def _brand_blob(col):
+    """The stored logo/letterhead bytes, or None.
+
+    The file on disk is only ever a cache. The database is what actually
+    survives a container being replaced, so it is the source of truth -- which
+    is why branding used to vanish on update even though it was still in here.
+    """
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT `%s` FROM Settings WHERE id=1" % col)
+        r = cur.fetchone(); c.close()
+        return (r or {}).get(col) or None
+    except Exception:
+        return None
+
+
+def _brand_store(col, path, data):
+    """Write branding to both the database (durable) and the file (fast)."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
+        c.commit(); c.close()
+    except Exception as e:
+        print(f"[itvault] could not store {col} in the database: {e}", flush=True)
+    try:
+        with open(path, "wb") as fp:
+            fp.write(data)
+    except Exception:
+        pass
+
+
+def _brand_restore(col, path):
+    """Re-create the on-disk cache from the database when it's missing.
+
+    Called by the serving routes, so the first request after an update quietly
+    repopulates the file instead of showing a blank logo.
+    """
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return True
+    data = _brand_blob(col)
+    if not data:
+        return False
+    try:
+        with open(path, "wb") as fp:
+            fp.write(data)
+        print(f"[itvault] restored {col} from the database", flush=True)
+        return True
+    except Exception:
+        return False
+
+
 def _migrate_branding_to_data_dir():
     """Move a logo/letterhead left in BASE by an older build into DATA_DIR.
 
@@ -945,6 +996,7 @@ def migrate_schema():
         "company_address": "VARCHAR(255) DEFAULT ''",
         "has_letterhead": "TINYINT DEFAULT 0",
         "logo": "MEDIUMBLOB",
+        "letterhead": "MEDIUMBLOB",
     }
     for col, typ in branding_cols.items():
         try:
@@ -2639,6 +2691,11 @@ def _save_letterhead(fileobj):
             from PIL import Image as PILImage
             img = PILImage.open(io.BytesIO(data)).convert("RGB")
             img.save(dest, format="PNG")
+        try:
+            with open(dest, "rb") as fp:
+                _brand_store("letterhead", dest, fp.read())
+        except Exception:
+            pass
         return True, None
     except Exception as e:
         return False, str(e)
@@ -2646,6 +2703,7 @@ def _save_letterhead(fileobj):
 @app.route("/letterhead.png")
 def letterhead_file():
     p = LETTERHEAD_PATH
+    _brand_restore("letterhead", p)      # rebuild the cache after a container swap
     if os.path.exists(p) and os.path.getsize(p) > 0:
         return send_from_directory(DATA_DIR, "letterhead.png")
     from flask import Response as _R
@@ -2767,7 +2825,7 @@ def settings():
                 c.commit(); c.close()
                 return jsonify({"error": err or "could not process letterhead file"}), 400
         elif str(d.get("remove_letterhead", "")).lower() in ("1", "true"):
-            cur.execute("UPDATE Settings SET has_letterhead=0 WHERE id=1")
+            cur.execute("UPDATE Settings SET has_letterhead=0, letterhead=NULL WHERE id=1")
             try:
                 open(LETTERHEAD_PATH, "wb").close()
             except Exception:
@@ -3186,11 +3244,22 @@ def portal_status():
 def ticket_detail(ticket_id):
     if request.method != "GET" and not _module_write_allowed("tickets"):
         return jsonify({"error": "forbidden"}), 403
-    # Changing a ticket's own fields, and deleting one outright, are both
-    # admin-only. Everyone with tickets access can still reply -- that route
-    # is separate -- so the queue keeps working without handing out edit rights.
-    if request.method in ("PUT", "DELETE") and not _is_admin():
-        return jsonify({"error": "Only an admin can modify or delete a ticket"}), 403
+    # Deleting a ticket destroys its replies and its trail, so that is
+    # admin-only outright.
+    if request.method == "DELETE" and not _is_admin():
+        return jsonify({"error": "Only an admin can delete a ticket"}), 403
+    # Editing a ticket's content is admin-only, but working the queue is not:
+    # moving status and priority is what anyone with tickets write does every
+    # day (the reply box sends exactly that), so those two stay open and only
+    # the rest of the fields need admin. Both paths are recorded in the trail.
+    if request.method == "PUT":
+        # Assigning is queue work too -- there is a dedicated "Assign to IT"
+        # control for it -- so it sits with status and priority.
+        _queue_only = {"status", "priority", "assignee"}
+        _touched = {k for k in (request.get_json(silent=True) or {}).keys()}
+        if not _touched.issubset(_queue_only) and not _is_admin():
+            return jsonify({"error": "Only an admin can change a ticket's details. "
+                                     "You can still reply, and set status and priority."}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); t = cur.fetchone()
@@ -3340,13 +3409,15 @@ def upload_logo():
     data = f.read()
     if len(data) > 500 * 1024:
         return jsonify({"error": "logo too large (max 500KB)"}), 400
-    with open(LOGO_PATH, "wb") as fp:
-        fp.write(data)
+    # Database first: the file is a cache that a container replacement takes
+    # with it, which is how branding used to disappear on update.
+    _brand_store("logo", LOGO_PATH, data)
     return jsonify({"ok": True, "logo": "/logo.png"})
 
 @app.route("/logo.png")
 def logo_file():
     p = LOGO_PATH
+    _brand_restore("logo", p)      # rebuild the cache after a container swap
     if os.path.exists(p) and os.path.getsize(p) > 0:
         return send_from_directory(DATA_DIR, "logo.png")
     # no custom logo uploaded yet (fresh install, or right after a wipe) --

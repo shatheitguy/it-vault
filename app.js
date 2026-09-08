@@ -67,6 +67,33 @@ let MY_PERMS={};
 // Show only what this user can actually open. A custom role with tickets-only
 // access shouldn't see an Assets link that answers 403, and every user keeps
 // Settings because that is where their own account lives.
+// Settings is reachable by everyone, because their own account lives in it --
+// but a role with no settings rights has no business seeing Users, LDAP, the
+// database pointer or the Danger Zone. Those sections answer 403 anyway, so
+// showing them just advertises what the user can't do.
+const SETTINGS_ALWAYS = ['account', 'general'];
+function applySettingsPermissions(){
+  const full = MY_ROLE===ROLE_ADMIN || permOf('settings')!=='none';
+  const allowed = full ? null : SETTINGS_ALWAYS;   // null = everything
+  document.querySelectorAll('#cfgNav .cfgitem').forEach(btn=>{
+    const ok = !allowed || allowed.indexOf(btn.dataset.sec)>=0;
+    btn.style.display = ok ? '' : 'none';
+  });
+  document.querySelectorAll('.cfg-sec').forEach(sec=>{
+    if(allowed && allowed.indexOf(sec.dataset.sec)<0) sec.style.display='none';
+  });
+  // If the section on screen is now hidden, fall back to the first allowed one.
+  if(allowed){
+    const shown=[...document.querySelectorAll('.cfg-sec')]
+      .find(s=>s.style.display!=='none' && allowed.indexOf(s.dataset.sec)>=0);
+    if(!shown){
+      const first=document.querySelector('#cfgNav .cfgitem[data-sec="account"]')
+              || document.querySelector('#cfgNav .cfgitem:not([style*="none"])');
+      if(first)first.click();
+    }
+  }
+}
+
 function applyNavPermissions(){
   const show=(id,on)=>{const el=document.getElementById(id); if(el)el.style.display=on?'':'none';};
   const admin=MY_ROLE===ROLE_ADMIN;
@@ -2368,12 +2395,9 @@ async function loadTicketHistory(id){
   if(!r||!r.ok){box.innerHTML='<div class="muted">History unavailable.</div>';return;}
   const rows=await r.json();
   if(!rows.length){box.innerHTML='<div class="muted">No changes recorded yet.</div>';return;}
-  box.innerHTML=rows.map(h=>`<div class="hrow">
-      <span class="hts">${esc(h.ts||'')}</span>
-      <span class="huser">${esc(h.user||'?')}</span>
-      <span class="hfield">${esc(h.field||'')}</span>
-      <span class="hval"><s>${esc(h.old_val||'—')}</s> &rarr; <b>${esc(h.new_val||'—')}</b></span>
-    </div>`).join('');
+  // Same markup and classes as the asset history block, so the two read
+  // identically instead of inventing a second style for the same idea.
+  box.innerHTML=rows.map(e=>`<div class="hist"><span class="hfield">${esc(e.field)}</span> <span class="hold">${esc(e.old_val||'—')}</span> → <span class="hnew">${esc(e.new_val||'—')}</span> <span class="hmeta">${esc(e.user)} · ${esc(e.ts)}</span></div>`).join('');
 }
 // Full ticket edit. The API already accepts every one of these fields on PUT;
 // the UI simply never offered them, so only status/priority could be changed.
@@ -2816,6 +2840,7 @@ window.repairDashStructure=repairDashStructure;
   MY_ROLE=me.role;
   MY_PERMS=me.perms||{};
   applyNavPermissions();
+  applySettingsPermissions();
   window.sessionUser=me.user;
   {const dz=document.getElementById('navDangerZone'); if(dz)dz.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';}
   applyTheme(me.theme||'dark');
@@ -3444,6 +3469,7 @@ async function loadUserSettings(){
   };
   // System Config sub-nav: toggle section panels
   const nav = document.getElementById('cfgNav');
+  applySettingsPermissions();
   if (nav) {
   nav.querySelectorAll('.cfgitem').forEach(btn => {
     btn.onclick = () => {
