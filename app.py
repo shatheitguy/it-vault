@@ -826,7 +826,7 @@ def feature_required(key):
             if not session.get("user") and not _resolve_session_from_api_key():
                 return jsonify({"error": "unauthorized"}), 401
             if not _feature_allowed(key):
-                return jsonify({"error": "forbidden"}), 403
+                return jsonify({"error": "No access"}), 403
             return f(*a, **k)
         return wrap
     return deco
@@ -1761,9 +1761,9 @@ def auth_required(role=None, module=None, level="write"):
                 if urole != ROLE_ADMIN:
                     have = _role_perms(urole).get(module, "none")
                     if _PERM_ORDER.get(have, 0) < _PERM_ORDER.get(level, 2):
-                        return jsonify({"error": "forbidden"}), 403
+                        return jsonify({"error": "No access"}), 403
             elif role and urole not in (role if isinstance(role, list) else [role]):
-                return jsonify({"error": "forbidden"}), 403
+                return jsonify({"error": "No access"}), 403
             return f(*a, **k)
         return wrap
     return deco
@@ -3145,7 +3145,7 @@ def letterhead_file():
 @auth_required(module="settings", level="read")
 def settings():
     if request.method != "GET" and not _module_write_allowed("settings"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "PUT":
         # accept JSON or multipart FormData (branding uses FormData)
@@ -3297,7 +3297,7 @@ def settings():
 @auth_required(module="contracts", level="read")
 def contracts_api():
     if request.method != "GET" and not _module_write_allowed("contracts"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY id"); rows = cur.fetchall(); c.close()
@@ -3541,7 +3541,7 @@ def check_sla_breach(ticket):
 @auth_required(module="tickets", level="read")
 def tickets_api():
     if request.method != "GET" and not _module_write_allowed("tickets"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         q = request.args.get("q","").strip(); st = request.args.get("status","")
@@ -3704,11 +3704,11 @@ def portal_status():
 @auth_required(module="tickets", level="read")
 def ticket_detail(ticket_id):
     if request.method != "GET" and not _module_write_allowed("tickets"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     # Deleting a ticket destroys its replies and its trail, so that is
     # admin-only outright.
     if request.method == "DELETE" and not _feature_allowed("tickets.delete"):
-        return jsonify({"error": "You don't have permission to delete a ticket"}), 403
+        return jsonify({"error": "No access -- you can't delete a ticket"}), 403
     # Editing a ticket's content is admin-only, but working the queue is not:
     # moving status and priority is what anyone with tickets write does every
     # day (the reply box sends exactly that), so those two stay open and only
@@ -3719,7 +3719,7 @@ def ticket_detail(ticket_id):
         _queue_only = {"status", "priority", "assignee"}
         _touched = {k for k in (request.get_json(silent=True) or {}).keys()}
         if not _touched.issubset(_queue_only) and not _feature_allowed("tickets.edit"):
-            return jsonify({"error": "You don't have permission to change a ticket's details. "
+            return jsonify({"error": "No access -- you can't change a ticket's details. "
                                      "You can still reply, and set status and priority."}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -3799,7 +3799,7 @@ def ticket_attachments(ticket_id):
     the same bucket as replying -- so it needs tickets write, not admin.
     """
     if request.method == "POST" and not _feature_allowed("tickets.photos"):
-        return jsonify({"error": "You don't have permission to add photos"}), 403
+        return jsonify({"error": "No access -- you can't add photos"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "POST":
         files = request.files.getlist("photos") or request.files.getlist("file")
@@ -3825,7 +3825,7 @@ def ticket_attachment_one(ticket_id, att_id):
     """Serve or remove one photo. Deleting destroys evidence, so it is
     admin-only, like deleting the ticket itself."""
     if request.method == "DELETE" and not _feature_allowed("tickets.delete"):
-        return jsonify({"error": "You don't have permission to delete a photo"}), 403
+        return jsonify({"error": "No access -- you can't delete a photo"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "DELETE":
         cur.execute("SELECT filename FROM TicketAttachments WHERE id=%s AND ticket_id=%s",

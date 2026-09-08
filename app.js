@@ -1820,7 +1820,7 @@ async function delRow(id){
 
 /* ---------- settings / profile ---------- */
 async function loadSettings(){
-  // /api/settings is admin-only — a read-only/read-write user gets {error:...} back here,
+  // /api/settings needs settings rights — a user without them gets {error:...} back here,
   // not a settings object. Skip populating these admin-only fields in that case instead of
   // blanking them out with garbage; loadProfile() (My Account) still runs for everyone below.
   const r=await api('/api/settings');
@@ -2322,7 +2322,7 @@ document.getElementById('dirImportFile').onchange=async()=>{
 let _usersCache=null;
 async function getUsersCached(){
   if(_usersCache) return _usersCache;
-  // /api/users is admin-only; read-write/read-only users get a 403 {error:...} body here,
+  // /api/users is admin-only; everyone else gets a 403 {error:"No access"} here,
   // not an array — never trust the shape without checking r.ok and Array.isArray first.
   try{
     const r=await api('/api/users');
@@ -3305,10 +3305,11 @@ async function loadCustom(){
   try{ s = await api_json('/api/settings'); }
   catch(e){ dbg('loadCustom FETCH ERROR: '+e.message); showCustomError('network/fetch error: '+e.message); console.error(e); return; }
   if(!s){ dbg('loadCustom settings NULL (unauthorized)'); showCustomError('unauthorized (settings returned null)'); return; }
-  // /api/settings is admin-only: a read-only/read-write user gets back {error:"forbidden"},
+  // /api/settings needs settings rights: a user without them gets back
+  // {error:"No access"},
   // not a settings object. Applying that would reset everyone's live theme to hardcoded
   // defaults just from opening Settings — bail out instead and leave the theme untouched.
-  if(s.error || s.bg===undefined){ dbg('loadCustom: not a settings object (likely forbidden) — leaving theme untouched'); showCustomError('Only admins can view or change appearance settings.'); return; }
+  if(s.error || s.bg===undefined){ dbg('loadCustom: not a settings object (no access) — leaving theme untouched'); showCustomError('No access — appearance settings need the Branding permission.'); return; }
   dbg('loadCustom settings: '+(s?('keys='+Object.keys(s).length):'NULL'));
   const c = applyCustomVars(s);
   fillCustomForm(c);
