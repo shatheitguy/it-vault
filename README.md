@@ -90,10 +90,11 @@ Options, as environment variables or flags:
 | | |
 |---|---|
 | `--port 8080` / `$env:ITVAULT_PORT` | host port, default 5000 |
-| `--tag 1.6.3` / `$env:ITVAULT_TAG` | image tag, default `latest` |
+| `--tag 1.6.4` / `$env:ITVAULT_TAG` | image tag, default `latest` |
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
 | `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
+| `--with-db` / `$env:ITVAULT_WITH_DB` | also provision MariaDB, wire it up and skip the setup wizard |
 | `--no-docker` / `$env:ITVAULT_NO_DOCKER` | skip Docker and install IT-Vault straight on the host (Python + waitress) |
 | `--dir` / `$env:ITVAULT_DIR` | where a no-Docker install lands, default `~/it-vault` |
 
