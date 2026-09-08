@@ -102,6 +102,10 @@ def main():
         wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
         _app.init_db()
         _app.migrate_schema()
+        # The database answered, so the credentials that got us here are worth
+        # keeping. Without this they live only in the container's environment
+        # and `docker rm -f itvault` sends the next start back to the wizard.
+        _app.persist_env_db_config()
     except Exception as e:
         print(f"[serve] no database yet ({type(e).__name__}) -- starting in setup mode; "
               f"open /setup to configure one", flush=True)
