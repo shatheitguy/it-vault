@@ -3777,8 +3777,23 @@ def tickets_api():
 
 @app.route("/api/portal/tickets", methods=["POST"])
 def portal_create_ticket():
-    """Public (no auth) ticket/request intake from the portal invite link."""
-    d = request.get_json(force=True) or {}
+    """Public (no auth) ticket/request intake from the portal invite link.
+
+    Accepts JSON, or multipart/form-data when the visitor attached photos.
+    Photos ride along with the ticket they belong to rather than going through
+    an attach-by-code endpoint of their own, so this stays the single public
+    write and nobody can staple a file onto someone else's ticket.
+
+    get_json(force=True) must NOT be reached for a multipart body: it raises
+    a 400 that reads as "the browser sent a request this server could not
+    understand", which is what every photo upload got.
+    """
+    if (request.content_type or "").startswith("multipart/form-data"):
+        d = {k: v for k, v in request.form.items()}
+        photos = request.files.getlist("photos")
+    else:
+        d = request.get_json(force=True) or {}
+        photos = []
     subject = (d.get("subject") or "").strip()
     description = (d.get("description") or "").strip()
     if not subject or not description:
