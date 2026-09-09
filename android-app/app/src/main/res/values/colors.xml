@@ -7,4 +7,9 @@
     <color name="text">#16202E</color>
     <color name="muted">#5D6B82</color>
     <color name="bar_track">#E4E8F0</color>
+    <!-- Heartbeat status. Chosen to stay legible on the light surface,
+         which the web palette's neon greens do not. -->
+    <color name="hb_up">#1FA971</color>
+    <color name="hb_down">#E03B3B</color>
+    <color name="hb_pending">#C07A10</color>
 </resources>

@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260908c">
+<link rel="stylesheet" href="/style.css?v=20260908h">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -31,6 +31,7 @@
 
       <div class="nav-grp">Tools</div>
       <a id="navScan" style="display:none" data-i18n="NetworkScan"><span class="ni">📡</span>Network Scan</a>
+      <a id="navHeartbeat" style="display:none" data-i18n="Heartbeat"><span class="ni">&#128147;</span>Heartbeat</a>
       <a id="navBackup" style="display:none" data-i18n="BackupRestore"><span class="ni">💾</span>Backup / Restore</a>
 
       <div class="nav-grp">System</div>
@@ -279,6 +280,7 @@
         <div class="panel widget" data-wkey="type"><div class="secthead">TOP ASSET TYPES</div><div class="bars" id="typeBars"></div></div>
         <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
         <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
+        <div class="panel widget" data-wkey="heartbeat"><div class="secthead">HEARTBEAT</div><div class="hbcounts" id="dashHbCounts"></div><div class="tablewrap" style="max-height:320px"><table id="dashHb"><thead><tr><th>STATUS</th><th>MONITOR</th><th>HEARTBEAT</th><th>RESPONSE</th><th>UPTIME</th></tr></thead><tbody id="dashHbBody"></tbody></table><div class="empty" id="dashHbEmpty" style="display:none">NO MONITORS</div></div></div>
         <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>
         <div class="panel widget" data-wkey="contracts"><div class="secthead">CONTRACTS BY TYPE</div><div class="bars" id="contractsBars"></div></div>
         <div class="panel widget" data-wkey="contracts-expiring"><div class="secthead">CONTRACTS EXPIRING ≤30d</div><div class="tablewrap" style="max-height:320px"><table id="dashContractsExp"><thead><tr><th>NAME</th><th>VENDOR</th><th>TYPE</th><th>END DATE</th><th>DAYS LEFT</th></tr></thead><tbody id="dashContractsExpBody"></tbody></table><div class="empty" id="dashContractsExpEmpty" style="display:none">NO CONTRACTS EXPIRING SOON</div></div></div>
@@ -544,16 +546,6 @@
               <label class="toggle"><input type="checkbox" id="unifi_verify_ssl"><span>Verify SSL certificate</span></label>
               <div class="m-actions" style="justify-content:flex-start"><button class="btn ghost" id="unifiTestBtn" type="button">⚡ TEST CONNECTION</button><span id="unifiTestMsg" class="muted" style="margin-left:8px"></span></div>
             </div>
-            <div class="panel" style="margin-top:14px"><div class="secthead">UPTIME KUMA (HEARTBEAT)</div>
-              <p class="muted" style="margin:0 0 12px">Shows live monitor status under <b>Network Scan &rarr; Heartbeat</b>. Uptime Kuma keeps doing the polling, the retries and the alerting; IT-Vault only reads it. Create a key in Kuma under <b>Settings &rarr; API Keys</b>. Use <b>Test</b> before saving.</p>
-              <label class="toggle" style="margin-bottom:12px"><input type="checkbox" id="kuma_enabled"><span>Enabled</span></label>
-              <div class="grid2">
-                <div class="field2" style="grid-column:1/-1"><label>Uptime Kuma URL</label><input id="kuma_url" placeholder="http://192.168.0.7:3001"></div>
-                <div class="field2" style="grid-column:1/-1"><label>API Key</label><input id="kuma_api_key" type="password" placeholder="leave blank to keep current"></div>
-              </div>
-              <label class="toggle" style="margin-top:6px"><input type="checkbox" id="kuma_verify_ssl"><span>Verify SSL certificate (only if Kuma has a valid one)</span></label>
-              <div class="m-actions" style="justify-content:flex-start"><button class="btn ghost" id="kumaTestBtn" type="button">&#9735; TEST CONNECTION</button><span id="kumaTestMsg" class="muted" style="margin-left:8px"></span></div>
-            </div>
             <div class="m-actions"><button class="btn mag" id="saveUnifiBtn">✓ SAVE UNIFI</button></div>
           </section>
           <!-- BRANDING -->
@@ -724,6 +716,62 @@
           </section>
         </div>
       </div>
+    </div>
+    <!-- ===================== HEARTBEAT (uptime monitoring) ===================== -->
+    <div id="page-heartbeat" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / HEARTBEAT</div><h2>Heartbeat</h2></div>
+        <div class="spacer"></div>
+        <select id="hbWindow" title="History window">
+          <option value="1">Last hour</option>
+          <option value="6">Last 6 hours</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+          <option value="720">Last 30 days</option>
+          <option value="8760">Last year</option>
+        </select>
+        <label class="toggle" style="margin:0"><input type="checkbox" id="hbAuto" checked><span>Auto&#8209;refresh</span></label>
+        <button class="btn ghost" id="hbChanBtn" style="display:none">&#128276; ALERTS</button>
+        <button class="btn ghost" id="hbCheckBtn">&#9889; CHECK NOW</button>
+        <button class="btn" id="hbAddBtn">+ ADD MONITOR</button>
+      </div>
+      <p class="sec-hint">Every monitor is checked on its own interval, around the clock, for as long as IT&#8209;Vault is
+      running. A monitor has to fail its retry count before it counts as down, and the alert goes out once on the way
+      down and once on the way back up &mdash; so a flapping device will not fill your inbox overnight. History is kept
+      indefinitely, so uptime over the last year is a question you can still ask.</p>
+
+      <div class="kpis" id="hbKpis">
+        <div class="kpi hbk-down"><div class="kpi-ico">&#9679;</div><div class="kpi-body"><div class="kpi-v" id="hbNDown">0</div><div class="kpi-k">Down</div></div></div>
+        <div class="kpi hbk-pending"><div class="kpi-ico">&#8987;</div><div class="kpi-body"><div class="kpi-v" id="hbNPending">0</div><div class="kpi-k">Checking</div></div></div>
+        <div class="kpi hbk-up"><div class="kpi-ico">&#10003;</div><div class="kpi-body"><div class="kpi-v" id="hbNUp">0</div><div class="kpi-k">Up</div></div></div>
+        <div class="kpi hbk-paused"><div class="kpi-ico">&#10073;&#10073;</div><div class="kpi-body"><div class="kpi-v" id="hbNPaused">0</div><div class="kpi-k">Paused</div></div></div>
+        <div class="kpi hbk-avg"><div class="kpi-ico">&#9201;</div><div class="kpi-body"><div class="kpi-v" id="hbAvg">&mdash;</div><div class="kpi-k">Avg Response</div></div></div>
+      </div>
+
+      <div class="toolbar">
+        <input id="hbSearch" type="search" placeholder="&#8981; filter by name, type, target or tag&hellip;">
+        <select id="hbFilter">
+          <option value="">All statuses</option>
+          <option value="down">Down only</option>
+          <option value="pending">Checking only</option>
+          <option value="up">Up only</option>
+          <option value="paused">Paused only</option>
+        </select>
+        <span class="tb-spacer"></span>
+        <span id="hbMeta" class="muted"></span>
+      </div>
+
+      <div id="hbStatus" class="muted scan-status"></div>
+      <div class="tablewrap" id="hbTableWrap" style="display:none">
+        <table class="dtable">
+          <thead><tr>
+            <th>STATUS</th><th>MONITOR</th><th>CHECK</th><th>TARGET</th>
+            <th>RESPONSE</th><th>HEARTBEAT</th><th>UPTIME</th><th>CERT</th><th>SINCE</th><th></th>
+          </tr></thead>
+          <tbody id="hbBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="hbEmpty" style="display:none">NO MONITORS YET &mdash; ADD ONE, OR RUN A NETWORK SCAN AND WATCH WHAT IT FINDS</div>
     </div>
   </section>
 </div>
@@ -960,6 +1008,164 @@
   </div>
 </div></div>
 
+<!-- Heartbeat monitor modal -->
+<div class="modal" id="hbModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+  <h3 id="hbModalTitle">ADD MONITOR</h3>
+  <div class="modal-scroll">
+    <div class="invbox">
+      <label>WHAT TO WATCH</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="hb_name" placeholder="e.g. Core Switch, Office Wi&#8209;Fi, Intranet"></div>
+        <div class="field2"><label>Check type</label>
+          <select id="hb_kind">
+            <option value="ping">Ping (ICMP) &mdash; is the device alive</option>
+            <option value="http">HTTP(S) &mdash; is the web service answering</option>
+            <option value="keyword">HTTP keyword &mdash; does the page say the right thing</option>
+            <option value="port">TCP port &mdash; is the service listening</option>
+            <option value="dns">DNS &mdash; does the name still resolve</option>
+          </select>
+        </div>
+        <div class="field2"><label id="hb_targetLabel">IP or hostname</label><input id="hb_target" class="mono" placeholder="e.g. 192.168.0.1"></div>
+        <div class="field2" id="hb_portWrap" style="display:none"><label>Port</label><input id="hb_port" type="number" min="1" max="65535" placeholder="e.g. 443"></div>
+        <div class="field2" id="hb_kwWrap" style="display:none"><label>Keyword the response must contain</label><input id="hb_keyword" placeholder="e.g. All systems operational"></div>
+        <div class="field2" id="hb_methodWrap" style="display:none"><label>HTTP method</label>
+          <select id="hb_method"><option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option></select>
+        </div>
+        <div class="field2" id="hb_codesWrap" style="display:none"><label>Accepted status codes</label><input id="hb_codes" class="mono" placeholder="200-299"></div>
+        <div class="field2"><label>Tag / group (optional)</label><input id="hb_tag" placeholder="e.g. Network, Servers, Branch office"></div>
+        <div class="field2"><label>Linked asset (optional)</label><select id="hb_asset"><option value="">-- none --</option></select></div>
+      </div>
+      <div class="scanrow" id="hb_kwOpts" style="display:none;margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hb_kwInvert"><span>Down when the keyword IS present (inverted)</span></label>
+      </div>
+      <div class="scanrow" id="hb_tlsOpts" style="display:none;margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hb_ignoreTls" checked><span>Ignore certificate errors (self&#8209;signed intranet services)</span></label>
+      </div>
+      <p class="muted scan-hint" id="hb_kindHint">Ping is the right check for switches, access points, printers and cameras &mdash; anything that should simply be reachable.</p>
+    </div>
+    <div class="invbox">
+      <label>HOW OFTEN, AND WHEN TO SHOUT</label>
+      <div class="grid2">
+        <div class="field2"><label>Check every (seconds)</label><input id="hb_interval" type="number" min="10" max="86400" value="60"></div>
+        <div class="field2"><label>Retries before it counts as down</label><input id="hb_thresh" type="number" min="1" max="10" value="2"></div>
+        <div class="field2"><label>Timeout (seconds)</label><input id="hb_timeout" type="number" min="1" max="120" value="8"></div>
+        <div class="field2"><label>While down, re&#8209;check every (seconds)</label><input id="hb_retryEvery" type="number" min="0" max="86400" value="0" placeholder="0 = same interval"></div>
+        <div class="field2"><label>Remind me every N further failures</label><input id="hb_resend" type="number" min="0" max="1000" value="0" placeholder="0 = never remind"></div>
+        <div class="field2"><label>Note (optional)</label><input id="hb_note" placeholder="What breaks if this goes down?"></div>
+      </div>
+      <div class="scanrow" style="margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hb_notify" checked><span>Alert me when it goes down and when it recovers</span></label>
+        <label class="toggle"><input type="checkbox" id="hb_enabled" checked><span>Monitor active</span></label>
+      </div>
+      <div class="scanrow" style="margin-top:6px">
+        <label class="toggle"><input type="checkbox" id="hb_upside"><span>Upside down &mdash; this should NOT respond, alert me if it does</span></label>
+      </div>
+      <p class="muted scan-hint" id="hb_thHint"></p>
+    </div>
+    <div class="invbox" id="hb_chanBox">
+      <label>WHERE THE ALERT GOES</label>
+      <div id="hb_chanList" class="permitem-wrap"></div>
+      <p class="muted scan-hint">Nothing selected means every enabled channel. With no channels set up at all, alerts go to the
+      notification address in Settings &#9656; Notifications.</p>
+    </div>
+  </div>
+  <div class="m-actions">
+    <button class="btn ghost" id="hbCancel" type="button">CANCEL</button>
+    <button class="btn danger" id="hbDelete" type="button" style="display:none">DELETE</button>
+    <button class="btn" id="hbSave" type="button">SAVE</button>
+  </div>
+</div></div>
+
+<!-- Heartbeat monitor detail -->
+<div class="modal" id="hbDetailModal"><div class="modal-box" style="width:min(860px,95vw);max-width:860px">
+  <h3 id="hbdTitle">MONITOR</h3>
+  <div class="modal-scroll">
+    <div class="hbd-head">
+      <div class="hbd-state"><span class="hbdot" id="hbdDot"></span><span id="hbdStatus">&mdash;</span></div>
+      <div class="mono muted" id="hbdTarget"></div>
+      <div class="spacer"></div>
+      <select id="hbdWindow" title="History window">
+        <option value="6">Last 6 hours</option>
+        <option value="24" selected>Last 24 hours</option>
+        <option value="168">Last 7 days</option>
+        <option value="720">Last 30 days</option>
+        <option value="8760">Last year</option>
+      </select>
+    </div>
+    <div class="kpis hbd-kpis">
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU24">&mdash;</div><div class="kpi-k">Uptime 24h</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU7">&mdash;</div><div class="kpi-k">Uptime 7d</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU30">&mdash;</div><div class="kpi-k">Uptime 30d</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU1y">&mdash;</div><div class="kpi-k">Uptime 1y</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdAvg">&mdash;</div><div class="kpi-k">Avg Response</div></div></div>
+    </div>
+    <div class="invbox">
+      <label>HEARTBEAT</label>
+      <div id="hbdEcg" class="hbd-ecg"></div>
+    </div>
+    <div class="invbox">
+      <label>RESPONSE TIME</label>
+      <div id="hbdChart" class="hbd-chart"></div>
+      <p class="muted scan-hint" id="hbdChartHint"></p>
+    </div>
+    <div class="invbox">
+      <label>WHAT HAPPENED</label>
+      <div class="tablewrap" style="max-height:280px">
+        <table class="dtable"><thead><tr><th>WHEN</th><th>EVENT</th><th>DETAIL</th></tr></thead>
+        <tbody id="hbdEvents"></tbody></table>
+      </div>
+      <div class="empty" id="hbdEventsEmpty" style="display:none">NOTHING LOGGED YET</div>
+    </div>
+  </div>
+  <div class="m-actions">
+    <button class="btn ghost" id="hbdClose" type="button">CLOSE</button>
+    <button class="btn ghost" id="hbdPause" type="button">&#10073;&#10073; PAUSE</button>
+    <button class="btn ghost" id="hbdCheck" type="button">&#9889; CHECK NOW</button>
+    <button class="btn" id="hbdEdit" type="button">EDIT</button>
+  </div>
+</div></div>
+
+<!-- Heartbeat alert channels -->
+<div class="modal" id="hbChanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+  <h3>ALERT CHANNELS</h3>
+  <div class="modal-scroll">
+    <p class="sec-hint">Where outage alerts are delivered. A monitor can use any combination of these; with none set up,
+    alerts fall back to the notification address in Settings &#9656; Notifications. Test a channel before an outage has
+    to rely on it.</p>
+    <div class="tablewrap">
+      <table class="dtable"><thead><tr><th>NAME</th><th>TYPE</th><th>WHERE</th><th>ACTIVE</th><th></th></tr></thead>
+      <tbody id="hbChanBody"></tbody></table>
+    </div>
+    <div class="empty" id="hbChanEmpty" style="display:none">NO CHANNELS YET &mdash; ALERTS GO TO THE NOTIFICATION ADDRESS</div>
+    <div class="invbox" style="margin-top:14px">
+      <label id="hbChanFormTitle">ADD A CHANNEL</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="hbc_name" placeholder="e.g. IT team email, Ops Slack"></div>
+        <div class="field2"><label>Type</label>
+          <select id="hbc_kind">
+            <option value="email">Email (uses your SMTP settings)</option>
+            <option value="webhook">Webhook (JSON POST)</option>
+            <option value="slack">Slack incoming webhook</option>
+            <option value="telegram">Telegram bot</option>
+          </select>
+        </div>
+        <div class="field2" id="hbc_urlWrap" style="display:none;grid-column:1/-1"><label id="hbc_urlLabel">Webhook URL</label><input id="hbc_url" class="mono" placeholder="https://hooks.example.com/..."></div>
+        <div class="field2" id="hbc_tokenWrap" style="display:none"><label>Bot token</label><input id="hbc_token" type="password" placeholder="123456:ABC-DEF..."></div>
+        <div class="field2" id="hbc_chatWrap" style="display:none"><label>Chat ID</label><input id="hbc_chat" class="mono" placeholder="-1001234567890"></div>
+      </div>
+      <div class="scanrow" style="margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hbc_enabled" checked><span>Channel active</span></label>
+      </div>
+      <p class="muted scan-hint" id="hbc_hint">Email uses the SMTP server and notification address already configured in Settings.</p>
+      <div class="m-actions" style="justify-content:flex-start">
+        <button class="btn" id="hbcSave" type="button">SAVE CHANNEL</button>
+        <button class="btn ghost" id="hbcReset" type="button" style="display:none">CANCEL EDIT</button>
+      </div>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="hbChanClose" type="button">CLOSE</button></div>
+</div></div>
+
 <!-- Network scan modal -->
 <div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
   <h3>NETWORK SCAN — LOCAL DEVICES</h3>
@@ -979,17 +1185,6 @@
     <div id="scanStatus" class="muted scan-status"></div>
     <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
 
-    <!-- Heartbeat: what Uptime Kuma's latest check says. The scan tells you what
-         the network; this tells you what is answering right now. -->
-    <div class="invbox" id="hbWrap">
-      <label>HEARTBEAT <span class="muted" style="font-weight:400">&mdash; live status from Uptime Kuma</span></label>
-      <div class="scanrow">
-        <button class="btn" id="hbBtn" type="button">&#9851; REFRESH</button>
-        <span id="hbCounts" class="hbcounts"></span>
-      </div>
-      <div id="hbStatus" class="muted scan-status"></div>
-      <div class="tablewrap" id="hbTableWrap" style="display:none"><table class="dtable"><thead><tr><th>STATUS</th><th>MONITOR</th><th>TYPE</th><th>TARGET</th><th>RESPONSE</th><th>CERT</th></tr></thead><tbody id="hbBody"></tbody></table></div>
-    </div>
   </div>
   
   <div class="m-actions">
@@ -1069,6 +1264,6 @@
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260908c"></script>
+<script src="/app.js?nocache=20260908h"></script>
 </body>
 </html>

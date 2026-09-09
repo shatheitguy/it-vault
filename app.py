@@ -265,6 +265,33 @@ def _brand_restore(col, path):
         return False
 
 
+def _brand_render_file(col, path):
+    """A real file a PDF renderer can open, or None.
+
+    reportlab needs a path on disk, and the cache is the only thing that is
+    one. When the cache is missing -- a replaced container, a volume the app
+    cannot write -- fall back to a temporary copy of the database blob.
+    Reading only the cache is what silently dropped the letterhead from
+    every printed page while it was still sitting in the database.
+
+    Returns (path, is_temp); the caller deletes it when is_temp.
+    """
+    if _brand_restore(col, path) and os.path.exists(path) and os.path.getsize(path) > 0:
+        return path, False
+    data = _brand_blob(col)
+    if not data:
+        return None, False
+    try:
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix=f"itvault_{col}_", suffix=".png")
+        with os.fdopen(fd, "wb") as fp:
+            fp.write(bytes(data))
+        return tmp, True
+    except Exception as e:
+        print(f"[itvault] could not materialize {col} for printing: {e}", flush=True)
+        return None, False
+
+
 def _brand_send(col, path, filename):
     """Serve branding from the disk cache, or straight from the database.
 
@@ -857,7 +884,7 @@ FEATURE_GROUPS = [
     ]},
     {"key": "tools", "label": "Tools and records", "module": None, "items": [
         ("tools.scan",    "Network scan",                     "admin_only"),
-        ("tools.heartbeat",     "Heartbeat (Uptime Kuma status)",       "admin_only"),
+        ("tools.heartbeat",     "Heartbeat (uptime monitoring + alerts)",       "admin_only"),
         ("tools.audit",   "Audit log",                        "admin_only"),
         ("tools.backup",  "Backup and restore",               "admin_only"),
         ("tools.monitor", "Monitor screen",                   "admin_only"),
@@ -1197,6 +1224,62 @@ def init_db():
         data MEDIUMBLOB,
         INDEX idx_tkatt (ticket_id)
     )""")
+    # One row per check. Kept indefinitely unless ITVAULT_HB_RETAIN_DAYS
+    # says otherwise -- the hourly roll-up below is what long windows read,
+    # so uptime history survives even if raw detail is ever pruned.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatSamples (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        monitor_id INT DEFAULT 0, monitor VARCHAR(190), ts DATETIME,
+        status VARCHAR(20), response_ms INT NULL,
+        INDEX idx_hb (monitor, ts), INDEX idx_hb_ts (ts), INDEX idx_hb_mid (monitor_id, ts)
+    )""")
+    # The monitors. fail_threshold is the flap guard: a monitor must fail
+    # this many checks in a row before it is called down, and an alert goes
+    # out on the transition only, never on every failed probe.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatMonitors (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(190), kind VARCHAR(12) DEFAULT 'ping',
+        target VARCHAR(255), port INT NULL,
+        interval_s INT DEFAULT 60, enabled TINYINT DEFAULT 1,
+        notify TINYINT DEFAULT 1, fail_threshold INT DEFAULT 2,
+        timeout_s INT DEFAULT 8, retry_interval_s INT DEFAULT 0,
+        resend_every INT DEFAULT 0, upside_down TINYINT DEFAULT 0,
+        ignore_tls TINYINT DEFAULT 1, keyword VARCHAR(255) DEFAULT '',
+        keyword_invert TINYINT DEFAULT 0,
+        accepted_codes VARCHAR(120) DEFAULT '200-299',
+        http_method VARCHAR(10) DEFAULT 'GET',
+        tag VARCHAR(60) DEFAULT '', channels VARCHAR(255) DEFAULT '',
+        note VARCHAR(255) DEFAULT '', cert_days INT NULL,
+        asset_id VARCHAR(40) DEFAULT '',
+        status VARCHAR(20) DEFAULT 'pending', fails INT DEFAULT 0,
+        last_ms INT NULL, last_check DATETIME NULL, last_change DATETIME NULL,
+        next_check DATETIME NULL, last_error VARCHAR(255) DEFAULT '',
+        INDEX idx_hbm (enabled, next_check)
+    )""")
+    # One row per monitor per hour, updated as checks land. Never pruned:
+    # a year of this is a few hundred thousand rows, which is what makes
+    # "uptime over the last 12 months" answerable at all.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatHourly (
+        monitor_id INT NOT NULL, hour DATETIME NOT NULL,
+        checks INT DEFAULT 0, ups INT DEFAULT 0, sum_ms BIGINT DEFAULT 0,
+        min_ms INT NULL, max_ms INT NULL,
+        PRIMARY KEY (monitor_id, hour), INDEX idx_hbh (hour)
+    )""")
+    # The incident log: what changed and when, per monitor.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatEvents (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        monitor_id INT NOT NULL, ts DATETIME, kind VARCHAR(12),
+        message VARCHAR(255) DEFAULT '',
+        INDEX idx_hbe (monitor_id, ts)
+    )""")
+    # Where alerts go. Empty table means "use the notification address in
+    # Settings", so monitoring works before anyone configures anything.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatChannels (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(120), kind VARCHAR(20) DEFAULT 'email',
+        config TEXT, enabled TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
         password VARCHAR(100),
@@ -1437,6 +1520,47 @@ def init_db():
 def migrate_schema():
     """Add new columns for the Customization engine / Profile / User Settings without dropping data."""
     c = conn(); cur = c.cursor()
+    # Heartbeat: the monitor table grew a lot of per-check options, and the
+    # roll-up / event / channel tables are new. ADD COLUMN is a no-op once
+    # the column exists, so this is safe to run on every start.
+    hb_cols = {
+        "timeout_s": "INT DEFAULT 8",
+        "retry_interval_s": "INT DEFAULT 0",
+        "resend_every": "INT DEFAULT 0",
+        "upside_down": "TINYINT DEFAULT 0",
+        "ignore_tls": "TINYINT DEFAULT 1",
+        "keyword": "VARCHAR(255) DEFAULT ''",
+        "keyword_invert": "TINYINT DEFAULT 0",
+        "accepted_codes": "VARCHAR(120) DEFAULT '200-299'",
+        "http_method": "VARCHAR(10) DEFAULT 'GET'",
+        "tag": "VARCHAR(60) DEFAULT ''",
+        "channels": "VARCHAR(255) DEFAULT ''",
+        "note": "VARCHAR(255) DEFAULT ''",
+        "cert_days": "INT NULL",
+        "next_check": "DATETIME NULL",
+    }
+    for col, typ in hb_cols.items():
+        try:
+            cur.execute(f"ALTER TABLE HeartbeatMonitors ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # kind used to be VARCHAR(10), too short for "keyword"
+    try:
+        cur.execute("ALTER TABLE HeartbeatMonitors MODIFY COLUMN kind VARCHAR(12) DEFAULT 'ping'")
+    except Exception:
+        pass
+    # settings left behind by the retired external-monitor integration
+    for col in ("kuma_enabled", "kuma_url", "kuma_api_key", "kuma_verify_ssl"):
+        try:
+            cur.execute(f"ALTER TABLE Settings DROP COLUMN {col}")
+        except Exception:
+            pass
+    # samples recorded by that integration had no monitor of their own
+    try:
+        cur.execute("DELETE FROM HeartbeatSamples WHERE monitor_id=0")
+    except Exception:
+        pass
+    c.commit()
     # Settings: theme engine + i18n + region
     set_cols = {
         "theme_preset": "VARCHAR(20) DEFAULT 'deepdark'",
@@ -1531,10 +1655,6 @@ def migrate_schema():
     unifi_cols = {
         "unifi_enabled": "BOOLEAN DEFAULT 0",
         "unifi_host": "VARCHAR(200) DEFAULT ''",
-        "kuma_enabled": "TINYINT DEFAULT 0",
-        "kuma_url": "VARCHAR(200) DEFAULT ''",
-        "kuma_api_key": "VARCHAR(200) DEFAULT ''",
-        "kuma_verify_ssl": "TINYINT DEFAULT 0",
         "unifi_port": "INT DEFAULT 443",
         "unifi_site": "VARCHAR(80) DEFAULT 'default'",
         "unifi_user": "VARCHAR(120) DEFAULT ''",
@@ -3242,188 +3362,857 @@ def _unifi_refresh(force=False):
 
 _UNIFI_TYPE_LABELS = {"uap": "Access Point", "usw": "Switch", "ugw": "Gateway", "udm": "Gateway", "uxg": "Gateway"}
 
-# ---------- Heartbeat: live monitor status pulled from Uptime Kuma ----------
-# Uptime Kuma already does the polling, the retries and the notifications, and
-# does them well. Rebuilding that here would duplicate a tool most people
-# running IT-Vault already have. So this reads its Prometheus endpoint and
-# shows the result next to the network scan: the scan tells you what is on the
-# network, Heartbeat tells you what is currently answering.
+# ================= Heartbeat: uptime monitoring =========================
+# IT-Vault's own monitoring engine. It checks every monitor on that monitor's
+# own interval, forever -- the runner starts with the app and never stops, and
+# nothing throttles it back or switches it off after a while.
 #
-# /metrics is a plain GET secured by HTTP Basic. Kuma accepts an API key as
-# the password (with any username) and disables user/password auth once a key
-# exists, so the key is the documented path and the only one offered here.
-_kuma_cache = {"ts": 0, "monitors": [], "error": None}
-_KUMA_CACHE_TTL = 20
+# History is kept in two places on purpose:
+#   HeartbeatSamples  one row per check. Kept indefinitely by default, because
+#                     "how did last month look" is a fair question and there is
+#                     no reason to throw the answer away. Set
+#                     ITVAULT_HB_RETAIN_DAYS to prune if disk is tight.
+#   HeartbeatHourly   one row per monitor per hour, written as the checks come
+#                     in. Kept forever regardless. A year of uptime for fifty
+#                     monitors is ~440k rows here versus ~26M raw, so long
+#                     windows read from this and stay fast even if raw samples
+#                     are pruned.
+#
+# The setting that decides whether any of this is usable is the retry count.
+# Checking every 60s and mailing on every failed check means one wobbly access
+# point sends forty emails overnight and the feature gets switched off. So a
+# monitor has to fail `fail_threshold` times in a row before it is called
+# down, and mail goes out on the TRANSITION -- once down, once back up --
+# with an optional reminder every N further failures if you want one.
+HB_KINDS = ("ping", "http", "keyword", "port", "dns")
+HB_TICK_SECONDS = 5          # how often the runner looks for work
+HB_RETAIN_DAYS = int(os.environ.get("ITVAULT_HB_RETAIN_DAYS") or 0)   # 0 = keep everything
+HB_MIN_INTERVAL = 10
+HB_CHANNEL_KINDS = ("email", "webhook", "slack", "telegram")
 
-# Kuma's status numbers, from its own source: 0 down, 1 up, 2 pending
-# (retrying before it commits to "down"), 3 under maintenance.
-_KUMA_STATUS = {0: "down", 1: "up", 2: "pending", 3: "maintenance"}
+
+# ---- the checks --------------------------------------------------------
+def _hb_accepts(code, spec):
+    """Is this HTTP status accepted? Spec reads '200-299,301,404'."""
+    for part in (spec or "200-299").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            try:
+                if int(lo) <= code <= int(hi):
+                    return True
+            except ValueError:
+                continue
+        else:
+            try:
+                if code == int(part):
+                    return True
+            except ValueError:
+                continue
+    return False
 
 
-def _kuma_parse_metrics(text):
-    """Prometheus exposition text -> one dict per monitor.
+def _hb_url(target):
+    return target if re.match(r"^https?://", target or "") else "http://" + (target or "")
 
-    Kuma emits several series per monitor, keyed by the same label set:
-      monitor_status{monitor_name="Router",monitor_type="ping",...} 1
-      monitor_response_time{...} 3
-      monitor_cert_days_remaining{...} 61
-    so they are collected by name rather than assumed to arrive in any order.
+
+def _hb_cert_days(url, timeout):
+    """Days until the TLS certificate expires, or None if not applicable.
+
+    Reachability and certificate trust are separate questions -- a self-signed
+    intranet box is up -- so this is reported alongside the check instead of
+    being allowed to fail it.
     """
-    label_re = re.compile(r'(\w+)="((?:[^"\\]|\\.)*)"')
-    line_re = re.compile(r"^([a-zA-Z_:][\w:]*)\{(.*)\}\s+([^\s]+)\s*$")
-    by_key = {}
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        m = line_re.match(line)
-        if not m:
-            continue
-        series, labels_s, value = m.group(1), m.group(2), m.group(3)
-        if not series.startswith("monitor_"):
-            continue
-        labels = {k: v.replace('\\"', '"') for k, v in label_re.findall(labels_s)}
-        name = labels.get("monitor_name") or ""
-        if not name:
-            continue
-        key = (name, labels.get("monitor_type", ""), labels.get("monitor_hostname", ""),
-               labels.get("monitor_url", ""))
-        rec = by_key.setdefault(key, {
-            "name": name,
-            "type": labels.get("monitor_type") or "",
-            # Kuma writes the literal string "null" for labels that do not
-            # apply to a monitor type, which must not reach the UI as text.
-            "target": (labels.get("monitor_hostname") or "").strip(),
-            "url": (labels.get("monitor_url") or "").strip(),
-            "port": (labels.get("monitor_port") or "").strip(),
-            "status": "unknown", "response_ms": None, "cert_days": None,
-        })
-        for f in ("target", "url", "port"):
-            if rec[f].lower() in ("null", "none"):
-                rec[f] = ""
-        try:
-            num = float(value)
-        except ValueError:
-            continue
-        if series == "monitor_status":
-            rec["status"] = _KUMA_STATUS.get(int(num), "unknown")
-        elif series == "monitor_response_time":
-            # -1 is Kuma's "no measurement yet"
-            rec["response_ms"] = None if num < 0 else int(round(num))
-        elif series == "monitor_cert_days_remaining":
-            rec["cert_days"] = int(round(num))
-    out = list(by_key.values())
-    # down first, then pending/maintenance, then up -- the useful order when
-    # something is wrong, and stable alphabetically within each group
-    rank = {"down": 0, "pending": 1, "maintenance": 2, "up": 3, "unknown": 4}
-    out.sort(key=lambda m: (rank.get(m["status"], 5), m["name"].lower()))
-    return out
-
-
-def _kuma_fetch(cfg):
-    """GET Kuma's /metrics and parse it. Raises with a readable message.
-
-    Uses urllib rather than requests so this works regardless of what is
-    installed -- the UniFi integration's requests import is exactly the kind
-    of dependency that goes missing in a slim image.
-    """
-    import base64
-    import ssl
-    import urllib.error
-    import urllib.request
-
-    url = (cfg.get("kuma_url") or "").strip().rstrip("/")
-    key = (cfg.get("kuma_api_key") or "").strip()
-    if not url:
-        raise Exception("Uptime Kuma URL is required")
-    if not re.match(r"^https?://", url):
-        url = "http://" + url
-    if not key:
-        raise Exception("An Uptime Kuma API key is required "
-                        "(Kuma: Settings > API Keys > Add API Key)")
-
-    req = urllib.request.Request(url + "/metrics", method="GET")
-    # any username, the API key as the password -- Kuma's documented scheme
-    req.add_header("Authorization", "Basic " +
-                   base64.b64encode(f":{key}".encode()).decode())
-    ctx = None
-    if url.startswith("https://") and not cfg.get("kuma_verify_ssl"):
+    try:
+        import socket
+        import ssl
+        from urllib.parse import urlsplit
+        u = urlsplit(url)
+        if u.scheme != "https":
+            return None
+        host = u.hostname
+        port = u.port or 443
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ss:
+                cert = ss.getpeercert()
+        if not cert:
+            # CERT_NONE gives an empty dict on some builds; fetch the DER and
+            # read notAfter from it instead of guessing
+            return None
+        import datetime
+        exp = datetime.datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z")
+        return max(0, (exp - datetime.datetime.utcnow()).days)
+    except Exception:
+        return None
+
+
+def _hb_check_ping(mon, timeout):
+    ok = _ping_one(mon.get("target")) is not None
+    return ok, (None if ok else "no ICMP reply"), None
+
+
+def _hb_check_http(mon, timeout, want_keyword=False):
+    import urllib.error
+    import urllib.request
+    url = _hb_url(mon.get("target"))
+    method = (mon.get("http_method") or "GET").upper()
+    if method not in ("GET", "POST", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"):
+        method = "GET"
+    if want_keyword and method == "HEAD":
+        method = "GET"          # a HEAD has no body to search
+    req = urllib.request.Request(url, method=method,
+                                 headers={"User-Agent": "IT-Vault-Heartbeat"})
+    ctx = None
+    if url.startswith("https://"):
+        import ssl
+        ctx = ssl.create_default_context()
+        if mon.get("ignore_tls", 1):
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+    body = ""
     try:
-        with urllib.request.urlopen(req, timeout=8, context=ctx) as r:
-            body = r.read().decode("utf-8", "replace")
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            code = r.status
+            if want_keyword:
+                body = r.read(262144).decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
-        if e.code in (401, 403):
-            raise Exception("Uptime Kuma rejected the API key -- check it is "
-                            "current and has not been revoked")
-        raise Exception(f"Uptime Kuma returned HTTP {e.code} for /metrics")
-    except urllib.error.URLError as e:
-        raise Exception(f"Could not reach {url} -- {e.reason}")
-    if "monitor_status" not in body:
-        raise Exception("That URL answered but did not look like Uptime Kuma's "
-                        "/metrics endpoint")
-    return _kuma_parse_metrics(body)
-
-
-def _kuma_cfg():
-    c = conn(); cur = c.cursor()
-    cur.execute("SELECT kuma_enabled, kuma_url, kuma_api_key, kuma_verify_ssl "
-                "FROM Settings WHERE id=1")
-    cfg = cur.fetchone() or {}
-    c.close()
-    return cfg
-
-
-def _kuma_refresh(force=False):
-    now = time.time()
-    if not force and (now - _kuma_cache["ts"]) < _KUMA_CACHE_TTL:
-        return
-    cfg = _kuma_cfg()
-    if not cfg.get("kuma_enabled"):
-        _kuma_cache.update(ts=now, monitors=[], error="not_configured")
-        return
-    try:
-        _kuma_cache.update(ts=now, monitors=_kuma_fetch(cfg), error=None)
+        code = e.code
+        if want_keyword:
+            try:
+                body = e.read(262144).decode("utf-8", "replace")
+            except Exception:
+                body = ""
     except Exception as e:
-        _kuma_cache.update(ts=now, monitors=[], error=str(e))
+        return False, str(e)[:180], None
+    cert = _hb_cert_days(url, timeout)
+    if not _hb_accepts(code, mon.get("accepted_codes")):
+        return False, f"HTTP {code}", cert
+    if want_keyword:
+        kw = (mon.get("keyword") or "").strip()
+        if kw:
+            found = kw.lower() in body.lower()
+            if mon.get("keyword_invert"):
+                if found:
+                    return False, f'"{kw[:60]}" present but should not be', cert
+            elif not found:
+                return False, f'"{kw[:60]}" not in the response', cert
+    return True, None, cert
 
 
-@app.route("/api/heartbeat")
+def _hb_check_port(mon, timeout):
+    import socket
+    try:
+        with socket.create_connection((mon.get("target"), int(mon.get("port") or 0)),
+                                      timeout=timeout):
+            return True, None, None
+    except Exception as e:
+        return False, str(e)[:180], None
+
+
+def _hb_check_dns(mon, timeout):
+    import socket
+    old = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(timeout)
+        infos = socket.getaddrinfo(mon.get("target"), None)
+        addrs = sorted({i[4][0] for i in infos})
+        if not addrs:
+            return False, "no address returned", None
+        return True, None, None
+    except Exception as e:
+        return False, str(e)[:180], None
+    finally:
+        socket.setdefaulttimeout(old)
+
+
+def _hb_probe(mon):
+    """Run one check. Returns (up, response_ms, error, cert_days)."""
+    kind = (mon.get("kind") or "ping").lower()
+    target = (mon.get("target") or "").strip()
+    if not target:
+        return False, None, "no target", None
+    timeout = max(1, min(120, int(mon.get("timeout_s") or 8)))
+    t0 = time.time()
+    cert = None
+    try:
+        if kind == "http":
+            ok, err, cert = _hb_check_http(mon, timeout)
+        elif kind == "keyword":
+            ok, err, cert = _hb_check_http(mon, timeout, want_keyword=True)
+        elif kind == "port":
+            ok, err, cert = _hb_check_port(mon, timeout)
+        elif kind == "dns":
+            ok, err, cert = _hb_check_dns(mon, timeout)
+        else:
+            ok, err, cert = _hb_check_ping(mon, timeout)
+    except Exception as e:
+        ok, err = False, str(e)[:180]
+    ms = int(round((time.time() - t0) * 1000))
+    # "upside down" is for things that are supposed to be unreachable -- a port
+    # that should be closed, a page that should 404. The measurement is the
+    # same, the verdict is flipped.
+    if mon.get("upside_down"):
+        ok = not ok
+        err = None if ok else "responded, but this monitor expects it not to"
+    return ok, (ms if ok else None), err, cert
+
+
+# ---- applying a result ------------------------------------------------
+def _hb_apply_result(cur, mon, up, ms, err, cert):
+    """Update a monitor from one probe and decide whether to alert.
+
+    Returns a transition string when mail should go out:
+      "down"   it has just been declared down
+      "up"     it has just recovered
+      "still"  it is still down and the reminder interval came round
+    """
+    was = mon.get("status") or "pending"
+    fails = int(mon.get("fails") or 0)
+    thresh = max(1, int(mon.get("fail_threshold") or 2))
+    resend = max(0, int(mon.get("resend_every") or 0))
+    interval = max(HB_MIN_INTERVAL, int(mon.get("interval_s") or 60))
+    retry_in = int(mon.get("retry_interval_s") or 0) or interval
+    transition = None
+    if up:
+        new, fails = "up", 0
+        if was != "up":
+            transition = "up"
+        wait = interval
+    else:
+        fails += 1
+        # hold at "pending" until it has failed enough times to be believed
+        new = "down" if fails >= thresh else ("pending" if was == "up" else was)
+        if new == "down" and was != "down":
+            transition = "down"
+        elif new == "down" and resend and (fails - thresh) > 0 \
+                and (fails - thresh) % resend == 0:
+            transition = "still"
+        # while something is wrong, check on the retry interval instead
+        wait = retry_in if new != "up" else interval
+    cur.execute(
+        "UPDATE HeartbeatMonitors SET status=%s, fails=%s, last_ms=%s, last_error=%s, "
+        "cert_days=%s, last_check=NOW(), next_check=NOW() + INTERVAL %s SECOND" +
+        (", last_change=NOW()" if transition in ("up", "down") else "") +
+        " WHERE id=%s",
+        (new, fails, ms, (err or "")[:255], cert, wait, mon["id"]))
+    cur.execute("INSERT INTO HeartbeatSamples (monitor_id, monitor, ts, status, response_ms) "
+                "VALUES (%s,%s,NOW(),%s,%s)",
+                (mon["id"], (mon.get("name") or "")[:190], new, ms))
+    # the hourly roll-up, written as we go so no cron job has to catch up
+    cur.execute(
+        "INSERT INTO HeartbeatHourly (monitor_id, hour, checks, ups, sum_ms, min_ms, max_ms) "
+        "VALUES (%s, DATE_FORMAT(NOW(), '%%Y-%%m-%%d %%H:00:00'), 1, %s, %s, %s, %s) "
+        "ON DUPLICATE KEY UPDATE checks=checks+1, ups=ups+VALUES(ups), "
+        "sum_ms=sum_ms+VALUES(sum_ms), "
+        "min_ms=IF(VALUES(min_ms) IS NULL, min_ms, LEAST(COALESCE(min_ms, VALUES(min_ms)), VALUES(min_ms))), "
+        "max_ms=IF(VALUES(max_ms) IS NULL, max_ms, GREATEST(COALESCE(max_ms, VALUES(max_ms)), VALUES(max_ms)))",
+        (mon["id"], 1 if new == "up" else 0, ms or 0, ms, ms))
+    if transition in ("up", "down"):
+        cur.execute("INSERT INTO HeartbeatEvents (monitor_id, ts, kind, message) "
+                    "VALUES (%s, NOW(), %s, %s)",
+                    (mon["id"], transition,
+                     (err or ("recovered" if transition == "up" else ""))[:255]))
+    mon["status"], mon["fails"], mon["cert_days"] = new, fails, cert
+    return transition
+
+
+# ---- notification channels --------------------------------------------
+def _hb_channels_for(mon, all_channels):
+    """Which channels this monitor alerts through. Empty selection = all."""
+    sel = (mon.get("channels") or "").strip()
+    live = [c for c in all_channels if c.get("enabled")]
+    if not sel:
+        return live
+    want = {s.strip() for s in sel.split(",") if s.strip()}
+    return [c for c in live if str(c["id"]) in want]
+
+
+def _hb_send_email(cfg, subject, body):
+    return send_notification(subject, body)
+
+
+def _hb_send_webhook(cfg, subject, body, payload):
+    import urllib.request
+    url = (cfg.get("url") or "").strip()
+    if not url:
+        raise Exception("webhook URL is empty")
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "User-Agent": "IT-Vault-Heartbeat"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status < 400
+
+
+def _hb_send_slack(cfg, subject, body, payload):
+    import urllib.request
+    url = (cfg.get("url") or "").strip()
+    if not url:
+        raise Exception("Slack webhook URL is empty")
+    text = f"*{subject}*\n{body}"
+    data = json.dumps({"text": text}).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status < 400
+
+
+def _hb_send_telegram(cfg, subject, body, payload):
+    import urllib.parse
+    import urllib.request
+    token = (cfg.get("token") or "").strip()
+    chat = (cfg.get("chat_id") or "").strip()
+    if not token or not chat:
+        raise Exception("Telegram needs both a bot token and a chat id")
+    q = urllib.parse.urlencode({"chat_id": chat, "text": f"{subject}\n\n{body}"})
+    url = f"https://api.telegram.org/bot{token}/sendMessage?{q}"
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return r.status < 400
+
+
+_HB_SENDERS = {"email": _hb_send_email, "webhook": _hb_send_webhook,
+               "slack": _hb_send_slack, "telegram": _hb_send_telegram}
+
+
+def _hb_channel_cfg(row):
+    try:
+        return json.loads(row.get("config") or "{}") or {}
+    except Exception:
+        return {}
+
+
+def _hb_all_channels():
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT * FROM HeartbeatChannels ORDER BY id")
+        return [dict(r) for r in cur.fetchall()]
+    except Exception:
+        return []
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+
+
+def _hb_message(mon, transition, err):
+    name = mon.get("name") or mon.get("target") or "monitor"
+    where = mon.get("target") or ""
+    if mon.get("port"):
+        where = f"{where}:{mon['port']}"
+    kind = (mon.get("kind") or "ping")
+    if transition == "up":
+        return (f"RECOVERED: {name}",
+                f"{name} is responding again.\n\nTarget: {where}\nCheck:  {kind}\n")
+    lead = "is still down" if transition == "still" else "stopped responding"
+    tail = ("" if transition == "still" else
+            "\nYou are getting this once, not on every failed check. "
+            "Another email follows when it recovers.")
+    return (f"{'STILL DOWN' if transition == 'still' else 'DOWN'}: {name}",
+            f"{name} {lead}.\n\nTarget: {where}\nCheck:  {kind}\n"
+            f"Reason: {err or 'no response'}\n"
+            f"Failed checks in a row: {mon.get('fails')}\n{tail}")
+
+
+def _hb_notify(mon, transition, err, all_channels=None):
+    """Alert on a transition, through every channel this monitor uses.
+
+    A dead channel must never stop the others, and must never stop the next
+    check -- so each send is guarded on its own.
+    """
+    if not int(mon.get("notify") or 0):
+        return
+    subject, body = _hb_message(mon, transition, err)
+    payload = {"event": transition, "monitor": mon.get("name"),
+               "kind": mon.get("kind"), "target": mon.get("target"),
+               "port": mon.get("port"), "status": mon.get("status"),
+               "error": err or "", "fails": mon.get("fails"),
+               "response_ms": mon.get("last_ms"), "subject": subject, "message": body}
+    channels = _hb_channels_for(mon, all_channels if all_channels is not None
+                                else _hb_all_channels())
+    if not channels:
+        # nothing configured: fall back to the notification address in Settings
+        try:
+            send_notification(subject, body)
+        except Exception as e:
+            print(f"[itvault] heartbeat alert not sent for {mon.get('name')}: {e}", flush=True)
+        return
+    for ch in channels:
+        fn = _HB_SENDERS.get((ch.get("kind") or "").lower())
+        if not fn:
+            continue
+        try:
+            fn(_hb_channel_cfg(ch), subject, body, payload)
+        except Exception as e:
+            print(f"[itvault] heartbeat alert via {ch.get('name')} failed: {e}", flush=True)
+
+
+# ---- the runner -------------------------------------------------------
+def _hb_prune(cur):
+    """Only ever prunes raw samples, and only if a retention was asked for.
+
+    The hourly roll-up is never pruned, so uptime history stays complete even
+    when raw check-by-check detail is dropped.
+    """
+    if HB_RETAIN_DAYS > 0:
+        cur.execute("DELETE FROM HeartbeatSamples WHERE ts < NOW() - INTERVAL %s DAY",
+                    [HB_RETAIN_DAYS])
+
+
+def _hb_run_due(force_all=False, only_id=None):
+    """Check every enabled monitor whose next check has come round."""
+    checked = []
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        if only_id:
+            cur.execute("SELECT * FROM HeartbeatMonitors WHERE id=%s", [only_id])
+        elif force_all:
+            cur.execute("SELECT * FROM HeartbeatMonitors WHERE enabled=1")
+        else:
+            cur.execute("SELECT * FROM HeartbeatMonitors WHERE enabled=1 AND "
+                        "(next_check IS NULL OR next_check <= NOW())")
+        due = [dict(r) for r in cur.fetchall()]
+        for mon in due:
+            # Claim the row before probing. Two IT-Vault instances against
+            # one database would otherwise both probe the same monitor in
+            # the same window and could each decide it just went down --
+            # two alerts for one outage. Whoever moves next_check first
+            # owns this round; the other skips it.
+            if not (force_all or only_id):
+                cur.execute(
+                    "UPDATE HeartbeatMonitors SET next_check = NOW() + INTERVAL %s SECOND "
+                    "WHERE id=%s AND (next_check IS NULL OR next_check <= NOW())",
+                    (max(HB_MIN_INTERVAL, int(mon.get("interval_s") or 60)), mon["id"]))
+                c.commit()
+                if cur.rowcount != 1:
+                    continue
+            up, ms, err, cert = _hb_probe(mon)
+            transition = _hb_apply_result(cur, mon, up, ms, err, cert)
+            c.commit()
+            checked.append((mon, transition, err))
+        if due:
+            try:
+                _hb_prune(cur); c.commit()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[itvault] heartbeat run failed: {e}", flush=True)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    # sending happens outside the database work, so a slow SMTP server cannot
+    # hold a transaction open or delay the next round of checks
+    if any(t for _, t, _ in checked):
+        chans = _hb_all_channels()
+        for mon, transition, err in checked:
+            if transition:
+                _hb_notify(mon, transition, err, chans)
+    return len(checked)
+
+
+def start_heartbeat_runner():
+    """Check due monitors on a short tick, for as long as the app is running.
+
+    Nothing here is allowed to raise: a failed round costs that round only.
+    """
+    def loop():
+        time.sleep(8)          # let the app finish coming up first
+        while True:
+            try:
+                _hb_run_due()
+            except Exception:
+                pass
+            time.sleep(HB_TICK_SECONDS)
+    t = threading.Thread(target=loop, name="heartbeat-runner", daemon=True)
+    t.start()
+    return t
+
+
+# ---- history queries --------------------------------------------------
+def _hb_uptime(cur, hours):
+    """Uptime per monitor over a window, from the hourly roll-up."""
+    out = {}
+    cur.execute("SELECT monitor_id, SUM(checks) n, SUM(ups) up, SUM(sum_ms) sms "
+                "FROM HeartbeatHourly WHERE hour >= NOW() - INTERVAL %s HOUR "
+                "GROUP BY monitor_id", [hours])
+    for r in cur.fetchall():
+        n = int(r["n"] or 0)
+        out[r["monitor_id"]] = {
+            "uptime": round(int(r["up"] or 0) * 100.0 / n, 2) if n else None,
+            "checks": n,
+            "avg_ms": int(round(int(r["sms"] or 0) / n)) if n else None}
+    return out
+
+
+def _hb_monitor_body(d, existing=None):
+    """Validate a monitor off the wire. Returns (fields, error).
+
+    A PUT is a partial update: anything the caller leaves out keeps the
+    value already stored. An explicit null counts as left out, because that
+    is what a typed client sends for "no opinion" -- the phone pauses a
+    monitor by sending enabled=false and nulls for the rest, and that must
+    not reset its interval and retries to the defaults.
+    """
+    ex = existing or {}
+    d = {k: v for k, v in (d or {}).items() if v is not None}
+    kind = (d.get("kind") or ex.get("kind") or "ping").lower()
+    if kind not in HB_KINDS:
+        return None, f"kind must be one of {', '.join(HB_KINDS)}"
+    target = (d.get("target", ex.get("target")) or "").strip()
+    if not target:
+        return None, "target is required"
+    port = d.get("port", ex.get("port"))
+    try:
+        port = int(port) if port not in (None, "", 0, "0") else None
+    except Exception:
+        return None, "port must be a number"
+    if kind == "port" and not port:
+        return None, "a port check needs a port number"
+
+    def num(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(d.get(key, ex.get(key) or default) or default)))
+        except Exception:
+            return None
+    interval = num("interval_s", 60, HB_MIN_INTERVAL, 86400)
+    if interval is None:
+        return None, "interval must be a number of seconds"
+    thresh = num("fail_threshold", 2, 1, 10)
+    if thresh is None:
+        return None, "retries must be a number"
+    timeout = num("timeout_s", 8, 1, 120)
+    if timeout is None:
+        return None, "timeout must be a number of seconds"
+    retry_in = num("retry_interval_s", 0, 0, 86400)
+    resend = num("resend_every", 0, 0, 1000)
+    if retry_in is None or resend is None:
+        return None, "retry and resend must be numbers"
+    keyword = (d.get("keyword", ex.get("keyword")) or "").strip()
+    if kind == "keyword" and not keyword:
+        return None, "a keyword check needs the text to look for"
+    codes = (d.get("accepted_codes", ex.get("accepted_codes")) or "200-299").strip()
+    if not re.match(r"^[0-9,\-\s]+$", codes):
+        return None, "accepted status codes look like 200-299,301"
+    name = (d.get("name", ex.get("name")) or target).strip()[:190]
+    flag = lambda k, dflt: 1 if d.get(k, ex.get(k, dflt)) else 0
+    return {
+        "name": name, "kind": kind, "target": target[:255], "port": port,
+        "interval_s": interval, "fail_threshold": thresh, "timeout_s": timeout,
+        "retry_interval_s": retry_in, "resend_every": resend,
+        "enabled": flag("enabled", 1), "notify": flag("notify", 1),
+        "upside_down": flag("upside_down", 0), "ignore_tls": flag("ignore_tls", 1),
+        "keyword_invert": flag("keyword_invert", 0),
+        "keyword": keyword[:255], "accepted_codes": codes[:120],
+        "http_method": (d.get("http_method", ex.get("http_method")) or "GET").upper()[:10],
+        "tag": (d.get("tag", ex.get("tag")) or "").strip()[:60],
+        "channels": (",".join(str(x) for x in d["channels"])
+                     if isinstance(d.get("channels"), list)
+                     else (d.get("channels", ex.get("channels")) or ""))[:255],
+        "asset_id": (d.get("asset_id", ex.get("asset_id")) or "")[:40],
+        "note": (d.get("note", ex.get("note")) or "").strip()[:255],
+    }, None
+
+
+HB_MON_COLS = ("name", "kind", "target", "port", "interval_s", "fail_threshold",
+               "timeout_s", "retry_interval_s", "resend_every", "enabled", "notify",
+               "upside_down", "ignore_tls", "keyword_invert", "keyword",
+               "accepted_codes", "http_method", "tag", "channels", "asset_id", "note")
+
+
+@app.route("/api/heartbeat/monitors", methods=["GET", "POST"])
 @feature_required("tools.heartbeat")
-def heartbeat_monitors():
-    """What Uptime Kuma's latest heartbeat says about each monitor."""
-    _kuma_refresh(force=request.args.get("force") == "1")
-    mons = _kuma_cache["monitors"]
-    counts = {k: 0 for k in ("up", "down", "pending", "maintenance", "unknown")}
-    for m in mons:
-        counts[m["status"]] = counts.get(m["status"], 0) + 1
-    return jsonify({"monitors": mons, "counts": counts,
-                    "error": _kuma_cache["error"],
-                    "checked_at": int(_kuma_cache["ts"])})
+def heartbeat_monitors_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        fields, err = _hb_monitor_body(request.get_json(force=True) or {})
+        if err:
+            c.close(); return jsonify({"error": err}), 400
+        cols = ", ".join(HB_MON_COLS)
+        marks = ", ".join(["%s"] * len(HB_MON_COLS))
+        cur.execute(f"INSERT INTO HeartbeatMonitors ({cols}) VALUES ({marks})",
+                    [fields[k] for k in HB_MON_COLS])
+        mid = cur.lastrowid
+        cur.execute("INSERT INTO HeartbeatEvents (monitor_id, ts, kind, message) "
+                    "VALUES (%s, NOW(), 'created', %s)",
+                    (mid, f"{fields['kind']} check on {fields['target']}"[:255]))
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", fields["name"],
+              f"added {fields['kind']} monitor for {fields['target']}")
+        return jsonify({"ok": True, "id": mid})
+    cur.execute("SELECT * FROM HeartbeatMonitors ORDER BY name")
+    rows = [dict(r) for r in cur.fetchall()]
+    c.close()
+    for r in rows:
+        for k in ("last_check", "last_change", "next_check"):
+            r[k] = str(r[k]) if r.get(k) else None
+    return jsonify(rows)
 
 
-@app.route("/api/test-kuma", methods=["POST"])
-@auth_required([ROLE_ADMIN])
-def test_kuma():
-    """Settings button: prove the URL and key work before saving them."""
-    d = request.get_json(force=True) or {}
-    cfg = _kuma_cfg()
-    # an empty key in the form means "keep the stored one", same as the other
-    # integrations, so a test does not require retyping it
-    merged = {
-        "kuma_url": (d.get("kuma_url") or cfg.get("kuma_url") or ""),
-        "kuma_api_key": (d.get("kuma_api_key") or cfg.get("kuma_api_key") or ""),
-        "kuma_verify_ssl": d.get("kuma_verify_ssl", cfg.get("kuma_verify_ssl")),
-    }
+@app.route("/api/heartbeat/monitors/<int:mid>", methods=["PUT", "DELETE"])
+@feature_required("tools.heartbeat")
+def heartbeat_monitor_one(mid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatMonitors WHERE id=%s", [mid])
+    ex = cur.fetchone()
+    if not ex:
+        c.close(); return jsonify({"error": "not found"}), 404
+    ex = dict(ex)
+    if request.method == "DELETE":
+        for t in ("HeartbeatSamples", "HeartbeatHourly", "HeartbeatEvents"):
+            cur.execute(f"DELETE FROM {t} WHERE monitor_id=%s", [mid])
+        cur.execute("DELETE FROM HeartbeatMonitors WHERE id=%s", [mid])
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", ex["name"], "deleted monitor")
+        return jsonify({"ok": True})
+    fields, err = _hb_monitor_body(request.get_json(force=True) or {}, ex)
+    if err:
+        c.close(); return jsonify({"error": err}), 400
+    sets = ", ".join(f"{k}=%s" for k in HB_MON_COLS)
+    args = [fields[k] for k in HB_MON_COLS]
+    # a paused monitor should start checking again the moment it is resumed,
+    # and an edited interval should take effect now rather than after the old
+    # one elapses
+    cur.execute(f"UPDATE HeartbeatMonitors SET {sets}, next_check=NULL WHERE id=%s",
+                args + [mid])
+    if int(ex.get("enabled") or 0) != fields["enabled"]:
+        cur.execute("INSERT INTO HeartbeatEvents (monitor_id, ts, kind, message) "
+                    "VALUES (%s, NOW(), %s, '')",
+                    (mid, "resumed" if fields["enabled"] else "paused"))
+        if not fields["enabled"]:
+            cur.execute("UPDATE HeartbeatMonitors SET status='paused', fails=0 WHERE id=%s", [mid])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/heartbeat/check", methods=["POST"])
+@feature_required("tools.heartbeat")
+def heartbeat_check_now():
+    """The Check now button: probe everything without waiting for the tick."""
+    return jsonify({"ok": True, "checked": _hb_run_due(force_all=True)})
+
+
+@app.route("/api/heartbeat/monitors/<int:mid>/check", methods=["POST"])
+@feature_required("tools.heartbeat")
+def heartbeat_check_one(mid):
+    return jsonify({"ok": True, "checked": _hb_run_due(only_id=mid)})
+
+
+@app.route("/api/heartbeat/monitors/<int:mid>/detail")
+@feature_required("tools.heartbeat")
+def heartbeat_monitor_detail(mid):
+    """Everything the detail view shows: uptime windows, chart, event log."""
     try:
-        mons = _kuma_fetch(merged)
+        hours = max(1, min(8760, int(request.args.get("hours") or 24)))
+    except Exception:
+        hours = 24
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatMonitors WHERE id=%s", [mid])
+    mon = cur.fetchone()
+    if not mon:
+        c.close(); return jsonify({"error": "not found"}), 404
+    mon = dict(mon)
+    for k in ("last_check", "last_change", "next_check"):
+        mon[k] = str(mon[k]) if mon.get(k) else None
+    windows = {}
+    for label, hrs in (("24h", 24), ("7d", 168), ("30d", 720), ("1y", 8760)):
+        u = _hb_uptime(cur, hrs).get(mid) or {}
+        windows[label] = {"uptime": u.get("uptime"), "checks": u.get("checks", 0),
+                          "avg_ms": u.get("avg_ms")}
+    # the chart reads the roll-up for long windows and raw checks for short
+    # ones, so a day looks detailed and a year still draws
+    if hours <= 48:
+        cur.execute("SELECT ts, status, response_ms FROM HeartbeatSamples "
+                    "WHERE monitor_id=%s AND ts >= NOW() - INTERVAL %s HOUR "
+                    "ORDER BY ts ASC LIMIT 2000", [mid, hours])
+        series = [{"t": str(r["ts"]), "status": r["status"], "ms": r["response_ms"]}
+                  for r in cur.fetchall()]
+    else:
+        cur.execute("SELECT hour, checks, ups, sum_ms FROM HeartbeatHourly "
+                    "WHERE monitor_id=%s AND hour >= NOW() - INTERVAL %s HOUR "
+                    "ORDER BY hour ASC LIMIT 2000", [mid, hours])
+        series = []
+        for r in cur.fetchall():
+            n = int(r["checks"] or 0) or 1
+            series.append({"t": str(r["hour"]),
+                           "status": "up" if int(r["ups"] or 0) == n else
+                                     ("down" if not int(r["ups"] or 0) else "mixed"),
+                           "ms": int(round(int(r["sum_ms"] or 0) / n))})
+    cur.execute("SELECT ts, kind, message FROM HeartbeatEvents WHERE monitor_id=%s "
+                "ORDER BY ts DESC LIMIT 100", [mid])
+    events = [{"t": str(r["ts"]), "kind": r["kind"], "message": r["message"]}
+              for r in cur.fetchall()]
+    c.close()
+    return jsonify({"monitor": mon, "windows": windows, "series": series,
+                    "events": events, "window_hours": hours})
+
+
+@app.route("/api/heartbeat/state")
+@feature_required("tools.heartbeat")
+def heartbeat_state():
+    """Everything the Heartbeat page needs: monitors, counts, recent history."""
+    try:
+        hours = max(1, min(8760, int(request.args.get("hours") or 24)))
+    except Exception:
+        hours = 24
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatMonitors ORDER BY name")
+    mons = [dict(r) for r in cur.fetchall()]
+    hist = _hb_uptime(cur, hours) if mons else {}
+    bars = {}
+    if mons:
+        # The bar strip is what makes this readable at a glance, so the status
+        # of each recent check comes back too -- a response-time line alone
+        # cannot show a gap, because a failed check has no response time.
+        cur.execute(
+            "SELECT monitor_id, status, response_ms FROM ("
+            "  SELECT monitor_id, status, response_ms, ts, ROW_NUMBER() OVER "
+            "         (PARTITION BY monitor_id ORDER BY ts DESC) rn"
+            "  FROM HeartbeatSamples WHERE monitor_id<>0"
+            ") x WHERE rn <= 40 ORDER BY monitor_id, ts ASC")
+        for r in cur.fetchall():
+            rec = bars.setdefault(r["monitor_id"], {"bars": [], "series": []})
+            rec["bars"].append(r["status"] or "pending")
+            if r["response_ms"] is not None:
+                rec["series"].append(r["response_ms"])
+    cur.execute("SELECT * FROM HeartbeatChannels ORDER BY id")
+    channels = [{"id": r["id"], "name": r["name"], "kind": r["kind"],
+                 "enabled": r["enabled"]} for r in cur.fetchall()]
+    c.close()
+    counts = {"up": 0, "down": 0, "pending": 0, "disabled": 0}
+    for m in mons:
+        for k in ("last_check", "last_change", "next_check"):
+            m[k] = str(m[k]) if m.get(k) else None
+        h = hist.get(m["id"]) or {}
+        b = bars.get(m["id"]) or {}
+        m["uptime"] = h.get("uptime")
+        m["avg_ms"] = h.get("avg_ms")
+        m["samples"] = h.get("checks", 0)
+        m["bars"] = b.get("bars", [])
+        m["series"] = b.get("series", [])
+        key = "disabled" if not m["enabled"] else (m["status"] or "pending")
+        counts[key] = counts.get(key, 0) + 1
+    return jsonify({"monitors": mons, "counts": counts, "channels": channels,
+                    "window_hours": hours, "retain_days": HB_RETAIN_DAYS})
+
+
+# ---- notification channels (admin) ------------------------------------
+def _hb_channel_body(d, existing=None):
+    ex = existing or {}
+    kind = (d.get("kind") or ex.get("kind") or "email").lower()
+    if kind not in HB_CHANNEL_KINDS:
+        return None, f"kind must be one of {', '.join(HB_CHANNEL_KINDS)}"
+    cfg = d.get("config")
+    if not isinstance(cfg, dict):
+        cfg = _hb_channel_cfg(ex)
+    if kind in ("webhook", "slack"):
+        url = (cfg.get("url") or "").strip()
+        if not re.match(r"^https?://", url):
+            return None, "that needs a full https:// URL"
+    if kind == "telegram" and not ((cfg.get("token") or "").strip()
+                                   and (cfg.get("chat_id") or "").strip()):
+        return None, "Telegram needs both a bot token and a chat id"
+    name = (d.get("name", ex.get("name")) or kind).strip()[:120]
+    return {"name": name, "kind": kind, "config": json.dumps(cfg),
+            "enabled": 1 if d.get("enabled", ex.get("enabled", 1)) else 0}, None
+
+
+@app.route("/api/heartbeat/channels", methods=["GET", "POST"])
+@auth_required([ROLE_ADMIN])
+def heartbeat_channels():
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        fields, err = _hb_channel_body(request.get_json(force=True) or {})
+        if err:
+            c.close(); return jsonify({"error": err}), 400
+        cur.execute("INSERT INTO HeartbeatChannels (name, kind, config, enabled) "
+                    "VALUES (%s,%s,%s,%s)",
+                    (fields["name"], fields["kind"], fields["config"], fields["enabled"]))
+        cid = cur.lastrowid
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", fields["name"],
+              f"added {fields['kind']} alert channel")
+        return jsonify({"ok": True, "id": cid})
+    cur.execute("SELECT * FROM HeartbeatChannels ORDER BY id")
+    rows = []
+    for r in cur.fetchall():
+        cfg = _hb_channel_cfg(dict(r))
+        # secrets never round-trip to the browser
+        safe = {k: v for k, v in cfg.items() if k not in ("token",)}
+        if cfg.get("token"):
+            safe["token_set"] = True
+        rows.append({"id": r["id"], "name": r["name"], "kind": r["kind"],
+                     "enabled": r["enabled"], "config": safe})
+    c.close()
+    return jsonify(rows)
+
+
+@app.route("/api/heartbeat/channels/<int:cid>", methods=["PUT", "DELETE"])
+@auth_required([ROLE_ADMIN])
+def heartbeat_channel_one(cid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatChannels WHERE id=%s", [cid])
+    ex = cur.fetchone()
+    if not ex:
+        c.close(); return jsonify({"error": "not found"}), 404
+    ex = dict(ex)
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM HeartbeatChannels WHERE id=%s", [cid])
+        # a monitor pointing only at this channel would go silent, so drop the
+        # reference and let it fall back to the default address
+        cur.execute("UPDATE HeartbeatMonitors SET channels=TRIM(BOTH ',' FROM "
+                    "REPLACE(CONCAT(',', channels, ','), %s, ',')) "
+                    "WHERE FIND_IN_SET(%s, channels)", (f",{cid},", str(cid)))
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", ex["name"], "deleted alert channel")
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    # an omitted token means "keep the stored one"
+    if isinstance(d.get("config"), dict):
+        old = _hb_channel_cfg(ex)
+        for secret in ("token",):
+            if not (d["config"].get(secret) or "").strip() and old.get(secret):
+                d["config"][secret] = old[secret]
+    fields, err = _hb_channel_body(d, ex)
+    if err:
+        c.close(); return jsonify({"error": err}), 400
+    cur.execute("UPDATE HeartbeatChannels SET name=%s, kind=%s, config=%s, enabled=%s "
+                "WHERE id=%s", (fields["name"], fields["kind"], fields["config"],
+                                fields["enabled"], cid))
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/heartbeat/channels/<int:cid>/test", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def heartbeat_channel_test(cid):
+    """Prove a channel works before an outage is relying on it."""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatChannels WHERE id=%s", [cid])
+    ch = cur.fetchone()
+    c.close()
+    if not ch:
+        return jsonify({"error": "not found"}), 404
+    ch = dict(ch)
+    fn = _HB_SENDERS.get((ch.get("kind") or "").lower())
+    if not fn:
+        return jsonify({"error": "unknown channel type"}), 400
+    subject = "IT-Vault Heartbeat test"
+    body = ("This is a test alert from IT-Vault Heartbeat.\n\n"
+            "If you are reading it, this channel works and real outage "
+            "alerts will arrive the same way.")
+    try:
+        fn(_hb_channel_cfg(ch), subject, body,
+           {"event": "test", "monitor": "test", "subject": subject, "message": body})
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-    up = sum(1 for m in mons if m["status"] == "up")
-    return jsonify({"ok": True, "monitors": len(mons), "up": up,
-                    "message": f"Connected -- {len(mons)} monitor(s), {up} up"})
+        return jsonify({"ok": False, "error": str(e)[:300]}), 400
+    return jsonify({"ok": True, "message": f"Sent through {ch['name']}"})
 
 @app.route("/api/unifi/devices")
 @auth_required()
@@ -3541,7 +4330,7 @@ def settings():
             logo = None
             letterhead = None
         # load current row so partial saves (e.g. branding only) don't reset other fields
-        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl, kuma_enabled, kuma_url, kuma_api_key, kuma_verify_ssl FROM Settings WHERE id=1")
+        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
         cur0 = cur.fetchone() or {}
         def gv(k, fb):
             return d.get(k) if (k in d and d.get(k) not in (None, "")) else cur0.get(k, fb)
@@ -3591,16 +4380,6 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
-        if any(k in d for k in ("kuma_enabled", "kuma_url", "kuma_api_key", "kuma_verify_ssl")):
-            cur.execute("""UPDATE Settings SET kuma_enabled=%s, kuma_url=%s,
-                          kuma_api_key=%s, kuma_verify_ssl=%s WHERE id=1""",
-                        (bool(d.get("kuma_enabled", cur0.get("kuma_enabled", False))),
-                         (d.get("kuma_url", cur0.get("kuma_url", "")) or "").strip()[:200],
-                         # blank means keep the stored key, so saving anything
-                         # else in this section does not wipe it
-                         (d.get("kuma_api_key") or cur0.get("kuma_api_key", "") or "")[:200],
-                         bool(d.get("kuma_verify_ssl", cur0.get("kuma_verify_ssl", False)))))
-            _kuma_cache["ts"] = 0
         if any(k in d for k in ("company_phone", "company_address")):
             cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
             br0 = cur.fetchone() or {}
@@ -3682,14 +4461,11 @@ def settings():
                                           "auto_assign_roundrobin","notify_on_create","notify_on_resolve","notify_on_reply",
                                           "unifi_enabled","unifi_host","unifi_port","unifi_site","unifi_user",
                                           "unifi_is_os","unifi_verify_ssl",
-                                          "kuma_enabled","kuma_url","kuma_verify_ssl",
                                           "backup_schedule","backup_scope","backup_retain","backup_last_run",
                                           "company_phone","company_address","has_letterhead"]} | {
                 "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME, "db_user": DB_USER,
                 "ldap_bind_pass_set": bool(s.get("ldap_bind_pass")),
                 "unifi_pass_set": bool(s.get("unifi_pass")),
-                # the key itself never round-trips to the browser
-                "kuma_api_key_set": bool(s.get("kuma_api_key")),
                 "db_pass_set": bool(DB_PASS)})
 
 # ---------- contracts / locations (GLPI-style) ----------
@@ -5493,8 +6269,13 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     # Stacking it inline was the earlier "not aligned" bug: at the story's
     # ~178mm content width, a full A4-shaped image renders ~252mm tall on its
     # own, swallowing almost the entire page before any real content starts.
-    letterhead_path = LETTERHEAD_PATH
-    used_letterhead = os.path.exists(letterhead_path) and os.path.getsize(letterhead_path) > 0
+    # the database is the source of truth: a missing cache must not
+    # quietly cost this document its letterhead
+    _brand_tmps = []
+    letterhead_path, _lh_tmp = _brand_render_file("letterhead", LETTERHEAD_PATH)
+    if _lh_tmp:
+        _brand_tmps.append(letterhead_path)
+    used_letterhead = bool(letterhead_path)
 
     buf = io.BytesIO()
     top_margin = 42 * mm if used_letterhead else 16 * mm
@@ -5506,8 +6287,10 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
 
     bn = brand_name()
     if not used_letterhead:
-        logo_path = LOGO_PATH
-        if os.path.exists(logo_path) and os.path.getsize(logo_path) > 0:
+        logo_path, _lg_tmp = _brand_render_file("logo", LOGO_PATH)
+        if _lg_tmp:
+            _brand_tmps.append(logo_path)
+        if logo_path:
             try:
                 from PIL import Image as PILImage
                 pil_logo = PILImage.open(logo_path).convert("RGBA")
@@ -5591,7 +6374,13 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                            preserveAspectRatio=False, mask="auto")
             cnv.restoreState()
 
-    doc.build(story, onFirstPage=_draw_letterhead_bg, onLaterPages=_draw_letterhead_bg)
+    try:
+        doc.build(story, onFirstPage=_draw_letterhead_bg, onLaterPages=_draw_letterhead_bg)
+    finally:
+        # branding materialized out of the database for this render only
+        for _t in _brand_tmps:
+            try: os.remove(_t)
+            except Exception: pass
     return buf.getvalue()
 
 def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attachment_name):
@@ -6006,8 +6795,16 @@ def _run_backup(scope="all"):
         fname = f"itvault_backup_{scope}_{stamp}.zip"
         with zipfile.ZipFile(os.path.join(BACKUP_DIR, fname), "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("dump.sql", sql_text)
-            for bf in BACKUP_BRANDING_FILES:
-                p = os.path.join(BASE, bf)
+            # Straight from the database, which is the live copy. This read
+            # BASE before, while branding actually lives in DATA_DIR, so on
+            # any install with a mounted data volume every archive bundled
+            # either nothing or a stale leftover.
+            for bf, _col in (("logo.png", "logo"), ("letterhead.png", "letterhead")):
+                blob = _brand_blob(_col)
+                if blob:
+                    zf.writestr(bf, bytes(blob))
+                    continue
+                p = os.path.join(DATA_DIR, bf)
                 try:
                     if os.path.getsize(p) > 0:
                         zf.write(p, bf)
@@ -6339,16 +7136,73 @@ def _apply_restore_sql(content):
     c.commit(); c.close()
     return applied, None
 
+def _brand_keep_after_restore(before, bundled=None):
+    """Put branding back when the restore did not bring any of its own.
+
+    A restore runs DELETE + REPLACE on Settings. A dump taken before
+    branding moved into the database has no logo/letterhead column at all,
+    so restoring one wiped both -- and the disk cache went on serving them
+    until the container was next replaced, at which point the logo was gone
+    with no obvious cause. Whatever the backup does carry still wins; this
+    only fills a hole the backup left.
+
+    The cache is then rewritten from the database either way, so it can
+    never sit there serving an image the database no longer has.
+    """
+    bundled = bundled or {}
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        for col, fname in (("logo", "logo.png"), ("letterhead", "letterhead.png")):
+            if _brand_blob(col):
+                continue                      # the backup carried it
+            data = bundled.get(fname) or before.get(col)
+            if not data:
+                continue
+            cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (bytes(data),))
+            if col == "letterhead":
+                cur.execute("UPDATE Settings SET has_letterhead=1 WHERE id=1")
+        # has_letterhead is only a flag, and it comes out of the dump on its
+        # own. Left saying "yes" with no image behind it, the UI offers a
+        # letterhead that prints as a blank page -- so make it match reality.
+        if not _brand_blob("letterhead"):
+            cur.execute("UPDATE Settings SET has_letterhead=0 WHERE id=1")
+            print(f"[itvault] restore: kept the existing {col} -- the backup "
+                  f"had none of its own", flush=True)
+        c.commit()
+    except Exception as e:
+        print(f"[itvault] restore: could not preserve branding: {e}", flush=True)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    for col, path in (("logo", LOGO_PATH), ("letterhead", LETTERHEAD_PATH)):
+        try:
+            blob = _brand_blob(col)
+            if blob:
+                with open(path, "wb") as fp:
+                    fp.write(bytes(blob))
+            elif os.path.exists(path):
+                open(path, "wb").close()
+        except Exception:
+            pass                              # the cache is only ever a cache
+
+
 def _apply_restore_bytes(data, filename=""):
-    """Accepts either a legacy plain-SQL backup or the newer .zip bundle (a
-    dump.sql plus logo.png/letterhead.png -- those never lived in the
-    database, so a "whole" backup has to carry the actual files) and applies
-    whichever it is. Branding files are written to disk before the SQL runs,
-    so a restore that fails partway through the SQL still leaves them in a
-    consistent, already-swapped state rather than a half-updated one."""
+    """Accepts either a plain-SQL backup or the .zip bundle (dump.sql plus
+    logo.png/letterhead.png) and applies whichever it is.
+
+    Branding is snapshotted first and reinstated afterwards if the backup
+    turns out not to contain any -- see _brand_keep_after_restore.
+    """
     is_zip = filename.lower().endswith(".zip") or data[:2] == b"PK"
+    before = {"logo": _brand_blob("logo"), "letterhead": _brand_blob("letterhead")}
     if not is_zip:
-        return _apply_restore_sql(data.decode("utf-8", "replace"))
+        applied, err = _apply_restore_sql(data.decode("utf-8", "replace"))
+        if err:
+            return None, err
+        _brand_keep_after_restore(before)
+        return applied, None
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = zf.namelist()
@@ -6361,12 +7215,10 @@ def _apply_restore_bytes(data, filename=""):
     applied, err = _apply_restore_sql(sql_text)
     if err:
         return None, err
-    for bf, data_bytes in branding.items():
-        try:
-            with open(os.path.join(BASE, bf), "wb") as fp:
-                fp.write(data_bytes)
-        except Exception:
-            pass
+    # the bundled files are only a fallback for a dump that carried no blob;
+    # they are never written straight over the cache, which used to put them
+    # in BASE where nothing serves them from anyway
+    _brand_keep_after_restore(before, branding)
     return applied, None
 
 @app.route("/api/restore", methods=["POST"])

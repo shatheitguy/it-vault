@@ -13,10 +13,10 @@ function fmtMoney(v,cur){
 
 // --- i18n: applied to [data-i18n] elements + document.dir for ar ---
 const I18N={
-  en:{Home:'Home',Assets:'Assets',AddAsset:'Add Asset',ImportExcel:'Import Excel',ExportExcel:'Export Excel',AuditLog:'Log',Tickets:'Tickets',Contracts:'Contracts',Locations:'Locations',Trash:'Trash',Customization:'Customization',NetworkScan:'Network Scan',BackupRestore:'Backup / Restore',Settings:'Settings',System:'System',Employees:'Employees',Save:'Save',Add:'Add',Edit:'Edit',Delete:'Delete',Search:'Search',Dashboard:'IT Guy - The Assets Manager'},
-  ar:{Home:'الرئيسية',Assets:'الأصول',AddAsset:'إضافة أصل',ImportExcel:'استيراد إكسل',ExportExcel:'تصدير إكسل',AuditLog:'سجل التدقيق',Tickets:'التذاكر',Contracts:'العقود',Locations:'المواقع',Trash:'السلة',Customization:'التخصيص',NetworkScan:'فحص الشبكة',BackupRestore:'النسخ الاحتياطي',Settings:'الإعدادات',System:'النظام',Employees:'الموظفون',Save:'حفظ',Add:'إضافة',Edit:'تعديل',Delete:'حذف',Search:'بحث',Dashboard:'IT Guy // مصفوفة الأصول'},
-  ta:{Home:'முகப்பு',Assets:'சொத்துகள்',AddAsset:'சொத்து சேர்',ImportExcel:'எக்செல் இறக்குமதி',ExportExcel:'எக்செல் ஏற்றுமதி',AuditLog:'தணிக்கை பதிவு',Tickets:'டிக்கெட்டுகள்',Contracts:'ஒப்பந்தங்கள்',Locations:'இடங்கள்',Trash:'குப்பை',Customization:'தனிப்பயனாக்கம்',NetworkScan:'பிணைய ஸ்கேன்',BackupRestore:'காப்புப்பு',Settings:'அமைப்புகள்',System:'கணினி',Employees:'ஊழியர்கள்',Save:'சேமி',Add:'சேர்',Edit:'திருத்து',Delete:'நீக்கு',Search:'தேடல்',Dashboard:'IT Guy // சொத்து மேட்ரிக்ஸ்'},
-  fr:{Home:'Accueil',Assets:'Actifs',AddAsset:'Ajouter',ImportExcel:'Importer Excel',ExportExcel:'Exporter Excel',AuditLog:'Journal',Tickets:'Tickets',Contracts:'Contrats',Locations:'Emplacements',Trash:'Corbeille',Customization:'Personnalisation',NetworkScan:'Scan réseau',BackupRestore:'Sauvegarde',Settings:'Paramètres',System:'Système',Employees:'Employés',Save:'Enregistrer',Add:'Ajouter',Edit:'Modifier',Delete:'Supprimer',Search:'Rechercher',Dashboard:'IT Guy // Matrice'}
+  en:{Home:'Home',Assets:'Assets',AddAsset:'Add Asset',ImportExcel:'Import Excel',ExportExcel:'Export Excel',AuditLog:'Log',Tickets:'Tickets',Contracts:'Contracts',Locations:'Locations',Trash:'Trash',Customization:'Customization',NetworkScan:'Network Scan',Heartbeat:'Heartbeat',BackupRestore:'Backup / Restore',Settings:'Settings',System:'System',Employees:'Employees',Save:'Save',Add:'Add',Edit:'Edit',Delete:'Delete',Search:'Search',Dashboard:'IT Guy - The Assets Manager'},
+  ar:{Home:'الرئيسية',Assets:'الأصول',AddAsset:'إضافة أصل',ImportExcel:'استيراد إكسل',ExportExcel:'تصدير إكسل',AuditLog:'سجل التدقيق',Tickets:'التذاكر',Contracts:'العقود',Locations:'المواقع',Trash:'السلة',Customization:'التخصيص',NetworkScan:'فحص الشبكة',Heartbeat:'مراقبة الأجهزة',BackupRestore:'النسخ الاحتياطي',Settings:'الإعدادات',System:'النظام',Employees:'الموظفون',Save:'حفظ',Add:'إضافة',Edit:'تعديل',Delete:'حذف',Search:'بحث',Dashboard:'IT Guy // مصفوفة الأصول'},
+  ta:{Home:'முகப்பு',Assets:'சொத்துகள்',AddAsset:'சொத்து சேர்',ImportExcel:'எக்செல் இறக்குமதி',ExportExcel:'எக்செல் ஏற்றுமதி',AuditLog:'தணிக்கை பதிவு',Tickets:'டிக்கெட்டுகள்',Contracts:'ஒப்பந்தங்கள்',Locations:'இடங்கள்',Trash:'குப்பை',Customization:'தனிப்பயனாக்கம்',NetworkScan:'பிணைய ஸ்கேன்',Heartbeat:'கண்காணிப்பு',BackupRestore:'காப்புப்பு',Settings:'அமைப்புகள்',System:'கணினி',Employees:'ஊழியர்கள்',Save:'சேமி',Add:'சேர்',Edit:'திருத்து',Delete:'நீக்கு',Search:'தேடல்',Dashboard:'IT Guy // சொத்து மேட்ரிக்ஸ்'},
+  fr:{Home:'Accueil',Assets:'Actifs',AddAsset:'Ajouter',ImportExcel:'Importer Excel',ExportExcel:'Exporter Excel',AuditLog:'Journal',Tickets:'Tickets',Contracts:'Contrats',Locations:'Emplacements',Trash:'Corbeille',Customization:'Personnalisation',NetworkScan:'Scan réseau',Heartbeat:'Supervision',BackupRestore:'Sauvegarde',Settings:'Paramètres',System:'Système',Employees:'Employés',Save:'Enregistrer',Add:'Ajouter',Edit:'Modifier',Delete:'Supprimer',Search:'Rechercher',Dashboard:'IT Guy // Matrice'}
 };
 // ---- column visibility (persisted) ----
 // First-ever visit (nothing saved yet): show a concise, uncluttered default instead of
@@ -123,6 +123,7 @@ function applyNavPermissions(){
 
   // Tools
   show('navScan',      canDo('tools.scan'));
+  show('navHeartbeat', canDo('tools.heartbeat'));
   show('navBackup',    canDo('tools.backup'));
 
   // Settings stays for everyone: My Account is in there. The page itself
@@ -140,7 +141,7 @@ function applyNavPermissions(){
   // Group headings are noise when everything under them is hidden.
   const groups=[
     ['Records', ['navDirectory','navCatalog','navTrash','navAudit']],
-    ['Tools',   ['navScan','navBackup']],
+    ['Tools',   ['navScan','navHeartbeat','navBackup']],
   ];
   document.querySelectorAll('.nav-grp').forEach(g=>{
     const hit=groups.find(([name])=>g.textContent.trim()===name);
@@ -673,6 +674,7 @@ async function loadDashboard(){
   if(eb) eb.innerHTML=exp.map(c=>`<tr style="cursor:pointer" onclick="showPage('page-contracts');openContractModal(${c.id})"><td>${esc(c.name)}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.type||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${c.days_left}d</td></tr>`).join('');
   const ee=document.getElementById('dashContractsExpEmpty'); if(ee) ee.style.display=exp.length?'none':'block';
   applyDashLayout();
+  loadDashHeartbeat();
   // widget bodies (recent assets / open tickets / activity) must refresh too --
   // previously these only reloaded when you navigated to the page
   loadDashboardPage();
@@ -1354,13 +1356,6 @@ function openScan(){
   document.getElementById('scanStatus').textContent='';
   document.getElementById('scanModal').classList.add('show');
   renderScan(lastScan);
-  // Heartbeat is a separate permission, so a role can have the scan without it.
-  const pw=document.getElementById('hbWrap');
-  if(pw){
-    const may=canDo('tools.heartbeat');
-    pw.style.display=may?'':'none';
-    if(may)loadHeartbeat(false);
-  }
 }
 async function doScan(){
   const prefix=document.getElementById('scanPrefix').value.trim();
@@ -2049,54 +2044,633 @@ document.getElementById('auditClearBtn').onclick=clearAuditLog;
 document.getElementById('navScan').onclick=openScan;
 document.getElementById('scanBtn').onclick=doScan;
 
-// ---- Heartbeat: live monitor status, read from Uptime Kuma ----
-// Uptime Kuma does the polling and the alerting; this only shows what it
-// currently thinks, next to the scan that found the devices in the first
-// place. Down first, because that is why anyone opens this.
-async function loadHeartbeat(force){
-  const body = document.getElementById('hbBody');
-  const wrap = document.getElementById('hbTableWrap');
-  const st = document.getElementById('hbStatus');
-  const counts = document.getElementById('hbCounts');
-  if(!body) return;
-  st.textContent = 'checking…'; counts.textContent = '';
-  const r = await api('/api/heartbeat' + (force ? '?force=1' : ''));
-  if(!r){ st.textContent = ''; return; }              // api() already reported it
-  if(r.status === 403){
-    st.textContent = 'No access to Heartbeat.';
-    wrap.style.display = 'none'; return;
-  }
-  const j = await r.json().catch(()=>({}));
-  if(j.error === 'not_configured'){
-    st.innerHTML = 'Not set up yet — add your Uptime Kuma URL and API key in '
-      + '<b>Settings ▸ UniFi Controller ▸ Uptime Kuma</b>.';
-    wrap.style.display = 'none'; return;
-  }
-  if(j.error){
-    st.textContent = '✕ ' + j.error;
-    wrap.style.display = 'none'; return;
-  }
-  const mons = j.monitors || [];
-  if(!mons.length){
-    st.textContent = 'Connected, but Uptime Kuma has no monitors yet.';
-    wrap.style.display = 'none'; return;
-  }
-  const c = j.counts || {};
-  counts.innerHTML = ['down','pending','maintenance','up']
-    .filter(k => c[k]).map(k => `<span class="hbpill ${k}">${c[k]} ${k}</span>`).join(' ');
-  st.textContent = '';
-  wrap.style.display = '';
-  body.innerHTML = mons.map(m => `<tr>
-      <td><span class="hbdot ${m.status}"></span>${esc(m.status)}</td>
-      <td>${esc(m.name)}</td>
-      <td>${esc(m.type||'—')}</td>
-      <td class="mono">${esc(m.target || m.url || '—')}${m.port?(':'+esc(m.port)):''}</td>
-      <td>${m.response_ms==null?'—':esc(String(m.response_ms))+' ms'}</td>
-      <td>${m.cert_days==null?'—':esc(String(m.cert_days))+' d'}</td>
-    </tr>`).join('');
+// ---- Heartbeat: uptime monitoring ----
+// The engine is server side: it probes each monitor on its own interval around
+// the clock, keeps the history and sends the alert. This is the window onto it.
+//
+// Rows are ordered down first, then still-being-retried, then healthy, then
+// paused. That is the order that matters when someone opens this in a hurry.
+let HB={monitors:[],counts:{},channels:[],window_hours:24};
+let hbTimer=null, hbEditId=null, hbDetailId=null, hbChanEditId=null;
+const HB_RANK={down:0,pending:1,up:2,paused:3};
+const HB_KIND_HINT={
+  ping:'Ping is the right check for switches, access points, printers and cameras — anything that should simply be reachable.',
+  http:'HTTP asks for the page and treats anything outside the accepted codes as down. Certificate trust is a separate question — the expiry is reported in its own column instead of failing the check.',
+  keyword:'Fetches the page and looks for your text in the body. Catches the case a plain HTTP check misses: the server answers 200 while the application behind it is broken.',
+  port:'Opens a TCP connection and closes it again. Use it for a service that answers on a port but not over HTTP — SQL on 3306, RDP on 3389, SMTP on 25.',
+  dns:'Resolves the name and fails if it stops resolving. Worth having on anything whose DNS you depend on but do not control.'
+};
+const HB_CHAN_HINT={
+  email:'Email uses the SMTP server and notification address already configured in Settings.',
+  webhook:'Every alert is POSTed as JSON: event, monitor, target, status, error and the message text. Point it at whatever you already run.',
+  slack:'Create an incoming webhook in Slack (Apps ▸ Incoming Webhooks) and paste the URL here.',
+  telegram:'Talk to @BotFather to create a bot and get its token, then add the bot to the chat and use that chat id.'
+};
+
+function hbStatusOf(m){ return !m.enabled ? 'paused' : (m.status||'pending'); }
+function hbRank(s){ return HB_RANK[s]===undefined ? 9 : HB_RANK[s]; }
+function hbAgo(ts){
+  if(!ts) return '—';
+  const t=Date.parse(String(ts).replace(' ','T'));
+  if(isNaN(t)) return '—';
+  const s=Math.max(0,Math.round((Date.now()-t)/1000));
+  if(s<60) return s+'s ago';
+  if(s<3600) return Math.round(s/60)+'m ago';
+  if(s<86400) return Math.round(s/3600)+'h ago';
+  return Math.round(s/86400)+'d ago';
 }
-const _hbBtn = document.getElementById('hbBtn');
-if(_hbBtn) _hbBtn.onclick = () => loadHeartbeat(true);
+
+// ---- the ECG trace ----------------------------------------------------
+// One heartbeat per recorded check, oldest on the left. An up check draws a
+// full QRS complex; a failed check draws a flatline, which is the honest
+// picture and reads instantly. The bright segment sweeping along the trace is
+// the same idea as a bedside monitor -- it says the thing is still being
+// watched right now, not that the data is moving.
+function hbEcg(m, opts){
+  opts=opts||{};
+  const st=hbStatusOf(m);
+  const beats=(m.bars||[]).slice(-(opts.beats||22));
+  const W=opts.w||136, H=opts.h||30, mid=H/2;
+  const ms=(m.series||[]).slice(-(opts.beats||22));
+  const lo=Math.min.apply(null, ms.length?ms:[0]), hi=Math.max.apply(null, ms.length?ms:[1]);
+  const span=(hi-lo)||1;
+  let msi=0;
+  let d='M0 '+mid.toFixed(1);
+  if(!beats.length){
+    // never checked yet: a bare baseline, still sweeping so it reads as armed
+    d+=' L'+W+' '+mid.toFixed(1);
+  } else {
+    const seg=W/beats.length;
+    beats.forEach((s,i)=>{
+      const x=i*seg;
+      const at=(f)=>(x+seg*f).toFixed(1);
+      if(s==='up'){
+        // a quicker response draws a taller spike, so the trace carries the
+        // response shape as well as the up/down record
+        const v=ms[msi++];
+        const amp=(v===undefined) ? 10 : (7+6*(1-(v-lo)/span));
+        d+=' L'+at(0.10)+' '+mid.toFixed(1)
+         + ' Q'+at(0.17)+' '+(mid-2.5)+' '+at(0.24)+' '+mid.toFixed(1)
+         + ' L'+at(0.32)+' '+(mid+1.8).toFixed(1)
+         + ' L'+at(0.40)+' '+(mid-amp).toFixed(1)
+         + ' L'+at(0.48)+' '+(mid+amp*0.42).toFixed(1)
+         + ' L'+at(0.56)+' '+mid.toFixed(1)
+         + ' Q'+at(0.72)+' '+(mid-3.2)+' '+at(0.86)+' '+mid.toFixed(1)
+         + ' L'+at(1)+' '+mid.toFixed(1);
+      } else if(s==='down'){
+        d+=' L'+at(1)+' '+mid.toFixed(1);                 // flatline
+      } else {
+        d+=' L'+at(0.44)+' '+mid.toFixed(1)
+         + ' L'+at(0.52)+' '+(mid-3.5).toFixed(1)
+         + ' L'+at(0.60)+' '+mid.toFixed(1)
+         + ' L'+at(1)+' '+mid.toFixed(1);
+      }
+    });
+  }
+  const cls='hbecg '+st+(beats.length?'':' idle');
+  return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"
+     preserveAspectRatio="none" role="img"
+     aria-label="${beats.length} recent checks, ${beats.filter(b=>b==='up').length} up">
+    <path class="hbecg-base" d="${d}" pathLength="1000"/>
+    <path class="hbecg-live" d="${d}" pathLength="1000"/>
+  </svg>`;
+}
+
+function hbAvgResponse(mons){
+  const v=mons.filter(m=>m.enabled&&m.status==='up'&&m.last_ms!=null).map(m=>m.last_ms);
+  if(!v.length) return '—';
+  return Math.round(v.reduce((a,b)=>a+b,0)/v.length)+' ms';
+}
+
+async function loadHeartbeat(){
+  const st=document.getElementById('hbStatus'); if(!st) return;
+  const hrs=(document.getElementById('hbWindow')||{}).value||'24';
+  const r=await api('/api/heartbeat/state?hours='+encodeURIComponent(hrs));
+  if(!r) return;                                   // api() already reported it
+  if(r.status===403){ st.textContent='No access to Heartbeat.'; return; }
+  const j=await r.json().catch(()=>null);
+  if(!j){ st.textContent='✕ could not read monitor status'; return; }
+  HB=j; st.textContent='';
+  const cb=document.getElementById('hbChanBtn');
+  if(cb) cb.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+  renderHeartbeat();
+  if(hbDetailId) loadHbDetail(hbDetailId, true);
+}
+
+function renderHeartbeat(){
+  const body=document.getElementById('hbBody'); if(!body) return;
+  const wrap=document.getElementById('hbTableWrap'), empty=document.getElementById('hbEmpty');
+  const q=((document.getElementById('hbSearch')||{}).value||'').trim().toLowerCase();
+  const f=(document.getElementById('hbFilter')||{}).value||'';
+  const all=(HB.monitors||[]).slice().sort((a,b)=>
+    (hbRank(hbStatusOf(a))-hbRank(hbStatusOf(b))) ||
+    String(a.name||'').toLowerCase().localeCompare(String(b.name||'').toLowerCase()));
+  const mons=all.filter(m=>{
+    if(f && hbStatusOf(m)!==f) return false;
+    if(!q) return true;
+    return [m.name,m.kind,m.target,m.port,m.tag].some(x=>String(x||'').toLowerCase().includes(q));
+  });
+
+  const c=HB.counts||{};
+  const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
+  set('hbNDown',c.down||0); set('hbNPending',c.pending||0);
+  set('hbNUp',c.up||0); set('hbNPaused',c.disabled||0);
+  set('hbAvg',hbAvgResponse(all));
+  set('hbMeta',all.length ? (mons.length===all.length
+        ? all.length+' monitor'+(all.length===1?'':'s')+' · '+hbWindowLabel(HB.window_hours)
+        : mons.length+' of '+all.length+' shown') : '');
+
+  if(!all.length){
+    wrap.style.display='none'; empty.style.display='block';
+    empty.textContent='NO MONITORS YET — ADD ONE, OR RUN A NETWORK SCAN AND WATCH WHAT IT FINDS';
+    return;
+  }
+  if(!mons.length){
+    wrap.style.display='none'; empty.style.display='block';
+    empty.textContent='NOTHING MATCHES THAT FILTER';
+    return;
+  }
+  empty.style.display='none'; wrap.style.display='';
+  body.innerHTML=mons.map(m=>{
+    const st=hbStatusOf(m), paused=!m.enabled;
+    const err=(m.last_error&&st!=='up'&&st!=='paused')
+      ?`<div class="hberr" title="${esc(m.last_error)}">${esc(m.last_error)}</div>`:'';
+    const mute=m.notify?'':'<span class="hbmute" title="alerts are off for this monitor">🔇</span>';
+    const ud=m.upside_down?'<span class="hbtag" title="upside down: this should not respond">INVERTED</span>':'';
+    const tag=m.tag?`<span class="hbtag">${esc(m.tag)}</span>`:'';
+    const cert=(m.cert_days==null)?'<span class="muted">—</span>'
+      :`<span class="${m.cert_days<14?'hbcert-bad':(m.cert_days<30?'hbcert-warn':'')}">${esc(String(m.cert_days))}d</span>`;
+    return `<tr class="${st==='down'?'hb-down':''}">
+      <td><span class="hbdot ${st}"></span>${st==='pending'?'CHECKING':st.toUpperCase()}</td>
+      <td class="hblink" onclick="hbOpen(${m.id})"><b>${esc(m.name||'')}</b>${mute}${tag}${ud}${err}</td>
+      <td>${esc((m.kind||'').toUpperCase())}</td>
+      <td class="mono">${esc(m.target||'')}${m.port?':'+esc(String(m.port)):''}</td>
+      <td>${m.last_ms==null?'<span class="muted">—</span>':esc(String(m.last_ms))+' ms'}</td>
+      <td class="hbecg-cell">${hbEcg(m)}</td>
+      <td>${m.uptime==null?'<span class="muted">—</span>':esc(String(m.uptime))+'%'}</td>
+      <td>${cert}</td>
+      <td class="muted">${esc(hbAgo(m.last_change))}</td>
+      <td><div class="row-actions">
+        <button class="btn sm ghost" onclick="hbToggle(${m.id})" title="${paused?'resume checking':'stop checking, keep the monitor'}">${paused?'▶':'❚❚'}</button>
+        <button class="btn sm" onclick="hbEdit(${m.id})">EDIT</button>
+        <button class="btn sm danger" onclick="hbDel(${m.id})">DEL</button>
+      </div></td></tr>`;
+  }).join('');
+}
+
+function hbWindowLabel(h){
+  h=parseInt(h||24,10);
+  if(h<=1) return '1h window';
+  if(h<48) return h+'h window';
+  if(h<720) return Math.round(h/24)+'d window';
+  if(h<8760) return Math.round(h/24)+'d window';
+  return '1y window';
+}
+
+async function hbCheckNow(){
+  const b=document.getElementById('hbCheckBtn'); const old=b.textContent;
+  b.disabled=true; b.textContent='CHECKING…';
+  const r=await api('/api/heartbeat/check',{method:'POST'});
+  b.disabled=false; b.textContent=old;
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  const j=await r.json().catch(()=>({}));
+  toast('✓ CHECKED '+(j.checked||0)+' MONITOR'+((j.checked||0)===1?'':'S'));
+  loadHeartbeat();
+}
+
+// ---- add / edit -------------------------------------------------------
+function hbKindUI(){
+  const k=document.getElementById('hb_kind').value;
+  const show=(id,on)=>{const e=document.getElementById(id); if(e) e.style.display=on?'':'none';};
+  const web=(k==='http'||k==='keyword');
+  show('hb_portWrap', k==='port');
+  show('hb_kwWrap', k==='keyword');
+  show('hb_kwOpts', k==='keyword');
+  show('hb_methodWrap', web);
+  show('hb_codesWrap', web);
+  show('hb_tlsOpts', web);
+  document.getElementById('hb_targetLabel').textContent=
+    web ? 'URL or host' : (k==='dns' ? 'Hostname to resolve' : 'IP or hostname');
+  document.getElementById('hb_target').placeholder=
+    web ? 'e.g. https://intranet.local/health'
+        : (k==='dns' ? 'e.g. mail.company.com' : 'e.g. 192.168.0.1');
+  document.getElementById('hb_kindHint').textContent=HB_KIND_HINT[k]||'';
+  hbThreshHint();
+}
+// Spelling out when the alert actually arrives, because the retry count is
+// the setting people get wrong -- too low and it cries wolf, too high and an
+// outage sits unreported.
+function hbThreshHint(){
+  const el=document.getElementById('hb_thHint'); if(!el) return;
+  const iv=parseInt(document.getElementById('hb_interval').value||'60',10);
+  const th=parseInt(document.getElementById('hb_thresh').value||'2',10);
+  const rs=parseInt(document.getElementById('hb_resend').value||'0',10);
+  if(!iv||!th){ el.textContent=''; return; }
+  const secs=iv*th, mins=Math.round(secs/60);
+  const when=secs<60?(secs+' seconds'):(mins+' minute'+(mins===1?'':'s'));
+  let s='You will hear about an outage roughly '+when+' after it starts — '+th+
+        ' failed check'+(th===1?'':'s')+' at '+iv+'s apart — and once more when it recovers.';
+  s+= rs>0 ? (' While it stays down you get a reminder every '+rs+' further failed check'+(rs===1?'':'s')+'.')
+           : ' Nothing in between.';
+  el.textContent=s;
+}
+function hbChanChecklist(selected){
+  const box=document.getElementById('hb_chanBox');
+  const list=document.getElementById('hb_chanList');
+  const chans=(HB.channels||[]);
+  if(!chans.length){
+    box.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+    list.innerHTML='<p class="muted" style="margin:0">No channels set up yet. '
+      +'<a class="mlink" onclick="openHbChannels()">Add one ↗</a> or leave this alone and '
+      +'alerts go to the notification address in Settings.</p>';
+    return;
+  }
+  box.style.display='';
+  const want=new Set(String(selected||'').split(',').filter(Boolean));
+  list.innerHTML=chans.map(ch=>`<label class="permitem"><input type="checkbox" class="hb-chan-chk"
+      value="${ch.id}"${want.has(String(ch.id))?' checked':''}${ch.enabled?'':' disabled'}>
+      <span>${esc(ch.name)} <span class="permtag">${esc(ch.kind)}</span>${ch.enabled?'':' <span class="muted">(inactive)</span>'}</span></label>`).join('');
+}
+async function openHbModal(id){
+  hbEditId=id||null;
+  const m=id?(HB.monitors||[]).find(x=>x.id===id):null;
+  const set=(el,v)=>{const e=document.getElementById(el); if(e) e.value=v;};
+  const chk=(el,v)=>{const e=document.getElementById(el); if(e) e.checked=!!v;};
+  document.getElementById('hbModalTitle').textContent=m?'EDIT MONITOR':'ADD MONITOR';
+  set('hb_name',m?(m.name||''):'');
+  set('hb_kind',m?(m.kind||'ping'):'ping');
+  set('hb_target',m?(m.target||''):'');
+  set('hb_port',(m&&m.port)?m.port:'');
+  set('hb_keyword',m?(m.keyword||''):'');
+  set('hb_method',m?(m.http_method||'GET'):'GET');
+  set('hb_codes',m?(m.accepted_codes||'200-299'):'200-299');
+  set('hb_tag',m?(m.tag||''):'');
+  set('hb_note',m?(m.note||''):'');
+  set('hb_interval',m?(m.interval_s||60):60);
+  set('hb_thresh',m?(m.fail_threshold||2):2);
+  set('hb_timeout',m?(m.timeout_s||8):8);
+  set('hb_retryEvery',m?(m.retry_interval_s||0):0);
+  set('hb_resend',m?(m.resend_every||0):0);
+  chk('hb_notify',m?m.notify:true);
+  chk('hb_enabled',m?m.enabled:true);
+  chk('hb_upside',m?m.upside_down:false);
+  chk('hb_kwInvert',m?m.keyword_invert:false);
+  chk('hb_ignoreTls',m?m.ignore_tls:true);
+  document.getElementById('hbDelete').style.display=m?'':'none';
+  hbKindUI();
+  hbChanChecklist(m?m.channels:'');
+  // the asset list is only needed while the form is open, so fetch it here
+  const sel=document.getElementById('hb_asset');
+  sel.innerHTML='<option value="">-- none --</option>';
+  try{
+    const r=await api('/api/assets');
+    if(r&&r.ok){
+      const list=await r.json();
+      sel.innerHTML='<option value="">-- none --</option>'+(list||[]).map(a=>
+        `<option value="${esc(a._id)}">${esc(a.Name||a.AssetTag||a._id)}${a.AssetTag?' ('+esc(a.AssetTag)+')':''}</option>`).join('');
+    }
+  }catch(e){}
+  sel.value=(m&&m.asset_id)?m.asset_id:'';
+  document.getElementById('hbModal').classList.add('show');
+  document.getElementById('hb_name').focus();
+}
+async function saveHbMonitor(){
+  const g=(id)=>document.getElementById(id);
+  const kind=g('hb_kind').value;
+  const target=g('hb_target').value.trim();
+  if(!target){ toast('✕ enter an IP, hostname or URL'); return; }
+  const port=g('hb_port').value.trim();
+  if(kind==='port' && !port){ toast('✕ a port check needs a port number'); return; }
+  if(kind==='keyword' && !g('hb_keyword').value.trim()){ toast('✕ enter the keyword to look for'); return; }
+  const body={
+    name:g('hb_name').value.trim()||target,
+    kind, target, port:port?parseInt(port,10):null,
+    keyword:g('hb_keyword').value.trim(),
+    keyword_invert:g('hb_kwInvert').checked,
+    http_method:g('hb_method').value,
+    accepted_codes:g('hb_codes').value.trim()||'200-299',
+    ignore_tls:g('hb_ignoreTls').checked,
+    tag:g('hb_tag').value.trim(),
+    note:g('hb_note').value.trim(),
+    interval_s:parseInt(g('hb_interval').value||'60',10),
+    fail_threshold:parseInt(g('hb_thresh').value||'2',10),
+    timeout_s:parseInt(g('hb_timeout').value||'8',10),
+    retry_interval_s:parseInt(g('hb_retryEvery').value||'0',10),
+    resend_every:parseInt(g('hb_resend').value||'0',10),
+    notify:g('hb_notify').checked,
+    enabled:g('hb_enabled').checked,
+    upside_down:g('hb_upside').checked,
+    channels:[...document.querySelectorAll('.hb-chan-chk:checked')].map(c=>c.value),
+    asset_id:g('hb_asset').value||''
+  };
+  const editing=hbEditId;
+  const r=await api(editing?('/api/heartbeat/monitors/'+editing):'/api/heartbeat/monitors',
+    {method:editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  const j=await r.json().catch(()=>({}));
+  document.getElementById('hbModal').classList.remove('show');
+  toast(editing?'✓ MONITOR UPDATED':'✓ MONITOR ADDED');
+  hbEditId=null;
+  // probe it straight away rather than leaving the row blank until the tick
+  const id=editing||j.id;
+  if(id) await api('/api/heartbeat/monitors/'+id+'/check',{method:'POST'});
+  loadHeartbeat();
+}
+window.hbEdit=(id)=>openHbModal(id);
+window.hbDel=async(id)=>{
+  const m=(HB.monitors||[]).find(x=>x.id===id);
+  if(!confirm('Delete monitor "'+((m&&m.name)||id)+'" and its history?')) return;
+  const r=await api('/api/heartbeat/monitors/'+id,{method:'DELETE'});
+  if(r&&r.ok){
+    toast('✓ MONITOR DELETED');
+    if(hbDetailId===id){ document.getElementById('hbDetailModal').classList.remove('show'); hbDetailId=null; }
+    loadHeartbeat();
+  } else if(r){ toast('✕ '+await apiError(r)); }
+};
+window.hbToggle=async(id)=>{
+  const m=(HB.monitors||[]).find(x=>x.id===id); if(!m) return;
+  const r=await api('/api/heartbeat/monitors/'+id,{method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind:m.kind,target:m.target,port:m.port,keyword:m.keyword,enabled:!m.enabled})});
+  if(r&&r.ok){ toast(m.enabled?'❚❚ PAUSED':'▶ RESUMED'); loadHeartbeat(); }
+  else if(r){ toast('✕ '+await apiError(r)); }
+};
+
+// ---- detail view ------------------------------------------------------
+window.hbOpen=(id)=>{ hbDetailId=id; document.getElementById('hbDetailModal').classList.add('show'); loadHbDetail(id); };
+async function loadHbDetail(id, quiet){
+  const hrs=(document.getElementById('hbdWindow')||{}).value||'24';
+  const r=await api('/api/heartbeat/monitors/'+id+'/detail?hours='+encodeURIComponent(hrs));
+  if(!r||!r.ok) return;
+  const j=await r.json().catch(()=>null); if(!j) return;
+  const m=j.monitor||{}, st=hbStatusOf(m);
+  document.getElementById('hbdTitle').textContent=(m.name||'MONITOR').toUpperCase();
+  document.getElementById('hbdDot').className='hbdot '+st;
+  document.getElementById('hbdStatus').textContent=
+    (st==='pending'?'CHECKING':st.toUpperCase())+(m.last_change?(' · since '+hbAgo(m.last_change)):'');
+  document.getElementById('hbdTarget').textContent=
+    (m.kind||'').toUpperCase()+' · '+(m.target||'')+(m.port?(':'+m.port):'')
+    +' · every '+(m.interval_s||60)+'s'+(m.note?(' · '+m.note):'');
+  const w=j.windows||{};
+  // 100% in the default accent read as an alarm; uptime is a verdict, so it
+  // gets a verdict colour
+  const put=(id,v)=>{
+    const el=document.getElementById(id);
+    el.textContent = v==null ? '—' : (v+'%');
+    el.className='kpi-v '+(v==null?'none':(v>=99.5?'ok':(v>=95?'warn':'bad')));
+  };
+  put('hbdU24',(w['24h']||{}).uptime);
+  put('hbdU7',(w['7d']||{}).uptime);
+  put('hbdU30',(w['30d']||{}).uptime);
+  put('hbdU1y',(w['1y']||{}).uptime);
+  const avg=(w['24h']||{}).avg_ms;
+  document.getElementById('hbdAvg').textContent=avg==null?'—':(avg+' ms');
+  // the ECG for the detail view uses the same generator, just wider
+  const bars=(j.series||[]).map(p=>p.status==='mixed'?'pending':p.status);
+  const msv=(j.series||[]).filter(p=>p.ms!=null).map(p=>p.ms);
+  document.getElementById('hbdEcg').innerHTML=hbEcg({bars, series:msv, enabled:m.enabled, status:m.status},
+                                                    {w:760,h:64,beats:40});
+  document.getElementById('hbdChart').innerHTML=hbSparkChart(j.series||[]);
+  document.getElementById('hbdChartHint').textContent=
+    (j.series||[]).length ? ((j.window_hours<=48)
+      ? (j.series.length+' checks in the last '+hbWindowLabel(j.window_hours).replace(' window',''))
+      : ('hourly averages over the last '+hbWindowLabel(j.window_hours).replace(' window','')))
+    : 'No checks recorded in this window yet.';
+  const evb=document.getElementById('hbdEvents');
+  const evs=j.events||[];
+  evb.innerHTML=evs.map(e=>`<tr>
+      <td class="mono">${esc(e.t||'')}</td>
+      <td><span class="hbdot ${e.kind==='up'?'up':(e.kind==='down'?'down':'paused')}"></span>${esc((e.kind||'').toUpperCase())}</td>
+      <td>${esc(e.message||'')}</td></tr>`).join('');
+  document.getElementById('hbdEventsEmpty').style.display=evs.length?'none':'block';
+  const pb=document.getElementById('hbdPause');
+  pb.textContent=m.enabled?'❚❚ PAUSE':'▶ RESUME';
+  if(!quiet) document.getElementById('hbdWindow').focus();
+}
+// A plain inline chart -- no library, so it cannot fail to load and cannot
+// drift out of step with the theme.
+function hbSparkChart(series){
+  const pts=series.filter(p=>p.ms!=null);
+  if(!pts.length) return '<div class="empty" style="padding:16px">NO RESPONSE DATA IN THIS WINDOW</div>';
+  const W=760, H=120, pad=18;
+  const hi=Math.max.apply(null,pts.map(p=>p.ms)), lo=0;
+  const span=(hi-lo)||1;
+  const step=pts.length>1?(W-pad*2)/(pts.length-1):0;
+  const xy=(p,i)=>[(pad+i*step).toFixed(1), (H-pad-((p.ms-lo)/span)*(H-pad*2)).toFixed(1)];
+  const line=pts.map((p,i)=>xy(p,i).join(',')).join(' ');
+  const area=`${pad},${H-pad} ${line} ${(pad+(pts.length-1)*step).toFixed(1)},${H-pad}`;
+  const downs=series.map((p,i)=>({p,i})).filter(x=>x.p.status==='down');
+  const allStep=series.length>1?(W-pad*2)/(series.length-1):0;
+  const bands=downs.map(x=>`<rect class="hbc-down" x="${(pad+x.i*allStep-1).toFixed(1)}" y="${pad}"
+      width="${Math.max(2,allStep).toFixed(1)}" height="${H-pad*2}"/>`).join('');
+  return `<svg class="hbchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+      aria-label="response time, peak ${hi} ms">
+    <line class="hbc-axis" x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}"/>
+    <line class="hbc-axis" x1="${pad}" y1="${pad}" x2="${W-pad}" y2="${pad}"/>
+    ${bands}
+    <polygon class="hbc-area" points="${area}"/>
+    <polyline class="hbc-line" points="${line}"/>
+    <text class="hbc-lbl" x="${pad}" y="${pad-5}">${hi} ms</text>
+    <text class="hbc-lbl" x="${pad}" y="${H-pad+13}">0</text>
+  </svg>`;
+}
+
+// ---- alert channels ---------------------------------------------------
+window.openHbChannels=async()=>{
+  document.getElementById('hbChanModal').classList.add('show');
+  hbcReset();
+  await loadHbChannels();
+};
+async function loadHbChannels(){
+  const body=document.getElementById('hbChanBody'); if(!body) return;
+  const r=await api('/api/heartbeat/channels');
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  const list=await r.json().catch(()=>[]);
+  HB.channels=list.map(c=>({id:c.id,name:c.name,kind:c.kind,enabled:c.enabled}));
+  window.HB_CHAN_FULL=list;
+  body.innerHTML=list.map(c=>{
+    const cfg=c.config||{};
+    const where=c.kind==='email' ? 'Settings ▸ Notifications'
+      : (c.kind==='telegram' ? ('chat '+esc(cfg.chat_id||'—')) : esc(cfg.url||'—'));
+    return `<tr>
+      <td><b>${esc(c.name)}</b></td>
+      <td>${esc((c.kind||'').toUpperCase())}</td>
+      <td class="mono" style="max-width:260px;overflow-wrap:anywhere">${where}</td>
+      <td>${c.enabled?'<span class="hbpill up">ACTIVE</span>':'<span class="hbpill paused">OFF</span>'}</td>
+      <td><div class="row-actions">
+        <button class="btn sm ghost" onclick="hbcTest(${c.id})">TEST</button>
+        <button class="btn sm" onclick="hbcEdit(${c.id})">EDIT</button>
+        <button class="btn sm danger" onclick="hbcDel(${c.id})">DEL</button>
+      </div></td></tr>`;
+  }).join('');
+  document.getElementById('hbChanEmpty').style.display=list.length?'none':'block';
+}
+function hbcKindUI(){
+  const k=document.getElementById('hbc_kind').value;
+  const show=(id,on)=>{document.getElementById(id).style.display=on?'':'none';};
+  show('hbc_urlWrap', k==='webhook'||k==='slack');
+  show('hbc_tokenWrap', k==='telegram');
+  show('hbc_chatWrap', k==='telegram');
+  document.getElementById('hbc_urlLabel').textContent=k==='slack'?'Slack webhook URL':'Webhook URL';
+  document.getElementById('hbc_hint').textContent=HB_CHAN_HINT[k]||'';
+}
+function hbcReset(){
+  hbChanEditId=null;
+  document.getElementById('hbChanFormTitle').textContent='ADD A CHANNEL';
+  ['hbc_name','hbc_url','hbc_token','hbc_chat'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('hbc_kind').value='email';
+  document.getElementById('hbc_enabled').checked=true;
+  document.getElementById('hbcReset').style.display='none';
+  document.getElementById('hbcSave').textContent='SAVE CHANNEL';
+  hbcKindUI();
+}
+window.hbcEdit=(id)=>{
+  const c=(window.HB_CHAN_FULL||[]).find(x=>x.id===id); if(!c) return;
+  hbChanEditId=id;
+  const cfg=c.config||{};
+  document.getElementById('hbChanFormTitle').textContent='EDIT CHANNEL';
+  document.getElementById('hbc_name').value=c.name||'';
+  document.getElementById('hbc_kind').value=c.kind||'email';
+  document.getElementById('hbc_url').value=cfg.url||'';
+  document.getElementById('hbc_chat').value=cfg.chat_id||'';
+  document.getElementById('hbc_token').value='';
+  document.getElementById('hbc_token').placeholder=cfg.token_set?'leave blank to keep current':'123456:ABC-DEF...';
+  document.getElementById('hbc_enabled').checked=!!c.enabled;
+  document.getElementById('hbcReset').style.display='';
+  document.getElementById('hbcSave').textContent='UPDATE CHANNEL';
+  hbcKindUI();
+};
+async function saveHbChannel(){
+  const g=(id)=>document.getElementById(id);
+  const kind=g('hbc_kind').value;
+  const cfg={};
+  if(kind==='webhook'||kind==='slack') cfg.url=g('hbc_url').value.trim();
+  if(kind==='telegram'){ cfg.token=g('hbc_token').value.trim(); cfg.chat_id=g('hbc_chat').value.trim(); }
+  const body={name:g('hbc_name').value.trim()||kind, kind, config:cfg, enabled:g('hbc_enabled').checked};
+  const editing=hbChanEditId;
+  const r=await api(editing?('/api/heartbeat/channels/'+editing):'/api/heartbeat/channels',
+    {method:editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  toast(editing?'✓ CHANNEL UPDATED':'✓ CHANNEL ADDED');
+  hbcReset();
+  await loadHbChannels();
+}
+window.hbcTest=async(id)=>{
+  const r=await api('/api/heartbeat/channels/'+id+'/test',{method:'POST'});
+  if(!r) return;
+  const j=await r.json().catch(()=>({}));
+  toast(r.ok ? ('✓ '+(j.message||'sent')) : ('✕ '+(j.error||'failed')));
+};
+window.hbcDel=async(id)=>{
+  const c=(window.HB_CHAN_FULL||[]).find(x=>x.id===id);
+  if(!confirm('Delete channel "'+((c&&c.name)||id)+'"? Monitors using only this channel fall back to the notification address.')) return;
+  const r=await api('/api/heartbeat/channels/'+id,{method:'DELETE'});
+  if(r&&r.ok){ toast('✓ CHANNEL DELETED'); hbcReset(); loadHbChannels(); loadHeartbeat(); }
+  else if(r){ toast('✕ '+await apiError(r)); }
+};
+
+// ---- auto-refresh, only while the page is actually on screen ----------
+function startHbAuto(){
+  stopHbAuto();
+  if(!(document.getElementById('hbAuto')||{}).checked) return;
+  hbTimer=setInterval(()=>{
+    const p=document.getElementById('page-heartbeat');
+    if(!p||p.style.display==='none'){ stopHbAuto(); return; }
+    loadHeartbeat();
+  },30000);
+}
+function stopHbAuto(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
+
+// ---- dashboard widget -------------------------------------------------
+async function loadDashHeartbeat(){
+  const body=document.getElementById('dashHbBody'); if(!body) return;
+  const widget=document.querySelector('.widget[data-wkey="heartbeat"]');
+  const hide=()=>{ if(widget) widget.style.display='none'; };
+  if(!canDo('tools.heartbeat')){ hide(); return; }
+  const r=await api('/api/heartbeat/state?hours=24');
+  if(!r||!r.ok){ hide(); return; }
+  const j=await r.json().catch(()=>null);
+  if(!j){ hide(); return; }
+  if(widget) widget.style.display='';
+  const c=j.counts||{};
+  const label=(k)=>k==='pending'?'checking':(k==='disabled'?'paused':k);
+  const cn=document.getElementById('dashHbCounts');
+  if(cn) cn.innerHTML=['down','pending','up','disabled'].filter(k=>c[k])
+    .map(k=>`<span class="hbpill ${k==='disabled'?'paused':k}">${c[k]} ${label(k)}</span>`).join(' ')
+    || '<span class="muted">no monitors yet</span>';
+  // worst first, and only enough rows to notice something is wrong
+  const mons=(j.monitors||[]).slice().sort((a,b)=>
+    (hbRank(hbStatusOf(a))-hbRank(hbStatusOf(b))) ||
+    String(a.name||'').toLowerCase().localeCompare(String(b.name||'').toLowerCase())).slice(0,12);
+  body.innerHTML=mons.map(m=>{
+    const st=hbStatusOf(m);
+    return `<tr style="cursor:pointer" onclick="showPage('page-heartbeat')">
+      <td><span class="hbdot ${st}"></span>${st==='pending'?'CHECKING':st.toUpperCase()}</td>
+      <td>${esc(m.name||'')}</td>
+      <td class="hbecg-cell">${hbEcg(m,{w:96,h:22,beats:14})}</td>
+      <td>${m.last_ms==null?'—':esc(String(m.last_ms))+' ms'}</td>
+      <td>${m.uptime==null?'—':esc(String(m.uptime))+'%'}</td></tr>`;
+  }).join('');
+  const emp=document.getElementById('dashHbEmpty');
+  if(emp) emp.style.display=mons.length?'none':'block';
+}
+
+document.getElementById('navHeartbeat').onclick=()=>showPage('page-heartbeat');
+document.getElementById('hbAddBtn').onclick=()=>openHbModal(null);
+document.getElementById('hbCheckBtn').onclick=hbCheckNow;
+document.getElementById('hbChanBtn').onclick=()=>openHbChannels();
+document.getElementById('hbSearch').oninput=renderHeartbeat;
+document.getElementById('hbFilter').onchange=renderHeartbeat;
+document.getElementById('hbWindow').onchange=loadHeartbeat;
+document.getElementById('hbAuto').onchange=startHbAuto;
+document.getElementById('hb_kind').onchange=hbKindUI;
+['hb_interval','hb_thresh','hb_resend'].forEach(id=>{
+  document.getElementById(id).oninput=hbThreshHint;
+});
+document.getElementById('hbCancel').onclick=()=>{document.getElementById('hbModal').classList.remove('show');hbEditId=null;};
+document.getElementById('hbSave').onclick=saveHbMonitor;
+document.getElementById('hbDelete').onclick=()=>{
+  if(!hbEditId) return;
+  const id=hbEditId;
+  document.getElementById('hbModal').classList.remove('show');
+  hbEditId=null;
+  window.hbDel(id);
+};
+document.getElementById('hbdClose').onclick=()=>{
+  document.getElementById('hbDetailModal').classList.remove('show'); hbDetailId=null;
+};
+document.getElementById('hbdWindow').onchange=()=>{ if(hbDetailId) loadHbDetail(hbDetailId,true); };
+document.getElementById('hbdCheck').onclick=async()=>{
+  if(!hbDetailId) return;
+  const b=document.getElementById('hbdCheck'); b.disabled=true;
+  await api('/api/heartbeat/monitors/'+hbDetailId+'/check',{method:'POST'});
+  b.disabled=false;
+  loadHbDetail(hbDetailId,true); loadHeartbeat();
+};
+document.getElementById('hbdPause').onclick=async()=>{
+  if(!hbDetailId) return;
+  await window.hbToggle(hbDetailId);
+  loadHbDetail(hbDetailId,true);
+};
+document.getElementById('hbdEdit').onclick=()=>{
+  if(!hbDetailId) return;
+  document.getElementById('hbDetailModal').classList.remove('show');
+  const id=hbDetailId; hbDetailId=null;
+  openHbModal(id);
+};
+document.getElementById('hbChanClose').onclick=()=>{
+  document.getElementById('hbChanModal').classList.remove('show');
+  loadHeartbeat();
+};
+document.getElementById('hbc_kind').onchange=hbcKindUI;
+document.getElementById('hbcSave').onclick=saveHbChannel;
+document.getElementById('hbcReset').onclick=hbcReset;
+window.loadHeartbeat=loadHeartbeat;
+window.loadDashHeartbeat=loadDashHeartbeat;
 document.getElementById('scanDeep').onchange=e=>{
   const row=document.getElementById('scanPrefixRow');
   row.style.display=e.target.checked?'':'none';
@@ -2153,16 +2727,17 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
   const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-tickets':'navTickets',
     'page-contracts':'navContracts','page-catalog':'navCatalog',
-    'page-usettings':'navSettings','page-scan':'navScan',
+    'page-usettings':'navSettings','page-scan':'navScan','page-heartbeat':'navHeartbeat',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
   const n=map[id]?document.getElementById(map[id]):null;
   if(n)n.classList.add('active');
   if(id==='page-dashboard')startUnifiAutoRefresh(); else stopUnifiAutoRefresh();
+  if(id!=='page-heartbeat') stopHbAuto();
   if(id==='page-dashboard'){ loadDashboard(); }   // loadDashboard() chains loadDashboardPage() + applyDashLayout()
   else if(id==='page-assets'){ load(); loadStats(); }
   else if(id==='page-employees')loadDirectory();
@@ -2172,6 +2747,7 @@ function showPage(id){
   else if(id==='page-catalog')loadCatalog();
   else if(id==='page-usettings'){loadUserSettings();loadSettings();loadCustom();}
   else if(id==='page-scan')openScan();
+  else if(id==='page-heartbeat'){loadHeartbeat();startHbAuto();}
   else if(id==='page-audit')openAudit();
 }
 window.showPage=showPage;
@@ -3097,6 +3673,7 @@ window.repairDashStructure=repairDashStructure;
   const navShow = {
     navAudit: true,
     navScan: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navHeartbeat: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navDirectory: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navContracts: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
@@ -3650,15 +4227,6 @@ async function loadUserSettings(){
   if (g('unifi_pass')) g('unifi_pass').value = '';
   if (g('unifi_is_os')) g('unifi_is_os').checked = (s.unifi_is_os == null ? true : !!s.unifi_is_os);
   if (g('unifi_verify_ssl')) g('unifi_verify_ssl').checked = !!s.unifi_verify_ssl;
-  // Uptime Kuma (Heartbeat). The key never comes back from the server, so the
-  // stays blank and its placeholder says what blank means.
-  if (g('kuma_enabled')) g('kuma_enabled').checked = !!s.kuma_enabled;
-  if (g('kuma_url')) g('kuma_url').value = s.kuma_url || '';
-  if (g('kuma_api_key')) {
-    g('kuma_api_key').value = '';
-    g('kuma_api_key').placeholder = s.kuma_api_key_set ? 'leave blank to keep current' : 'paste the key from Uptime Kuma';
-  }
-  if (g('kuma_verify_ssl')) g('kuma_verify_ssl').checked = !!s.kuma_verify_ssl;
   // SLA policy fields
   if (g('sla_low')) g('sla_low').value = s.sla_low || 72;
   if (g('sla_normal')) g('sla_normal').value = s.sla_normal || 24;
@@ -3852,31 +4420,17 @@ async function loadUserSettings(){
   const j = r ? await r.json().catch(()=>({})) : {};
   m.textContent = (j.ok? '✓ ' : '✕ ') + (j.msg||''); m.style.color = j.ok? 'var(--grn)':'var(--red)';
   };
-  const kt = g('kumaTestBtn');
-  if (kt) kt.onclick = async () => {
-    const m = g('kumaTestMsg'); m.textContent = 'testing…'; m.style.color = 'var(--muted)';
-    const body = {kuma_url: g('kuma_url').value.trim(), kuma_verify_ssl: g('kuma_verify_ssl').checked};
-    if (g('kuma_api_key').value) body.kuma_api_key = g('kuma_api_key').value;
-    const r = await api('/api/test-kuma', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-    const j = r ? await r.json().catch(()=>({})) : {};
-    m.textContent = (j.ok ? '✓ ' : '✕ ') + (j.message || j.error || 'failed');
-    m.style.color = j.ok ? 'var(--grn)' : 'var(--red)';
-  };
   const su = g('saveUnifiBtn');
   if (su) su.onclick = async () => {
   const body = {
-    kuma_enabled: g('kuma_enabled') ? g('kuma_enabled').checked : false,
-    kuma_url: g('kuma_url') ? g('kuma_url').value.trim() : '',
-    kuma_verify_ssl: g('kuma_verify_ssl') ? g('kuma_verify_ssl').checked : false,
     unifi_enabled: g('unifi_enabled').checked,
     unifi_host: g('unifi_host').value.trim(), unifi_port: parseInt(g('unifi_port').value||'443', 10),
     unifi_site: g('unifi_site').value.trim(), unifi_user: g('unifi_user').value.trim(),
     unifi_is_os: g('unifi_is_os').checked, unifi_verify_ssl: g('unifi_verify_ssl').checked
   };
   if (g('unifi_pass').value) body.unifi_pass = g('unifi_pass').value;
-  if (g('kuma_api_key') && g('kuma_api_key').value) body.kuma_api_key = g('kuma_api_key').value;
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  if (r && r.ok){ toast('✓ INTEGRATIONS SAVED'); loadUnifiWidgets(true); if (g('kuma_api_key')) g('kuma_api_key').value = ''; }
+  if (r && r.ok){ toast('✓ INTEGRATIONS SAVED'); loadUnifiWidgets(true); }
   else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'save failed')); }
   };
   // Asset Label save button

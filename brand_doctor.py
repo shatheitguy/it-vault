@@ -73,6 +73,8 @@ expected = {
     "bounds the image before storing": "_fit_png",
     "configurable query timeout": "DB_TIMEOUT",
     "validates by file signature": "_sniff_image",
+    "keeps branding through a restore": "_brand_keep_after_restore",
+    "prints branding without a cache": "_brand_render_file",
 }
 missing = [name for name, attr in expected.items() if not hasattr(app, attr)]
 if missing:
@@ -155,6 +157,54 @@ try:
     info("has_letterhead flag", str(r.get("f")))
 except Exception as e:
     warn("could not measure stored branding", repr(e))
+
+# ------------------------------------------------- surviving what comes next
+head("5b. Will it still be there tomorrow?")
+# Branding used to vanish hours or days after a successful upload. Three
+# things caused it, and all three are checkable from here.
+try:
+    cur.execute("SELECT LENGTH(logo) AS l, LENGTH(letterhead) AS h FROM Settings WHERE id=1")
+    _r = cur.fetchone() or {}
+    _db_logo, _db_lh = _r.get("l") or 0, _r.get("h") or 0
+except Exception:
+    _db_logo = _db_lh = 0
+
+# (a) the database copy is the one that survives a container being replaced
+if _db_logo or _db_lh:
+    ok("branding is in the database", "survives a container replace")
+else:
+    info("branding in the database", "nothing stored -- upload it once")
+
+# (b) the cache must agree with the database, or it serves a ghost
+for _label, _col, _path in (("logo", "logo", app.LOGO_PATH),
+                            ("letterhead", "letterhead", app.LETTERHEAD_PATH)):
+    _blob = app._brand_blob(_col)
+    try:
+        _cached = os.path.getsize(_path) if os.path.exists(_path) else 0
+    except Exception:
+        _cached = 0
+    if not _blob and _cached:
+        warn(f"{_label}: cached on disk but NOT in the database",
+             f"{_cached}B cached -- it will disappear when this container is replaced")
+        info("", "re-upload it once from Settings > Branding to store it properly")
+    elif _blob and _cached and _cached != len(_blob):
+        warn(f"{_label}: the cache does not match the database",
+             f"cache {_cached}B vs database {len(_blob)}B")
+    elif _blob:
+        ok(f"{_label}: database and cache agree", f"{len(_blob)}B")
+
+# (c) a backup must actually carry it, or restoring one takes it away
+try:
+    _bundled = []
+    for _bf, _col in (("logo.png", "logo"), ("letterhead.png", "letterhead")):
+        if app._brand_blob(_col):
+            _bundled.append(_bf)
+    if _bundled:
+        ok("backups will include " + ", ".join(_bundled))
+    else:
+        info("backups", "no branding to include yet")
+except Exception as e:
+    warn("could not check what backups would carry", repr(e))
 
 # ------------------------------------------------------------ server limits
 head("6. Server limits that can refuse a large write")

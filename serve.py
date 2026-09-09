@@ -111,6 +111,7 @@ def main():
               f"open /setup to configure one", flush=True)
     _app.start_ldap_scheduler()
     _app.start_backup_scheduler()
+    _app.start_heartbeat_runner()    # runs IT-Vault's own checks
     _app.start_contract_expiry_scheduler()
 
     host = os.environ.get("HOST", "0.0.0.0")
