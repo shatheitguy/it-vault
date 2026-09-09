@@ -15,6 +15,7 @@ IT-Vault is a single-tenant, self-hosted asset & ticket manager for IT teams (e.
 - **Contracts** (warranty/vendor) and **Locations** (site tree).
 - **Trash** (soft-delete + restore).
 - **System Settings** (language, currency, region, notifications, branding, theme).
+- **Heartbeat** — uptime monitoring of devices and services (ping / HTTP / keyword / TCP port / DNS) with alerting and retained history.
 - **Audit Log**, **Network Scan**, **Backup/Restore**, **Import/Export Excel**.
 
 Stack: Python 3 (Flask), MariaDB 12.3, Jinja-free server-rendered HTML + vanilla JS SPA, openpyxl for Excel, ldap3 for AD sync, qrcode for labels.
@@ -41,6 +42,7 @@ MariaDB on 127.0.0.1:3306  (you provide it; install it as a service so it
 ### Processes
 - **Flask dev server** — `python app.py` → listens on `127.0.0.1:5000`. `debug=False`, so **no auto-reload**; after editing `app.py` you must kill the process on :5000 and relaunch.
 - **MariaDB** — must be running before Flask starts, or DB calls fail with `pymysql 2003`.
+- **Heartbeat runner** — a daemon thread started by `serve.py` (`start_heartbeat_runner()`). Ticks every 5 s and probes any monitor whose `next_check` has come round, for as long as the app runs. A monitor row is claimed before it is probed, so two instances sharing one database cannot double-alert on the same outage.
 
 ---
 
@@ -168,7 +170,12 @@ System-wide settings (persisted in the `Settings` table, row id=1) are editable 
 - **Checkouts** (`id`, `asset_id`, `username`, `checkout_date`, `expected_checkin`, `checkin_date`, `note`)
 - **Maintenance** (`id`, `asset_id`, `date`, `mtype`, `cost`, `note`, `by_user`)
 - **AuditLog** (`id`, `ts`, `user`, `action`, `asset_id`, `detail`)
-- **Settings** (row id=1): theme, smtp_*, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_*, qr_size, qr_fields, label_size, label_logo, org_contact
+- **HeartbeatMonitors** (`id`, `name`, `kind` [ping|http|keyword|port|dns], `target`, `port`, `interval_s`, `fail_threshold`, `timeout_s`, `retry_interval_s`, `resend_every`, `enabled`, `notify`, `upside_down`, `ignore_tls`, `keyword`, `keyword_invert`, `accepted_codes`, `http_method`, `tag`, `channels`, `note`, `cert_days`, `asset_id`, `status`, `fails`, `last_ms`, `last_error`, `last_check`, `last_change`, `next_check`)
+- **HeartbeatSamples** (`id`, `monitor_id`, `monitor`, `ts`, `status`, `response_ms`) — one row per check. Kept indefinitely unless `ITVAULT_HB_RETAIN_DAYS` is set.
+- **HeartbeatHourly** (`monitor_id`, `hour` PK, `checks`, `ups`, `sum_ms`, `min_ms`, `max_ms`) — roll-up written as checks land, never pruned; what the long uptime windows read.
+- **HeartbeatEvents** (`id`, `monitor_id`, `ts`, `kind` [created|up|down|paused|resumed], `message`) — the incident log.
+- **HeartbeatChannels** (`id`, `name`, `kind` [email|webhook|slack|telegram], `config` JSON, `enabled`, `created_at`) — where alerts go. Empty table = fall back to the notification address in Settings.
+- **Settings** (row id=1): theme, smtp_*, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_*, qr_size, qr_fields, label_size, label_logo, org_contact, plus `logo` / `letterhead` (MEDIUMBLOB — the database is the source of truth for branding; the files in `DATA_DIR` are only a cache)
 
 ---
 
@@ -265,6 +272,18 @@ Both accessible from the Assets area.
 ### 8.11 LDAP / Active Directory Sync
 Configured in **System** settings (LDAP server, domain, bind user, base DN). `POST /api/ldap/test` validates; `POST /api/employees/ldap-import` pulls users; a background scheduler auto-syncs every 30 min (`POST /api/employees/ldap-sync`).
 
+
+### 8.12 Heartbeat (uptime monitoring)
+
+**Tools → Network Scan → Heartbeat.** Separate permission: `tools.heartbeat`, so a role can have the network scan without this, or the reverse.
+
+Check types: `ping` (ICMP), `http` (accepted status codes, default `200-299`), `keyword` (fetches the body and looks for a string, optionally inverted), `port` (TCP connect), `dns` (resolves a name).
+
+**The flap guard is the point.** A monitor must fail `fail_threshold` consecutive checks before its status becomes `down`; until then it sits at `pending`. Alerts are sent on the *transition* only — once on the way down, once on recovery — plus an optional reminder every `resend_every` further failures. While a monitor is down it is re-checked on `retry_interval_s` instead of `interval_s`.
+
+`upside_down` inverts the verdict, for something that is supposed to *not* respond. HTTPS monitors also record days until certificate expiry, which is reported separately and never fails the check.
+
+History: uptime over 24 h / 7 d / 30 d / 1 y comes from `HeartbeatHourly`; the response chart reads raw samples for windows ≤ 48 h and the roll-up beyond that.
 ---
 
 ## 9. Customization & Theming
@@ -325,6 +344,15 @@ Themes apply to:
 | POST | `/api/settings/smtp-test` | admin | test SMTP |
 | GET/POST | `/api/import` / `/api/export` | rw+ | Excel |
 | GET | `/api/scan` | admin | network scan |
+| GET | `/api/heartbeat/state` | `tools.heartbeat` | monitors, counts, recent checks, channels |
+| GET/POST | `/api/heartbeat/monitors` | `tools.heartbeat` | list / create a monitor |
+| PUT/DELETE | `/api/heartbeat/monitors/<id>` | `tools.heartbeat` | update (partial — omitted or null fields keep their stored value) / delete |
+| GET | `/api/heartbeat/monitors/<id>/detail` | `tools.heartbeat` | uptime windows, chart series, event log |
+| POST | `/api/heartbeat/check` | `tools.heartbeat` | probe everything now |
+| POST | `/api/heartbeat/monitors/<id>/check` | `tools.heartbeat` | probe one now |
+| GET/POST | `/api/heartbeat/channels` | admin | list / create an alert channel |
+| PUT/DELETE | `/api/heartbeat/channels/<id>` | admin | update / delete a channel |
+| POST | `/api/heartbeat/channels/<id>/test` | admin | send a test alert |
 | GET/POST | `/api/backup` / `/api/backups` / `/api/restore` | admin | backup/restore |
 | GET | `/api/audit` | rw+ | audit log |
 | GET | `/api/dashboard` | session | dashboard stats |
@@ -338,6 +366,9 @@ Themes apply to:
 |---|---|
 | `pymysql.err.OperationalError 2003` | MariaDB not running. Start `mysqld` (see 3.2). |
 | Editing `app.py` has no effect | `debug=False` = no auto-reload. Kill :5000, relaunch. |
+| Logo / letterhead disappeared | The database holds the real copy; the files in `DATA_DIR` are a cache. Run `docker exec itvault python brand_doctor.py` and read section 5b — if it says *cached but not in the database*, re-upload once. |
+| A monitor alerts repeatedly | Raise `fail_threshold`, or set `resend_every` back to 0. Alerts fire on transitions; a reminder interval is opt-in. |
+| No alert arrived | Check **Alerts** on the Heartbeat page and use each channel's Test button. With no channel configured, alerts use the notification address in Settings, which needs SMTP. |
 | Changes revert after restart | Settings are persisted in DB; ensure you clicked **SAVE** on System/Customization. Hard-refresh browser cache. |
 | Login/sign page ignores theme | Old cached asset. Hard-refresh. Theme comes from `/api/branding`. |
 | Sign flow shows "invalid or expired token" | Token expired. Generate a **fresh** SIGN link. |

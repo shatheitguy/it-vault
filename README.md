@@ -7,7 +7,8 @@
 
 A self-hosted IT asset & helpdesk manager: track assets, employees, checkouts,
 maintenance history, support tickets (with a public portal + a live wallboard
-monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
+monitor), uptime monitoring with alerting, audit logging, LDAP/AD sync, network
+scanning, and full theming —
 built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
 for storage.
 
@@ -50,6 +51,54 @@ flips to `Checked-Out`, and the signature stays attached to it.
 
 *A factory-new install — the theme, layout and branding above are what you
 get on first run. Every asset, name and serial is invented.*
+
+## Heartbeat — uptime monitoring
+
+IT-Vault watches your network itself. **Tools → Network Scan → Heartbeat.**
+
+Each monitor is checked on its own interval, around the clock, for as long as
+IT-Vault is running. Five kinds of check:
+
+| Check | What it answers |
+|---|---|
+| **Ping** (ICMP) | Is the device reachable at all — switches, APs, printers, cameras |
+| **HTTP(S)** | Is the web service answering, with the status codes you accept |
+| **HTTP keyword** | Does the page actually say the right thing — catches a server that returns 200 while the app behind it is broken |
+| **TCP port** | Is the service listening — SQL on 3306, RDP on 3389, SMTP on 25 |
+| **DNS** | Does the name still resolve |
+
+**Alerts arrive once, not forty times.** A monitor has to fail its retry count
+before it counts as down, and the alert goes out on the *transition* — once on
+the way down, once on the way back up. A flapping access point cannot fill your
+inbox overnight. If you want nagging, set a reminder every N further failures;
+by default there is nothing in between.
+
+Alerts go to **email, a webhook, Slack or Telegram** — set them up under the
+**Alerts** button, and test each one before an outage has to rely on it. With no
+channel configured they fall back to the notification address in
+**Settings → Notifications**.
+
+**History is kept indefinitely.** Uptime over 24 hours, 7 days, 30 days or a
+year; a response-time chart; and an event log of every state change with the
+reason. An hourly roll-up is written as checks land and never pruned, so a long
+window stays fast — raw per-check rows are only discarded if you ask, with
+`ITVAULT_HB_RETAIN_DAYS`.
+
+Each row draws a **live ECG trace**: one heartbeat per recorded check, oldest on
+the left. A check that answered draws a QRS complex whose height follows its
+response time; a failed check draws a flatline. An outage is visible at a glance,
+and so is when it started.
+
+Per monitor you can also set a timeout, a shorter re-check interval while it is
+down, **upside-down mode** (alert if it *does* respond — for a port that should
+be closed), the HTTP method, certificate-expiry tracking, a tag, and a linked
+asset. Pause one while you work on it without losing its history.
+
+Two IT-Vault instances pointed at the same database will not both report the
+same outage — a monitor is claimed before it is probed.
+
+It is a separate permission (`tools.heartbeat`), so a role can have the network
+scan without it, or the other way round.
 
 ## Install IT-Vault and a database, in one step
 
