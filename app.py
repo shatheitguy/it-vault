@@ -6630,7 +6630,8 @@ def _arp_devices():
         return devs
 
     # BSD/macOS/net-tools style fallback.
-    out = _run(["arp", "-an"]) or _run(["arp", "-a"])
+    _arp = _tool_path("arp") or "arp"
+    out = _run([_arp, "-an"]) or _run([_arp, "-a"])
     for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})", out):
         _add(m.group(1), m.group(2), "neighbour")
     return devs
@@ -6646,9 +6647,27 @@ def _have_tool(name):
     and every scan came back empty, which reads as "your network is down"
     rather than "this container cannot look".
     """
+    return _tool_path(name) is not None
+
+
+def _tool_path(name):
+    """Absolute path to a command, or None.
+
+    PATH is not enough: Debian installs arp and friends in /usr/sbin, which
+    is deliberately absent from a non-root user's PATH -- and this container
+    runs as uid 1000. shutil.which alone therefore reported 'arp missing' on
+    an image that had it, so the sbin directories are checked by hand.
+    """
     if name not in _TOOL_CACHE:
         import shutil
-        _TOOL_CACHE[name] = shutil.which(name) is not None
+        found = shutil.which(name)
+        if not found:
+            for d in ("/usr/local/sbin", "/usr/sbin", "/sbin"):
+                cand = os.path.join(d, name)
+                if os.path.exists(cand) and os.access(cand, os.X_OK):
+                    found = cand
+                    break
+        _TOOL_CACHE[name] = found
     return _TOOL_CACHE[name]
 
 
