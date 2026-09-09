@@ -390,6 +390,9 @@ def persist_env_db_config():
         _cfg["db_host"] = DB_HOST
         print(f"[itvault] database pointer saved to {CONFIG_PATH} -- it now "
               f"survives the container being replaced", flush=True)
+        print(f"[itvault] that file is the source of truth for the database "
+              f"connection; keep {DATA_DIR} on a volume and updates cannot "
+              f"lose it", flush=True)
         return True
     print(f"[itvault] could not write {CONFIG_PATH}"
           + ("" if before else " (directory not writable?)")
@@ -1135,8 +1138,24 @@ def _db_pool():
                 except Exception: pass
         return _pool_obj
 
+_db_pointer_saved = False
+
+
 def conn():
     c = _db_pool().connection()
+    # The first connection that succeeds is proof the credentials work, so
+    # that is the moment to write them down. Doing this only at startup was
+    # not enough: a database that took longer than the boot wait, or came up
+    # after it, left the pointer unsaved forever -- and the next time the
+    # container was replaced the setup wizard asked for a database again on
+    # an install that had been running fine for months.
+    global _db_pointer_saved
+    if not _db_pointer_saved:
+        _db_pointer_saved = True          # set first: never re-enter
+        try:
+            persist_env_db_config()
+        except Exception:
+            pass
     # Remembered for the request teardown below. A view that raises before its
     # own c.close() would otherwise hand the connection back to nobody, with
     # its transaction still open and the rows it touched still locked.
