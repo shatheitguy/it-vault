@@ -99,7 +99,19 @@ def main():
     # database that's merely still starting, then start regardless: app.py
     # serves /setup until one is configured and an admin exists.
     try:
-        wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+        try:
+            wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+        except Exception:
+            # The saved pointer has had its full wait and still isn't
+            # answering. If the environment carries credentials that DO work,
+            # follow those instead of sitting on the setup wizard: the saved
+            # file normally wins, which is what makes a database survive its
+            # container, but a pointer that has stopped being true then has no
+            # way to be corrected from outside the volume.
+            if _app.reconcile_db_config():
+                wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+            else:
+                raise
         _app.init_db()
         _app.migrate_schema()
         # The database answered, so the credentials that got us here are worth
