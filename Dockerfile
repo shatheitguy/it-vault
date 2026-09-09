@@ -2,7 +2,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# iputils-ping / iproute2 / net-tools are what the network features actually
+# shell out to. python:3.12-slim ships none of them, so before this every
+# Heartbeat ping check reported "no ICMP reply" and every network scan found
+# nothing -- the commands simply were not there.
+#
+# iputils-ping carries cap_net_raw+ep, which is why ping still works as the
+# non-root user below: Docker's default capability set includes NET_RAW, so
+# the file capability is honoured.
 RUN apt-get update && apt-get install -y --no-install-recommends gcc default-libmysqlclient-dev pkg-config curl \
+    iputils-ping iproute2 net-tools \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
