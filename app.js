@@ -1376,6 +1376,16 @@ async function doScan(){
   lastScan=Array.isArray(j)?j:[];
   saveLastScan(lastScan);
   renderScan(lastScan);
+  // An empty result is ambiguous -- a quiet network looks exactly like a
+  // container that cannot see one. Ask the server which it was.
+  if(!lastScan.length) explainEmptyScan();
+}
+async function explainEmptyScan(){
+  const st=document.getElementById('scanStatus'); if(!st) return;
+  const r=await api('/api/scan/capabilities');
+  if(!r||!r.ok) return;
+  const c=await r.json().catch(()=>null);
+  if(c&&c.hint) st.innerHTML='&#9888; '+esc(c.hint);
 }
 function renderScan(devs){
   const nodes=devs.map((d,i)=>`<tr><td>${esc(d.ip||'')}</td><td>${esc(d.host||'')||'<span class="muted">—</span>'}</td><td>${esc(d.mac||d.hw||'')}</td><td>${esc(d.vendor||'')||'<span class="muted">—</span>'}</td><td>${esc(d.type||'LAN')}</td><td><button class="btn sm ghost" onclick="addScannedAsAsset('${i}')">Add as asset</button></td></tr>`).join('');

@@ -3452,6 +3452,11 @@ def _hb_cert_days(url, timeout):
 
 
 def _hb_check_ping(mon, timeout):
+    if not _have_tool("ping"):
+        # blaming the device for a missing binary is what made this so hard
+        # to work out from the UI
+        return False, ("the ping command is not available in this container -- "
+                       "pull the latest image and recreate it"), None
     ok = _ping_one(mon.get("target")) is not None
     return ok, (None if ok else "no ICMP reply"), None
 
@@ -6609,8 +6614,14 @@ def _arp_devices():
             _add(m.group(1), m.group(2), m.group(3))
         return devs
 
-    # Linux first: `ip` exists on modern distros even where net-tools (which
-    # provides `arp`) does not -- including slim container images.
+    # Linux first: `ip` covers modern distros where net-tools (which provides
+    # `arp`) is absent. Neither is in python:3.12-slim, which is why the
+    # image installs iproute2 and net-tools explicitly -- without them this
+    # returned nothing and looked like an empty network.
+    if not (_have_tool("ip") or _have_tool("arp")):
+        print("[itvault] scan: neither 'ip' nor 'arp' is installed -- "
+              "cannot read the neighbour table", flush=True)
+        return devs
     out = _run(["ip", "neigh", "show"])
     for m in re.finditer(
             r"(\d+\.\d+\.\d+\.\d+)\s+.*?lladdr\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})(?:\s+(\w+))?", out):
@@ -6623,6 +6634,59 @@ def _arp_devices():
     for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})", out):
         _add(m.group(1), m.group(2), "neighbour")
     return devs
+
+_TOOL_CACHE = {}
+
+
+def _have_tool(name):
+    """Is this command actually present? Cached -- it cannot appear later.
+
+    Worth asking explicitly because the answer used to be invisible: with no
+    ping binary in the image every Heartbeat check reported "no ICMP reply"
+    and every scan came back empty, which reads as "your network is down"
+    rather than "this container cannot look".
+    """
+    if name not in _TOOL_CACHE:
+        import shutil
+        _TOOL_CACHE[name] = shutil.which(name) is not None
+    return _TOOL_CACHE[name]
+
+
+def _net_capabilities():
+    """What this install can and cannot discover, and why."""
+    have_ping = _have_tool("ping")
+    have_ip = _have_tool("ip")
+    have_arp = _have_tool("arp")
+    in_docker = bool(os.environ.get("ITVAULT_DOCKER"))
+    # A container on a bridge network has its own network namespace: its
+    # neighbour table holds the docker gateway and nothing else, so an ARP
+    # scan cannot see the LAN however many tools are installed. Host
+    # networking is the only way to read the real neighbour table.
+    bridged = False
+    if in_docker and have_ip:
+        try:
+            out = subprocess.run(["ip", "-o", "addr", "show"], capture_output=True,
+                                 text=True, timeout=5).stdout or ""
+            bridged = (" eth0 " in out) and ("docker0" not in out)
+        except Exception:
+            bridged = True
+    hints = []
+    if not have_ping:
+        hints.append("The ping command is missing, so ICMP checks and deep scans "
+                     "cannot run. Pull the latest image and recreate the container.")
+    if not (have_ip or have_arp):
+        hints.append("Neither 'ip' nor 'arp' is available, so the neighbour table "
+                     "cannot be read. Pull the latest image and recreate the container.")
+    elif bridged:
+        hints.append("This container has its own network namespace, so its "
+                     "neighbour table only holds the Docker gateway -- a quick scan "
+                     "cannot see your LAN. Use Deep scan with your subnet (it pings "
+                     "out and works), or run the container with --network host to "
+                     "discover MAC addresses and vendors too.")
+    return {"ping": have_ping, "ip": have_ip, "arp": have_arp,
+            "docker": in_docker, "isolated_network": bridged,
+            "hint": " ".join(h if isinstance(h, str) else "".join(h) for h in hints)}
+
 
 def _ping_one(ip):
     """One ping, cross-platform.
@@ -6654,6 +6718,17 @@ def _resolve_host(ip):
         return ip, socket.gethostbyaddr(ip)[0].split(".")[0]
     except Exception:
         return ip, ""
+
+@app.route("/api/scan/capabilities")
+@feature_required("tools.scan")
+def scan_capabilities():
+    """Why a scan found nothing, in the cases where it cannot possibly work.
+
+    Kept separate from /api/scan so the response shape of the scan itself does
+    not change -- the phone app decodes that as a plain list.
+    """
+    return jsonify(_net_capabilities())
+
 
 @app.route("/api/scan")
 @feature_required("tools.scan")
