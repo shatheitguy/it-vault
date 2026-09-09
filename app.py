@@ -364,6 +364,65 @@ def save_db_config(h, p, n, u, pw):
             json.dump({"db_host": h, "db_port": int(p), "db_name": n, "db_user": u, "db_pass": pw}, f, indent=2)
     except Exception:
         pass
+def _db_reachable(host, port, name, user, pw, timeout=6):
+    """Can these exact credentials open a connection right now?
+
+    Deliberately not the pool: the pool was built with whatever config the
+    app resolved at import, and the point here is to test something else.
+    """
+    try:
+        c = pymysql.connect(host=host, port=int(port), user=user, password=pw,
+                            database=name, connect_timeout=timeout,
+                            read_timeout=timeout, write_timeout=timeout)
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def reconcile_db_config():
+    """Follow the environment when the saved pointer has stopped working.
+
+    itvault_config.json takes precedence over the environment, which is what
+    makes a database survive its container being replaced. The cost is that a
+    pointer which stops being true -- the database moved, was renamed, joined
+    a different network, had its password rotated -- cannot be corrected by
+    passing new environment variables, because the file keeps winning. The
+    install then sits on the setup wizard with no way out but editing a file
+    inside a volume.
+
+    So: if the saved pointer cannot connect and the environment's credentials
+    can, the environment wins and the file is rewritten. Only ever called
+    after the saved pointer has had its full startup wait, so a database that
+    is merely slow to boot is never mistaken for a wrong one.
+    """
+    env_host = os.environ.get("DB_HOST")
+    env_name = os.environ.get("DB_NAME")
+    if not (env_host or env_name):
+        return False                      # nothing to fall back to
+    e_host = env_host or DB_HOST
+    e_port = int(os.environ.get("DB_PORT") or DB_PORT)
+    e_name = env_name or DB_NAME
+    e_user = os.environ.get("DB_USER") or DB_USER
+    e_pass = os.environ.get("DB_PASS")
+    if e_pass is None:
+        e_pass = DB_PASS
+    if (e_host, e_port, e_name, e_user, e_pass) == (DB_HOST, DB_PORT, DB_NAME,
+                                                    DB_USER, DB_PASS):
+        return False                      # identical: nothing to reconcile
+    if not _db_reachable(e_host, e_port, e_name, e_user, e_pass):
+        return False                      # no better than what we have
+    print(f"[itvault] the saved database pointer ({DB_USER}@{DB_HOST}/{DB_NAME}) "
+          f"did not answer, but the environment's ({e_user}@{e_host}/{e_name}) "
+          f"does -- following it and updating {CONFIG_PATH}", flush=True)
+    save_db_config(e_host, e_port, e_name, e_user, e_pass)
+    _cfg.update({"db_host": e_host, "db_port": e_port, "db_name": e_name,
+                 "db_user": e_user, "db_pass": e_pass})
+    # no need to touch the pool: _db_pool() is keyed on the config and
+    # rebuilds itself as soon as these globals change
+    return True
+
+
 def persist_env_db_config():
     """Record environment-provided database credentials in the config file.
 
