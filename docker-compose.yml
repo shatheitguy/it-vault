@@ -115,10 +115,10 @@ services:
     container_name: itvault-db
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in .env}
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
       MARIADB_DATABASE: ${DB_NAME:-itvault}
       MARIADB_USER: ${DB_USER:-itvault}
-      MARIADB_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
+      MARIADB_PASSWORD: ${DB_PASS:-}
     volumes:
       - itvault_db:/var/lib/mysql
     # Deliberately not published: only the web service needs it, and it
@@ -129,8 +129,22 @@ services:
       timeout: 5s
       retries: 20
 
+# Named explicitly, and that matters more than it looks.
+#
+# Compose normally prefixes volumes with the project name, so in a directory
+# called itvault these would become itvault_itvault_data and so on -- BRAND
+# NEW, EMPTY volumes. Anyone moving an existing install onto this file would
+# bring compose up and find every asset, ticket and setting apparently gone,
+# while the real data sat untouched in the unprefixed volumes next to it.
+#
+# Pinning `name:` keeps the exact names install.sh creates, so this file is a
+# drop-in for an install that already exists as well as a fresh one.
 volumes:
   itvault_data:
+    name: itvault_data
   invoices_data:
+    name: invoices_data
   backups_data:
+    name: backups_data
   itvault_db:
+    name: itvault_db
