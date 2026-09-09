@@ -419,6 +419,14 @@ _check_db_volume_major() {
     return 1
 }
 
+# One value out of the database container's environment. That is where the
+# credentials that created it still live, which is what makes adopting it
+# possible at all.
+_db_container_env() {
+    $DK inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+        "$DB_CONTAINER" 2>/dev/null | sed -n "s/^$1=//p" | head -n 1
+}
+
 provision_db() {
     # A shared user-defined network is what makes container-name DNS work, so
     # the app can reach the database as "itvault-db" without publishing 3306
@@ -430,12 +438,35 @@ provision_db() {
         say "    network '$NET' already exists -- reusing it"
     fi
 
+    # An existing database container is ADOPTED, not refused. Its
+    # credentials are readable from its own environment for as long as it
+    # exists -- MARIADB_USER/PASSWORD/DATABASE are what created it. This
+    # used to give up here and send people to the setup wizard, which is how
+    # `docker rm -f itvault` + re-running this script lost a working
+    # database pointer on an install that already had one.
     if $DK inspect "$DB_CONTAINER" >/dev/null 2>&1; then
-        # Its credentials were baked into its volume on first init and we
-        # cannot read them back, so adopting it would only produce the 1045
-        # everyone hits. Say so plainly instead.
+        _adopt_user="$(_db_container_env MARIADB_USER)"
+        _adopt_pass="$(_db_container_env MARIADB_PASSWORD)"
+        _adopt_name="$(_db_container_env MARIADB_DATABASE)"
+        if [ -n "$_adopt_user" ] && [ -n "$_adopt_pass" ] && [ -n "$_adopt_name" ]; then
+            step "Adopting the existing database container '$DB_CONTAINER'"
+            DB_USER_V="$_adopt_user"
+            DB_PASS_V="$_adopt_pass"
+            DB_NAME_V="$_adopt_name"
+            # it must be running, and on the network the app will join
+            if [ "$($DK inspect -f "{{.State.Running}}" "$DB_CONTAINER" 2>/dev/null)" != "true" ]; then
+                run start "$DB_CONTAINER"
+            fi
+            if ! $DK inspect -f "{{range \$k, \$v := .NetworkSettings.Networks}}{{\$k}} {{end}}" \
+                    "$DB_CONTAINER" 2>/dev/null | grep -q "$NET"; then
+                run network connect "$NET" "$DB_CONTAINER"
+            fi
+            say "    reusing database '$DB_NAME_V' as user '$DB_USER_V'"
+            return 0
+        fi
+        # No MARIADB_* in its environment: not one of ours, so do not guess.
         say ""
-        warn "A container named '$DB_CONTAINER' already exists, so its password isn't ours to know."
+        warn "A container named '$DB_CONTAINER' already exists, and its password is not in its environment."
         say "    Point IT-Vault at it through the setup wizard, or remove it first:"
         say "      ${B}docker rm -f $DB_CONTAINER${N}   ${Y}# keeps the itvault_db volume${N}"
         say ""
@@ -699,6 +730,15 @@ fi
 
 # Asked here rather than after the pull, so the install is not waiting on a
 # download before it knows what it is building.
+# An install that already has our database container is reconnected to it
+# rather than asked about it: this is the update path, and the whole point
+# is that it keeps the database it already had.
+if [ -z "$WITH_DB" ] && [ -z "$NO_DB" ] \
+        && $DK inspect "$DB_CONTAINER" >/dev/null 2>&1 \
+        && [ -n "$(_db_container_env MARIADB_USER)" ]; then
+    say "    found the existing database container -- reconnecting to it"
+    WITH_DB=1
+fi
 if [ -z "$WITH_DB" ] && [ -z "$NO_DB" ]; then
     if db_prompt; then WITH_DB=1; fi
 fi
