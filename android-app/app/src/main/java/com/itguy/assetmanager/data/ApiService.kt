@@ -193,4 +193,26 @@ interface ApiService {
     @Multipart
     @POST("api/restore")
     suspend fun restore(@Part file: okhttp3.MultipartBody.Part): Response<RestoreResponse>
+
+    // ---- heartbeat (uptime monitoring) ----
+    @GET("api/heartbeat/state")
+    suspend fun heartbeatState(@Query("hours") hours: Int? = null): Response<HbState>
+
+    @GET("api/heartbeat/monitors/{id}/detail")
+    suspend fun heartbeatDetail(@Path("id") id: Int, @Query("hours") hours: Int? = null): Response<HbDetail>
+
+    @POST("api/heartbeat/check")
+    suspend fun heartbeatCheckAll(): Response<HbCheckResponse>
+
+    @POST("api/heartbeat/monitors/{id}/check")
+    suspend fun heartbeatCheckOne(@Path("id") id: Int): Response<HbCheckResponse>
+
+    @POST("api/heartbeat/monitors")
+    suspend fun heartbeatCreate(@Body body: HbMonitorRequest): Response<HbCreateResponse>
+
+    @PUT("api/heartbeat/monitors/{id}")
+    suspend fun heartbeatUpdate(@Path("id") id: Int, @Body body: HbMonitorRequest): Response<OkResponse>
+
+    @DELETE("api/heartbeat/monitors/{id}")
+    suspend fun heartbeatDelete(@Path("id") id: Int): Response<OkResponse>
 }

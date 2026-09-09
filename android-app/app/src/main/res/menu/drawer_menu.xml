@@ -24,6 +24,7 @@
         <menu>
             <group android:checkableBehavior="single">
                 <item android:id="@+id/nav_scan" android:title="Network Scan" android:icon="@drawable/ic_wifi" />
+                <item android:id="@+id/nav_heartbeat" android:title="Heartbeat" android:icon="@drawable/ic_heartbeat" />
                 <item android:id="@+id/nav_backup" android:title="Backup / Restore" android:icon="@drawable/ic_backup" />
             </group>
         </menu>
