@@ -16,6 +16,7 @@ import com.itguy.assetmanager.ui.dashboard.DashboardFragment
 import com.itguy.assetmanager.ui.employees.DirectoryFragment
 import com.itguy.assetmanager.ui.generic.GenericListFragment
 import com.itguy.assetmanager.ui.generic.ListKind
+import com.itguy.assetmanager.ui.heartbeat.HeartbeatFragment
 import com.itguy.assetmanager.ui.login.LoginActivity
 import com.itguy.assetmanager.ui.scan.NetworkScanFragment
 import com.itguy.assetmanager.ui.settings.SettingsFragment
@@ -131,6 +132,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_trash -> showFragment(GenericListFragment.newInstance(ListKind.TRASH), "Trash")
             com.itguy.assetmanager.R.id.nav_audit -> showFragment(GenericListFragment.newInstance(ListKind.AUDIT), "Audit Log")
             com.itguy.assetmanager.R.id.nav_scan -> showFragment(NetworkScanFragment(), "Network Scan")
+            com.itguy.assetmanager.R.id.nav_heartbeat -> showFragment(HeartbeatFragment(), "Heartbeat")
             com.itguy.assetmanager.R.id.nav_backup -> showFragment(BackupRestoreFragment(), "Backup / Restore")
             com.itguy.assetmanager.R.id.nav_settings -> showFragment(SettingsFragment(), "Settings")
         }

@@ -601,7 +601,7 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 /* the roles list is short; a scroll frame around three rows is just noise */
 #rolesBody td{padding-top:7px;padding-bottom:7px}
 
-/* Heartbeat: monitor status pulled from Uptime Kuma. A dot plus the word, not a
+/* Heartbeat: monitor status. A dot plus the word, not a
    colour alone -- the state has to survive being read by someone who cannot
    distinguish red from green. */
 .hbdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
@@ -618,6 +618,94 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 .hbpill.down{color:var(--red);border-color:var(--red)}
 .hbpill.pending{color:var(--amber);border-color:var(--amber)}
 .hbpill.maintenance{color:var(--cyan);border-color:var(--cyan)}
+.hbdot.paused{background:var(--muted2)}
+.hbpill.paused{color:var(--muted);border-color:var(--line)}
+
+/* The KPI colours elsewhere are positional (c1..c5). Here the number means a
+   state, so red has to mean down and green has to mean up -- a green "1 DOWN"
+   reads as reassuring, which is the opposite of true. */
+.kpi.hbk-down .kpi-v,.kpi.hbk-down .kpi-ico{color:var(--red)}
+.kpi.hbk-pending .kpi-v,.kpi.hbk-pending .kpi-ico{color:var(--amber)}
+.kpi.hbk-up .kpi-v,.kpi.hbk-up .kpi-ico{color:var(--grn)}
+.kpi.hbk-paused .kpi-v,.kpi.hbk-paused .kpi-ico{color:var(--muted)}
+.kpi.hbk-avg .kpi-v,.kpi.hbk-avg .kpi-ico{color:var(--cyan)}
+
+/* The ECG trace. One heartbeat per recorded check, oldest on the left: an up
+   check draws a QRS complex, a failed check draws a flatline. The bright
+   segment travelling along it is the bedside-monitor idea -- it says the thing
+   is being watched right now. The trace itself is history and does not move,
+   which matters: a moving trace would imply data that is not there. */
+.hbecg{display:block;overflow:visible}
+.hbecg path{fill:none;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.hbecg .hbecg-base{stroke:currentColor;stroke-width:1.5;opacity:.28}
+.hbecg .hbecg-live{stroke:currentColor;stroke-width:1.9;
+  stroke-dasharray:130 870;stroke-dashoffset:1000;
+  filter:drop-shadow(0 0 3px currentColor);
+  animation:hbsweep 2.6s linear infinite}
+.hbecg.up{color:var(--grn)}
+.hbecg.down{color:var(--red)}
+.hbecg.pending{color:var(--amber)}
+.hbecg.paused{color:var(--muted2)}
+/* a paused monitor is not being checked, so nothing should be sweeping */
+.hbecg.paused .hbecg-live{animation:none;stroke-dasharray:none;stroke-dashoffset:0;
+  opacity:.5;filter:none}
+/* down: slower sweep, so a flatline reads as a flatline rather than as activity */
+.hbecg.down .hbecg-live{animation-duration:3.6s}
+.hbecg.idle .hbecg-live{animation-duration:4.4s;opacity:.7}
+@keyframes hbsweep{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
+.hbecg-cell{width:1%;white-space:nowrap;padding-top:4px;padding-bottom:4px}
+.hblink{cursor:pointer}
+.hblink:hover b{color:var(--accent)}
+.hbtag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:20px;
+  font-size:9.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.hbcert-warn{color:var(--amber)}
+.hbcert-bad{color:var(--red);font-weight:650}
+
+/* monitor detail */
+.hbd-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.hbd-state{font-weight:650;letter-spacing:.03em}
+.hbd-kpis{margin-bottom:14px}
+.hbd-kpis .kpi-v{font-size:20px}
+/* uptime carries a verdict, so it is coloured like one -- the default accent
+   made a healthy 100% render in alarm red */
+.hbd-kpis .kpi-v.ok{color:var(--grn)}
+.hbd-kpis .kpi-v.warn{color:var(--amber)}
+.hbd-kpis .kpi-v.bad{color:var(--red)}
+.hbd-kpis .kpi-v.none{color:var(--muted)}
+.hbd-ecg .hbecg{width:100%;height:64px}
+.hbd-chart{overflow-x:auto}
+.hbchart{display:block;width:100%;min-width:420px;height:120px}
+.hbchart .hbc-axis{stroke:var(--line);stroke-width:1}
+.hbchart .hbc-line{fill:none;stroke:var(--cyan);stroke-width:1.8;stroke-linejoin:round}
+.hbchart .hbc-area{fill:var(--cyan);opacity:.12;stroke:none}
+.hbchart .hbc-down{fill:var(--red);opacity:.16}
+.hbchart .hbc-lbl{fill:var(--muted);font-size:9px;font-family:var(--mono,monospace)}
+
+/* a monitor's alert-channel picker reuses the permission-tree item styling */
+.permitem-wrap{display:flex;flex-direction:column;gap:2px}
+
+@media (prefers-reduced-motion: reduce){
+  .hbecg .hbecg-live{animation:none;stroke-dasharray:none;stroke-dashoffset:0;filter:none}
+}
+
+/* The reason a monitor is down belongs next to its name. Kept to one line:
+   a socket error can be a paragraph long, and letting it wrap turned one bad
+   row into half the table. The full text is in the title attribute. */
+.hberr{font-size:11px;color:var(--red);margin-top:3px;max-width:260px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:400}
+.hbmute{margin-left:6px;opacity:.65;font-size:11px}
+.hb-down td{background:rgba(255,107,107,.06)}
+#page-heartbeat .topbar select,#page-heartbeat .topbar .toggle{flex:0 0 auto}
+#page-heartbeat .dtable{min-width:1060px}
+#page-heartbeat .dtable td{vertical-align:middle}
+#page-heartbeat .dtable td:nth-child(2){min-width:190px}
+
+/* phones: the strip and the actions are what run out of room first */
+@media(max-width:560px){
+  .hbecg{width:90px}
+  .hberr{max-width:160px}
+}
 
 /* ticket photos: a grid of thumbnails, each a link to the full-size image.
    Same shape as the portal's picker so a photo looks the same to the person
