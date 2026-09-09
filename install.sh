@@ -46,6 +46,16 @@ DB_IMAGE="${ITVAULT_DB_IMAGE:-mariadb:latest}"
 DB_PASS_V="${ITVAULT_DB_PASS:-}"
 DB_ROOT_PASS_V=""
 DIR="${ITVAULT_DIR:-$HOME/it-vault}"
+# Where this installer keeps what it decided, so a later run does not have
+# to ask again. The database credentials used to live only in the app
+# container's environment, so replacing that container lost them and the
+# setup wizard asked for a database on an install that already had one.
+# Written automatically; nobody has to create or edit it.
+CONF_DIR="${ITVAULT_CONF_DIR:-}"
+if [ -z "$CONF_DIR" ]; then
+    if [ "$(id -u)" = "0" ]; then CONF_DIR="/etc/itvault"; else CONF_DIR="$HOME/.itvault"; fi
+fi
+CONF_FILE="$CONF_DIR/install.env"
 DRY=""
 
 while [ $# -gt 0 ]; do
@@ -419,12 +429,119 @@ _check_db_volume_major() {
     return 1
 }
 
+# Read back what a previous run decided. Only fills values that are still
+# unset, so a flag or an environment variable on this run always wins.
+load_conf() {
+    [ -r "$CONF_FILE" ] || return 1
+    # shellcheck disable=SC1090
+    . "$CONF_FILE" 2>/dev/null || return 1
+    [ -n "$DB_NAME_V" ]   || DB_NAME_V="${SAVED_DB_NAME:-$DB_NAME_V}"
+    [ -n "$DB_USER_V" ]   || DB_USER_V="${SAVED_DB_USER:-$DB_USER_V}"
+    [ -n "$DB_PASS_V" ]   || DB_PASS_V="${SAVED_DB_PASS:-}"
+    [ -n "$SAVED_DB_HOST" ] && DB_HOST_SAVED="$SAVED_DB_HOST"
+    return 0
+}
+
+# Record it. 600 on the file and 700 on the directory: it holds a database
+# password, so it is readable only by whoever installed IT-Vault.
+save_conf() {
+    [ -n "$DRY" ] && return 0
+    ( umask 077 && mkdir -p "$CONF_DIR" ) 2>/dev/null || return 1
+    {   printf "# Written by the IT-Vault installer -- do not delete.\n"
+        printf "# It is what lets an update keep this install's database.\n"
+        printf "SAVED_DB_HOST=%s\n" "$1"
+        printf "SAVED_DB_NAME=%s\n" "$2"
+        printf "SAVED_DB_USER=%s\n" "$3"
+        printf "SAVED_DB_PASS=%s\n" "$4"
+    } > "$CONF_FILE" 2>/dev/null || return 1
+    chmod 600 "$CONF_FILE" 2>/dev/null || true
+    say "    configuration saved to ${B}$CONF_FILE${N} -- updates reuse it"
+    return 0
+}
+
 # One value out of the database container's environment. That is where the
 # credentials that created it still live, which is what makes adopting it
 # possible at all.
 _db_container_env() {
     $DK inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
         "$DB_CONTAINER" 2>/dev/null | sed -n "s/^$1=//p" | head -n 1
+}
+
+# Replace the app container with the new image, reusing this install's own
+# settings. Volumes are never touched, so assets, tickets, branding and the
+# database all stay exactly where they are.
+update_in_place() {
+    step "Pulling $IMAGE:$TAG"
+    if [ -n "$DRY" ]; then
+        printf '    docker pull %s\n' "$IMAGE:$TAG"
+    else
+        # shellcheck disable=SC2086
+        $DK pull "$IMAGE:$TAG" >/dev/null || die "Could not pull $IMAGE:$TAG."
+    fi
+
+    # Where the database is, in order of trust: what this installer saved,
+    # then the database container's own environment, then whatever the old
+    # app container was told.
+    _u_host=""; _u_name=""; _u_user=""; _u_pass=""
+    if load_conf; then
+        _u_host="${DB_HOST_SAVED:-}"; _u_name="$DB_NAME_V"
+        _u_user="$DB_USER_V"; _u_pass="$DB_PASS_V"
+    fi
+    if [ -z "$_u_pass" ] && $DK inspect "$DB_CONTAINER" >/dev/null 2>&1; then
+        _u_host="$DB_CONTAINER"
+        _u_name="$(_db_container_env MARIADB_DATABASE)"
+        _u_user="$(_db_container_env MARIADB_USER)"
+        _u_pass="$(_db_container_env MARIADB_PASSWORD)"
+    fi
+    if [ -z "$_u_pass" ]; then
+        _u_host="$(_app_container_env DB_HOST)"
+        _u_name="$(_app_container_env DB_NAME)"
+        _u_user="$(_app_container_env DB_USER)"
+        _u_pass="$(_app_container_env DB_PASS)"
+    fi
+
+    # Keep the network and published port the running container already has,
+    # so an update never quietly moves the app somewhere else.
+    _u_net="$($DK inspect -f "{{range \$k, \$v := .NetworkSettings.Networks}}{{\$k}} {{end}}" "$NAME" 2>/dev/null | awk "{print \$1}")"
+    _u_port="$($DK inspect -f "{{range \$p, \$c := .NetworkSettings.Ports}}{{range \$c}}{{.HostPort}}{{end}}{{end}}" "$NAME" 2>/dev/null | head -n 1)"
+    [ -n "$_u_port" ] && PORT="$_u_port"
+
+    step "Replacing the container (volumes are kept)"
+    run rm -f "$NAME"
+
+    set -- run -d \
+        --name "$NAME" \
+        --restart unless-stopped \
+        -p "$PORT:5000" \
+        -v itvault_data:/app/data \
+        -v invoices_data:/app/invoices \
+        -v backups_data:/app/backups \
+        -e ITVAULT_DATA_DIR=/app/data \
+        --add-host host.docker.internal:host-gateway
+    if [ -n "$_u_net" ] && [ "$_u_net" != "bridge" ]; then
+        set -- "$@" --network "$_u_net"
+    fi
+    if [ -n "$_u_host" ]; then
+        set -- "$@" -e DB_HOST="$_u_host" -e DB_PORT=3306 \
+            -e DB_NAME="$_u_name" -e DB_USER="$_u_user" -e DB_PASS="$_u_pass"
+    fi
+    run "$@" "$IMAGE:$TAG"
+
+    if [ -n "$_u_host" ]; then
+        save_conf "$_u_host" "$_u_name" "$_u_user" "$_u_pass" >/dev/null 2>&1 || true
+    fi
+    [ -n "$DRY" ] && return 0
+    say ""
+    say "${G}Updated.${N} Open http://localhost:$PORT"
+    say "  Your database, assets, tickets and branding were not touched."
+    say ""
+}
+
+# One value out of the APP container's environment -- the last resort when
+# working out where an existing install's database is.
+_app_container_env() {
+    $DK inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+        "$NAME" 2>/dev/null | sed -n "s/^$1=//p" | head -n 1
 }
 
 provision_db() {
@@ -696,10 +813,19 @@ else
             say "${G}IT-Vault is already running${N} as container '$NAME'."
             say ""
             say "  Open it:       http://localhost:$PORT"
-            say "  Update it:     in the app, Settings ▸ General ▸ Check for Updates"
-            say "  Or by hand:    $DK pull $IMAGE:$TAG && $DK rm -f $NAME"
-            say "                 then run this installer again"
             say "  See its logs:  $DK logs -f $NAME"
+            say ""
+            # Offer to do the update here rather than printing steps for
+            # someone to carry out. The credentials come from the saved
+            # configuration (or the database container itself), so
+            # recreating the app container cannot lose the connection.
+            if ask "Update IT-Vault to the latest image now?"; then
+                update_in_place
+                exit 0
+            fi
+            say ""
+            say "  Nothing changed. To update later, run this installer again"
+            say "  and answer yes, or use:  Settings ▸ General ▸ Check for Updates"
             say ""
             # Someone who installed without a database and now wants one is
             # otherwise stuck: this installer won't recreate a container that
@@ -730,6 +856,13 @@ fi
 
 # Asked here rather than after the pull, so the install is not waiting on a
 # download before it knows what it is building.
+# Anything a previous run saved comes back first, so an install that is
+# being repaired or re-run never has to be told its own database again.
+if load_conf; then
+    say "    reusing the saved configuration from $CONF_FILE"
+    [ -n "$DB_PASS_V" ] && WITH_DB=1
+fi
+
 # An install that already has our database container is reconnected to it
 # rather than asked about it: this is the update path, and the whole point
 # is that it keeps the database it already had.
@@ -791,6 +924,13 @@ if [ -n "$DB_ENV" ]; then
         -e DB_NAME="$DB_NAME_V" -e DB_USER="$DB_USER_V" -e DB_PASS="$DB_PASS_V"
 fi
 run "$@" "$IMAGE:$TAG"
+
+# Record where the database is before anything else can go wrong. This is
+# what makes the next update a no-op for the person running it.
+if [ -n "$DB_ENV" ]; then
+    save_conf "$DB_CONTAINER" "$DB_NAME_V" "$DB_USER_V" "$DB_PASS_V" || \
+        warn "Could not write $CONF_FILE -- an update will fall back to reading the containers."
+fi
 
 if [ -n "$DRY" ]; then
     say ""
