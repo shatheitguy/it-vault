@@ -503,8 +503,25 @@ update_in_place() {
     # Keep the network and published port the running container already has,
     # so an update never quietly moves the app somewhere else.
     _u_net="$($DK inspect -f "{{range \$k, \$v := .NetworkSettings.Networks}}{{\$k}} {{end}}" "$NAME" 2>/dev/null | awk "{print \$1}")"
-    _u_port="$($DK inspect -f "{{range \$p, \$c := .NetworkSettings.Ports}}{{range \$c}}{{.HostPort}}{{end}}{{end}}" "$NAME" 2>/dev/null | head -n 1)"
-    [ -n "$_u_port" ] && PORT="$_u_port"
+    # println, not bare output: publishing -p 5000:5000 binds BOTH IPv4 and
+    # IPv6, so this printed two host ports with nothing between them and the
+    # update tried to publish 50005000 -- which docker rejects, after the old
+    # container had already been removed.
+    _u_port="$($DK inspect \
+        -f "{{range \$p, \$c := .NetworkSettings.Ports}}{{range \$c}}{{println .HostPort}}{{end}}{{end}}" \
+        "$NAME" 2>/dev/null | sed -n "1p")"
+    case "$_u_port" in
+        ''|*[!0-9]*) _u_port="" ;;
+    esac
+    if [ -n "$_u_port" ] && [ "$_u_port" -ge 1 ] && [ "$_u_port" -le 65535 ]; then
+        PORT="$_u_port"
+    fi
+    # Everything the new container needs is settled BEFORE the old one is
+    # removed. Working it out afterwards is how a bad value left this host
+    # with no container at all.
+    case "$PORT" in
+        ''|*[!0-9]*) die "Could not work out which port to publish (got '$PORT'). Nothing was changed." ;;
+    esac
 
     step "Replacing the container (volumes are kept)"
     run rm -f "$NAME"
@@ -525,7 +542,14 @@ update_in_place() {
         set -- "$@" -e DB_HOST="$_u_host" -e DB_PORT=3306 \
             -e DB_NAME="$_u_name" -e DB_USER="$_u_user" -e DB_PASS="$_u_pass"
     fi
-    run "$@" "$IMAGE:$TAG"
+    if ! run "$@" "$IMAGE:$TAG"; then
+        say ""
+        warn "The new container did not start, and the old one is already gone."
+        say "    Your data is untouched -- it is all in the volumes. Bring it back with:"
+        say "      ${B}curl -sSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh${N}"
+        say ""
+        return 1
+    fi
 
     if [ -n "$_u_host" ]; then
         save_conf "$_u_host" "$_u_name" "$_u_user" "$_u_pass" >/dev/null 2>&1 || true
