@@ -33,7 +33,18 @@ case "$1" in
         *State.Status*)   echo running ;;
         *State.Running*)  echo true ;;
         *NetworkSettings.Networks*) echo "itvault-net " ;;
-        *NetworkSettings.Ports*)    echo 5000 ;;
+        *NetworkSettings.Ports*)
+          # real docker: one entry for 0.0.0.0 and one for :: -- two host
+          # ports. Concatenated, -p 5000:5000 became "50005000" (which docker
+          # rejects) and -p 80:5000 becomes "8080" (which it accepts, silently
+          # moving the app to the wrong port).
+          sp="${STUB_PORT:-5000}"
+          case "$fmt" in
+            *println*) printf '%s
+%s
+' "$sp" "$sp" ;;
+            *)         printf '%s%s' "$sp" "$sp" ;;
+          esac ;;
         *) echo "" ;;
       esac
       exit 0
@@ -83,6 +94,25 @@ grep 'run -d' "$LOG" | grep -q 'itvault_data:/app/data' \
   && check "volumes are reused, not recreated" 1 || check "volumes are reused, not recreated" 0
 grep 'run -d' "$LOG" | grep -q -- '--network itvault-net' \
   && check "it stays on the same network" 1 || check "it stays on the same network" 0
+# A container published with -p 5000:5000 binds IPv4 AND IPv6, so inspecting
+# its ports yields TWO host ports. Concatenated they became "50005000", which
+# docker rejects -- after the old container had already been removed, leaving
+# the host with nothing running.
+published="$(grep 'run -d' "$LOG" | grep -oE -- '-p [0-9]+:[0-9]+' | head -1)"
+case "$published" in
+  '-p 5000:5000') check "it republishes the one port it had" 1 ;;
+  *)              check "it republishes the one port it had" 0 "got '$published'" ;;
+esac
+
+# The case validation alone cannot catch: two 2-digit ports concatenate into a
+# perfectly valid 4-digit one, so the app moves ports without a word.
+: > "$LOG"
+STUB_PORT=80 PATH="$WORK/bin:$PATH" ITVAULT_CONF_DIR="$CONF" ITVAULT_YES=1   sh "$(dirname "$0")/../install.sh" > "$WORK/out80.txt" 2>&1 || true
+p80="$(grep 'run -d' "$LOG" | grep -oE -- '-p [0-9]+:[0-9]+' | head -1)"
+case "$p80" in
+  '-p 80:5000') check "a 2-digit port is not doubled into 8080" 1 ;;
+  *)            check "a 2-digit port is not doubled into 8080" 0 "got '$p80'" ;;
+esac
 ! grep -q 'volume rm\|volume prune' "$LOG" \
   && check "no volume is ever removed" 1 || check "no volume is ever removed" 0
 
