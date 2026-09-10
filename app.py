@@ -5779,7 +5779,10 @@ def label_page(a_id):
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
-    norem_mm = 2.6 if compact else 3.2
+    # two lines of it: an organisation name plus DO NOT REMOVE does not fit
+    # on one at a readable size, and clipping is not an option when the
+    # clipped half is the instruction
+    norem_mm = 4.2 if compact else 5.2
     reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
                    + gap_mm * (1 if compact else 2))
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
@@ -5857,7 +5860,7 @@ def label_page(a_id):
  .aid{{font-family:'Consolas','Courier New',monospace;font-size:3.1mm;font-weight:700;letter-spacing:0.08mm}}
  .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
- .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.9mm' if compact else '2.2mm'};letter-spacing:0.25mm;text-transform:uppercase;color:#000;white-space:nowrap;overflow:hidden}}
+ .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -5875,7 +5878,7 @@ def label_page(a_id):
    </div>
    <div id=qr class=qr></div>
  </div>
- <div class=norem>Do Not Remove</div>
+ <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
 </div></div>
 <div class="no-print" style="text-align:center;margin-top:10px"><button onclick="window.print()">🖨 PRINT LABEL</button></div>
 <script>new QRCode(document.getElementById('qr'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});</script>
@@ -5920,7 +5923,10 @@ def labels_page():
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
-    norem_mm = 2.6 if compact else 3.2
+    # two lines of it: an organisation name plus DO NOT REMOVE does not fit
+    # on one at a readable size, and clipping is not an option when the
+    # clipped half is the instruction
+    norem_mm = 4.2 if compact else 5.2
     reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
                    + gap_mm * (1 if compact else 2))
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
@@ -5980,7 +5986,7 @@ def labels_page():
    <div class=meta>{rows_html}</div>
    <div id={qr_id} class=qr></div>
  </div>
- <div class=norem>Do Not Remove</div>
+ <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
 </div>"""
         scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});"
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
@@ -6001,7 +6007,7 @@ def labels_page():
  .kv b{{color:#333;font-weight:700}}
  .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
- .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.9mm' if compact else '2.2mm'};letter-spacing:0.25mm;text-transform:uppercase;color:#000;white-space:nowrap;overflow:hidden}}
+ .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
