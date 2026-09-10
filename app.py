@@ -5659,6 +5659,49 @@ def asset_qr(a_id):
     asset = row_to_dict(a)
     return jsonify({"asset": asset, "url": f"{lan_base_url()}asset/{a_id}"})
 
+def _employee_label_map():
+    """{EmployeeID: (EmpCode, EmployeeName)} for putting on an asset tag.
+
+    Assets store Employees.EmployeeID, which for anything synced from AD is
+    the AD username -- not an employee number. Printing it raw under a
+    heading of "Employee ID" put a login name on the tag. The real number is
+    EmpCode (EMP-001, assigned when the employee is created), so that is what
+    a field called Employee ID has to show.
+
+    One query for the whole table rather than one per asset: a sheet of fifty
+    labels would otherwise be fifty round trips. Opens its own connection
+    because both label routes have already closed theirs by the time they
+    build their fields, and holds no lock anyone else wants.
+    """
+    out = {}
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT EmployeeID, EmpCode, EmployeeName FROM Employees")
+        for r in cur.fetchall():
+            key = (r.get("EmployeeID") or "").strip()
+            if key:
+                out[key] = ((r.get("EmpCode") or "").strip(),
+                            (r.get("EmployeeName") or "").strip())
+    except Exception as e:
+        print(f"[itvault] could not read employees for the label: {e}", flush=True)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    return out
+
+
+def _employee_for_label(emp_map, assigned):
+    """(id, name) for one asset. Falls back to the stored value, so a tag for
+    an asset assigned to someone since deleted still says something."""
+    assigned = (assigned or "").strip()
+    if not assigned:
+        return "", ""
+    code, name = emp_map.get(assigned, ("", ""))
+    return (code or assigned), (name or assigned)
+
+
 @app.route("/label/<a_id>")
 def label_page(a_id):
     # Build a LAN-reachable base URL so QR codes scan from any device on the network
@@ -5709,6 +5752,10 @@ def label_page(a_id):
     # embed logo as base64 if present (no extra request, prints reliably)
     logo_uri = _logo_data_uri()
     rows_html = ""
+    # the tag says "Employee ID", so it shows the employee NUMBER -- not the
+    # AD username the asset row actually stores
+    _emp_code, _emp_name = _employee_for_label(_employee_label_map(),
+                                               asset.get("EmployeeID"))
     field_defs = {
         "Name": ("Asset", asset.get("Name")),
         "AssetID": ("Asset ID", asset["_id"][:12]),
@@ -5718,7 +5765,8 @@ def label_page(a_id):
         "Location": ("Location", asset.get("Location")),
         "ReceivedBy": ("Signed By", asset.get("ReceivedBy")),
         "ReceiverDate": ("Signed Date", asset.get("NotesReceived")),
-        "EmployeeID": ("Employee ID", asset.get("EmployeeID")),
+        "EmployeeID": ("Employee ID", _emp_code),
+        "EmployeeName": ("Employee", _emp_name),
         "Department": ("Department", asset.get("Department")),
         "Warranty": ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"),
         "PurchaseDate": ("Purchase", asset.get("PurchaseDate")),
@@ -5838,7 +5886,10 @@ def labels_page():
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if (show_logo and logo_uri) else ""
     boxes_html = ""
     scripts = ""
+    # read once for the whole sheet, not once per label
+    _emp_map = _employee_label_map()
     for idx, asset in enumerate(ordered):
+        _emp_code, _emp_name = _employee_for_label(_emp_map, asset.get("EmployeeID"))
         field_defs = {
             "Name": ("Asset", asset.get("Name")),
             "AssetID": ("Asset ID", asset["_id"][:12]),
@@ -5848,7 +5899,8 @@ def labels_page():
             "Location": ("Location", asset.get("Location")),
             "ReceivedBy": ("Signed By", asset.get("ReceivedBy")),
             "ReceiverDate": ("Signed Date", asset.get("NotesReceived")),
-            "EmployeeID": ("Employee ID", asset.get("EmployeeID")),
+            "EmployeeID": ("Employee ID", _emp_code),
+            "EmployeeName": ("Employee", _emp_name),
             "Department": ("Department", asset.get("Department")),
             "Warranty": ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"),
             "PurchaseDate": ("Purchase", asset.get("PurchaseDate")),
@@ -6115,8 +6167,11 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
 .asset-table td:first-child{color:var(--muted);width:150px;font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;vertical-align:top}
 .asset-table td:last-child{color:var(--txt);font-weight:600;word-break:break-word;overflow-wrap:anywhere;white-space:pre-line}
 .sig-label{color:var(--muted);font-size:13px;margin-bottom:6px;display:block}
-#sigCanvas{width:100%;max-width:480px;height:160px;border-radius:var(--radius);background:var(--surface2);border:2px solid var(--line);cursor:crosshair;display:none;touch-action:none}
-#sigPlaceholder{width:100%;max-width:480px;height:160px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface2);cursor:pointer}
+/* White pad, because the ink is black. The drawing buffer itself stays
+   transparent -- see initCanvas() -- so the exported PNG is the stroke
+   alone and drops onto the PDF without a box around it. */
+#sigCanvas{width:100%;max-width:480px;height:160px;border-radius:var(--radius);background:#ffffff;border:2px solid var(--line);cursor:crosshair;display:none;touch-action:none}
+#sigPlaceholder{width:100%;max-width:480px;height:160px;display:flex;align-items:center;justify-content:center;color:#5d6b82;font-size:14px;border:2px dashed var(--line);border-radius:var(--radius);background:#ffffff;cursor:pointer}
 #sigPlaceholder.hidden{display:none}
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 .btnrow .btn{flex:1;min-width:140px;min-height:44px}
@@ -6159,29 +6214,59 @@ if(!token){document.body.innerHTML='<div class=sign-card><h3>❌ No token</h3><p
 const placeholder=document.getElementById('sigPlaceholder');
 const canvas=document.getElementById('sigCanvas');
 let ctx=null, isDrawing=false, hasSig=false;
-function accentColor(){try{return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#ff3b30';}catch(e){return '#ff3b30';}}
+// Signatures are always black. They used to take the theme accent, so a
+// red or blue mark ended up on the acknowledgement PDF and on the record --
+// a signature is not a themed element, and ink is black.
+const SIG_INK='#000000';
+function padSize(){
+  // The size the drawing buffer should be. Every source of truth here can
+  // read 0 (or just the border width) in the frame the canvas stops being
+  // display:none, so each is checked before it is trusted and there is a
+  // fixed fallback at the end. 40px is the floor: anything smaller is not a
+  // pad, it is a measurement that has not happened yet.
+  const cs = getComputedStyle(canvas);
+  const bx = (parseFloat(cs.borderLeftWidth)||0) + (parseFloat(cs.borderRightWidth)||0);
+  const by = (parseFloat(cs.borderTopWidth)||0) + (parseFloat(cs.borderBottomWidth)||0);
+  let w = canvas.clientWidth;
+  if(!(w > 40)) w = canvas.offsetWidth - bx;
+  if(!(w > 40) && canvas.parentElement) w = canvas.parentElement.clientWidth - bx;
+  if(!(w > 40)) w = 480;
+  let h = canvas.clientHeight;
+  if(!(h > 40)) h = canvas.offsetHeight - by;
+  if(!(h > 40)) h = 160;
+  return { w: Math.min(Math.round(w), 480), h: Math.round(h) };
+}
 function initCanvas(){
-  if(ctx) return;
   // Must run AFTER the canvas is actually visible -- offsetWidth/Height read
   // 0 on a display:none element, which used to lock the drawing buffer to the
   // 480x160 fallback regardless of the phone's real (narrower) screen width,
   // making touches land in the wrong spot on mobile. Also scales the buffer
   // by devicePixelRatio so the line doesn't look blurry on retina/high-DPI
   // phone screens.
+  //
+  // Measuring in the same frame the canvas is un-hidden is not reliable
+  // either: the layout had not settled, offsetWidth came back as just the 4px
+  // of borders, and the buffer was locked to 4px wide -- a pad nobody could
+  // sign on. So the size is sanity-checked, and this can re-run to correct
+  // itself (it refuses to once there is a signature, because resizing a
+  // canvas clears it).
+  const {w, h} = padSize();
   const dpr = window.devicePixelRatio || 1;
-  const w = canvas.offsetWidth||480, h = canvas.offsetHeight||160;
-  canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
+  const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  if(ctx && canvas.width === bw && canvas.height === bh) return;
+  if(ctx && hasSig) return;
+  canvas.width = bw; canvas.height = bh;
   ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
   ctx.lineWidth = 2; ctx.lineCap='round'; ctx.lineJoin='round';
-  ctx.strokeStyle = accentColor();
-  // No fillRect here on purpose -- the canvas's own CSS background (dark,
-  // matching the page) shows through while signing, but the drawing buffer
-  // itself stays transparent, so the exported PNG (toDataURL) is just the
-  // stroke with a transparent background. A baked-in dark fill here used to
-  // ship as an opaque black box wherever the signature got embedded later
-  // (the emailed PDF, the QR scan page), regardless of that page's own
-  // background color.
+  ctx.strokeStyle = SIG_INK;
+  // Nothing is painted into the buffer on purpose. The canvas's own CSS
+  // background (white, so black ink is visible while signing) shows through
+  // in the browser, but the drawing buffer itself stays transparent -- so the
+  // exported PNG (toDataURL) is the stroke alone. Filling it here would ship
+  // an opaque rectangle wherever the signature is embedded later (the emailed
+  // PDF, the QR scan page), whatever that page's own background is.
 }
 function getPos(e){
   const rect=canvas.getBoundingClientRect();
@@ -6200,7 +6285,22 @@ function draw(e){
   const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; updateClearBtn();
 }
 function stopDraw(){ if(!isDrawing) return; isDrawing=false; ctx.beginPath(); updateClearBtn(); }
-function showCanvas(){ placeholder.classList.add('hidden'); canvas.style.display='block'; initCanvas(); canvas.focus(); }
+function showCanvas(){
+  placeholder.classList.add('hidden');
+  canvas.style.display='block';
+  // initCanvas() right here measured a canvas the browser had not laid out
+  // yet. It still runs immediately so a pointer already on its way down
+  // has a context to draw into, then again on the next frame to correct
+  // the size once the real width is known.
+  initCanvas();
+  requestAnimationFrame(initCanvas);
+  canvas.focus();
+}
+// A rotated phone changes the pad's width. Re-sizing wipes a canvas, so
+// this only ever corrects an empty one -- initCanvas() refuses once there
+// is a signature on it.
+window.addEventListener('resize', () => { if(!hasSig) initCanvas(); });
+
 placeholder.addEventListener('click',()=>{showCanvas();});
 canvas.addEventListener('mousedown',startDraw);
 canvas.addEventListener('mousemove',draw);
