@@ -1523,6 +1523,13 @@ def init_db():
         cur.execute("SELECT SignatureData FROM Assets LIMIT 1")
     except Exception:
         cur.execute("ALTER TABLE Assets ADD COLUMN SignatureData TEXT")
+    # The nonce of the ONE sign link that is currently valid for this asset.
+    # Set when a link is issued, cleared the moment it is used, so a link
+    # cannot be signed twice and issuing a new one retires the old.
+    try:
+        cur.execute("SELECT SignNonce FROM Assets LIMIT 1")
+    except Exception:
+        cur.execute("ALTER TABLE Assets ADD COLUMN SignNonce VARCHAR(32) DEFAULT ''")
     # migrate: add SLA policy columns to Settings if missing
     for col, typ in [("sla_low","INT DEFAULT 72"),("sla_normal","INT DEFAULT 24"),("sla_high","INT DEFAULT 8"),("sla_urgent","INT DEFAULT 4"),("sla_breach_notify","BOOLEAN DEFAULT 1"),("auto_assign_roundrobin","BOOLEAN DEFAULT 0"),("notify_on_create","BOOLEAN DEFAULT 1"),("notify_on_resolve","BOOLEAN DEFAULT 1"),("notify_on_reply","BOOLEAN DEFAULT 1")]:
         try:
@@ -6144,7 +6151,14 @@ def get_sign_link(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
-    tk = _sign_token({"asset_id":a_id, "name":a["Name"]}, exp_hours=7)
+    # Single use, and good for seven DAYS -- this said exp_hours=7, which is
+    # seven hours: a link emailed on a Friday afternoon was dead before
+    # anyone read it on Monday.
+    nonce = secrets.token_hex(8)
+    cur.execute("UPDATE Assets SET SignNonce=%s WHERE _id=%s", (nonce, a_id))
+    c.commit()
+    tk = _sign_token({"asset_id": a_id, "name": a["Name"], "n": nonce},
+                     exp_hours=24 * 7)
     c.close()
     return jsonify({"ok": True, "token": tk, "url": f"{request.host_url}sign?token={quote(tk)}"})
 
@@ -6418,13 +6432,51 @@ load();
 def sign_page():
     return SIGNATURE_HTML
 
+def _sign_link_asset(cur, tk):
+    """Resolve a sign link to an asset id. Returns (asset_id, error).
+
+    A link is single use: signing clears the asset's nonce, so opening it
+    again -- or submitting twice -- is refused rather than silently
+    overwriting the signature that is already on record. Issuing a new link
+    replaces the nonce, which retires any link sent earlier.
+
+    Links issued before this existed carry no nonce. Those are honoured until
+    the asset is signed, so anything already in someone's inbox still works,
+    and they age out on their own.
+    """
+    data = _verify_token(tk)
+    if not isinstance(data, dict) or not data.get("asset_id"):
+        return None, ("This signature link has expired. Ask IT to send you a "
+                      "new one.")
+    aid = data["asset_id"]
+    cur.execute("SELECT SignNonce, SignatureData FROM Assets WHERE _id=%s", [aid])
+    row = cur.fetchone()
+    if not row:
+        return None, "That asset no longer exists."
+    sent = (data.get("n") or "").strip()
+    held = (row.get("SignNonce") or "").strip()
+    if sent:
+        if not held:
+            return None, ("This link has already been used -- the acknowledgement "
+                          "is on record. Ask IT if you need to sign again.")
+        if sent != held:
+            return None, ("This link is no longer valid because a newer one was "
+                          "issued. Please use the most recent email.")
+    elif (row.get("SignatureData") or "").strip():
+        return None, ("This asset has already been signed for. Ask IT if you "
+                      "need to sign again.")
+    return aid, None
+
+
 @app.route("/api/assets/sign/verify")
 def verify_sign():
-    tk = request.args.get("token","");
-    d = _verify_token(tk)
-    if not d: return jsonify({"ok": False, "error": "invalid or expired token"}), 400
+    tk = request.args.get("token","")
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id AS id, AssetTag, Name, Type, Serial, Status, Location, Notes, ReceivedBy, NotesReceived, SignatureData, EmployeeID FROM Assets WHERE _id=%s", [d["asset_id"]]); a = cur.fetchone()
+    aid, err = _sign_link_asset(cur, tk)
+    if err:
+        c.close()
+        return jsonify({"ok": False, "error": err}), 400
+    cur.execute("SELECT _id AS id, AssetTag, Name, Type, Serial, Status, Location, Notes, ReceivedBy, NotesReceived, SignatureData, EmployeeID FROM Assets WHERE _id=%s", [aid]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"ok": False, "error": "asset not found"}), 404
     if a.get("EmployeeID"):
         cur.execute("SELECT Department, Designation FROM Employees WHERE EmployeeID=%s", [a["EmployeeID"]])
@@ -6625,17 +6677,21 @@ def approve_asset():
     d = request.get_json(force=True) or {}
     tk = d.get("token",""); name = d.get("name","").strip()
     if not name: return jsonify({"error": "approver name required"}), 400
-    data = _verify_token(tk)
-    if not data: return jsonify({"error": "invalid or expired token"}), 400
-    aid = data["asset_id"]
     c = conn(); cur = c.cursor()
+    aid, err = _sign_link_asset(cur, tk)
+    if err:
+        c.close()
+        return jsonify({"error": err}), 400
     cur.execute("SELECT Name FROM Assets WHERE _id=%s", [aid]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     receivedBy = name
     notesReceived = datetime.now().strftime("%Y-%m-%d")
     sigData = (d.get("data") or "").strip()
-    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s WHERE _id=%s",
+    # SignNonce is cleared in the same statement that records the signature,
+    # so the link dies exactly when the acknowledgement lands -- not a moment
+    # before, and never twice.
+    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s, SignNonce='' WHERE _id=%s",
                 (receivedBy, name, notesReceived, sigData, aid))
     c.commit(); c.close()
     audit(session.get("user"), "ACKNOWLEDGE", aid, f"{name} acknowledged")
