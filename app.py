@@ -5315,7 +5315,8 @@ def _lookup_person_email(identifier):
     r = cur.fetchone(); c.close()
     return (r.get("Email") if r else "") or ""
 
-def notify_person_asset_assigned(employee_id, asset, checked_out=False):
+def notify_person_asset_assigned(employee_id, asset, checked_out=False, reminder=False,
+                                 sign_url=None):
     """Emails the specific person an asset is assigned to (not the general
     staff broadcast) -- only Asset ID + Serial, never MAC, per policy. Includes
     a signature/acknowledgement link so they can sign for it directly from
@@ -5327,22 +5328,39 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
     name = (asset.get("Name") or "").strip()
     what = f"{tag} ({name})" if name else tag
     verb = "checked out to you" if checked_out else "assigned to you"
-    lead = f"We have deployed asset {what} to you."
     ask = "Kindly review the details and acknowledge receipt by signing."
+    if reminder:
+        # same asset, same link -- but a mail that reads like a first
+        # notification is confusing when it is the second or third
+        lead = (f"This is a reminder that asset {what} is assigned to you "
+                "and still needs your acknowledgement.")
+        subj = f"Reminder: please acknowledge asset {name or tag}"
+        head = (f"Asset <b>{tag}</b>{(' (' + name + ')') if name else ''} is "
+                f"assigned to you and still needs your acknowledgement.<br>{ask}")
+    else:
+        lead = f"We have deployed asset {what} to you."
+        subj = f"Asset {verb}: {name or tag}"
+        head = (f"We have deployed asset <b>{tag}</b>"
+                f"{(' (' + name + ')') if name else ''} to you.<br>{ask}")
     body = f"{lead}\n"
     html_body = None
     aid = asset.get("_id")
     if aid:
         try:
-            tk = _sign_token({"asset_id": aid, "name": asset.get("Name", "")}, exp_hours=168)
-            sign_url = f"{_public_base()}sign?token={quote(tk)}"
+            # A nonce-bearing link, the same as the one the dialog hands out:
+            # without it an old email stayed valid after a new link was
+            # issued, so resending retired nothing.
+            #
+            # A caller that has already issued one passes it in, so a resend
+            # does not immediately invalidate the link it just mailed.
+            if not sign_url:
+                _tk, sign_url = _issue_sign_link(aid, asset.get("Name", ""))
             body += f"\n{ask}\n{sign_url}\n"
             html_body = _button_email_html(
-                f"We have deployed asset <b>{tag}</b>{(' (' + name + ')') if name else ''} to you.<br>{ask}",
-                "Review &amp; Sign Acknowledgement", sign_url)
+                head, "Review &amp; Sign Acknowledgement", sign_url)
         except Exception as e:
             print("sign link build error:", e)
-    return _send_simple_email(to, f"Asset {verb}: {name or tag}", body, html_body=html_body)
+    return _send_simple_email(to, subj, body, html_body=html_body)
 
 def notify_asset_status_changed(asset, old_status, new_status):
     """Emails the assigned employee, whoever requested it, and every
@@ -6239,22 +6257,115 @@ def _verify_token(tk):
     except Exception:
         return None
 
+def _issue_sign_link(a_id, name=""):
+    """A fresh acknowledgement link, retiring any issued for this asset before.
+
+    Rotating the nonce is what makes resending mean something: the link in
+    the employee's older email stops working, so there is only ever one live
+    link per asset and two signatures cannot race each other.
+
+    Single use, and good for seven DAYS -- this once said exp_hours=7, which
+    is seven hours: a link emailed on a Friday afternoon was dead before
+    anyone read it on Monday.
+    """
+    nonce = secrets.token_hex(8)
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Assets SET SignNonce=%s WHERE _id=%s", (nonce, a_id))
+    c.commit(); c.close()
+    tk = _sign_token({"asset_id": a_id, "name": name or "", "n": nonce},
+                     exp_hours=24 * 7)
+    return tk, f"{_public_base()}sign?token={quote(tk)}"
+
+
+def _sign_recipient(identifier):
+    """(name, email) for whoever an asset is assigned to.
+
+    The assignee can be a system user or an employee record -- checkout lets
+    you pick from either -- so both tables are tried, in that order.
+    """
+    identifier = (identifier or "").strip()
+    if not identifier:
+        return "", ""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT display, email FROM Users WHERE username=%s", [identifier])
+    r = cur.fetchone()
+    if r and (r.get("email") or "").strip():
+        c.close(); return ((r.get("display") or identifier), r["email"].strip())
+    cur.execute("SELECT EmployeeName, Email FROM Employees WHERE EmployeeID=%s",
+                [identifier])
+    r = cur.fetchone(); c.close()
+    if not r:
+        return identifier, ""
+    return ((r.get("EmployeeName") or identifier), (r.get("Email") or "").strip())
+
+
+def _smtp_ready():
+    """Whether mail is set up at all. Worth asking before offering to send:
+    otherwise the only feedback is a send that quietly reports failure."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT smtp_host FROM Settings WHERE id=1")
+        r = cur.fetchone(); c.close()
+        return bool(((r or {}).get("smtp_host") or "").strip())
+    except Exception:
+        return False
+
+
 @app.route("/api/assets/<a_id>/sign/link")
 @auth_required(module="assets", level="write")
 def get_sign_link(a_id):
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
+    cur.execute("SELECT _id, Name, EmployeeID FROM Assets WHERE _id=%s", [a_id])
+    a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
-    # Single use, and good for seven DAYS -- this said exp_hours=7, which is
-    # seven hours: a link emailed on a Friday afternoon was dead before
-    # anyone read it on Monday.
-    nonce = secrets.token_hex(8)
-    cur.execute("UPDATE Assets SET SignNonce=%s WHERE _id=%s", (nonce, a_id))
-    c.commit()
-    tk = _sign_token({"asset_id": a_id, "name": a["Name"], "n": nonce},
-                     exp_hours=24 * 7)
     c.close()
-    return jsonify({"ok": True, "token": tk, "url": f"{_public_base()}sign?token={quote(tk)}"})
+    tk, url = _issue_sign_link(a_id, a["Name"])
+    # Who the link can be emailed to, so the dialog can offer it rather than
+    # leaving copy-and-paste as the only way to get it to the employee.
+    who, to = _sign_recipient(a.get("EmployeeID"))
+    mail_ok = _smtp_ready()
+    return jsonify({"ok": True, "token": tk, "url": url,
+                    "assignee": who, "assignee_email": to,
+                    "can_email": bool(to) and mail_ok,
+                    "smtp_ready": mail_ok})
+
+
+@app.route("/api/assets/<a_id>/sign/send", methods=["POST"])
+@auth_required(module="assets", level="write")
+def send_sign_link(a_id):
+    """Email the acknowledgement link to whoever the asset is assigned to.
+
+    The link goes out with the asset when it is assigned, but that email
+    gets buried, deleted, or arrives while someone is on leave -- and the
+    only way to chase it was to copy the link out of the dialog and paste
+    it into a mail client by hand. Each send issues a new link, so the
+    employee cannot be looking at a stale one.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag, Name, Serial, Status, EmployeeID "
+                "FROM Assets WHERE _id=%s", [a_id])
+    a = cur.fetchone(); c.close()
+    if not a:
+        return jsonify({"error": "asset not found"}), 404
+    emp = (a.get("EmployeeID") or "").strip()
+    if not emp:
+        return jsonify({"error": "This asset is not assigned to anyone yet, so there is nobody to send it to. Assign it first, or copy the link."}), 400
+    who, to = _sign_recipient(emp)
+    if not to:
+        return jsonify({"error": f"{who} has no email address on file. Add one on the Employees page, or copy the link instead."}), 400
+    if not _smtp_ready():
+        return jsonify({"error": "Email is not set up yet -- add an SMTP server under Settings before sending. You can copy the link in the meantime."}), 400
+    # Issued here and passed down, so the link that goes in the mail is the
+    # same one handed back to the dialog. Letting the notifier mint its own
+    # would rotate the nonce a second time and kill the mail we just sent.
+    _tk, url = _issue_sign_link(a_id, a.get("Name") or "")
+    ok = notify_person_asset_assigned(
+        emp, dict(a), checked_out=(a.get("Status") == "Checked-Out"),
+        reminder=True, sign_url=url)
+    if not ok:
+        return jsonify({"error": f"Could not send to {to}. Check the SMTP settings and the server log."}), 502
+    audit(session.get("user"), "SIGN_LINK_SENT", a_id, f"acknowledgement link emailed to {to}")
+    return jsonify({"ok": True, "sent_to": to, "assignee": who, "url": url})
 
 # The colour maths behind every publicly-shared page: the acknowledgement
 # page and the page a scanned QR opens. Both are seen by people who never
