@@ -6047,14 +6047,26 @@ def asset_public(a_id):
         except Exception:
             pass
     # org branding + contact
+    # The theme columns come along too. This page used to select the name
+    # and contact only, then link style.css and read var(--accent) from it
+    # -- so a tag scanned on a yellow-themed install opened stock red, and
+    # the one page an employee sees without logging in was the one page
+    # that ignored the branding.
+    THEME_COLS = ("theme_preset", "bg_type", "bg", "comp_bg", "radius",
+                  "accent", "accent2")
+    brand_theme = {}
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT app_name, logo_text, company_phone, company_address FROM Settings WHERE id=1")
+        cols = ", ".join("`%s`" % col for col in THEME_COLS)
+        scur.execute("SELECT app_name, logo_text, company_phone, company_address, "
+                     + cols + " FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
         company_phone = (srow.get("company_phone") or "") if srow else ""
         company_address = (srow.get("company_address") or "") if srow else ""
+        if srow:
+            brand_theme = {k: srow.get(k) for k in THEME_COLS}
     except Exception:
         app_name, logo_text, company_phone, company_address = "IT-Vault", "IT-Vault", "", ""
     # who actually processed this asset (the staff/admin account, as opposed to
@@ -6083,6 +6095,13 @@ def asset_public(a_id):
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if logo_uri else ""
     contact_bits = [c for c in [company_phone, company_address] if c]
     contact_html = " &nbsp;·&nbsp; ".join(contact_bits) if contact_bits else "—"
+    # Rendered into the document rather than fetched on load: a QR is
+    # scanned on a phone on mobile data, and a round trip before the
+    # colours land is a visible flash of the wrong theme. PUBLIC_THEME_JS
+    # is the acknowledgement page's engine, shared so the two cannot drift.
+    theme_script = ("<script>" + PUBLIC_THEME_JS
+                    + "applySignTheme("
+                    + json.dumps(brand_theme, default=str) + ");</script>")
     return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Asset {asset['Name']}</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -6106,12 +6125,12 @@ tr:last-child td{{border-bottom:none}}
 .contact{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);font-size:14px}}
 .contact b{{color:var(--accent)}}
 .foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
-a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:#fff;border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
+a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:var(--btn-text,#04121f);border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
 .sig-block{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
 .sig-block b{{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:8px}}
 .sig-block img{{max-width:220px;max-height:110px;background:#fff;border-radius:6px;padding:6px}}
 @media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} }}
-</style></head><body><div class=wrap><div class=card>
+</style>{theme_script}</head><body><div class=wrap><div class=card>
  <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
  <div class=assetid-badge>{asset.get("AssetTag") or asset["_id"][:12]}</div>
  <div class=title>{asset['Name']}</div>
@@ -6213,6 +6232,82 @@ def get_sign_link(a_id):
                      exp_hours=24 * 7)
     c.close()
     return jsonify({"ok": True, "token": tk, "url": f"{_public_base()}sign?token={quote(tk)}"})
+
+# The colour maths behind every publicly-shared page: the acknowledgement
+# page and the page a scanned QR opens. Both are seen by people who never
+# log in, and both have to come out in the colours the install is actually
+# themed in -- the scan page used to link style.css and inherit its stock
+# red, so a tag scanned on a yellow-themed install opened a red page.
+#
+# Kept as one string rather than copied into each template: the contrast
+# safeguards in here (ensureAccentVisible, onBg, muteFor) are the whole
+# point, and two copies would drift.
+PUBLIC_THEME_JS = r'''
+/* ---- branding + theme (same color math as the main app / login page, so
+   this publicly-shared page always gets correct, readable colors instead of
+   just a few vars copied straight through) ---- */
+function hex6(v, fb){
+  const s=String(v==null?'':v).trim();
+  if(/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
+  if(/^#[0-9a-fA-F]{3}$/.test(s)) return ('#'+s[1]+s[1]+s[2]+s[2]+s[3]+s[3]).toLowerCase();
+  return fb;
+}
+function hexRgb(h){ const s=hex6(h,'#000000'); return [parseInt(s.slice(1,3),16),parseInt(s.slice(3,5),16),parseInt(s.slice(5,7),16)]; }
+function rgba(h,a){ const c=hexRgb(h); return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'; }
+function shade(h,amt){ const c=hexRgb(h); const f=n=>{const v=Math.max(0,Math.min(255,Math.round(n+255*amt)));return v.toString(16).padStart(2,'0');}; return '#'+f(c[0])+f(c[1])+f(c[2]); }
+function isLightHex(h){ const c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.114)>150; }
+function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
+function muteFor(bgHex,k){ const light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
+function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*bl;}; const la=L(a),lb=L(b); const hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
+// Button labels sit on top of --accent. A fixed dark ink disappears on a
+// near-black accent and a fixed white one disappears on a bright yellow,
+// so pick whichever of the two the accent actually contrasts with -- the
+// logged-in app has always done this; the public pages never did.
+function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
+function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
+function applySignTheme(b){
+  try{
+    const bgType=b.bg_type==='gradient'?'gradient':'solid';
+    const bgRaw=String(b.bg||'').trim();
+    let bgA='#0a0d13', bgB='#121826';
+    if(bgType==='gradient'){
+      const found=bgRaw.match(/#[0-9a-fA-F]{3,6}/g)||[];
+      bgA=hex6(found[0],'#0a0d13'); bgB=hex6(found[1],'#121826');
+    }
+    const baseHex=bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13');
+    const bgValue=bgType==='gradient'?('linear-gradient(135deg, '+bgA+', '+bgB+')'):baseHex;
+    const surface=hex6(b.comp_bg,'#121826');
+    const light=isLightHex(baseHex);
+    const surfaceLight=isLightHex(surface);
+    const accent=ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
+    const accent2=ensureAccentVisible(hex6(b.accent2,'#c0392b'), surface);
+    const radius=Math.max(0,Math.min(24,parseInt(b.radius,10)||12));
+    const r=document.documentElement.style;
+    r.setProperty('--bg', bgValue);
+    r.setProperty('--bg1', light?shade(baseHex,-0.04):shade(baseHex,0.03));
+    r.setProperty('--surface', surface);
+    r.setProperty('--surface2', surfaceLight?shade(surface,-0.04):shade(surface,-0.02));
+    r.setProperty('--line', surfaceLight?shade(surface,-0.14):shade(surface,0.10));
+    r.setProperty('--line2', surfaceLight?shade(surface,-0.22):shade(surface,0.16));
+    r.setProperty('--txt', onBg(baseHex));
+    r.setProperty('--muted', muteFor(baseHex,'muted'));
+    r.setProperty('--muted2', muteFor(baseHex,'muted2'));
+    r.setProperty('--accent', accent);
+    r.setProperty('--accent2', accent2);
+    r.setProperty('--accent-soft', rgba(accent,0.14));
+    r.setProperty('--btn-text', bestTextOn(accent));
+    r.setProperty('--btn-mag-text', bestTextOn(accent2));
+    r.setProperty('--radius', radius+'px');
+    // The scan page applies this from <head> so the page never paints in
+    // the wrong colours first; <body> does not exist that early, and an
+    // unguarded reference here threw and swallowed the class.
+    const mark=()=>document.body&&document.body.classList.toggle('light', light);
+    if(document.body) mark();
+    else document.addEventListener('DOMContentLoaded', mark);
+  }catch(e){}
+}
+'''
+
 
 SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>IT-Vault // Asset Acknowledgement</title>
@@ -6455,57 +6550,7 @@ document.getElementById('saveSign').addEventListener('click',async()=>{
   if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+data+'">'); w.document.close();};}}
   else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
 });
-/* ---- branding + theme (same color math as the main app / login page, so
-   this publicly-shared page always gets correct, readable colors instead of
-   just a few vars copied straight through) ---- */
-function hex6(v, fb){
-  const s=String(v==null?'':v).trim();
-  if(/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
-  if(/^#[0-9a-fA-F]{3}$/.test(s)) return ('#'+s[1]+s[1]+s[2]+s[2]+s[3]+s[3]).toLowerCase();
-  return fb;
-}
-function hexRgb(h){ const s=hex6(h,'#000000'); return [parseInt(s.slice(1,3),16),parseInt(s.slice(3,5),16),parseInt(s.slice(5,7),16)]; }
-function rgba(h,a){ const c=hexRgb(h); return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'; }
-function shade(h,amt){ const c=hexRgb(h); const f=n=>{const v=Math.max(0,Math.min(255,Math.round(n+255*amt)));return v.toString(16).padStart(2,'0');}; return '#'+f(c[0])+f(c[1])+f(c[2]); }
-function isLightHex(h){ const c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.114)>150; }
-function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
-function muteFor(bgHex,k){ const light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
-function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*bl;}; const la=L(a),lb=L(b); const hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
-function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
-function applySignTheme(b){
-  try{
-    const bgType=b.bg_type==='gradient'?'gradient':'solid';
-    const bgRaw=String(b.bg||'').trim();
-    let bgA='#0a0d13', bgB='#121826';
-    if(bgType==='gradient'){
-      const found=bgRaw.match(/#[0-9a-fA-F]{3,6}/g)||[];
-      bgA=hex6(found[0],'#0a0d13'); bgB=hex6(found[1],'#121826');
-    }
-    const baseHex=bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13');
-    const bgValue=bgType==='gradient'?('linear-gradient(135deg, '+bgA+', '+bgB+')'):baseHex;
-    const surface=hex6(b.comp_bg,'#121826');
-    const light=isLightHex(baseHex);
-    const surfaceLight=isLightHex(surface);
-    const accent=ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
-    const accent2=ensureAccentVisible(hex6(b.accent2,'#c0392b'), surface);
-    const radius=Math.max(0,Math.min(24,parseInt(b.radius,10)||12));
-    const r=document.documentElement.style;
-    r.setProperty('--bg', bgValue);
-    r.setProperty('--bg1', light?shade(baseHex,-0.04):shade(baseHex,0.03));
-    r.setProperty('--surface', surface);
-    r.setProperty('--surface2', surfaceLight?shade(surface,-0.04):shade(surface,-0.02));
-    r.setProperty('--line', surfaceLight?shade(surface,-0.14):shade(surface,0.10));
-    r.setProperty('--line2', surfaceLight?shade(surface,-0.22):shade(surface,0.16));
-    r.setProperty('--txt', onBg(baseHex));
-    r.setProperty('--muted', muteFor(baseHex,'muted'));
-    r.setProperty('--muted2', muteFor(baseHex,'muted2'));
-    r.setProperty('--accent', accent);
-    r.setProperty('--accent2', accent2);
-    r.setProperty('--accent-soft', rgba(accent,0.14));
-    r.setProperty('--radius', radius+'px');
-    document.body.classList.toggle('light', light);
-  }catch(e){}
-}
+/*__PUBLIC_THEME_JS__*/
 (async()=>{ try{
   const b=await (await fetch('/api/branding')).json();
   const name=b.app_name||'IT-Vault';
@@ -6516,6 +6561,10 @@ function applySignTheme(b){
 }catch(e){} })();
 load();
 </script></body></html>"""
+
+# the shared theme code is spliced in at import, so the template above stays
+# readable and there is only ever one copy of it
+SIGNATURE_HTML = SIGNATURE_HTML.replace("/*__PUBLIC_THEME_JS__*/", PUBLIC_THEME_JS)
 
 @app.route("/sign")
 def sign_page():
