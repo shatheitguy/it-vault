@@ -6181,6 +6181,14 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
 .asset-table td:first-child{color:var(--muted);width:150px;font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;vertical-align:top}
 .asset-table td:last-child{color:var(--txt);font-weight:600;word-break:break-word;overflow-wrap:anywhere;white-space:pre-line}
 .sig-label{color:var(--muted);font-size:13px;margin-bottom:6px;display:block}
+/* A refused link is the whole message, not a footnote under a form
+   nobody can submit. */
+.link-notice{text-align:center;padding:26px 18px;border-radius:var(--radius);
+   background:var(--surface2);border:1px solid var(--line)}
+.link-notice .ln-ico{font-size:34px;line-height:1;margin-bottom:10px}
+.link-notice .ln-head{font-size:17px;font-weight:700;margin-bottom:8px;color:var(--txt)}
+.link-notice .ln-body{font-size:14px;color:var(--muted);line-height:1.5;
+   max-width:34em;margin:0 auto}
 /* White pad, because the ink is black. The drawing buffer itself stays
    transparent -- see initCanvas() -- so the exported PNG is the stroke
    alone and drops onto the PDF without a box around it. */
@@ -6208,17 +6216,20 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
   <div class="brand" id="brand">IT-Vault</div>
   <div class="sub" id="sub">// ASSET ACKNOWLEDGEMENT</div>
   <div class="assetid-badge" id="assetIdBadge"></div>
+  <div id="linkNotice" class="link-notice" style="display:none"></div>
   <div id="assetCard"></div>
-  <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
-  <div class="sig-wrap">
-    <span class="sig-label">Signature</span>
-    <div id="sigPlaceholder">✏️ Click here to sign</div>
-    <canvas id="sigCanvas"></canvas>
-  </div>
-  <div class="btnrow">
-    <button class="btn ghost" id="clearSign" style="display:none">🗑 CLEAR</button>
-    <button class="btn ghost" id="viewSign" style="display:none">🖼 VIEW SIGNATURE</button>
-    <button class="btn" id="saveSign">✅ SUBMIT ACKNOWLEDGEMENT</button>
+  <div id="signForm">
+    <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
+    <div class="sig-wrap">
+      <span class="sig-label">Signature</span>
+      <div id="sigPlaceholder">✏️ Click here to sign</div>
+      <canvas id="sigCanvas"></canvas>
+    </div>
+    <div class="btnrow">
+      <button class="btn ghost" id="clearSign" style="display:none">🗑 CLEAR</button>
+      <button class="btn ghost" id="viewSign" style="display:none">🖼 VIEW SIGNATURE</button>
+      <button class="btn" id="saveSign">✅ SUBMIT ACKNOWLEDGEMENT</button>
+    </div>
   </div>
   <div id="result"></div>
 </div>
@@ -6327,10 +6338,36 @@ function clearSig(){ if(!ctx) return; ctx.save(); ctx.setTransform(1,0,0,1,0,0);
 function updateClearBtn(){ const c=document.getElementById('clearSign'); if(!c) return; c.style.display = hasSig?'block':'none'; }
 function getSigData(){return canvas.toDataURL('image/png');}
 function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+// A link that cannot be used should say so and stop. It used to print the
+// reason above a full signature form -- name box, pad and SUBMIT -- which
+// invited people to sign into a request the server was always going to
+// refuse.
+function deadLink(msg){
+  const form=document.getElementById('signForm');
+  if(form) form.style.display='none';
+  const card=document.getElementById('assetCard');
+  if(card) card.innerHTML='';
+  const badge=document.getElementById('assetIdBadge');
+  if(badge) badge.textContent='';
+  const res=document.getElementById('result');
+  if(res) res.innerHTML='';
+  const n=document.getElementById('linkNotice');
+  if(!n) return;
+  const text=String(msg||'This link can no longer be used.');
+  // 'expired' covers the genuinely timed-out case; the rest are links that
+  // were used or replaced, which is the same thing to whoever is holding it
+  const head=/expired/i.test(text) ? 'This link has expired'
+           : /already been used|already been signed/i.test(text) ? 'This link has already been used'
+           : /newer one/i.test(text) ? 'This link has been replaced'
+           : 'This link is no longer valid';
+  n.innerHTML='<div class=ln-ico>🔒</div><div class=ln-head>'+esc(head)+'</div>'+
+              '<div class=ln-body>'+esc(text)+'</div>';
+  n.style.display='block';
+}
 async function load(){
   const r=await fetch('/api/assets/sign/verify?token='+encodeURIComponent(token));
-  const j=await r.json();
-  if(!j.ok){document.getElementById('assetCard').innerHTML='<p class=err>❌ '+j.error+'</p>';throw 0;}
+  const j=await r.json().catch(()=>({ok:false,error:'Could not reach the server.'}));
+  if(!j.ok){ deadLink(j.error); throw 0; }
   const a=j.asset;
   const receivedBy = a.ReceivedBy || a.received_by || '';
   const notesReceived = a.NotesReceived || a.notes_received || '';

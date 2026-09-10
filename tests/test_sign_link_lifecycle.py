@@ -75,6 +75,19 @@ check("the asset holds the same nonce", nonce_on_asset() == payload["a"]["n"])
 life_days = (payload["exp"] - time.time()) / 86400.0
 check("it lives 7 days, not 7 hours", 6.9 < life_days < 7.1, f"{life_days:.2f} days")
 
+print("\n1b. A refused link shows a notice, NOT a signature form")
+# It used to print the reason above a live form -- name box, pad and SUBMIT --
+# which invited people to sign into a request the server would always refuse.
+page = anon.get("/sign?token=whatever").get_data(as_text=True)
+check("the form is wrapped so it can be hidden in one go",
+      'id="signForm"' in page, "no #signForm wrapper")
+check("there is a notice element to show instead",
+      'id="linkNotice"' in page, "no #linkNotice")
+check("a refusal routes to deadLink()", "deadLink(j.error)" in page)
+check("deadLink hides the form", "form.style.display='none'" in page)
+check("the old error-above-the-form path is gone",
+      "<p class=err>" not in page.split("function deadLink")[0])
+
 print("\n2. Before signing, the link works -- repeatedly")
 for i in (1, 2):
     r = anon.get(f"/api/assets/sign/verify?token={tok}")
