@@ -65,6 +65,21 @@ check("the exported buffer is still transparent (nothing painted into it)",
       not re.search(r"ctx\.fillRect\s*\(", page),
       "a fill would box the signature on the PDF")
 
+# A transparent PNG shows whatever it is dropped onto. The VIEW SIGNATURE
+# popups used to write a bare <img> into a blank window, so black ink landed
+# on the browser's own default background -- dark, in dark mode -- and the
+# signature came out looking like anything but black.
+src_all = io.open(os.path.join(ROOT, "app.py"), encoding="utf-8").read()
+popups = re.findall(r"w\.document\.write\((.{0,400}?)\);", src_all, re.S)
+check("all three VIEW SIGNATURE popups found", len(popups) == 3, len(popups))
+for i, p in enumerate(popups, 1):
+    check(f"popup {i} puts the signature on a white sheet", "background:#fff" in p,
+          p[:80])
+    check(f"popup {i} pins the light colour scheme", "color-scheme:light" in p,
+          "otherwise a dark-mode browser darkens the sheet")
+check("no popup writes a bare img onto an unstyled page",
+      not re.search(r"w\.document\.write\('<img", src_all))
+
 print("\n2. An asset tag prints the employee NUMBER, not the AD username")
 c = A.conn(); cur = c.cursor()
 emp_id = "j.smith"                      # what AD sync stores
