@@ -4957,7 +4957,7 @@ def portal_link():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT portal_token, app_name FROM Settings WHERE id=1"); s = cur.fetchone() or {}
     c.close()
-    base = request.host_url.rstrip("/")
+    base = _public_base().rstrip("/")
     url = base + "/portal"
     if s.get("portal_token"):
         url += "?t=" + s["portal_token"]
@@ -5312,7 +5312,7 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
     if aid:
         try:
             tk = _sign_token({"asset_id": aid, "name": asset.get("Name", "")}, exp_hours=168)
-            sign_url = f"{request.host_url}sign?token={quote(tk)}"
+            sign_url = f"{_public_base()}sign?token={quote(tk)}"
             body += f"\n{ask}\n{sign_url}\n"
             html_body = _button_email_html(
                 f"We have deployed asset <b>{tag}</b>{(' (' + name + ')') if name else ''} to you.<br>{ask}",
@@ -5709,16 +5709,42 @@ def _employee_for_label(emp_map, assigned):
     return (code or assigned), (name or assigned)
 
 
+def _public_base():
+    """The base URL a phone should use, with a trailing slash.
+
+    QR codes used to encode http://<lan-ip>:5000/, where the IP came from
+    opening a UDP socket and reading back the local address. In a container
+    that is the bridge address -- 172.18.0.x -- which nothing outside the
+    host can reach, the port was hardcoded to 5000 whatever it was published
+    on, and the scheme was always http. Scanning an asset tag then offered a
+    link that went nowhere.
+
+    The portal and the signature links have always used the address the
+    request actually came in on, which is by definition one that reaches this
+    server. This is that, in one place, so the three cannot drift apart.
+
+    X-Forwarded-Proto is honoured IF it arrives -- but waitress strips
+    X-Forwarded-* by default (clear_untrusted_proxy_headers is on and no
+    trusted_proxy is configured), so behind a TLS-terminating proxy this
+    yields http:// and the phone takes one redirect to get to https. Set
+    ITVAULT_PUBLIC_URL=https://your.host to put the final URL straight in the
+    QR; that also covers a proxy whose Host header cannot be trusted.
+    """
+    override = (os.environ.get("ITVAULT_PUBLIC_URL") or "").strip()
+    if override:
+        return override.rstrip("/") + "/"
+    base = request.host_url
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
+    if proto in ("http", "https") and "://" in base:
+        base = proto + "://" + base.split("://", 1)[1]
+    return base
+
+
 @app.route("/label/<a_id>")
 def label_page(a_id):
-    # Build a LAN-reachable base URL so QR codes scan from any device on the network
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
-    except Exception:
-        lan_ip = "127.0.0.1"
-    base = f"http://{lan_ip}:5000/"
+    # the address this request came in on -- the same one the portal and
+    # the signature links use, and the only one a phone can be sure of
+    base = _public_base()
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone(); c.close()
@@ -5751,10 +5777,18 @@ def label_page(a_id):
     head_mm = 0.0 if compact else 5.5
     name_mm = 2.6 if compact else 4.0
     gap_mm = 0.5 if compact else 1.0
-    reserved_mm = pad_mm * 2 + head_mm + name_mm + gap_mm * (1 if compact else 2)
+    # the DO NOT REMOVE strip is a row of its own: budget for it, or the
+    # bottom field silently clips off the tag
+    norem_mm = 2.6 if compact else 3.2
+    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
+                   + gap_mm * (1 if compact else 2))
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     # QR must fit both the label width and whatever vertical room is left
-    qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
+    # Capped at 44% of the label width. It used to be allowed up to
+    # lw_mm - 7, which on a 50.8mm tag left the fields a ~12mm column --
+    # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
+    # still scans from a phone at arm's length.
+    qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
     qr_px = int(qr_mm * 3.78)
     # embed logo as base64 if present (no extra request, prints reliably)
     logo_uri = _logo_data_uri()
@@ -5765,7 +5799,7 @@ def label_page(a_id):
                                                asset.get("EmployeeID"))
     field_defs = {
         "Name": ("Asset", asset.get("Name")),
-        "AssetID": ("Asset ID", asset["_id"][:12]),
+        "AssetID": ("Asset ID", asset.get("AssetTag") or asset["_id"][:12]),
         "Type": ("Category", asset.get("Type")),
         "Serial": ("Serial", asset.get("Serial")),
         "Status": ("Status", asset.get("Status")),
@@ -5784,11 +5818,17 @@ def label_page(a_id):
     for forced in ["Type", "AssetID"]:
         if forced not in chosen:
             chosen.insert(1 if forced == "Type" else len(chosen), forced)
-    for key in chosen:
-        if key == "Name" or key not in field_defs: continue
+    # what will actually be printed, so the row style can be chosen on fit
+    printable = [k for k in chosen
+                 if k != "Name" and k in field_defs
+                 and field_defs[k][1] not in (None, "")]
+    # a stacked field is a label line plus a value line; a single-line row is
+    # one. Measured against the space left after the header, name and strip.
+    STACKED_MM, LINE_MM = 6.6, 3.05
+    rows_compact = compact or (len(printable) * STACKED_MM > avail_h_mm)
+    for key in printable:
         lbl, val = field_defs[key]
-        if val is None or val == "": continue
-        if compact:
+        if rows_compact:
             rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
         else:
             rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
@@ -5799,7 +5839,7 @@ def label_page(a_id):
                   else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Label {asset['Name']}</title>
 <style>
- body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff}}
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;justify-content:center;padding:20px}}
  .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
@@ -5810,12 +5850,14 @@ def label_page(a_id):
  .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;overflow:hidden}}
  .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
- .k{{color:#555;font-size:1.9mm;line-height:1.05}}
- .v{{font-size:2.4mm;line-height:1.1;margin-bottom:0.5mm;word-break:break-word}}
- .kv{{font-size:1.7mm;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#333}}
- .kv b{{color:#555;font-weight:600}}
- .aid{{font-family:monospace;font-size:2.6mm;font-weight:700}}
+ .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
+ .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
+ .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv b{{color:#333;font-weight:700}}
+ .aid{{font-family:'Consolas','Courier New',monospace;font-size:3.1mm;font-weight:700;letter-spacing:0.08mm}}
  .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
+ .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.9mm' if compact else '2.2mm'};letter-spacing:0.25mm;text-transform:uppercase;color:#000;white-space:nowrap;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -5833,6 +5875,7 @@ def label_page(a_id):
    </div>
    <div id=qr class=qr></div>
  </div>
+ <div class=norem>Do Not Remove</div>
 </div></div>
 <div class="no-print" style="text-align:center;margin-top:10px"><button onclick="window.print()">🖨 PRINT LABEL</button></div>
 <script>new QRCode(document.getElementById('qr'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});</script>
@@ -5845,13 +5888,7 @@ def labels_page():
     ids = [i.strip() for i in (request.args.get("ids") or "").split(",") if i.strip()]
     if not ids:
         return "No assets specified", 400
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
-    except Exception:
-        lan_ip = "127.0.0.1"
-    base = f"http://{lan_ip}:5000/"
+    base = _public_base()
     c = conn(); cur = c.cursor()
     placeholders = ",".join(["%s"] * len(ids))
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + f", InvoiceFile FROM Assets WHERE _id IN ({placeholders})", ids)
@@ -5881,9 +5918,17 @@ def labels_page():
     head_mm = 0.0 if compact else 5.5
     name_mm = 2.6 if compact else 4.0
     gap_mm = 0.5 if compact else 1.0
-    reserved_mm = pad_mm * 2 + head_mm + name_mm + gap_mm * (1 if compact else 2)
+    # the DO NOT REMOVE strip is a row of its own: budget for it, or the
+    # bottom field silently clips off the tag
+    norem_mm = 2.6 if compact else 3.2
+    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
+                   + gap_mm * (1 if compact else 2))
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
-    qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
+    # Capped at 44% of the label width. It used to be allowed up to
+    # lw_mm - 7, which on a 50.8mm tag left the fields a ~12mm column --
+    # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
+    # still scans from a phone at arm's length.
+    qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
     qr_px = int(qr_mm * 3.78)
     logo_uri = _logo_data_uri()
     chosen = [f.strip() for f in (srow.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location").split(",") if f.strip()] if srow else ["Name","AssetID","Type","Serial","Status","Location"]
@@ -5899,7 +5944,7 @@ def labels_page():
         _emp_code, _emp_name = _employee_for_label(_emp_map, asset.get("EmployeeID"))
         field_defs = {
             "Name": ("Asset", asset.get("Name")),
-            "AssetID": ("Asset ID", asset["_id"][:12]),
+            "AssetID": ("Asset ID", asset.get("AssetTag") or asset["_id"][:12]),
             "Type": ("Category", asset.get("Type")),
             "Serial": ("Serial", asset.get("Serial")),
             "Status": ("Status", asset.get("Status")),
@@ -5914,11 +5959,15 @@ def labels_page():
             "Note": ("Note", asset.get("Note")),
         }
         rows_html = ""
-        for key in chosen:
-            if key == "Name" or key not in field_defs: continue
+        printable = [k for k in chosen
+                     if k != "Name" and k in field_defs
+                     and field_defs[k][1] not in (None, "")]
+        # the same fit test as the single label, so a printed sheet and a
+        # one-off tag of the same asset come out identical
+        rows_compact = compact or (len(printable) * 6.6 > avail_h_mm)
+        for key in printable:
             lbl, val = field_defs[key]
-            if val is None or val == "": continue
-            if compact:
+            if rows_compact:
                 rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
             else:
                 rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
@@ -5931,11 +5980,12 @@ def labels_page():
    <div class=meta>{rows_html}</div>
    <div id={qr_id} class=qr></div>
  </div>
+ <div class=norem>Do Not Remove</div>
 </div>"""
         scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});"
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
 <style>
- body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff}}
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;flex-wrap:wrap;gap:3mm;padding:20px}}
  .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
@@ -5945,11 +5995,13 @@ def labels_page():
  .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;overflow:hidden}}
  .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
- .k{{color:#555;font-size:1.9mm;line-height:1.05}}
- .v{{font-size:2.4mm;line-height:1.1;margin-bottom:0.5mm;word-break:break-word}}
- .kv{{font-size:1.7mm;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#333}}
- .kv b{{color:#555;font-weight:600}}
+ .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
+ .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
+ .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv b{{color:#333;font-weight:700}}
  .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
+ .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.9mm' if compact else '2.2mm'};letter-spacing:0.25mm;text-transform:uppercase;color:#000;white-space:nowrap;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -5966,14 +6018,8 @@ def labels_page():
 
 @app.route("/asset/<a_id>")
 def asset_public(a_id):
-    # Public asset detail page (opened by scanning the QR from any device on the LAN)
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
-    except Exception:
-        lan_ip = "127.0.0.1"
-    base = f"http://{lan_ip}:5000/"
+    # Public asset detail page, opened by scanning the QR on the tag
+    base = _public_base()
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SignatureData FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone()
@@ -6160,7 +6206,7 @@ def get_sign_link(a_id):
     tk = _sign_token({"asset_id": a_id, "name": a["Name"], "n": nonce},
                      exp_hours=24 * 7)
     c.close()
-    return jsonify({"ok": True, "token": tk, "url": f"{request.host_url}sign?token={quote(tk)}"})
+    return jsonify({"ok": True, "token": tk, "url": f"{_public_base()}sign?token={quote(tk)}"})
 
 SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
 <title>IT-Vault // Asset Acknowledgement</title>
