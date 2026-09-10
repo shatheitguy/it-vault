@@ -6321,7 +6321,7 @@ async function load(){
   const receivedBy = a.ReceivedBy || a.received_by || '';
   const notesReceived = a.NotesReceived || a.notes_received || '';
   const viewBtn=document.getElementById('viewSign');
-  if(viewBtn){ if(a.SignatureData){ viewBtn.style.display='block'; viewBtn.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+a.SignatureData+'" style="max-width:100%"/>');}; } else { viewBtn.style.display='none'; } }
+  if(viewBtn){ if(a.SignatureData){ viewBtn.style.display='block'; viewBtn.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+a.SignatureData+'">'); w.document.close();}; } else { viewBtn.style.display='none'; } }
   document.getElementById('assetIdBadge').textContent = a.AssetTag||a.asset_tag||'';
   document.getElementById('assetCard').innerHTML=
     '<table class=asset-table>'+
@@ -6339,7 +6339,7 @@ async function load(){
     '</table>';
 }
 document.getElementById('clearSign').addEventListener('click',()=>{clearSig();});
-document.getElementById('viewSign').addEventListener('click',()=>{const sig=(document.querySelector('meta[data-sig]')||{}).content||''; if(!sig){alert('No signature');return;} const w=window.open('','_blank'); w.document.write('<img src="'+sig+'" style="max-width:100%"/>'); });
+document.getElementById('viewSign').addEventListener('click',()=>{const sig=(document.querySelector('meta[data-sig]')||{}).content||''; if(!sig){alert('No signature');return;} const w=window.open('','_blank'); w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+sig+'">'); w.document.close(); });
 document.getElementById('saveSign').addEventListener('click',async()=>{
   const name=document.getElementById('signer').value.trim();
   const res=document.getElementById('result');
@@ -6349,7 +6349,7 @@ document.getElementById('saveSign').addEventListener('click',async()=>{
   res.textContent='Submitting…';
   const r=await fetch('/api/assets/sign/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name,data})});
   const j=await r.json();
-  if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+data+'" style="max-width:100%"/>');};}}
+  if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+data+'">'); w.document.close();};}}
   else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
 });
 /* ---- branding + theme (same color math as the main app / login page, so
