@@ -53,7 +53,7 @@ function applyLanguage(lang){
 }
 const STATUSES=['Available','Checked-Out','Under-Maintenance','Reserved','Retired','Lost/Stolen'];
 {const _sf=document.getElementById('statusFilter'); if(_sf)_sf.innerHTML='<option value="">All statuses</option>'+STATUSES.map(s=>`<option>${s}</option>`).join('');}
-const LABEL_FIELD_KEYS=['Name','Type','AssetID','Serial','Status','Location','ReceivedBy','ReceiverDate','EmployeeID','Department','Warranty','PurchaseDate','Note'];
+const LABEL_FIELD_KEYS=['Name','Type','AssetID','Serial','Status','Location','ReceivedBy','ReceiverDate','EmployeeID','EmployeeName','Department','Warranty','PurchaseDate','Note'];
 const ROLE_ADMIN='admin', ROLE_EDIT='read-write', ROLE_VIEW='read-only';
 const ROLE_LABELS={'admin':'Admin','read-write':'Editor','read-only':'Read-only'};
 const TICKET_STATUSES=['Open','In Progress','Pending','Resolved','Closed'];
