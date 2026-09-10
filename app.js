@@ -1626,17 +1626,58 @@ function toggleBackupRowMenu(e,file){
 }
 
 /* ---------- signature ---------- */
+let signAssetId=null;   // the asset the open signModal belongs to
 async function openSign(id){
   const r=await api('/api/assets/'+id+'/sign/link');
   const j=r?await r.json():{};
   if(!j.ok){toast('✕ '+(j.error||'failed'));return;}
+  signAssetId=id;
   showSignLink(j.url);
+  showSignMailTarget(j);
 }
 function showSignLink(url){
   document.getElementById('signUrl').value=url;
   const shareBtn=document.getElementById('signShareBtn');
   if(shareBtn)shareBtn.style.display=(navigator.share)?'':'none';
   document.getElementById('signModal').classList.add('show');
+}
+// Say who the mail would go to, and when it can't go, say why -- an offer to
+// email with no address on file is just a button that fails.
+function showSignMailTarget(j){
+  const row=document.getElementById('signMailRow');
+  const who=document.getElementById('signMailWho');
+  const btn=document.getElementById('signMailBtn');
+  if(!row||!who||!btn)return;
+  btn.disabled=!j.can_email;
+  btn.textContent='📧 SEND LINK';
+  if(j.can_email){
+    who.innerHTML='Sends to <b>'+esc(j.assignee||'')+'</b> &lt;'+esc(j.assignee_email)+'&gt;';
+  }else if(!j.assignee){
+    who.textContent='Not assigned to anyone yet — assign the asset to email the link.';
+  }else if(!j.assignee_email){
+    who.innerHTML='No email on file for <b>'+esc(j.assignee)+'</b> — add one on the Employees page.';
+  }else{
+    who.textContent='Email is not set up — add an SMTP server under Settings.';
+  }
+}
+async function emailSignLink(){
+  const btn=document.getElementById('signMailBtn');
+  if(!signAssetId||!btn||btn.disabled)return;
+  const label=btn.textContent;
+  btn.disabled=true; btn.textContent='SENDING…';
+  try{
+    const r=await api('/api/assets/'+signAssetId+'/sign/send',{method:'POST'});
+    const j=r?await r.json():{};
+    if(j&&j.ok){
+      // each send issues a fresh link, so the box has to show the one that
+      // was actually mailed -- otherwise a copied link is already dead
+      if(j.url)document.getElementById('signUrl').value=j.url;
+      toast('✓ SENT TO '+(j.sent_to||'employee'));
+    }else{
+      toast('✕ '+((j&&j.error)||'Could not send'));
+    }
+  }catch(e){ toast('✕ Could not send'); }
+  btn.textContent=label; btn.disabled=false;
 }
 async function copySignLink(){
   const url=document.getElementById('signUrl').value;
@@ -1653,6 +1694,7 @@ async function shareSignLink(){
   catch(e){/* user cancelled the share sheet -- not an error */}
 }
 document.getElementById('signCopyBtn').onclick=copySignLink;
+document.getElementById('signMailBtn').onclick=emailSignLink;
 document.getElementById('signShareBtn').onclick=shareSignLink;
 
 /* ---------- users ---------- */

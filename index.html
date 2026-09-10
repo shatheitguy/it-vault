@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260910c">
+<link rel="stylesheet" href="/style.css?v=20260910d">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -1259,12 +1259,18 @@
       <button class="btn" id="signCopyBtn" type="button">📋 COPY LINK</button>
       <button class="btn ghost" id="signShareBtn" type="button" style="display:none">🔗 SHARE</button>
     </div>
+    <!-- Emailing the assigned employee is the common case; copy-and-paste into
+         a mail client was the only way to do it. -->
+    <div id="signMailRow" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+      <div id="signMailWho" style="font-size:13px;color:var(--muted);margin-bottom:8px"></div>
+      <button class="btn" id="signMailBtn" type="button">📧 SEND LINK</button>
+    </div>
   </div>
   
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
 </div></div>
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260910c"></script>
+<script src="/app.js?nocache=20260910d"></script>
 </body>
 </html>
