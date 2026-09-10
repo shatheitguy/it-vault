@@ -1918,6 +1918,29 @@ def _pending_2fa_user():
         return None
     return u
 
+def _mail_from(addr, brand):
+    """The sender line a recipient actually reads.
+
+    Every notification went out with a bare address, so an inbox showed the
+    mailbox it was sent from -- it@example.com -- in place of the
+    organisation the install is branded as. Recipients could not tell at a
+    glance who the mail was from, and some of them are people who have never
+    logged in and only know the organisation by name.
+
+    An address the admin has already given a display name of its own keeps
+    it: that is a deliberate choice, not a default worth overriding.
+    """
+    from email.utils import formataddr, parseaddr
+    raw = str(addr or "")
+    name, mailbox = parseaddr(raw)
+    if "@" not in mailbox:
+        # not something to put a name in front of. parseaddr hands back any
+        # junk it was given as the mailbox, and wrapping that in angle
+        # brackets only makes a misconfigured From harder to read in the bounce.
+        return raw
+    return formataddr((name or (brand or "IT-Vault"), mailbox))
+
+
 def _send_login_otp_email(username, to_email):
     if not to_email:
         return False
@@ -1935,7 +1958,7 @@ def _send_login_otp_email(username, to_email):
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage()
         msg["Subject"] = f"{bn}: your sign-in code is {code}"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email
         msg.set_content(f"Your {bn} sign-in verification code is: {code}\n\nThis code expires in 5 minutes. If you didn't request this, you can ignore this email." + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
@@ -1994,7 +2017,7 @@ def _send_password_reset_email(username, to_email, code):
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage()
         msg["Subject"] = f"{bn}: password reset code"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email
         msg.set_content(f"Your {bn} password reset code is: {code}\n\nThis code expires in 10 minutes. "
                          f"If you didn't request this, you can safely ignore this email -- your password "
@@ -3249,7 +3272,7 @@ def _send_simple_email(to_email, subject, body, html_body=None):
     try:
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
         if html_body:
             # a plain-text link (what mail clients were rendering before)
@@ -4752,7 +4775,7 @@ def notify_ticket_resolved(ticket):
         subj = f"{bn}: Ticket {ticket['code']} Resolved"
         body = (f"Your ticket has been resolved.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nStatus: {ticket.get('status','')}\n\nIf you need further assistance, reply to this email or submit a new ticket.")
         msg = EmailMessage(); msg["Subject"] = subj
-        msg["From"] = settings.get("smtp_from") or settings.get("smtp_user")
+        msg["From"] = _mail_from(settings.get("smtp_from") or settings.get("smtp_user"), bn)
         msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
@@ -4782,7 +4805,7 @@ def notify_ticket_replied(ticket, reply_author, reply_body):
         subj = f"{bn}: Reply on Ticket {ticket['code']}"
         body = (f"Your ticket received a reply.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nReply from: {reply_author}\n\n{reply_body[:500]}\n\nLogin to view full thread.")
         msg = EmailMessage(); msg["Subject"] = subj
-        msg["From"] = settings.get("smtp_from") or settings.get("smtp_user")
+        msg["From"] = _mail_from(settings.get("smtp_from") or settings.get("smtp_user"), bn)
         msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
@@ -5380,7 +5403,7 @@ def send_notification(subject, body):
     try:
         bn = s.get("app_name") or "IT-Vault"
         subj = subject if subject.startswith(bn) else f"{bn}: {subject}" if not subject.startswith("IT Guy") else subject.replace("IT Guy", bn, 1)
-        msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = ", ".join(emails); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
@@ -5418,7 +5441,7 @@ def notify_ticket_assigned(ticket, assignee_user):
                 f"This ticket has been assigned to {assignee_user or 'the IT team'}.\n"
                 f"Login to {s.get('app_name') or 'IT-Vault'} to update status and reply.\n")
         msg = EmailMessage(); msg["Subject"] = subj
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = ", ".join(recipients); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
@@ -5456,7 +5479,7 @@ def test_email():
         bn = (gv("app_name") or "IT-Vault").strip() or "IT-Vault"
         msg = EmailMessage()
         msg["Subject"] = f"{bn} · SMTP check ✅"
-        msg["From"] = frm
+        msg["From"] = _mail_from(frm, bn)
         msg["To"] = to
         msg.set_content(
             f"Yo — this is your SMTP test email from {bn}.\n\n"
@@ -6767,7 +6790,7 @@ def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attac
     try:
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
         msg.add_attachment(attachment_bytes, maintype="application", subtype="pdf", filename=attachment_name)
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
