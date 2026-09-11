@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 dark palette -->
+    <color name="bg">#0B0E14</color>
+    <color name="surface">#151B26</color>
+    <color name="surface_variant">#1E2632</color>
+    <color name="accent">#FF5A50</color>
+    <color name="accent2">#C0392B</color>
+    <color name="accent_container">#3A211F</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="text">#F4F6FA</color>
+    <color name="muted">#98A2B4</color>
+    <color name="outline">#29313E</color>
+    <color name="bar_track">#1A222E</color>
+</resources>

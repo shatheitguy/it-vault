@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Top-level destinations. Ids intentionally match drawer_menu so both
+     navigations route through MainActivity.onNavigationItemSelected(). -->
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_dashboard"
+        android:icon="@drawable/ic_dashboard"
+        android:title="Dashboard" />
+    <item
+        android:id="@+id/nav_assets"
+        android:icon="@drawable/ic_assets"
+        android:title="Assets" />
+    <item
+        android:id="@+id/nav_tickets"
+        android:icon="@drawable/ic_ticket"
+        android:title="Tickets" />
+    <item
+        android:id="@+id/nav_scan"
+        android:icon="@drawable/ic_wifi"
+        android:title="Scan" />
+</menu>

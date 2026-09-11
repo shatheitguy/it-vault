@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IT-Vault — Sign in</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css?v=20260903e">
+<style>
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidden;
+  transition:background .25s,color .25s;-webkit-font-smoothing:antialiased}
+.card{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:24px}
+.box{position:relative;width:min(400px,100%);padding:40px 36px;border-radius:var(--radius);
+  background:var(--surface);border:1px solid var(--line);box-shadow:var(--shadow);
+  opacity:0;transform:translateY(16px) scale(.98);animation:boxIn .55s cubic-bezier(.16,1,.3,1) .05s forwards}
+.box{padding-bottom:32px}
+@keyframes boxIn{to{opacity:1;transform:translateY(0) scale(1)}}
+@media (prefers-reduced-motion: reduce){.box{animation:none;opacity:1;transform:none}}
+.logoimg{display:block;max-height:44px;max-width:190px;width:auto;height:auto;object-fit:contain;margin:0 auto 16px;
+  opacity:0;animation:logoIn .5s ease .15s forwards}
+@keyframes logoIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.brand{font-weight:650;font-size:26px;letter-spacing:-.02em;text-align:center;color:var(--txt);margin:0 0 5px;
+  opacity:0;animation:fadeUp .5s ease .18s forwards}
+.sub{text-align:center;color:var(--muted);font-size:13.5px;margin-bottom:30px;
+  opacity:0;animation:fadeUp .5s ease .24s forwards}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.f{margin-bottom:13px;opacity:0;animation:fadeUp .45s ease .3s forwards}
+.f:nth-of-type(2){animation-delay:.36s}
+.f label{display:block;font-size:12.5px;font-weight:500;color:var(--muted);margin-bottom:6px}
+.f input{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);
+  padding:11px 13px;border-radius:8px;font-family:var(--font);font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}
+.f input::placeholder{color:var(--muted2)}
+.f input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.btn{width:100%;margin-top:20px;padding:12px;border:none;border-radius:8px;cursor:pointer;
+  font-family:var(--font);font-weight:600;font-size:14px;color:var(--btn-text,#04121f);background:var(--accent);
+  transition:filter .15s,transform .15s,box-shadow .15s}
+.btn:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 18px var(--accent-soft)}
+.btn:active{transform:translateY(1px);box-shadow:none}
+.rem{display:flex;align-items:center;gap:9px;margin-top:16px;color:var(--muted);font-size:13px;cursor:pointer;
+  /* the checkbox is 15px, so the label is the tap target -- give it a
+     height a thumb can actually hit rather than the 16px the text
+     happened to occupy */
+  min-height:40px;padding:4px 2px;margin-left:-2px}
+.rem input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;margin:0}
+.err{color:var(--red);font-size:13px;text-align:center;min-height:0;margin-top:14px;line-height:1.4}
+.shake{animation:sh .4s}@keyframes sh{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-5px)}}
+.sess{position:fixed;bottom:20px;left:0;right:0;z-index:10;text-align:center;color:var(--muted2);font-size:12px;
+  display:flex;align-items:center;justify-content:center;gap:8px;flex-wrap:wrap;padding:0 16px}
+.sess .sep{opacity:.35}
+.sess .src{color:var(--muted2);text-decoration:none;border-bottom:1px solid transparent}
+.sess .src:hover{color:var(--accent);border-bottom-color:var(--accent)}
+/* animated gradient wordmark -- the credit line, with a bit of shine */
+.pwr{font-weight:800;letter-spacing:.2px;white-space:nowrap;
+  background:linear-gradient(90deg,var(--accent),#ff9f45,var(--accent2),var(--accent));
+  background-size:300% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  -webkit-text-fill-color:transparent;color:transparent;
+  animation:pwrShine 5s linear infinite}
+.pwr b{font-weight:900}
+@keyframes pwrShine{to{background-position:300% 0}}
+@media (prefers-reduced-motion:reduce){.pwr{animation:none}}
+#step1,#step2fa,#stepForgot{animation:fadeUp .35s ease}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:var(--btn-text,#04121f);
+  border-radius:50%;animation:spin .6s linear infinite;vertical-align:-3px;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="card"><div class="box" id="box">
+  <img id="loginLogo" class="logoimg" src="/logo.png?t=1" alt="" style="display:none">
+  <div class="brand" id="brand" data-t="IT-Vault">IT-Vault</div>
+  <div class="sub" id="sub">Asset Management</div>
+  <div id="step1">
+    <div class="f"><label for="u">Username</label><input id="u" placeholder="Enter your username" autocomplete="username"></div>
+    <div class="f"><label for="p">Password</label><input id="p" type="password" placeholder="Enter your password" autocomplete="current-password"></div>
+    <label class="rem"><input type="checkbox" id="r"> Keep me signed in until I sign out</label>
+    <button class="btn" id="go">Sign in</button>
+    <div style="margin-top:14px;text-align:center"><a href="#" id="forgotLink" style="color:var(--muted);font-size:12.5px">Forgot password?</a></div>
+  </div>
+  <div id="stepForgot" style="display:none">
+    <div id="forgotRequest">
+      <div class="sub" style="margin-bottom:18px">Enter your username or email and we'll send you a reset code</div>
+      <div class="f"><label for="fpUser">Username or email</label><input id="fpUser" placeholder="Username or email" autocomplete="username"></div>
+      <button class="btn" id="fpSend">Send reset code</button>
+    </div>
+    <div id="forgotReset" style="display:none">
+      <div class="sub" style="margin-bottom:18px">We emailed a 6-digit code to your address (if an account exists). Enter it below with your new password.</div>
+      <div class="f"><label for="fpCode">Reset code</label><input id="fpCode" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
+      <div class="f"><label for="fpNew">New password</label><input id="fpNew" type="password" placeholder="New password" autocomplete="new-password"></div>
+      <div class="f"><label for="fpNew2">Confirm new password</label><input id="fpNew2" type="password" placeholder="Confirm new password" autocomplete="new-password"></div>
+      <button class="btn" id="fpReset">Reset password</button>
+      <div style="display:flex;justify-content:space-between;margin-top:14px;font-size:12.5px">
+        <a href="#" id="fpResend" style="color:var(--muted)">Resend code</a>
+      </div>
+    </div>
+    <div style="margin-top:10px;text-align:center"><a href="#" id="backToLoginFromForgot" style="color:var(--muted);font-size:12.5px">← Back to sign in</a></div>
+  </div>
+  <div id="step2fa" style="display:none">
+    <div class="sub" id="tfaMsg" style="margin-bottom:18px">Enter the 6-digit code</div>
+    <div class="f"><label for="code2fa" id="tfaLabel">Verification code</label><input id="code2fa" inputmode="numeric" maxlength="6" placeholder="123456" autocomplete="one-time-code"></div>
+    <button class="btn" id="verify2fa">Verify</button>
+    <div id="tfaLinks" style="display:flex;justify-content:space-between;margin-top:14px;font-size:12.5px">
+      <a href="#" id="switchMethod" style="color:var(--muted);display:none">Use email code instead</a>
+      <a href="#" id="resendCode" style="color:var(--muted);display:none">Resend code</a>
+    </div>
+    <div style="margin-top:10px;text-align:center"><a href="#" id="backToLogin" style="color:var(--muted);font-size:12.5px">← Back to sign in</a></div>
+  </div>
+  <div class="err" id="e"></div>
+</div></div>
+<div class="sess">
+  <span id="sessNote">Session timeout: 5 minutes</span>
+  <span class="sep">•</span>
+  <span class="pwr">⚡ powered by <b>Sha The IT Guy</b></span>
+  <span class="sep">•</span>
+  <!-- AGPL section 13: anyone using this over a network must be able to get
+       the source, so the offer has to be reachable before signing in too. -->
+  <a class="src" href="https://github.com/shatheitguy/it-vault" target="_blank" rel="noopener">AGPL-3.0 source</a>
+</div>
+<script>
+/* ---- theme preset + branding (follows dashboard customization engine) ---- */
+let savedTheme='dark';
+function resolveTheme(t){return t==='system'?(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'):t;}
+function applyTheme(t){savedTheme=t;}
+/* Actual light/dark is derived from the real background color inside applyCustomVars
+   (single source of truth, matching the main app) — applyTheme just tracks the
+   'system' preference so the matchMedia listener below knows when to react. */
+/* Same color math as the main app's theme engine (app.js applyCustomVars),
+   ported here so the login page always gets correct, readable colors for
+   whatever background/accent the admin picked — not just a binary light/dark class. */
+function hex6(v, fb){
+  const s=String(v==null?'':v).trim();
+  if(/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
+  if(/^#[0-9a-fA-F]{3}$/.test(s)) return ('#'+s[1]+s[1]+s[2]+s[2]+s[3]+s[3]).toLowerCase();
+  return fb;
+}
+function hexRgb(h){ const s=hex6(h,'#000000'); return [parseInt(s.slice(1,3),16),parseInt(s.slice(3,5),16),parseInt(s.slice(5,7),16)]; }
+function rgba(h,a){ const c=hexRgb(h); return 'rgba('+c[0]+','+c[1]+','+c[2]+','+a+')'; }
+function shade(h,amt){ const c=hexRgb(h); const f=n=>{const v=Math.max(0,Math.min(255,Math.round(n+255*amt)));return v.toString(16).padStart(2,'0');}; return '#'+f(c[0])+f(c[1])+f(c[2]); }
+function isLightHex(h){ const c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.114)>150; }
+function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
+function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
+function muteFor(bgHex,k){ const light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
+function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*bl;}; const la=L(a),lb=L(b); const hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
+function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
+function applyCustomVars(s){
+  if(!s) return;
+  const bgType=s.bg_type==='gradient'?'gradient':'solid';
+  const bgRaw=String(s.bg||'').trim();
+  let bgA='#0a0d13', bgB='#121826';
+  if(bgType==='gradient'){
+    const found=bgRaw.match(/#[0-9a-fA-F]{3,6}/g)||[];
+    bgA=hex6(found[0],'#0a0d13'); bgB=hex6(found[1],'#121826');
+  }
+  const baseHex=bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13');
+  const bgValue=bgType==='gradient'?('linear-gradient(135deg, '+bgA+', '+bgB+')'):baseHex;
+  const surface=hex6(s.comp_bg,'#121826');
+  const light=isLightHex(baseHex);
+  const surfaceLight=isLightHex(surface);
+  const accent=ensureAccentVisible(hex6(s.accent,'#ff3b30'), surface);
+  const accent2=ensureAccentVisible(hex6(s.accent2,'#c0392b'), surface);
+  const radius=Math.max(0,Math.min(24,parseInt(s.radius,10)||12));
+  const r=document.documentElement.style;
+  r.setProperty('--bg', bgValue);
+  r.setProperty('--bg1', light?shade(baseHex,-0.04):shade(baseHex,0.03));
+  r.setProperty('--surface', surface);
+  r.setProperty('--surface2', surfaceLight?shade(surface,-0.04):shade(surface,-0.02));
+  r.setProperty('--line', surfaceLight?shade(surface,-0.14):shade(surface,0.10));
+  r.setProperty('--line2', surfaceLight?shade(surface,-0.22):shade(surface,0.16));
+  r.setProperty('--txt', onBg(baseHex));
+  r.setProperty('--muted', muteFor(baseHex,'muted'));
+  r.setProperty('--muted2', muteFor(baseHex,'muted2'));
+  r.setProperty('--accent', accent);
+  r.setProperty('--accent2', accent2);
+  r.setProperty('--accent-soft', rgba(accent,0.14));
+  r.setProperty('--btn-text', bestTextOn(accent));
+  r.setProperty('--radius', radius+'px');
+  document.body.classList.toggle('light', light);
+}
+if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(savedTheme==='system')applyTheme('system');});}
+(async()=>{
+  try{
+    const b=await (await fetch('/api/branding')).json();
+    const name=b.app_name||'IT-Vault';
+    document.title=name+' — Sign in';
+    const brand=document.getElementById('brand');
+    brand.textContent=name; brand.setAttribute('data-t',name);
+    const lg=document.getElementById('loginLogo');
+    if(lg){ lg.src='/logo.png?t='+Date.now(); lg.style.display=''; }
+    applyCustomVars(b);
+    applyTheme(b.theme||'dark');
+    window.__matrixOn = !!b.matrix_on && !document.body.classList.contains('light');
+  }catch(e){ applyTheme('dark'); window.__matrixOn=true; }
+})();
+let tfaMethods=[]; let tfaActive='';
+function shakeBox(){ document.getElementById('box').classList.add('shake'); setTimeout(()=>document.getElementById('box').classList.remove('shake'),400); }
+function setBtnBusy(btn,busy,busyText){
+  if(busy){ btn.dataset.label=btn.textContent; btn.disabled=true; btn.innerHTML='<span class="spin"></span>'+busyText; }
+  else{ btn.disabled=false; btn.textContent=btn.dataset.label||btn.textContent; }
+}
+async function login(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  if(location.protocol==='file:'){
+    eEl.textContent='Open this page at http://localhost:5000 — not the file directly.';
+    shakeBox();
+    return;
+  }
+  const u=document.getElementById('u').value.trim(),p=document.getElementById('p').value;
+  const goBtn=document.getElementById('go');
+  setBtnBusy(goBtn,true,'Signing in…');
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:u,password:p,remember:document.getElementById('r').checked})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.need_2fa){
+      tfaMethods=d.methods||[]; tfaActive=tfaMethods[0];
+      showStep2fa();
+      return;
+    }
+    if(r.ok){
+      const me=await fetch('/api/me'); const j=await me.json();
+      if(j.user){ window.location.replace('/'); return; }
+      else{ eEl.textContent='Session could not be started. Please try again.'; }
+    } else {
+      let msg='Incorrect username or password.';
+      if(d.error) msg=d.error;
+      eEl.textContent=msg;
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(goBtn,false);
+  }
+}
+function showStep2fa(){
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2fa').style.display='';
+  document.getElementById('e').textContent='';
+  renderTfaStep();
+  document.getElementById('code2fa').value='';
+  document.getElementById('code2fa').focus();
+}
+function renderTfaStep(){
+  const isEmail=tfaActive==='email';
+  document.getElementById('tfaMsg').textContent=isEmail
+    ? 'We emailed a 6-digit code to your address'
+    : 'Enter the 6-digit code from your authenticator app';
+  document.getElementById('tfaLabel').textContent=isEmail?'Email code':'Authenticator code';
+  const sw=document.getElementById('switchMethod');
+  if(tfaMethods.length>1){
+    sw.style.display='';
+    sw.textContent=isEmail?'Use authenticator app instead':'Use email code instead';
+  } else { sw.style.display='none'; }
+  document.getElementById('resendCode').style.display=isEmail?'':'none';
+}
+document.getElementById('switchMethod').onclick=(e)=>{
+  e.preventDefault();
+  tfaActive=tfaActive==='email'?tfaMethods.find(m=>m!=='email'):'email';
+  renderTfaStep();
+  document.getElementById('code2fa').value='';
+};
+document.getElementById('resendCode').onclick=async(e)=>{
+  e.preventDefault();
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const r=await fetch('/api/2fa/resend-email-code',{method:'POST'});
+  const d=await r.json().catch(()=>({}));
+  eEl.style.color=''; eEl.textContent = r.ok ? 'Code resent.' : (d.error||'Could not resend code.');
+};
+document.getElementById('backToLogin').onclick=async(e)=>{
+  e.preventDefault();
+  await fetch('/api/logout',{method:'POST'});
+  document.getElementById('step2fa').style.display='none';
+  document.getElementById('step1').style.display='';
+  document.getElementById('e').textContent='';
+  document.getElementById('p').value='';
+};
+async function verify2fa(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const code=document.getElementById('code2fa').value.trim();
+  if(!code){ eEl.textContent='Enter the code.'; shakeBox(); return; }
+  const vBtn=document.getElementById('verify2fa');
+  setBtnBusy(vBtn,true,'Verifying…');
+  try{
+    const r=await fetch('/api/2fa/verify-login',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({method:tfaActive,code})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){
+      const me=await fetch('/api/me'); const j=await me.json();
+      if(j.user){ window.location.replace('/'); return; }
+      else{ eEl.textContent='Session could not be started. Please try again.'; }
+    } else {
+      eEl.textContent=d.error||'Invalid code.';
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(vBtn,false);
+  }
+}
+document.getElementById('go').onclick=login;
+document.getElementById('p').addEventListener('keydown',e=>{if(e.key==='Enter')login();});
+document.getElementById('verify2fa').onclick=verify2fa;
+document.getElementById('code2fa').addEventListener('keydown',e=>{if(e.key==='Enter')verify2fa();});
+
+/* ---- forgot password (self-service reset via emailed OTP) ---- */
+function showForgot(){
+  document.getElementById('step1').style.display='none';
+  document.getElementById('step2fa').style.display='none';
+  document.getElementById('stepForgot').style.display='';
+  document.getElementById('forgotRequest').style.display='';
+  document.getElementById('forgotReset').style.display='none';
+  document.getElementById('e').textContent='';
+  document.getElementById('fpUser').value=document.getElementById('u').value.trim();
+  document.getElementById('fpUser').focus();
+}
+function backToSignInFromForgot(){
+  document.getElementById('stepForgot').style.display='none';
+  document.getElementById('step1').style.display='';
+  document.getElementById('e').textContent='';
+}
+document.getElementById('forgotLink').onclick=(e)=>{ e.preventDefault(); showForgot(); };
+document.getElementById('backToLoginFromForgot').onclick=(e)=>{ e.preventDefault(); backToSignInFromForgot(); };
+
+async function requestReset(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const ident=document.getElementById('fpUser').value.trim();
+  if(!ident){ eEl.textContent='Enter your username or email.'; shakeBox(); return; }
+  const btn=document.getElementById('fpSend');
+  setBtnBusy(btn,true,'Sending…');
+  try{
+    const r=await fetch('/api/forgot-password/request',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({username:ident})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){
+      document.getElementById('forgotRequest').style.display='none';
+      document.getElementById('forgotReset').style.display='';
+      document.getElementById('fpCode').value=''; document.getElementById('fpNew').value=''; document.getElementById('fpNew2').value='';
+      document.getElementById('fpCode').focus();
+    } else {
+      eEl.textContent=d.error||'Could not send reset code.';
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(btn,false);
+  }
+}
+async function submitReset(){
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const code=document.getElementById('fpCode').value.trim();
+  const pw1=document.getElementById('fpNew').value;
+  const pw2=document.getElementById('fpNew2').value;
+  if(!code){ eEl.textContent='Enter the code from your email.'; shakeBox(); return; }
+  if(!pw1){ eEl.textContent='Enter a new password.'; shakeBox(); return; }
+  if(pw1!==pw2){ eEl.textContent='Passwords do not match.'; shakeBox(); return; }
+  const btn=document.getElementById('fpReset');
+  setBtnBusy(btn,true,'Resetting…');
+  try{
+    const r=await fetch('/api/forgot-password/reset',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code,new_password:pw1})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok && d.ok){
+      const me=await fetch('/api/me'); const j=await me.json();
+      if(j.user){ window.location.replace('/'); return; }
+      else{ eEl.textContent='Password reset -- please sign in.'; backToSignInFromForgot(); }
+    } else {
+      eEl.textContent=d.error||'Invalid or expired code.';
+      shakeBox();
+    }
+  }catch(err){
+    eEl.textContent='Cannot reach the server. Is it running on port 5000?';
+  }finally{
+    setBtnBusy(btn,false);
+  }
+}
+document.getElementById('fpSend').onclick=requestReset;
+document.getElementById('fpUser').addEventListener('keydown',e=>{if(e.key==='Enter')requestReset();});
+document.getElementById('fpReset').onclick=submitReset;
+document.getElementById('fpNew2').addEventListener('keydown',e=>{if(e.key==='Enter')submitReset();});
+document.getElementById('fpResend').onclick=async(e)=>{
+  e.preventDefault();
+  const eEl=document.getElementById('e'); eEl.textContent='';
+  const r=await fetch('/api/forgot-password/request',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:document.getElementById('fpUser').value.trim()})});
+  const d=await r.json().catch(()=>({}));
+  eEl.textContent = r.ok ? 'Code resent.' : (d.error||'Could not resend code.');
+};
+
+/* keep the footer note honest about which session mode is selected */
+(function(){
+  const box=document.getElementById('r'), note=document.getElementById('sessNote');
+  if(!box||!note) return;
+  const sync=()=>{ note.textContent = box.checked
+    ? 'Stays signed in until you sign out'
+    : 'Session timeout: 5 minutes of inactivity'; };
+  box.addEventListener('change', sync);
+  sync();
+})();
+</script>
+</body>
+</html>

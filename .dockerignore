@@ -1,0 +1,55 @@
+# Runtime data / secrets — never bake these into the image. itvault_config.json
+# in particular would override the DB_HOST env var and break DB connectivity
+# inside the container (it would try 127.0.0.1 instead of the db service).
+itvault_config.json
+.env
+*.env
+backups/
+invoices/
+logo.png
+logs/
+
+# Real / non-generic sample data
+sample-assets.xlsx
+screenshots/
+legacy/
+ui_backup_20260901/
+
+# The Android client and its build output are not part of the server image --
+# android-app/ alone is ~600MB of Gradle output and bundled ML Kit models, and
+# COPY . . would put every byte of it (plus the shipped APK) into the published
+# image for no runtime benefit.
+android-app/
+*.apk
+
+# Hidden tool/editor state dirs (never needed at runtime)
+.*/
+!.github/
+
+# Local-machine dev tooling, not needed inside the container
+run_server.bat
+start-itvault.bat
+start_all.bat
+itvault_spawn.py
+
+# VCS / editor / OS
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Python / node artifacts
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+node_modules/
+
+# Tests and docs aren't needed at runtime
+docs/
+test_smoke.py
+widget_test.js
+zorder_test.js

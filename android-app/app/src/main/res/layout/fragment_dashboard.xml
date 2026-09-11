@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:layoutAnimation="@anim/layout_stagger">
+
+        <TextView
+            style="@style/HeadingLarge"
+            android:layout_marginTop="6dp"
+            android:text="Overview" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="14dp"
+            android:text="Your infrastructure at a glance"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
+
+        <TextView
+            android:id="@+id/offlineBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="10dp"
+            android:background="@color/surface"
+            android:padding="8dp"
+            android:textColor="@color/accent"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:visibility="gone" />
+
+        <!-- KPI row (matches the web dashboard's top stat cards) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+            <include android:id="@+id/statTotal" layout="@layout/item_stat_card" />
+            <include android:id="@+id/statOut" layout="@layout/item_stat_card" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+            <include android:id="@+id/statMaint" layout="@layout/item_stat_card" />
+            <include android:id="@+id/statDue" layout="@layout/item_stat_card" />
+        </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="10dp">
+            <include android:id="@+id/statWarr" layout="@layout/item_stat_card" />
+            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+        </LinearLayout>
+
+        <!-- ASSET STATUS widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="ASSET STATUS" />
+            <LinearLayout android:id="@+id/statusBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- TOP ASSET TYPES widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="TOP ASSET TYPES" />
+            <LinearLayout android:id="@+id/typeBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- RECENT ASSETS widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="RECENT ASSETS" />
+            <LinearLayout android:id="@+id/recentAssets" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- OPEN TICKETS widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="OPEN TICKETS" />
+            <LinearLayout android:id="@+id/openTickets" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- RECENT ACTIVITY widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="RECENT ACTIVITY" />
+            <LinearLayout android:id="@+id/activityFeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- CONTRACTS BY TYPE widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="CONTRACTS BY TYPE" />
+            <LinearLayout android:id="@+id/contractsBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <!-- CONTRACTS EXPIRING widget -->
+        <LinearLayout style="@style/WidgetCard">
+            <TextView style="@style/WidgetTitle" android:text="CONTRACTS EXPIRING ≤30d" />
+            <LinearLayout android:id="@+id/contractsExpiring" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/dashProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="20dp"
+            android:indeterminateTint="@color/accent" />
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,12 @@
+flask
+pymysql
+DBUtils
+openpyxl
+waitress
+ldap3
+pyotp
+qrcode
+reportlab
+pymupdf
+requests
+urllib3

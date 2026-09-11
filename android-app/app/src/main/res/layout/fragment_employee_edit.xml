@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView style="@style/SectionLabel" android:text="IDENTITY" android:layout_marginTop="0dp" />
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Emp ID (optional)">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fEmpCode" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Username / Employee ID">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fEmployeeID" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Employee Name">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fEmployeeName" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView style="@style/FieldLabel" android:text="Department" />
+        <Spinner android:id="@+id/fDepartment" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <TextView style="@style/FieldLabel" android:text="Designation" />
+        <Spinner android:id="@+id/fDesignation" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+
+        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Email">
+            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fEmail" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textEmailAddress" android:textColor="@color/text" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <TextView
+            android:id="@+id/formError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/accent"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginTop="18dp">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/deleteBtn"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginEnd="10dp"
+                android:text="Delete"
+                android:textColor="@color/accent"
+                android:visibility="gone"
+                app:strokeColor="@color/accent" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/saveBtn"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:backgroundTint="@color/accent"
+                android:text="Save" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/formProgress"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:layout_marginTop="16dp"
+            android:visibility="gone"
+            android:indeterminateTint="@color/accent" />
+    </LinearLayout>
+</ScrollView>

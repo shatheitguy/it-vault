@@ -1,0 +1,1276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IT-Vault</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css?v=20260910d">
+</head>
+<body>
+<canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
+<canvas id="sessBar"></canvas>
+<div class="row-menu" id="rowMenu" style="display:none"></div>
+
+<div id="app">
+  <aside class="side">
+    <div class="logo"><img id="sideLogo" src="/logo.png" alt="" onerror="this.style.display='none'"><span id="sideName">IT-Vault</span></div>
+    <nav class="nav">
+      <div class="nav-grp">Main</div>
+      <a id="navHome" class="active"><span class="ni">🏠</span>Dashboard</a>
+      <a id="navAssets" data-i18n="Assets"><span class="ni">💻</span>Assets</a>
+      <a id="navContracts" data-i18n="Contracts"><span class="ni">📄</span>Contracts</a>
+      <a id="navTickets" data-i18n="Tickets"><span class="ni">🎫</span>Tickets</a>
+
+      <div class="nav-grp">Records</div>
+      <a id="navDirectory" style="display:none"><span class="ni">👥</span>Directory</a>
+      <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
+      <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
+      <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Log</a>
+
+      <div class="nav-grp">Tools</div>
+      <a id="navScan" style="display:none" data-i18n="NetworkScan"><span class="ni">📡</span>Network Scan</a>
+      <a id="navHeartbeat" style="display:none" data-i18n="Heartbeat"><span class="ni">&#128147;</span>Heartbeat</a>
+      <a id="navBackup" style="display:none" data-i18n="BackupRestore"><span class="ni">💾</span>Backup / Restore</a>
+
+      <div class="nav-grp">System</div>
+      <a id="navSettings" data-i18n="Settings"><span class="ni">⚙️</span>Settings</a>
+    </nav>
+    <div class="side-foot">
+      <div class="userbox">
+        <div class="avatar" id="av">A</div>
+        <div><div id="uname">admin</div><div class="mono" style="color:var(--muted);font-size:11px"><span id="roleBadge">ADMIN</span> · ONLINE</div></div>
+      </div>
+      <button class="logout" id="logoutBtn">⏻ LOGOUT</button>
+    </div>
+  </aside>
+
+  <section class="main">
+    <div id="page-employees" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb" id="crumbText">Directory</div><h2 id="dashTitle">Directory</h2></div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="dirImportBtn">⬆ IMPORT EXCEL/CSV</button>
+        <input type="file" id="dirImportFile" accept=".xlsx,.xls,.csv" style="display:none">
+      </div>
+      <div class="secthead">EMPLOYEES</div>
+      <div class="topbar">
+        <div class="spacer"></div>
+        <button class="btn mag" id="addEmpBtn">＋ ADD EMPLOYEE</button>
+        <button class="btn ghost" id="importLdapBtn">⬇ PULL FROM LDAP</button>
+      </div>
+      <p class="sec-hint">Staff records — added manually or synced from Active Directory. Employees are the people assets are issued to; they do not have logins. Sign-in accounts live under Settings &rsaquo; System users.</p>
+      <div class="toolbar">
+        <input id="empSearch" placeholder="Search name, ID, department…">
+      </div>
+      <div class="tablewrap">
+        <table id="empGrid"><thead><tr><th>EMP ID</th><th>USERNAME</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
+        <div class="empty" id="empEmpty" style="display:none">NO EMPLOYEES // add manually or pull from LDAP</div>
+      </div>
+
+      <div class="secthead" style="margin-top:22px">ORG REFERENCE LISTS</div>
+      <p class="sec-hint">Dropdown values used on the Employee and Add Asset forms -- department, location, and designation. Add everything here in bulk, then just pick it from a dropdown. Import an .xlsx/.xls/.csv with any of these column headers: <b>Department</b>, <b>Location</b>, <b>Designation</b>.</p>
+      <div class="grid3 catalog-grid">
+        <div class="invbox">
+          <label>DEPARTMENTS <span id="depCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="depInput" placeholder="e.g. IT, Finance, HR"><button class="btn sm" id="depAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="depBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>LOCATIONS <span id="dirLocCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="dirLocInput" placeholder="e.g. HQ, Warehouse"><button class="btn sm" id="dirLocAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="dirLocBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>DESIGNATIONS <span id="desCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="desInput" placeholder="e.g. Manager, Technician"><button class="btn sm" id="desAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="desBody"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-trash" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / TRASH</div><h2>Recycle Bin</h2></div>
+        <div class="spacer"></div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>DELETED ASSETS</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm ghost" id="trashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
+            <button class="btn sm danger" id="trashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
+            <button class="btn sm danger" id="trashEmptyBtn">🗑 EMPTY</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="trashGrid"><thead><tr><th><input type="checkbox" id="trashChkAll"></th><th>ASSET ID</th><th>ASSET NAME</th><th>ITEM CATEGORY</th><th>SERIAL</th><th>LOCATION</th><th>STATUS</th><th></th></tr></thead><tbody id="trashBody"></tbody></table>
+          <div class="empty" id="trashEmpty" style="display:none">TRASH IS EMPTY</div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <span>DELETED CONTRACTS</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn sm ghost" id="ctTrashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
+            <button class="btn sm danger" id="ctTrashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
+            <button class="btn sm danger" id="ctTrashEmptyBtn">🗑 EMPTY</button>
+          </div>
+        </div>
+        <div class="tablewrap">
+          <table id="ctTrashGrid"><thead><tr><th><input type="checkbox" id="ctTrashChkAll"></th><th>CONTRACT ID</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>END DATE</th><th>COST</th><th></th></tr></thead><tbody id="ctTrashBody"></tbody></table>
+          <div class="empty" id="ctTrashEmpty" style="display:none">CONTRACTS TRASH IS EMPTY</div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-tickets" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / HELPDESK TICKETS</div><h2>Ticket Desk</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="newTicketBtn">＋ NEW TICKET</button>
+        <button class="btn ghost" id="openMonitorBtn">🖥 OPEN MONITOR</button>
+        <button class="btn ghost" id="sharePortalBtn">🔗 SHARE PORTAL LINK</button>
+      </div>
+      <div class="toolbar">
+        <input id="tkSearch" placeholder="⌕ search subject, code, requester…">
+        <select id="tkStatus"><option value="">ALL STATUS</option><option>Open</option><option>In Progress</option><option>Pending</option><option>Resolved</option><option>Closed</option></select>
+      </div>
+      <div class="secthead">ACTIVE TICKETS <span id="tkActiveCount" class="muted mono" style="text-transform:none;font-weight:500"></span></div>
+      <div class="tablewrap">
+        <table id="tkGrid"><thead><tr><th>CODE</th><th>SUBJECT</th><th>PRIORITY</th><th>STATUS</th><th>CATEGORY</th><th>REQUESTER</th><th>ASSIGNEE</th><th>DUE</th><th>REPLIES</th></tr></thead><tbody id="tkBody"></tbody></table>
+        <div class="empty" id="tkEmpty" style="display:none">NO ACTIVE TICKETS</div>
+      </div>
+      <div class="secthead" style="margin-top:22px">TICKET HISTORY <span class="muted" style="text-transform:none;font-weight:500">(Resolved / Closed)</span> <span id="tkClosedCount" class="muted mono" style="text-transform:none;font-weight:500"></span></div>
+      <div class="tablewrap">
+        <table id="tkGridClosed"><thead><tr><th>CODE</th><th>SUBJECT</th><th>PRIORITY</th><th>STATUS</th><th>CATEGORY</th><th>REQUESTER</th><th>ASSIGNEE</th><th>DUE</th><th>REPLIES</th></tr></thead><tbody id="tkBodyClosed"></tbody></table>
+        <div class="empty" id="tkEmptyClosed" style="display:none">NO CLOSED TICKETS</div>
+      </div>
+    </div>
+
+    <div id="page-contracts" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / CONTRACTS</div><h2>Contracts, AMC &amp; Subscriptions</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="newContractBtn">＋ ADD CONTRACT</button>
+        <button class="btn ghost" id="ctImportBtn">Import</button>
+        <button class="btn ghost" id="ctExportBtn">Export</button>
+        <input type="file" id="ctFile" accept=".xlsx,.xls,.csv" style="display:none">
+      </div>
+      <div class="stats">
+        <div class="stat c1"><div class="k">Total Contracts</div><div class="v" id="ctTotal">0</div></div>
+        <div class="stat c2"><div class="k">AMC</div><div class="v" id="ctAmc">0</div></div>
+        <div class="stat c3"><div class="k">Licenses</div><div class="v" id="ctLicense">0</div></div>
+        <div class="stat c4"><div class="k">Subscriptions</div><div class="v" id="ctSub">0</div></div>
+        <div class="stat c5"><div class="k">Expiring ≤30d</div><div class="v" id="ctExpiring">0</div></div>
+      </div>
+
+      <div class="toolbar">
+        <input id="ctSearch" placeholder="Search name, vendor, type…">
+        <select id="ctTypeFilter"><option value="">All types</option><option>AMC</option><option>License</option><option>Subscription</option><option>Warranty</option><option>Support</option><option>Lease</option><option>Other</option></select>
+        <select id="ctGroupBy"><option value="">No grouping</option><option value="type">Type</option><option value="vendor">Vendor</option></select>
+        <span class="tb-spacer"></span>
+        <div class="count" id="ctCount"></div>
+        <button class="btn sm ghost" id="ctPrintSelBtn">Print selected</button>
+        <button class="btn sm danger" id="ctDelSelBtn" style="display:none">Delete selected</button>
+      </div>
+
+      <div class="tablewrap">
+        <table id="ctGrid"><thead><tr><th><input type="checkbox" id="ctChkAll"/></th><th>CONTRACT ID</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>START</th><th>END</th><th>COST</th><th>PLAN</th><th>LICENSE KEY</th><th>LINKED ASSET</th><th></th></tr></thead><tbody id="ctBody"></tbody></table>
+        <div class="empty" id="ctEmpty" style="display:none">NO CONTRACTS YET</div>
+      </div>
+    </div>
+
+    <div id="page-catalog" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / PRODUCT CATALOG</div><h2>Product Catalog</h2></div>
+        <div class="spacer"></div>
+        <button class="btn ghost" id="catImportBtn">⬆ IMPORT EXCEL/CSV</button>
+        <input type="file" id="catImportFile" accept=".xlsx,.xls,.csv" style="display:none">
+      </div>
+      <p class="sec-hint">Reference lists used on the Add Asset and Contract forms -- item categories, manufacturers, models, and contract types. Add everything here in bulk, then just pick it from a dropdown. Import an .xlsx/.xls/.csv with any of these column headers: <b>Category</b>, <b>Manufacturer</b>, <b>Model</b> -- a row can fill in just one, or a Manufacturer+Model pair.</p>
+      <div class="grid2 catalog-grid">
+        <div class="invbox">
+          <label>ITEM CATEGORIES <span id="catCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="catInput" placeholder="e.g. Mobile, Network, CCTV"><button class="btn sm" id="catAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="catBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>MANUFACTURERS <span id="mfrCatCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="mfrCatInput" placeholder="e.g. Apple, Dell, HP"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
+        </div>
+        <div class="invbox">
+          <label>CONTRACT TYPES <span id="ctTypeCatCount" class="cat-count"></span></label>
+          <div class="catrow"><input id="ctTypeCatInput" placeholder="e.g. AMC, License, Subscription"><button class="btn sm" id="ctTypeCatAdd">＋ ADD</button></div>
+          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="ctTypeCatBody"></tbody></table></div>
+        </div>
+      </div>
+      <div class="invbox" style="margin-top:14px">
+        <label>MODELS <span id="modCatCount" class="cat-count"></span></label>
+        <div class="catrow">
+          <select id="modMfrSelect"><option value="">-- choose manufacturer --</option></select>
+          <input id="modCatInput" placeholder="e.g. iPhone 13 Pro Max">
+          <button class="btn sm" id="modCatAdd">＋ ADD</button>
+        </div>
+        <div class="tablewrap"><table class="dtable"><thead><tr><th>Model</th><th>Manufacturer</th><th class="col-del"></th></tr></thead><tbody id="modCatBody"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- Ticket detail modal -->
+    <!-- New Ticket modal (styled like Add Asset) -->
+    <div class="modal" id="tkFormModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
+      <h3 id="tkFormTitle">NEW TICKET</h3>
+      
+  <div class="modal-scroll"><div id="tkFormFields"></div>
+  </div>
+  
+      <div class="m-actions"><button class="btn ghost" id="tkFormCancel">CANCEL</button><button class="btn" id="tkFormSave">CREATE TICKET</button></div>
+    </div></div>
+
+    <div class="modal" id="tkModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+      <h3 id="tkModalTitle">TICKET</h3>
+      
+  <div class="modal-scroll">
+        <div id="tkDetail"></div>
+        <div class="replybox">
+          <label>REPLY / UPDATE</label>
+          <textarea id="tkReply" rows="3" placeholder="Type a reply…"></textarea>
+          <button class="btn" id="tkReplyBtn">SEND REPLY</button>
+        </div>
+        <!-- Last section of the form, as on the asset form: the trail is
+             reference material, not something you fill in. -->
+        <div class="invbox"><label>CHANGE HISTORY</label><div class="tkhist" id="tkHistory"></div></div>
+  </div>
+  
+      <div class="m-actions">
+        <button class="btn ghost" id="tkModalClose">CLOSE</button>
+        <button class="btn" id="tkSaveBtn">SAVE CHANGES</button>
+        <button class="btn danger" id="tkDeleteBtn" style="display:none">DELETE TICKET</button>
+      </div>
+    </div></div>
+
+    <!-- ===================== DASHBOARD (Home) UNIQUEMARKER20260827 ===================== -->
+    <div id="page-dashboard" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / DASHBOARD</div><h2 id="dashTitle">Dashboard</h2></div>
+        <div class="spacer"></div>
+      </div>
+
+      <div class="kpis" id="kpiRow">
+        <div class="kpi c1"><div class="kpi-ico">▣</div><div class="kpi-body"><div class="kpi-v" id="kTotal">0</div><div class="kpi-k">Total Assets</div></div></div>
+        <div class="kpi c2"><div class="kpi-ico">⇄</div><div class="kpi-body"><div class="kpi-v" id="kOut">0</div><div class="kpi-k">Checked Out</div></div></div>
+        <div class="kpi c3"><div class="kpi-ico">🔧</div><div class="kpi-body"><div class="kpi-v" id="kMaint">0</div><div class="kpi-k">Under Maint.</div></div></div>
+        <div class="kpi c4"><div class="kpi-ico">⏳</div><div class="kpi-body"><div class="kpi-v" id="kDue">0</div><div class="kpi-k">Due Soon</div></div></div>
+        <div class="kpi c5"><div class="kpi-ico">🛡</div><div class="kpi-body"><div class="kpi-v" id="kWarr">0</div><div class="kpi-k">Warranty ≤30d</div></div></div>
+      </div>
+
+      <div class="dash-tools" id="dashTools">
+        <button class="btn ghost" id="dashEditLayout">✎ EDIT LAYOUT</button>
+        <button class="btn" id="dashSaveLayout" style="display:none">💾 SAVE LAYOUT</button>
+        <button class="btn ghost" id="dashResetLayout" style="display:none">↺ RESET</button>
+        <span id="dashLayoutMsg" class="muted"></span>
+      </div>
+
+      <div id="dashWidgets">
+        <div class="panel widget" data-wkey="status"><div class="secthead">ASSET STATUS</div><div class="bars" id="statusBars"></div></div>
+        <div class="panel widget" data-wkey="type"><div class="secthead">TOP ASSET TYPES</div><div class="bars" id="typeBars"></div></div>
+        <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
+        <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
+        <div class="panel widget" data-wkey="heartbeat"><div class="secthead">HEARTBEAT</div><div class="hbcounts" id="dashHbCounts"></div><div class="tablewrap" style="max-height:320px"><table id="dashHb"><thead><tr><th>STATUS</th><th>MONITOR</th><th>HEARTBEAT</th><th>RESPONSE</th><th>UPTIME</th></tr></thead><tbody id="dashHbBody"></tbody></table><div class="empty" id="dashHbEmpty" style="display:none">NO MONITORS</div></div></div>
+        <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>
+        <div class="panel widget" data-wkey="contracts"><div class="secthead">CONTRACTS BY TYPE</div><div class="bars" id="contractsBars"></div></div>
+        <div class="panel widget" data-wkey="contracts-expiring"><div class="secthead">CONTRACTS EXPIRING ≤30d</div><div class="tablewrap" style="max-height:320px"><table id="dashContractsExp"><thead><tr><th>NAME</th><th>VENDOR</th><th>TYPE</th><th>END DATE</th><th>DAYS LEFT</th></tr></thead><tbody id="dashContractsExpBody"></tbody></table><div class="empty" id="dashContractsExpEmpty" style="display:none">NO CONTRACTS EXPIRING SOON</div></div></div>
+        <div class="panel widget" data-wkey="unifi-devices"><div class="secthead">UNIFI DEVICES</div><div class="tablewrap" style="max-height:320px"><table id="unifiDevices"><thead><tr><th>NAME</th><th>TYPE</th><th>IP</th><th>CLIENTS</th><th>STATUS</th></tr></thead><tbody id="unifiDevicesBody"></tbody></table><div class="empty" id="unifiDevicesEmpty" style="display:none">NO DEVICES</div></div></div>
+        <div class="panel widget" data-wkey="unifi-clients"><div class="secthead">UNIFI ACTIVE CLIENTS</div><div class="tablewrap" style="max-height:320px"><table id="unifiClients"><thead><tr><th>HOSTNAME</th><th>IP</th><th>NETWORK</th><th>LINK</th></tr></thead><tbody id="unifiClientsBody"></tbody></table><div class="empty" id="unifiClientsEmpty" style="display:none">NO ACTIVE CLIENTS</div></div></div>
+      </div>
+    </div>
+
+    <!-- ===================== ASSET REGISTRY (Assets) ===================== -->
+    <div id="page-assets" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb" id="crumbText">Assets</div><h2 id="dashTitle">Asset Registry</h2></div>
+        <div class="spacer"></div>
+        <button class="btn mag" id="addBtn2">+ Add asset</button>
+        <button class="btn ghost" id="importBtn2">Import</button>
+        <button class="btn ghost" id="exportBtn2">Export</button>
+      </div>
+
+      <div class="stats">
+        <div class="stat c1"><div class="k">Total Assets</div><div class="v" id="stTotal">0</div></div>
+        <div class="stat c2"><div class="k">Checked Out</div><div class="v" id="stOut">0</div></div>
+        <div class="stat c3"><div class="k">Under Maint.</div><div class="v" id="stMaint">0</div></div>
+        <div class="stat c4"><div class="k">Due Soon</div><div class="v" id="stDue">0</div></div>
+        <div class="stat c5"><div class="k">Warranty ≤30d</div><div class="v" id="stWarr">0</div></div>
+      </div>
+
+      <div class="toolbar">
+        <input id="search" placeholder="Search name, serial, location, type…">
+        <select id="statusFilter"><option value="">All statuses</option></select>
+        <select id="groupBy"><option value="">No grouping</option><option value="ReceivedBy">Signed by (employee)</option><option value="EmployeeID">Employee ID</option><option value="Type">Item category (type)</option><option value="Status">Status</option><option value="Location">Location</option></select>
+        <span class="tb-spacer"></span>
+        <div class="count" id="count"></div>
+        <button class="btn sm ghost" id="colToggleBtn">Columns</button>
+        <button class="btn sm ghost" id="printSelBtn">Print selected</button>
+        <button class="btn sm ghost" id="qrSelBtn">Print QR (selected)</button>
+        <button class="btn sm danger" id="delSelBtn" style="display:none">Delete selected</button>
+        <div class="colpop" id="colPop" style="display:none"></div>
+      </div>
+      <div id="undoBar" class="undobar" style="display:none"></div>
+      <div class="hscroll" id="hscroll"><div class="hscroll-in" id="hscrollIn"></div></div>
+      <div class="tablewrap" id="tablewrap">
+        <table id="grid"><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+        <div class="empty" id="empty" style="display:none">No assets yet — import an Excel file or add one manually.</div>
+      </div>
+    </div>
+
+
+    <!-- ===================== USER SETTINGS ===================== -->
+    <div id="page-usettings" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">Settings</div><h2>Settings</h2></div>
+      </div>
+      <div class="cfgwrap">
+        <nav class="cfgnav" id="cfgNav">
+          <button class="cfgitem active" data-sec="general">⚙ General</button>
+          <button class="cfgitem" data-sec="account">🧑 My Account</button>
+          <button class="cfgitem" data-sec="users">👤 Users</button>
+          <button class="cfgitem" data-sec="notif">🔔 Notifications</button>
+          <button class="cfgitem" data-sec="sla">⏱ SLA & Automation</button>
+          <button class="cfgitem" data-sec="database">🗄 Database</button>
+          <button class="cfgitem" data-sec="ldap">🛡 LDAP / AD</button>
+          <button class="cfgitem" data-sec="unifi">🛜 UniFi Controller</button>
+          <button class="cfgitem" data-sec="branding">🏢 Branding</button>
+          <button class="cfgitem" data-sec="custom">🎨 Customization</button>
+          <button class="cfgitem" data-sec="label">🏷 Asset Label</button>
+          <button class="cfgitem cfgitem-danger" data-sec="danger" id="navDangerZone" style="display:none">💀 Danger Zone</button>
+        </nav>
+        <div class="cfgcontent">
+          <!-- GENERAL -->
+          <section class="cfg-sec" data-sec="general">
+            <div class="panel"><div class="secthead">GENERAL</div><div class="grid2">
+              <div class="field2"><label>Language</label><select id="uLang"><option value="en">English</option><option value="ar">العربية (Arabic)</option><option value="ta">தமிழ் (Tamil)</option><option value="fr">Français</option></select></div>
+              <div class="field2"><label>Currency</label><select id="uCur"><option value="AED">AED — UAE Dirham</option><option value="USD">USD — US Dollar</option><option value="EUR">EUR — Euro</option><option value="INR">INR — Indian Rupee</option></select></div>
+              <div class="field2"><label>Region</label><select id="uRegion"><option value="UAE">United Arab Emirates</option><option value="US">United States</option><option value="GB">United Kingdom</option><option value="IN">India</option><option value="FR">France</option></select></div>
+            </div></div>
+            <div class="m-actions"><button class="btn mag" id="saveUsetBtn">✓ SAVE GENERAL</button></div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">VERSION &amp; UPDATES</div>
+              <div class="refcard">
+                <div class="rc-left"><div class="verbadge" id="verBadge">⚙</div></div>
+                <div class="rc-info">
+                  <b>IT-Vault <span id="verCurrent" class="mono">—</span></b><br>
+                  <span id="verInstallKind" class="muted">Checking install type…</span><br>
+                  <!-- AGPL section 13: the source offer has to be reachable
+                       by anyone using this over a network. -->
+                  <span class="muted" style="font-size:12.5px">Free software under the
+                    <a href="https://www.gnu.org/licenses/agpl-3.0.html" target="_blank" rel="noopener">AGPL-3.0</a>
+                    — <a href="https://github.com/shatheitguy/it-vault" target="_blank" rel="noopener">get the source</a>
+                  </span>
+                </div>
+                <div class="spacer"></div>
+                <button class="btn" id="checkUpdateBtn">⟳ CHECK FOR UPDATES</button>
+              </div>
+              <div id="updateResult" style="margin-top:10px"></div>
+            </div>
+          </section>
+          <!-- MY ACCOUNT -->
+          <section class="cfg-sec" data-sec="account" style="display:none">
+            <div class="panel"><div class="secthead">MY ACCOUNT</div>
+<div id="profileInfo" class="mono" style="color:var(--muted);margin-bottom:10px"></div>
+    <div class="secthead">AVATAR</div>
+    <div class="refcard" style="margin-bottom:12px">
+      <div class="rc-left"><div id="avatarPrev" class="avatar-prev">A</div></div>
+      <div class="rc-info" id="avatarHint">PNG / JPG — square images look best.</div>
+      <div class="spacer"></div>
+      <input type="file" id="avatarFile" accept="image/*">
+      <button class="btn sm" id="avatarSave">⇪ UPLOAD</button>
+    </div>
+    <div class="field2"><label>Display name</label><input id="pDisplay" placeholder="Full name"></div>
+    <div class="field2"><label>Email (for notifications)</label><input id="p_email" placeholder="you@company.com"></div>
+    <div class="secthead">API KEY</div>
+    <div class="refcard" style="margin-bottom:12px">
+      <input id="pApiKey" class="mono" readonly style="flex:1;min-width:0">
+      <button class="btn sm ghost" id="copyKey">⧉ COPY</button>
+      <button class="btn sm" id="regenKey">↻ REGENERATE</button>
+    </div>
+    <div class="field2"><label>Old password</label><input id="p_old" type="password"></div>
+    <div class="field2"><label>New password</label><input id="p_new" type="password"></div>
+    <div class="field2"><label>Confirm new</label><input id="p_new2" type="password"></div>
+    <div class="m-actions">
+      <button class="btn ghost" id="pPassSave">✓ UPDATE PASSWORD</button>
+      <button class="btn" id="accSave">SAVE ACCOUNT</button>
+    </div>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">TWO-FACTOR AUTHENTICATION</div>
+              <p class="sec-hint">Add a second step at sign-in. You can enable an authenticator app (TOTP), email codes, or both.</p>
+
+              <div class="refcard" style="margin-bottom:10px">
+                <div class="rc-left"><div class="avatar-prev" id="totpIcon">📱</div></div>
+                <div class="rc-info">
+                  <b>Authenticator App</b><br>
+                  <span id="totpStatusText" class="muted">Not enabled</span>
+                </div>
+                <div class="spacer"></div>
+                <button class="btn sm" id="totpEnableBtn">ENABLE</button>
+                <button class="btn sm danger" id="totpDisableBtn" style="display:none">DISABLE</button>
+              </div>
+              <div id="totpSetupBox" style="display:none;margin-bottom:16px">
+                <div class="field2" style="max-width:260px"><label>Scan with Google Authenticator, Microsoft Authenticator, Authy, etc.</label></div>
+                <div id="totpQr" style="background:#fff;padding:12px;border-radius:8px;width:fit-content;margin-bottom:10px"></div>
+                <div class="field2"><label>Can't scan? Enter this key manually</label><input id="totpSecretText" class="mono" readonly></div>
+                <div class="field2" style="max-width:200px"><label>Enter the 6-digit code to confirm</label><input id="totpConfirmCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+                <div class="m-actions" style="justify-content:flex-start">
+                  <button class="btn" id="totpConfirmBtn">✓ CONFIRM &amp; ENABLE</button>
+                  <button class="btn ghost" id="totpCancelBtn">CANCEL</button>
+                </div>
+                <div class="muted" id="totpSetupMsg" style="margin-top:6px"></div>
+              </div>
+
+              <div class="refcard">
+                <div class="rc-left"><div class="avatar-prev" id="emailOtpIcon">✉️</div></div>
+                <div class="rc-info">
+                  <b>Email Codes</b><br>
+                  <span id="emailOtpStatusText" class="muted">Not enabled</span>
+                </div>
+                <div class="spacer"></div>
+                <button class="btn sm" id="emailOtpEnableBtn">ENABLE</button>
+                <button class="btn sm danger" id="emailOtpDisableBtn" style="display:none">DISABLE</button>
+              </div>
+              <div id="emailOtpSetupBox" style="display:none;margin-top:10px">
+                <div class="field2" style="max-width:200px"><label>Enter the code we emailed you</label><input id="emailOtpConfirmCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+                <div class="m-actions" style="justify-content:flex-start">
+                  <button class="btn" id="emailOtpConfirmBtn">✓ CONFIRM &amp; ENABLE</button>
+                  <button class="btn ghost" id="emailOtpCancelBtn">CANCEL</button>
+                </div>
+                <div class="muted" id="emailOtpSetupMsg" style="margin-top:6px"></div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">SESSION TRACKING</div>
+              <ul class="sesslist" id="pSessions"></ul>
+            </div>
+          </section>
+          <!-- USERS -->
+          <section class="cfg-sec" data-sec="users" style="display:none">
+            <div class="panel"><div class="secthead">SYSTEM USERS</div>
+              <p class="sec-hint">Login accounts for this system — the people who sign in to this app. Besides the built-in Admin / Read-write / Read-only tiers, use <b>Manage Roles</b> to build a custom role with per-module access (e.g. a user who can reach Assets only), then pick it as that user's Role. Staff imported from Active Directory are <b>Employees</b>, not system users, and are managed on the Employees page.</p>
+              <div class="m-actions" style="justify-content:flex-start;margin-bottom:10px"><button class="btn" id="cfgAddUser">＋ ADD USER</button><button class="btn ghost" id="cfgManageRoles" type="button">🛡 MANAGE ROLES</button></div>
+              <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Display name</th><th>Email</th><th>2FA</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
+            </div>
+          </section>
+          <!-- NOTIFICATIONS -->
+          <section class="cfg-sec" data-sec="notif" style="display:none">
+            <div class="panel"><div class="secthead">EMAIL NOTIFICATIONS (SMTP)</div><div class="grid2">
+              <div class="field2"><label>SMTP Host</label><input id="s_host" placeholder="smtp.gmail.com"></div>
+              <div class="field2"><label>Port</label><input id="s_port" value="587"></div>
+              <div class="field2"><label>SMTP User</label><input id="s_user"></div>
+              <div class="field2"><label>SMTP Password / App pw</label><input id="s_pass" type="password"></div>
+              <div class="field2" style="grid-column:1/-1"><label>From</label><input id="s_from"></div>
+            </div>
+            <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="saveSettings">Save notifications</button><button class="btn ghost" id="smtpTestBtn">⚡ TEST EMAIL</button><span id="smtpTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">ASSET EVENT NOTIFICATIONS</div>
+              <label class="toggle"><input type="checkbox" id="uNew"><span>Notify on new asset created</span></label>
+              <label class="toggle"><input type="checkbox" id="uDel"><span>Notify on asset deletion</span></label>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">TICKET EVENT NOTIFICATIONS</div>
+              <label class="toggle"><input type="checkbox" id="notify_on_create"><span>New ticket created</span></label>
+              <label class="toggle"><input type="checkbox" id="notify_on_resolve"><span>Ticket resolved/closed</span></label>
+              <label class="toggle"><input type="checkbox" id="notify_on_reply"><span>Reply added (email requester)</span></label>
+              <p class="muted" style="margin:12px 0 0">All emails sent from the SMTP above. Recipients = users with emails set in their profile.</p>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveNotifBtn">✓ SAVE NOTIFICATIONS</button></div>
+          </section>
+          <!-- SLA & AUTOMATION -->
+          <section class="cfg-sec" data-sec="sla" style="display:none">
+            <div class="panel"><div class="secthead">SLA POLICIES (hours)</div><div class="grid2">
+              <div class="field2"><label>Low Priority (hrs)</label><input id="sla_low" type="number" value="72" min="1"></div>
+              <div class="field2"><label>Normal Priority (hrs)</label><input id="sla_normal" type="number" value="24" min="1"></div>
+              <div class="field2"><label>High Priority (hrs)</label><input id="sla_high" type="number" value="8" min="1"></div>
+              <div class="field2"><label>Urgent Priority (hrs)</label><input id="sla_urgent" type="number" value="4" min="1"></div>
+            </div>
+            <p class="muted" style="margin:12px 0 0">Due date auto-calculated from priority. Overdue tickets highlighted red.</p>
+            </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">AUTOMATION</div>
+              <label class="toggle"><input type="checkbox" id="sla_breach_notify"><span>Email alert on SLA breach</span></label>
+              <label class="toggle"><input type="checkbox" id="auto_assign_roundrobin"><span>Auto-assign new tickets (round-robin)</span></label>
+              <p class="muted" style="margin:12px 0 0">Round-robin assigns to admin/editor with fewest open tickets.</p>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveSlaBtn">✓ SAVE SLA SETTINGS</button></div>
+          </section>
+          <!-- DATABASE -->
+          <section class="cfg-sec" data-sec="database" style="display:none">
+            <div class="panel"><div class="secthead">DATABASE (MariaDB)</div>
+              <p class="muted" style="margin:0 0 12px">Point the app at a different MariaDB server / container. Use <b>Test</b> before saving.</p>
+              <div class="grid2">
+                <div class="field2"><label>Host / IP</label><input id="db_host" placeholder="127.0.0.1"></div>
+                <div class="field2"><label>Port</label><input id="db_port" type="number" value="3306"></div>
+                <div class="field2"><label>Database name</label><input id="db_name" placeholder="itguy_assets"></div>
+                <div class="field2"><label>Username</label><input id="db_user" placeholder="itguy"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Password</label><input id="db_pass" type="password" placeholder="leave blank to keep current"></div>
+              </div>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="dbTestBtn" type="button">⚡ TEST CONNECTION</button><span id="dbTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveDbBtn">✓ SAVE DATABASE</button></div>
+          </section>
+          <!-- LDAP -->
+          <section class="cfg-sec" data-sec="ldap" style="display:none">
+            <div class="panel"><div class="secthead">LDAP / ACTIVE DIRECTORY</div>
+              <p class="muted" style="margin:0 0 12px">Connect to your Domain Controller to sync employees. Use <b>Test</b> before saving.</p>
+              <div class="grid2">
+                <div class="field2"><label>LDAP Server (host or ldap://host:389)</label><input id="ldap_server" placeholder="192.168.0.0"></div>
+                <div class="field2"><label>Domain</label><input id="ldap_domain" placeholder="domain.local"></div>
+                <div class="field2"><label>Bind User</label><input id="ldap_bind_user" placeholder="domain\\user"></div>
+                <div class="field2"><label>Bind Password</label><input id="ldap_bind_pass" type="password" placeholder="leave blank to keep current"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Base DN</label><input id="ldap_base_dn" placeholder="DC=domain,DC=local"></div>
+              </div>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="ldapTestBtn2" type="button">⚡ TEST LDAP</button><button class="btn ghost" id="ldapSyncBtn2" type="button">⇩ SYNC FROM AD NOW</button><span id="ldapTestMsg2" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveLdapBtn">✓ SAVE LDAP</button></div>
+          </section>
+          <!-- UNIFI CONTROLLER -->
+          <section class="cfg-sec" data-sec="unifi" style="display:none">
+            <div class="panel"><div class="secthead">UNIFI CONTROLLER</div>
+              <p class="muted" style="margin:0 0 12px">Pulls the managed device list and active clients onto the Dashboard. Use <b>Test</b> before saving.</p>
+              <label class="toggle" style="margin-bottom:12px"><input type="checkbox" id="unifi_enabled"><span>Enabled</span></label>
+              <div class="grid2">
+                <div class="field2"><label>Controller Host / IP</label><input id="unifi_host" placeholder="192.168.1.1 or unifi.company.local"></div>
+                <div class="field2"><label>Port</label><input id="unifi_port" type="number" value="443"></div>
+                <div class="field2"><label>Site</label><input id="unifi_site" placeholder="default"></div>
+                <div class="field2"><label>Username</label><input id="unifi_user" placeholder="local admin / read-only account"></div>
+                <div class="field2" style="grid-column:1/-1"><label>Password</label><input id="unifi_pass" type="password" placeholder="leave blank to keep current"></div>
+              </div>
+              <label class="toggle" style="margin-top:6px"><input type="checkbox" id="unifi_is_os" checked><span>UniFi OS (UDM / UDM Pro / Cloud Key Gen2+)</span></label>
+              <label class="toggle"><input type="checkbox" id="unifi_verify_ssl"><span>Verify SSL certificate</span></label>
+              <div class="m-actions" style="justify-content:flex-start"><button class="btn ghost" id="unifiTestBtn" type="button">⚡ TEST CONNECTION</button><span id="unifiTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveUnifiBtn">✓ SAVE UNIFI</button></div>
+          </section>
+          <!-- BRANDING -->
+          <section class="cfg-sec" data-sec="branding" style="display:none">
+            <div class="panel"><div class="secthead">BRANDING</div>
+            <p class="sec-hint">Your organization's identity across the app — name, logo, and what shows in the sidebar and browser tab. Label printing and appearance/theme have their own sections.</p>
+            <div class="grid2">
+              <div class="field2"><label>App / Company Name</label><input id="b_name" placeholder="IT-Vault"></div>
+              <div class="field2"><label>Logo Text (sidebar)</label><input id="b_logoText" placeholder="IT-Vault"></div>
+              <div class="field2"><label>Company Phone</label><input id="b_phone" placeholder="+971 4 000 0000"></div>
+              <div class="field2"><label>Company Address</label><input id="b_address" placeholder="Office / building, city, country"></div>
+              <div class="field2" style="grid-column:1/-1"><label>Logo (PNG, max 500KB)</label><input type="file" id="b_logo" accept="image/png"></div>
+            </div>
+            <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="pm_saveBrand">✓ SAVE BRANDING</button><button class="btn danger" id="removeLogoBtn" type="button">🗑 REMOVE LOGO</button><img id="b_logoPrev" src="/logo.png?t=1" style="height:34px;margin-left:10px"></div>
+            <div class="invbox" style="margin-top:14px">
+              <label>LETTERHEAD</label>
+              <p class="sec-hint" style="margin:0 0 10px">Upload your official letterhead (PDF or image). Every printed asset/contract sheet and generated PDF (e.g. signed acknowledgements) uses this as its header instead of the plain logo bar.</p>
+              <div class="invrow">
+                <input type="file" id="b_letterhead" accept=".pdf,.png,.jpg,.jpeg">
+                <button class="btn sm" id="pm_saveLetterhead" type="button">⬆ UPLOAD</button>
+                <button class="btn sm danger" id="removeLetterheadBtn" type="button">🗑 REMOVE</button>
+              </div>
+              <img id="b_letterheadPrev" src="/letterhead.png?t=1" style="max-width:100%;max-height:160px;margin-top:10px;border:1px solid var(--line);border-radius:6px;display:none">
+            </div>
+            </div>
+          </section>
+          <!-- CUSTOMIZATION (appearance + theme, single unified section) -->
+          <section class="cfg-sec" id="cfgCustomSec" data-sec="custom" style="display:none">
+            <div class="panel">
+              <div class="secthead">PRESET THEMES</div>
+              <div class="preset-grid" id="presetGrid">
+                <button type="button" class="preset-card" data-preset="deepdark">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#0a0d13,#121826)"></span>
+                  <span class="pc-name">Deep Dark</span>
+                  <span class="pc-sub">Professional / default</span>
+                </button>
+                <button type="button" class="preset-card" data-preset="cleanlight">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#eef1f6,#ffffff)"></span>
+                  <span class="pc-name">Clean Light</span>
+                  <span class="pc-sub">Bright / office</span>
+                </button>
+                <button type="button" class="preset-card" data-preset="graphite">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#16181d,#ff6b57)"></span>
+                  <span class="pc-name">Graphite</span>
+                  <span class="pc-sub">Neutral / low glare</span>
+                </button>
+                <button type="button" class="preset-card" data-preset="minimalist">
+                  <span class="pc-swatch" style="background:linear-gradient(135deg,#f7f7f8,#111111)"></span>
+                  <span class="pc-name">Minimalist</span>
+                  <span class="pc-sub">Flat / mono</span>
+                </button>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">FULL CUSTOMIZE</div>
+              <div class="grid2">
+                <div class="field2">
+                  <label>Background type</label>
+                  <select id="bgType"><option value="solid">Solid</option><option value="gradient">Gradient</option></select>
+                </div>
+                <div class="field2">
+                  <label>Background color</label>
+                  <input type="color" id="bg" value="#0a0d13">
+                </div>
+                <div class="field2" id="bgGradWrapA" style="display:none">
+                  <label>Gradient color A</label>
+                  <input type="color" id="bgA" value="#0a0d13">
+                </div>
+                <div class="field2" id="bgGradWrapB" style="display:none">
+                  <label>Gradient color B</label>
+                  <input type="color" id="bgB" value="#121826">
+                </div>
+                <div class="field2">
+                  <label>Component background</label>
+                  <input type="color" id="compBg" value="#121826">
+                </div>
+                <div class="field2">
+                  <label>Border radius — <span id="radiusVal" class="mono">12</span>px</label>
+                  <input type="range" id="radius" min="0" max="24" step="1" value="12">
+                </div>
+                <div class="field2">
+                  <label>Font family</label>
+                  <select id="font">
+                    <option value="Inter">Inter</option>
+                    <option value="Segoe UI">Segoe UI</option>
+                    <option value="System">System default</option>
+                  </select>
+                </div>
+                <div class="field2">
+                  <label>Primary accent</label>
+                  <input type="color" id="accent" value="#ff3b30">
+                </div>
+                <div class="field2">
+                  <label>Secondary accent</label>
+                  <input type="color" id="accent2" value="#c0392b">
+                </div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">LIVE PREVIEW</div>
+              <div class="preview-box" id="previewBox">
+                <div class="pv-card">
+                  <div class="pv-title">Sample Component</div>
+                  <div class="pv-text">This card renders with your current theme variables — surface, radius, font and accent colours.</div>
+                  <div class="pv-row">
+                    <button type="button" class="btn" id="pvBtn1">PRIMARY</button>
+                    <button type="button" class="btn ghost" id="pvBtn2">GHOST</button>
+                    <span class="pv-chip">ACTIVE</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="m-actions"><button class="btn ghost" id="resetCustomBtn">↺ RESET</button><button class="btn mag" id="saveCustomBtn">✓ SAVE THEME</button></div>
+          </section>
+          <!-- ASSET LABEL (QR / print label — separate from Branding) -->
+          <section class="cfg-sec" data-sec="label" style="display:none">
+            <div class="panel">
+              <div class="secthead">LABEL SIZE</div>
+              <p class="sec-hint">Two independent sizes: the QR code's own image resolution, and the physical label it gets printed onto. Pick the physical size to match your label stock, and a QR resolution that stays sharp at that size.</p>
+              <div class="grid2">
+                <div class="field2"><label>QR code resolution (image)</label>
+                  <select id="qr_size">
+                    <option value="120">Small — 120 × 120 px</option>
+                    <option value="160" selected>Default — 160 × 160 px</option>
+                    <option value="240">Large — 240 × 240 px</option>
+                    <option value="320">Extra large — 320 × 320 px</option>
+                  </select>
+                </div>
+                <div class="field2"><label>Physical label size (printed)</label>
+                  <select id="label_size">
+                    <option value="50.8x50.8">Square — 5.08 × 5.08 cm</option>
+                    <option value="50.8x25.4">Rectangle — 5.08 × 2.54 cm</option>
+                  </select>
+                </div>
+              </div>
+              <label class="toggle" style="margin-top:6px"><input type="checkbox" id="label_logo" checked><span>Show company logo on label</span></label>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">FIELDS SHOWN ON LABEL</div>
+              <p class="sec-hint">Choose exactly what prints on the label. <b>Category</b> and <b>Asset ID</b> always show — they're needed to identify a scanned item.</p>
+              <div class="label-fields-grid" id="lblFieldsGrid">
+                <label class="toggle"><input type="checkbox" id="lf_Name" value="Name" checked><span>Asset Name</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Type" value="Type" checked disabled><span>Category (always shown)</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_AssetID" value="AssetID" checked disabled><span>Asset ID (always shown)</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Serial" value="Serial" checked><span>Serial</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Status" value="Status" checked><span>Status</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Location" value="Location" checked><span>Location</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_ReceivedBy" value="ReceivedBy"><span>Signed By</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_ReceiverDate" value="ReceiverDate"><span>Signed Date</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_EmployeeID" value="EmployeeID"><span>Employee ID</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_EmployeeName" value="EmployeeName"><span>Employee Name</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Department" value="Department"><span>Department</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Warranty" value="Warranty"><span>Warranty</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_PurchaseDate" value="PurchaseDate"><span>Purchased Date</span></label>
+                <label class="toggle"><input type="checkbox" id="lf_Note" value="Note"><span>Note</span></label>
+              </div>
+            </div>
+            <div class="m-actions"><button class="btn mag" id="saveLabelBtn">✓ SAVE LABEL SETTINGS</button></div>
+          </section>
+          <!-- DANGER ZONE -->
+          <section class="cfg-sec" data-sec="danger" style="display:none">
+            <div class="panel danger-zone-panel">
+              <div class="secthead" style="color:#ff3b30">💀 DANGER ZONE</div>
+              <p class="sec-hint" style="color:#ffb4ac">This nukes <b>everything</b> — every asset, contract, employee, ticket, and your branding — back to a blank slate, like the app was just installed. Login accounts are the only thing kept, so you can still get back in. There's no undo button here, only a backup file: one is taken automatically the instant before the wipe runs.</p>
+              <div class="danger-cta">
+                <button class="btn danger-wipe-btn" id="openWipeBtn" type="button">🔥 WIPE EVERYTHING 🔥</button>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+    <!-- ===================== HEARTBEAT (uptime monitoring) ===================== -->
+    <div id="page-heartbeat" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / HEARTBEAT</div><h2>Heartbeat</h2></div>
+        <div class="spacer"></div>
+        <select id="hbWindow" title="History window">
+          <option value="1">Last hour</option>
+          <option value="6">Last 6 hours</option>
+          <option value="24" selected>Last 24 hours</option>
+          <option value="168">Last 7 days</option>
+          <option value="720">Last 30 days</option>
+          <option value="8760">Last year</option>
+        </select>
+        <label class="toggle" style="margin:0"><input type="checkbox" id="hbAuto" checked><span>Auto&#8209;refresh</span></label>
+        <button class="btn ghost" id="hbChanBtn" style="display:none">&#128276; ALERTS</button>
+        <button class="btn ghost" id="hbCheckBtn">&#9889; CHECK NOW</button>
+        <button class="btn" id="hbAddBtn">+ ADD MONITOR</button>
+      </div>
+      <p class="sec-hint">Every monitor is checked on its own interval, around the clock, for as long as IT&#8209;Vault is
+      running. A monitor has to fail its retry count before it counts as down, and the alert goes out once on the way
+      down and once on the way back up &mdash; so a flapping device will not fill your inbox overnight. History is kept
+      indefinitely, so uptime over the last year is a question you can still ask.</p>
+
+      <div class="kpis" id="hbKpis">
+        <div class="kpi hbk-down"><div class="kpi-ico">&#9679;</div><div class="kpi-body"><div class="kpi-v" id="hbNDown">0</div><div class="kpi-k">Down</div></div></div>
+        <div class="kpi hbk-pending"><div class="kpi-ico">&#8987;</div><div class="kpi-body"><div class="kpi-v" id="hbNPending">0</div><div class="kpi-k">Checking</div></div></div>
+        <div class="kpi hbk-up"><div class="kpi-ico">&#10003;</div><div class="kpi-body"><div class="kpi-v" id="hbNUp">0</div><div class="kpi-k">Up</div></div></div>
+        <div class="kpi hbk-paused"><div class="kpi-ico">&#10073;&#10073;</div><div class="kpi-body"><div class="kpi-v" id="hbNPaused">0</div><div class="kpi-k">Paused</div></div></div>
+        <div class="kpi hbk-avg"><div class="kpi-ico">&#9201;</div><div class="kpi-body"><div class="kpi-v" id="hbAvg">&mdash;</div><div class="kpi-k">Avg Response</div></div></div>
+      </div>
+
+      <div class="toolbar">
+        <input id="hbSearch" type="search" placeholder="&#8981; filter by name, type, target or tag&hellip;">
+        <select id="hbFilter">
+          <option value="">All statuses</option>
+          <option value="down">Down only</option>
+          <option value="pending">Checking only</option>
+          <option value="up">Up only</option>
+          <option value="paused">Paused only</option>
+        </select>
+        <span class="tb-spacer"></span>
+        <span id="hbMeta" class="muted"></span>
+      </div>
+
+      <div id="hbStatus" class="muted scan-status"></div>
+      <div class="tablewrap" id="hbTableWrap" style="display:none">
+        <table class="dtable">
+          <thead><tr>
+            <th>STATUS</th><th>MONITOR</th><th>CHECK</th><th>TARGET</th>
+            <th>RESPONSE</th><th>HEARTBEAT</th><th>UPTIME</th><th>CERT</th><th>SINCE</th><th></th>
+          </tr></thead>
+          <tbody id="hbBody"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="hbEmpty" style="display:none">NO MONITORS YET &mdash; ADD ONE, OR RUN A NETWORK SCAN AND WATCH WHAT IT FINDS</div>
+    </div>
+  </section>
+</div>
+
+<!-- Danger Zone: factory reset confirmation -->
+<div class="modal" id="wipeModal"><div class="modal-box danger-modal" style="width:min(480px,94vw);max-width:480px">
+  <h3 style="color:#ff3b30">💀 FACTORY RESET</h3>
+  <p class="sec-hint">This wipes the database completely — every asset, contract, employee, ticket, branding setting <b>and every login account, including your own</b>. The instance returns to the first-run setup wizard, where you create a new admin from scratch. A full backup is saved automatically first, but this can't be undone from here.</p>
+  <div class="field2"><label>Your password</label><input id="wipePassword" type="password" placeholder="Confirm it's really you" autocomplete="current-password"></div>
+  <div class="field2"><label>Type <span class="mono">WIPE EVERYTHING</span> to confirm</label><input id="wipeConfirmText" placeholder="WIPE EVERYTHING" autocomplete="off"></div>
+  <div id="wipeErr" class="muted" style="color:#ff3b30;min-height:16px"></div>
+  <div class="m-actions">
+    <button class="btn ghost" id="wipeCancelBtn">CANCEL, I CHANGED MY MIND</button>
+    <button class="btn danger-wipe-btn" id="wipeConfirmBtn" disabled>💣 DELETE EVERYTHING</button>
+  </div>
+</div></div>
+
+<input type="file" id="file" accept=".xlsx,.xls,.csv" style="display:none">
+
+<!-- Asset modal -->
+<div class="modal" id="modal"><div class="modal-box">
+  <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3><button class="btn sm ghost" id="camScanBtn" type="button">📷 SCAN QR / SN</button></div>
+  <div class="modal-scroll">
+    <div id="formFields"></div>
+    <div class="invbox" id="maintWrap" style="display:none">
+      <label>MAINTENANCE / REPAIR LOG</label>
+      <div class="tablewrap"><table class="dtable"><thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Note</th><th></th></tr></thead><tbody id="maintListInline"></tbody></table></div>
+      <div class="grid2" style="margin-top:12px">
+        <div class="field2"><label>Date</label><input id="mDate2" type="date"></div>
+        <div class="field2"><label>Type</label><input id="mType2" placeholder="Repair / Upgrade"></div>
+        <div class="field2"><label>Cost</label><input id="mCost2" type="number" step="0.01" placeholder="0.00"></div>
+        <div class="field2"><label>Note</label><input id="mNote2" placeholder="what was done"></div>
+      </div>
+      <div class="m-actions" style="justify-content:flex-start;padding-top:10px"><button class="btn sm" type="button" id="mAdd2">ADD RECORD</button></div>
+    </div>
+    <div id="noteInvoiceWrap"></div>
+    <div class="invbox" id="histWrap"><label>CHANGE HISTORY</label><div id="histBox" class="histbox"></div></div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="cancelBtn">CANCEL</button><button class="btn" id="saveBtn">COMMIT</button></div>
+</div></div>
+
+<!-- Camera scan modal (QR / barcode -> Add Asset form) -->
+<div class="modal" id="camScanModal"><div class="modal-box" style="width:min(480px,94vw);max-width:480px">
+  <h3>SCAN QR / SERIAL NUMBER</h3>
+  
+  <div class="modal-scroll"><p class="sec-hint" id="camScanHint">Point the camera at a QR code or serial-number barcode. Detected values fill the asset form automatically -- nothing is saved until you hit COMMIT.</p>
+    <div class="camscan-view">
+      <video id="camScanVideo" autoplay playsinline muted></video>
+    </div>
+    <canvas id="camScanCanvas" style="display:none"></canvas>
+    <div class="camscan-status" id="camScanStatus"></div>
+    <div class="camscan-upload-row">
+      <button class="btn sm" id="camScanTextBtn" type="button">📄 SCAN TEXT ON LABEL (S/N, Model…)</button>
+    </div>
+    <div class="camscan-upload-row">
+      <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
+      <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
+    </div>
+  </div>
+  
+  <div class="m-actions"><button class="btn ghost" id="camScanCancel" type="button">CLOSE</button></div>
+</div></div>
+
+<!-- Contract / AMC / License / Subscription modal -->
+<div class="modal" id="contractModal"><div class="modal-box">
+  <h3 id="contractModalTitle">ADD CONTRACT</h3>
+  <div class="modal-scroll">
+    <div class="invbox">
+      <label>DETAILS</label>
+      <div class="grid2">
+        <div class="field2"><label>Contract ID</label><input id="ct_idDisplay" class="mono" placeholder="e.g. CT-0001"></div>
+        <div class="field2"><label>Name</label><input id="ct_name" placeholder="e.g. AC Maintenance AMC, Antivirus License"></div>
+        <div class="field2"><label>Type <a class="mlink" onclick="document.getElementById('contractModal').classList.remove('show');showPage('page-catalog')">manage in Product Catalog ↗</a></label><select id="ct_type"><option value="">-- select type --</option></select></div>
+        <div class="field2"><label>Vendor / Company</label><input id="ct_vendor" placeholder="Outside company name"></div>
+        <div class="field2"><label>Vendor Email</label><input id="ct_vendor_email" type="email" placeholder="vendor@company.com"></div>
+        <div class="field2"><label>Cost (<span id="ctCurLabel">AED</span>)</label><input id="ct_cost" type="number" step="0.01" min="0"></div>
+        <div class="field2"><label>Payment Plan</label><select id="ct_billing">
+          <option value="One-Time">One-Time</option>
+          <option value="Monthly">Monthly</option>
+          <option value="Quarterly">Quarterly</option>
+          <option value="Semi-Annually">Semi-Annually</option>
+          <option value="Annually">Annually</option>
+        </select></div>
+        <div class="field2"><label>Start Date</label><input id="ct_start" type="date"></div>
+        <div class="field2"><label>End / Renewal Date</label><input id="ct_end" type="date"></div>
+        <div class="field2"><label>Linked Asset (optional)</label><select id="ct_asset"><option value="">-- none --</option></select></div>
+        <div class="field2"><label>Employee (optional)</label><select id="ct_employee"><option value="">-- none --</option></select></div>
+        <div class="field2"><label>Location (optional)</label><select id="ct_location"><option value="">-- none --</option></select></div>
+        <div class="field2"><label>Department (optional)</label><select id="ct_department"><option value="">-- none --</option></select></div>
+        <div class="field2" id="ct_license_key_wrap" style="display:none"><label>License Key</label><input id="ct_license_key" placeholder="e.g. XXXXX-XXXXX-XXXXX-XXXXX" class="mono"></div>
+      </div>
+    </div>
+    <div class="invbox">
+      <label>NOTE</label>
+      <textarea id="ct_note" rows="3" placeholder="Coverage details, renewal terms, contact person…"></textarea>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="ctCancel" type="button">CANCEL</button><button class="btn danger" id="ctDelete" type="button" style="display:none">DELETE</button><button class="btn" id="ctSave" type="button">SAVE</button></div>
+</div></div>
+
+<!-- Employee modal -->
+<div class="modal" id="empModal"><div class="modal-box">
+  <h3 id="empModalTitle">ADD EMPLOYEE</h3>
+  
+  <div class="modal-scroll"><div class="grid2">
+      <div class="field2"><label>Emp ID</label><input id="e_EmpCode" placeholder="e.g. 1024 or STAFF-045"></div>
+      <div class="field2"><label>Username</label><input id="e_EmployeeID" placeholder="AD/login username, or any unique ID"></div>
+      <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
+      <div class="field2"><label>Department</label><select id="e_Department"><option value="">-- select department --</option></select></div>
+      <div class="field2"><label>Designation</label><select id="e_Designation"><option value="">-- select designation --</option></select></div>
+      <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
+    </div>
+  </div>
+  
+  <div class="m-actions"><button class="btn ghost" id="empCancel">CANCEL</button><button class="btn" id="empSave">SAVE</button></div>
+</div></div>
+
+<!-- LDAP import modal -->
+<div class="modal" id="ldapModal"><div class="modal-box" style="width:min(520px,94vw);max-width:520px">
+  <h3>SYNC EMPLOYEES FROM ACTIVE DIRECTORY</h3>
+  
+  <div class="modal-scroll"><p class="muted" style="margin-top:0">Pulls all users from your Domain Controller and keeps the employee list in sync automatically (every 30 min).</p>
+  </div>
+  
+  <div class="m-actions" style="justify-content:flex-start">
+    <button class="btn" id="ldapSyncBtn">⇩ SYNC FROM AD NOW</button>
+    <button class="btn ghost" id="ldapCancel">CLOSE</button>
+  </div>
+  <div class="muted" id="ldapStatus" style="margin-top:8px"></div>
+</div></div>
+
+<!-- Users modal -->
+<div class="modal" id="usersModal"><div class="modal-box">
+  <h3>USER MANAGEMENT</h3>
+  
+  <div class="modal-scroll"><div class="toolbar" style="padding:0 0 12px">
+      <button class="btn" id="addUserBtn">＋ ADD USER</button>
+      <button class="btn ghost" id="manageRolesBtn" type="button">🛡 MANAGE ROLES</button>
+    </div>
+  </div>
+  
+  <table id="usersGrid" style="font-size:13px"><thead><tr><th>USER</th><th>ROLE</th><th>DISPLAY</th><th>ACTIONS</th></tr></thead><tbody id="usersBody"></tbody></table>
+  <div class="m-actions"><button class="btn ghost" id="usersClose">CLOSE</button></div>
+</div></div>
+
+<!-- Roles modal (custom per-module permissions, e.g. "Manager") -->
+<div class="modal" id="rolesModal"><div class="modal-box" style="width:min(900px,96vw);max-width:900px">
+  <h3>USER ROLES</h3>
+  <!-- Everything between the title and the buttons lives in ONE scroll
+       container. Left as direct children of .modal-box they each picked up
+       "overflow:auto; flex:1 1 auto" from the generic rule, so the modal grew
+       five scrollbars and clipped the name field to half its height. -->
+  <div class="modal-scroll">
+    <p class="sec-hint" style="margin-top:0">Built-in roles (admin, read-write, read-only) are fixed. A custom role is
+    assembled from individual permissions, so you can grant one thing and nothing else. <em class="permnote">extra</em>
+    marks permissions the read-write role doesn't get by default. Users, Roles, Database and the Danger Zone stay
+    admin-only &mdash; granting those is granting admin.</p>
+    <div class="tablewrap noscroll"><table class="dtable"><thead><tr><th>Role Name</th><th>Permissions</th><th></th></tr></thead><tbody id="rolesBody"></tbody></table></div>
+    <div class="grid2" style="margin-top:14px">
+      <div class="field2"><label>Role Name</label><input id="rl_name" placeholder="e.g. Helpdesk"></div>
+      <div class="field2"><label>Selected</label><div class="ro" id="rl_total">Nothing selected yet</div></div>
+    </div>
+    <div class="secthead" style="margin-top:14px">PERMISSIONS</div>
+    <div id="rl_tree" class="permtree"></div>
+  </div>
+  <div class="m-actions">
+    <button class="btn ghost" id="rolesClose">CLOSE</button>
+    <button class="btn" id="rl_save">+ ADD ROLE</button>
+  </div>
+</div></div>
+
+<!-- User edit modal -->
+<div class="modal" id="userModal"><div class="modal-box">
+  <h3 id="userModalTitle">ADD USER</h3>
+  
+  <div class="modal-scroll"><div class="grid2">
+      <div class="field2"><label>Username</label><input id="u_username"></div>
+      <div class="field2"><label>Display name</label><input id="u_display"></div>
+      <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com"></div>
+      <div class="field2"><label>Role</label><select id="u_role"><option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option></select></div>
+      <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="set / change"></div>
+    </div>
+  </div>
+  
+  <div class="m-actions"><button class="btn ghost" id="userCancel">CANCEL</button><button class="btn" id="userSave">SAVE</button></div>
+</div></div>
+
+<!-- Settings modal (Profile) -->
+<footer class="brandfoot">Powered by <b>Sha The IT Guy</b> &nbsp;·&nbsp; build <span id="appVer">…</span></footer>
+
+<!-- Checkout modal -->
+<div class="modal" id="checkoutModal"><div class="modal-box">
+  <h3>CHECK OUT ASSET</h3>
+  
+  <div class="modal-scroll"><div class="field2"><label>Assign to user</label><select id="coUser"></select></div>
+    <div class="field2"><label>Signed Date</label><input id="coSignedDate" type="date"></div>
+    <div class="field2"><label>Expected return</label><input id="coExpected" type="date"></div>
+    <div class="field2"><label>Note</label><input id="coNote" placeholder="e.g. event loan"></div>
+  </div>
+  
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('checkoutModal').classList.remove('show')">CANCEL</button><button class="btn" id="coSave">CHECK OUT</button></div>
+</div></div>
+
+<!-- Maintenance modal -->
+<div class="modal" id="maintModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
+  <h3>MAINTENANCE / REPAIR LOG</h3>
+  
+  <div class="modal-scroll"><div class="tablewrap"><table class="dtable"><thead><tr><th>Date</th><th>Type</th><th>Cost</th><th>Note</th><th></th></tr></thead><tbody id="maintList"></tbody></table></div>
+    <div class="grid2" style="margin-top:12px">
+      <div class="field2"><label>Date</label><input id="mDate" type="date"></div>
+      <div class="field2"><label>Type</label><input id="mType" placeholder="Repair / Upgrade"></div>
+      <div class="field2"><label>Cost</label><input id="mCost" type="number" step="0.01" placeholder="0.00"></div>
+      <div class="field2"><label>Note</label><input id="mNote" placeholder="what was done"></div>
+    </div>
+  </div>
+  
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('maintModal').classList.remove('show')">CLOSE</button><button class="btn" id="mAdd">ADD RECORD</button></div>
+</div></div>
+
+<!-- Audit modal -->
+<div class="modal" id="auditModal"><div class="modal-box" style="width:min(760px,94vw);max-width:760px">
+  <h3>AUDIT LOG</h3>
+  <div class="modal-scroll">
+  <div class="toolbar" style="margin-bottom:12px">
+    <input id="auditSearch" placeholder="⌕ search actor, action, detail…">
+    <span class="tb-spacer"></span>
+    <span id="auditCount" class="muted"></span>
+  </div>
+  <div class="tablewrap"><table class="dtable"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Detail</th></tr></thead><tbody id="auditBody"></tbody></table></div>
+  </div>
+  <div class="m-actions">
+    <button class="btn danger" id="auditClearBtn" style="margin-right:auto">🗑 CLEAR LOG</button>
+    <button class="btn ghost" onclick="document.getElementById('auditModal').classList.remove('show')">Close</button>
+  </div>
+</div></div>
+
+<!-- Heartbeat monitor modal -->
+<div class="modal" id="hbModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+  <h3 id="hbModalTitle">ADD MONITOR</h3>
+  <div class="modal-scroll">
+    <div class="invbox">
+      <label>WHAT TO WATCH</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="hb_name" placeholder="e.g. Core Switch, Office Wi&#8209;Fi, Intranet"></div>
+        <div class="field2"><label>Check type</label>
+          <select id="hb_kind">
+            <option value="ping">Ping (ICMP) &mdash; is the device alive</option>
+            <option value="http">HTTP(S) &mdash; is the web service answering</option>
+            <option value="keyword">HTTP keyword &mdash; does the page say the right thing</option>
+            <option value="port">TCP port &mdash; is the service listening</option>
+            <option value="dns">DNS &mdash; does the name still resolve</option>
+          </select>
+        </div>
+        <div class="field2"><label id="hb_targetLabel">IP or hostname</label><input id="hb_target" class="mono" placeholder="e.g. 192.168.0.1"></div>
+        <div class="field2" id="hb_portWrap" style="display:none"><label>Port</label><input id="hb_port" type="number" min="1" max="65535" placeholder="e.g. 443"></div>
+        <div class="field2" id="hb_kwWrap" style="display:none"><label>Keyword the response must contain</label><input id="hb_keyword" placeholder="e.g. All systems operational"></div>
+        <div class="field2" id="hb_methodWrap" style="display:none"><label>HTTP method</label>
+          <select id="hb_method"><option>GET</option><option>HEAD</option><option>POST</option><option>PUT</option><option>PATCH</option><option>DELETE</option><option>OPTIONS</option></select>
+        </div>
+        <div class="field2" id="hb_codesWrap" style="display:none"><label>Accepted status codes</label><input id="hb_codes" class="mono" placeholder="200-299"></div>
+        <div class="field2"><label>Tag / group (optional)</label><input id="hb_tag" placeholder="e.g. Network, Servers, Branch office"></div>
+        <div class="field2"><label>Linked asset (optional)</label><select id="hb_asset"><option value="">-- none --</option></select></div>
+      </div>
+      <div class="scanrow" id="hb_kwOpts" style="display:none;margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hb_kwInvert"><span>Down when the keyword IS present (inverted)</span></label>
+      </div>
+      <div class="scanrow" id="hb_tlsOpts" style="display:none;margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hb_ignoreTls" checked><span>Ignore certificate errors (self&#8209;signed intranet services)</span></label>
+      </div>
+      <p class="muted scan-hint" id="hb_kindHint">Ping is the right check for switches, access points, printers and cameras &mdash; anything that should simply be reachable.</p>
+    </div>
+    <div class="invbox">
+      <label>HOW OFTEN, AND WHEN TO SHOUT</label>
+      <div class="grid2">
+        <div class="field2"><label>Check every (seconds)</label><input id="hb_interval" type="number" min="10" max="86400" value="60"></div>
+        <div class="field2"><label>Retries before it counts as down</label><input id="hb_thresh" type="number" min="1" max="10" value="2"></div>
+        <div class="field2"><label>Timeout (seconds)</label><input id="hb_timeout" type="number" min="1" max="120" value="8"></div>
+        <div class="field2"><label>While down, re&#8209;check every (seconds)</label><input id="hb_retryEvery" type="number" min="0" max="86400" value="0" placeholder="0 = same interval"></div>
+        <div class="field2"><label>Remind me every N further failures</label><input id="hb_resend" type="number" min="0" max="1000" value="0" placeholder="0 = never remind"></div>
+        <div class="field2"><label>Note (optional)</label><input id="hb_note" placeholder="What breaks if this goes down?"></div>
+      </div>
+      <div class="scanrow" style="margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hb_notify" checked><span>Alert me when it goes down and when it recovers</span></label>
+        <label class="toggle"><input type="checkbox" id="hb_enabled" checked><span>Monitor active</span></label>
+      </div>
+      <div class="scanrow" style="margin-top:6px">
+        <label class="toggle"><input type="checkbox" id="hb_upside"><span>Upside down &mdash; this should NOT respond, alert me if it does</span></label>
+      </div>
+      <p class="muted scan-hint" id="hb_thHint"></p>
+    </div>
+    <div class="invbox" id="hb_chanBox">
+      <label>WHERE THE ALERT GOES</label>
+      <div id="hb_chanList" class="permitem-wrap"></div>
+      <p class="muted scan-hint">Nothing selected means every enabled channel. With no channels set up at all, alerts go to the
+      notification address in Settings &#9656; Notifications.</p>
+    </div>
+  </div>
+  <div class="m-actions">
+    <button class="btn ghost" id="hbCancel" type="button">CANCEL</button>
+    <button class="btn danger" id="hbDelete" type="button" style="display:none">DELETE</button>
+    <button class="btn" id="hbSave" type="button">SAVE</button>
+  </div>
+</div></div>
+
+<!-- Heartbeat monitor detail -->
+<div class="modal" id="hbDetailModal"><div class="modal-box" style="width:min(860px,95vw);max-width:860px">
+  <h3 id="hbdTitle">MONITOR</h3>
+  <div class="modal-scroll">
+    <div class="hbd-head">
+      <div class="hbd-state"><span class="hbdot" id="hbdDot"></span><span id="hbdStatus">&mdash;</span></div>
+      <div class="mono muted" id="hbdTarget"></div>
+      <div class="spacer"></div>
+      <select id="hbdWindow" title="History window">
+        <option value="6">Last 6 hours</option>
+        <option value="24" selected>Last 24 hours</option>
+        <option value="168">Last 7 days</option>
+        <option value="720">Last 30 days</option>
+        <option value="8760">Last year</option>
+      </select>
+    </div>
+    <div class="kpis hbd-kpis">
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU24">&mdash;</div><div class="kpi-k">Uptime 24h</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU7">&mdash;</div><div class="kpi-k">Uptime 7d</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU30">&mdash;</div><div class="kpi-k">Uptime 30d</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdU1y">&mdash;</div><div class="kpi-k">Uptime 1y</div></div></div>
+      <div class="kpi"><div class="kpi-body"><div class="kpi-v" id="hbdAvg">&mdash;</div><div class="kpi-k">Avg Response</div></div></div>
+    </div>
+    <div class="invbox">
+      <label>HEARTBEAT</label>
+      <div id="hbdEcg" class="hbd-ecg"></div>
+    </div>
+    <div class="invbox">
+      <label>RESPONSE TIME</label>
+      <div id="hbdChart" class="hbd-chart"></div>
+      <p class="muted scan-hint" id="hbdChartHint"></p>
+    </div>
+    <div class="invbox">
+      <label>WHAT HAPPENED</label>
+      <div class="tablewrap" style="max-height:280px">
+        <table class="dtable"><thead><tr><th>WHEN</th><th>EVENT</th><th>DETAIL</th></tr></thead>
+        <tbody id="hbdEvents"></tbody></table>
+      </div>
+      <div class="empty" id="hbdEventsEmpty" style="display:none">NOTHING LOGGED YET</div>
+    </div>
+  </div>
+  <div class="m-actions">
+    <button class="btn ghost" id="hbdClose" type="button">CLOSE</button>
+    <button class="btn ghost" id="hbdPause" type="button">&#10073;&#10073; PAUSE</button>
+    <button class="btn ghost" id="hbdCheck" type="button">&#9889; CHECK NOW</button>
+    <button class="btn" id="hbdEdit" type="button">EDIT</button>
+  </div>
+</div></div>
+
+<!-- Heartbeat alert channels -->
+<div class="modal" id="hbChanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+  <h3>ALERT CHANNELS</h3>
+  <div class="modal-scroll">
+    <p class="sec-hint">Where outage alerts are delivered. A monitor can use any combination of these; with none set up,
+    alerts fall back to the notification address in Settings &#9656; Notifications. Test a channel before an outage has
+    to rely on it.</p>
+    <div class="tablewrap">
+      <table class="dtable"><thead><tr><th>NAME</th><th>TYPE</th><th>WHERE</th><th>ACTIVE</th><th></th></tr></thead>
+      <tbody id="hbChanBody"></tbody></table>
+    </div>
+    <div class="empty" id="hbChanEmpty" style="display:none">NO CHANNELS YET &mdash; ALERTS GO TO THE NOTIFICATION ADDRESS</div>
+    <div class="invbox" style="margin-top:14px">
+      <label id="hbChanFormTitle">ADD A CHANNEL</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="hbc_name" placeholder="e.g. IT team email, Ops Slack"></div>
+        <div class="field2"><label>Type</label>
+          <select id="hbc_kind">
+            <option value="email">Email (uses your SMTP settings)</option>
+            <option value="webhook">Webhook (JSON POST)</option>
+            <option value="slack">Slack incoming webhook</option>
+            <option value="telegram">Telegram bot</option>
+          </select>
+        </div>
+        <div class="field2" id="hbc_urlWrap" style="display:none;grid-column:1/-1"><label id="hbc_urlLabel">Webhook URL</label><input id="hbc_url" class="mono" placeholder="https://hooks.example.com/..."></div>
+        <div class="field2" id="hbc_tokenWrap" style="display:none"><label>Bot token</label><input id="hbc_token" type="password" placeholder="123456:ABC-DEF..."></div>
+        <div class="field2" id="hbc_chatWrap" style="display:none"><label>Chat ID</label><input id="hbc_chat" class="mono" placeholder="-1001234567890"></div>
+      </div>
+      <div class="scanrow" style="margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hbc_enabled" checked><span>Channel active</span></label>
+      </div>
+      <p class="muted scan-hint" id="hbc_hint">Email uses the SMTP server and notification address already configured in Settings.</p>
+      <div class="m-actions" style="justify-content:flex-start">
+        <button class="btn" id="hbcSave" type="button">SAVE CHANNEL</button>
+        <button class="btn ghost" id="hbcReset" type="button" style="display:none">CANCEL EDIT</button>
+      </div>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="hbChanClose" type="button">CLOSE</button></div>
+</div></div>
+
+<!-- Network scan modal -->
+<div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
+  <h3>NETWORK SCAN — LOCAL DEVICES</h3>
+  
+  <div class="modal-scroll"><p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep of any subnet with Deep scan. Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
+    <div class="invbox">
+      <label>SCAN OPTIONS</label>
+      <div class="scanrow">
+        <button class="btn" id="scanBtn">⚡ SCAN</button>
+        <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan</span></label>
+      </div>
+      <div class="scan-prefix-row" id="scanPrefixRow" style="display:none">
+        <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22">
+      </div>
+      <p class="muted scan-hint">Deep scan needs a subnet in CIDR form (up to /20, 4096 addresses) and pings every address in it; without it, Scan just reads the ARP table (fast, no subnet needed).</p>
+    </div>
+    <div id="scanStatus" class="muted scan-status"></div>
+    <div class="tablewrap"><table class="dtable"><thead><tr><th>IP</th><th>HOSTNAME</th><th>MAC</th><th>BRAND</th><th>Type</th><th></th></tr></thead><tbody id="scanBody"></tbody></table></div>
+
+  </div>
+  
+  <div class="m-actions">
+    <button class="btn ghost" onclick="document.getElementById('scanModal').classList.remove('show')">CLOSE</button>
+  </div>
+</div></div>
+
+<!-- Backup / Restore modal -->
+<div class="modal" id="backupModal"><div class="modal-box" style="width:min(820px,94vw);max-width:820px">
+  <h3>BACKUP / RESTORE</h3>
+  <div class="modal-scroll">
+  <div class="invbox">
+    <label>CREATE BACKUP</label>
+    <div class="grid2">
+      <div class="field2"><label>Scope</label>
+        <select id="bkScope">
+          <option value="all">All (config + assets + history)</option>
+          <option value="config">Configuration only (Settings + Users)</option>
+          <option value="assets">Assets only (Assets + Checkouts + Maintenance)</option>
+        </select>
+      </div>
+      <div class="field2"><label>&nbsp;</label><button class="btn" id="bkDownload">⬇ CREATE &amp; DOWNLOAD</button></div>
+    </div>
+  </div>
+  <div class="invbox">
+    <label>SCHEDULED BACKUPS</label>
+    <div class="grid2">
+      <div class="field2"><label>Frequency</label>
+        <select id="bkSchedule">
+          <option value="off">Off (manual only)</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+        </select>
+      </div>
+      <div class="field2"><label>Scope</label>
+        <select id="bkScheduleScope">
+          <option value="all">All (config + assets + history)</option>
+          <option value="config">Configuration only (Settings + Users)</option>
+          <option value="assets">Assets only (Assets + Checkouts + Maintenance)</option>
+        </select>
+      </div>
+      <div class="field2"><label>Keep last N backups</label><input id="bkRetain" type="number" min="1" max="100" value="7"></div>
+      <div class="field2"><label>&nbsp;</label><button class="btn ghost" id="bkScheduleSave">SAVE SCHEDULE</button></div>
+    </div>
+    <p class="sec-hint" id="bkScheduleHint" style="margin:6px 0 0">Older backups beyond the keep-limit are deleted automatically, every time a backup runs (scheduled or manual).</p>
+  </div>
+  <div class="invbox">
+    <label>RESTORE FROM FILE</label>
+    <div class="invrow">
+      <label class="btn ghost" style="cursor:pointer;text-align:center">⬆ CHOOSE BACKUP FILE
+        <input type="file" id="bkFile" accept=".sql,.zip" style="display:none">
+      </label>
+      <span id="bkStatus" class="muted"></span>
+    </div>
+  </div>
+  <div class="invbox">
+    <label>STORED BACKUPS (local)</label>
+    <div class="tablewrap"><table class="dtable"><thead><tr><th>File</th><th>Scope</th><th>Created</th><th>Size</th><th></th></tr></thead><tbody id="bkList"></tbody></table></div>
+  </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('backupModal').classList.remove('show')">CLOSE</button></div>
+</div></div>
+
+<!-- Signature link modal -->
+<div class="modal" id="signModal"><div class="modal-box" style="width:min(500px,94vw);max-width:500px">
+  <h3>APPROVAL SIGNATURE LINK</h3>
+  
+  <div class="modal-scroll"><p>Send this link to the approver. They can sign the asset digitally. Link expires in 7 days.</p>
+    <div class="field2"><label>Signature Link</label><input id="signUrl" readonly style="font-family:var(--mono);font-size:12.5px"></div>
+    <div class="m-actions" style="justify-content:flex-start">
+      <button class="btn" id="signCopyBtn" type="button">📋 COPY LINK</button>
+      <button class="btn ghost" id="signShareBtn" type="button" style="display:none">🔗 SHARE</button>
+    </div>
+    <!-- Emailing the assigned employee is the common case; copy-and-paste into
+         a mail client was the only way to do it. -->
+    <div id="signMailRow" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
+      <div id="signMailWho" style="font-size:13px;color:var(--muted);margin-bottom:8px"></div>
+      <button class="btn" id="signMailBtn" type="button">📧 SEND LINK</button>
+    </div>
+  </div>
+  
+  <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
+</div></div>
+
+<div class="toast" id="toast"></div>
+<script src="/app.js?nocache=20260910d"></script>
+</body>
+</html>
