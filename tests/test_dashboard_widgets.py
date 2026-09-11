@@ -133,18 +133,53 @@ check("noopener survives either target",
       and "const tgt=(t.target==='_self')?'_self':'_blank';" in appjs)
 
 print()
-print("9. A layout can leave the browser it was built in")
-# localStorage is per-browser, so without this the layout does not follow the
-# user to another machine at all
-check("it can be exported", 'id="dashExport"' in idx and "itvault-dashboard.json" in appjs)
-check("it can be imported", 'id="dashImport"' in idx)
-check("an import is merged onto a blank layout",
-      "Object.assign(blankLayout(), {" in appjs)
-check("an imported tile must still be http(s)",
-      "test(t.url)" in appjs)
-check("imported columns are clamped", appjs.count("Math.max(1, Math.min(4,") >= 2)
-check("bad JSON is reported, not swallowed",
-      "That file is not valid JSON" in appjs)
+print("9. The layout is stored per user, so it is in the backup")
+# It lived in localStorage, which meant one browser's opinion: gone on a new
+# machine, gone with a cleared cache, and absent from every backup.
+LAYOUT = {"v": 2, "cols": 3, "order": ["tickets", "link:a"], "hidden": ["feed"],
+          "links": [{"key": "link:a", "title": "NAS", "url": "http://10.0.0.9:5000"}]}
+r = admin.get("/api/dash/layout")
+check("it can be read", r.status_code == 200, r.status_code)
+r = admin.put("/api/dash/layout", json={"layout": LAYOUT})
+check("it can be saved", r.status_code == 200, r.get_json())
+got = (admin.get("/api/dash/layout").get_json() or {}).get("layout")
+check("it round-trips byte for byte", got == LAYOUT, got)
+
+for body, why in ((None, "no body"), ({"layout": []}, "a list"),
+                  ({"layout": "nope"}, "a string")):
+    r = admin.put("/api/dash/layout", json=body)
+    check("%-10s is rejected" % why, r.status_code == 400,
+          "%s %s" % (r.status_code, (r.get_json() or {}).get("error")))
+# icons are inline data URIs, so a layout is bigger than it looks
+r = admin.put("/api/dash/layout", json={"layout": {"v": 2, "b": "x" * (600 * 1024)}})
+check("an oversized layout is refused", r.status_code == 413, r.status_code)
+check("signed out is refused",
+      A.app.test_client().get("/api/dash/layout").status_code == 401)
+
+# the reason it moved to the server at all
+import zipfile
+fname = A._run_backup("all")
+path = os.path.join(A.BACKUP_DIR, fname)
+text = ""
+if zipfile.is_zipfile(path):
+    with zipfile.ZipFile(path) as z:
+        for n in z.namelist():
+            if n.endswith(".sql"):
+                text = z.read(n).decode("utf-8", "replace")
+else:
+    text = io.open(path, encoding="utf-8").read()
+check("a backup carries the dash_layout column", "dash_layout" in text)
+check("and the tiles inside it", "10.0.0.9" in text)
+
+print()
+print("10. The browser copy is a cache, not the record")
+check("saving writes through to the server", "'/api/dash/layout', {method:'PUT'" in appjs)
+check("and still paints from the local copy first",
+      "localStorage.setItem(DASH_LAYOUT_KEY2" in appjs)
+check("a visit re-reads the stored layout", "syncDashLayout()" in appjs)
+check("a failed save says what did not happen",
+      "Saved on this device only" in appjs)
+check("export/import is gone", "dashExport" not in appjs and "dashExport" not in idx)
 
 print()
 if fails:
