@@ -6,7 +6,11 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260910d">
+<link rel="stylesheet" href="/style.css?v=20260911a">
+<!-- The install's own logo, so a browser tab is identifiable and the
+     dashboard's icon lookup finds something when pointed at itself. -->
+<link rel="icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -270,9 +274,22 @@
 
       <div class="dash-tools" id="dashTools">
         <button class="btn ghost" id="dashEditLayout">✎ EDIT LAYOUT</button>
+        <button class="btn ghost" id="dashAddWidget" style="display:none">+ ADD WIDGET</button>
+        <label class="dashcols" id="dashColsWrap" style="display:none">Columns
+          <select id="dashCols">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
         <button class="btn" id="dashSaveLayout" style="display:none">💾 SAVE LAYOUT</button>
+        <button class="btn ghost" id="dashExport" style="display:none">⭳ EXPORT</button>
+        <label class="btn ghost" id="dashImportWrap" style="display:none;margin:0">⭱ IMPORT<input type="file" id="dashImport" accept="application/json,.json" hidden></label>
         <button class="btn ghost" id="dashResetLayout" style="display:none">↺ RESET</button>
         <span id="dashLayoutMsg" class="muted"></span>
+        <span class="spacer" style="flex:1"></span>
+        <input id="dashFilter" class="dashfilter" placeholder="Filter widgets…" autocomplete="off">
       </div>
 
       <div id="dashWidgets">
@@ -1270,7 +1287,45 @@
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
 </div></div>
 
+
+<div class="modal" id="widgetModal"><div class="modal-box" style="width:min(620px,95vw)">
+  <h3>ADD WIDGET</h3>
+  <div class="modal-scroll">
+    <div class="secthead">HIDDEN WIDGETS</div>
+    <div id="wmHidden" class="wmlist"></div>
+    <div class="secthead" style="margin-top:16px">LINK TILE</div>
+    <p class="sec-hint">A tile that opens an address — a controller, a NAS, a switch.
+      Bind it to a Heartbeat monitor and it shows up/down and response time too.</p>
+    <div class="grid2">
+      <div class="field2"><label>Title</label><input id="wmTitle" placeholder="UniFi Controller"></div>
+      <div class="field2"><label>Address</label><input id="wmUrl" placeholder="https://10.0.0.1:8443"></div>
+    </div>
+    <div class="grid2">
+      <div class="field2"><label>Heartbeat monitor (optional)</label>
+        <select id="wmMonitor"><option value="">— none —</option></select></div>
+      <div class="field2"><label>Subtitle (optional)</label><input id="wmDesc" placeholder="Network controller"></div>
+      <div class="field2"><label>Opens in</label>
+        <select id="wmTarget">
+          <option value="_blank">New tab</option>
+          <option value="_self">This tab</option>
+        </select></div>
+      <div class="field2"><label>Icon</label>
+        <div class="wmicon">
+          <img id="wmIconPrev" alt="" style="display:none">
+          <button class="btn ghost sm" type="button" id="wmFetchIcon">⤓ FETCH FROM LINK</button>
+          <label class="btn ghost sm" style="margin:0">⬆ UPLOAD<input type="file" id="wmIconFile" accept="image/*" hidden></label>
+          <button class="btn ghost sm" type="button" id="wmClearIcon" style="display:none">✕</button>
+        </div>
+        <span class="muted" id="wmIconMsg" style="font-size:12px"></span>
+      </div>
+    </div>
+  </div>
+  <div class="m-actions">
+    <button class="btn" id="wmAdd">+ ADD TILE</button>
+    <button class="btn ghost" onclick="document.getElementById('widgetModal').classList.remove('show')">CLOSE</button>
+  </div>
+</div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260910d"></script>
+<script src="/app.js?nocache=20260911a"></script>
 </body>
 </html>

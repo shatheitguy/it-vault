@@ -749,15 +749,101 @@ async function loadUnifiWidgets(force){
 let _unifiTimer=null;
 function startUnifiAutoRefresh(){ stopUnifiAutoRefresh(); _unifiTimer=setInterval(()=>loadUnifiWidgets(), 30000); }
 function stopUnifiAutoRefresh(){ if(_unifiTimer){ clearInterval(_unifiTimer); _unifiTimer=null; } }
-const DASH_LAYOUT_KEY='itvault_dash_layout_v1';
-function getDashLayout(){ try{ const v=localStorage.getItem(DASH_LAYOUT_KEY); return v?JSON.parse(v):null; }catch(e){ return null; } }
-function applyDashLayout(){
-  const order=getDashLayout(); if(!order||!order.length) return;
-  const cont=document.getElementById('dashWidgets'); if(!cont) return;
-  order.forEach(k=>{ const el=cont.querySelector('.widget[data-wkey="'+k+'"]'); if(el) cont.appendChild(el); });
+const DASH_LAYOUT_KEY='itvault_dash_layout_v1';   // legacy: a bare order array
+const DASH_LAYOUT_KEY2='itvault_dash_layout_v2';
+/* The layout grew from "what order" into "what is shown, how wide, and which
+   tiles the user invented". v1 stays on disk untouched and is migrated on
+   read, so nothing is lost if someone rolls back. */
+function blankLayout(){ return {v:2, cols:2, order:[], hidden:[], links:[]}; }
+function getDashLayout(){
+  try{
+    const v2=localStorage.getItem(DASH_LAYOUT_KEY2);
+    if(v2){ const o=JSON.parse(v2); return Object.assign(blankLayout(), o||{}); }
+  }catch(e){}
+  const L=blankLayout();
+  try{
+    const v1=JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY)||'null');
+    if(Array.isArray(v1)) L.order=v1;
+  }catch(e){}
+  return L;
 }
-function saveDashLayout(){ const cont=document.getElementById('dashWidgets'); if(!cont) return [];
-  return [...cont.querySelectorAll('.widget')].map(w=>w.getAttribute('data-wkey')); }
+function putDashLayout(L){ try{ localStorage.setItem(DASH_LAYOUT_KEY2, JSON.stringify(L)); }catch(e){} }
+function dashCont(){ return document.getElementById('dashWidgets'); }
+
+/* Built-in widgets are whatever the markup ships with; a title for the picker
+   comes from the widget's own heading so the two can never disagree. */
+function builtinWidgets(){
+  const cont=dashCont(); if(!cont) return [];
+  return [...cont.querySelectorAll('.widget[data-wkey]')]
+    .filter(w=>!w.getAttribute('data-wkey').startsWith('link:'))
+    .map(w=>({key:w.getAttribute('data-wkey'),
+              title:(w.querySelector('.secthead')?.textContent||w.getAttribute('data-wkey')).trim()}));
+}
+
+function applyDashLayout(){
+  const cont=dashCont(); if(!cont) return;
+  const L=getDashLayout();
+  cont.style.setProperty('--dashcols', String(L.cols||2));
+  renderLinkWidgets(L);
+  // order first, then visibility -- a hidden widget still has a place in the
+  // order so unhiding it puts it back where it was, not at the end
+  (L.order||[]).forEach(k=>{ const el=cont.querySelector('.widget[data-wkey="'+CSS.escape(k)+'"]'); if(el) cont.appendChild(el); });
+  const hidden=new Set(L.hidden||[]);
+  cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
+    w.classList.toggle('w-hidden', hidden.has(w.getAttribute('data-wkey')));
+  });
+  const sel=document.getElementById('dashCols'); if(sel) sel.value=String(L.cols||2);
+}
+
+/* The user's own tiles. Rebuilt from the layout rather than mutated in place,
+   so there is exactly one source of truth for what exists. */
+function renderLinkWidgets(L){
+  const cont=dashCont(); if(!cont) return;
+  cont.querySelectorAll('.widget[data-wkey^="link:"]').forEach(w=>w.remove());
+  (L.links||[]).forEach(t=>{
+    const el=document.createElement('div');
+    el.className='panel widget wlink';
+    el.setAttribute('data-wkey', t.key);
+    // _self is offered, but noopener stays on either way: a page opened from
+    // here must never get a handle on this one.
+    const tgt=(t.target==='_self')?'_self':'_blank';
+    el.innerHTML=`<div class="secthead">${esc(t.title||'LINK')}</div>
+      <a class="wlink-body" href="${esc(t.url)}" target="${tgt}" rel="noopener noreferrer">
+        ${t.icon?`<img class="wlink-ico" src="${esc(t.icon)}" alt="">`:'<div class="wlink-ico wlink-ico-none">🔗</div>'}
+        <div class="wlink-txt">
+          <div class="wlink-host">${esc(t.desc||hostOf(t.url))}</div>
+          <div class="wlink-sub">${esc(t.desc?hostOf(t.url):'')}</div>
+          <div class="wlink-state" data-mon="${t.monitor||''}"></div>
+        </div>
+      </a>`;
+    cont.appendChild(el);
+  });
+}
+function hostOf(u){ try{ return new URL(u).host; }catch(e){ return String(u||''); } }
+
+/* Heartbeat state is already fetched for the dashboard's own widget; the tiles
+   read the same response rather than each polling for themselves. */
+function paintLinkStates(monitors){
+  const byId={}; (monitors||[]).forEach(m=>{ byId[String(m.id)]=m; });
+  document.querySelectorAll('.wlink-state[data-mon]').forEach(el=>{
+    const id=el.getAttribute('data-mon'); if(!id){ el.textContent=''; return; }
+    const m=byId[id];
+    if(!m){ el.innerHTML='<span class="muted">monitor gone</span>'; return; }
+    const st=hbStatusOf(m);
+    const ms=(m.last_ms!=null)?` · ${m.last_ms} ms`:'';
+    el.innerHTML=`<span class="hbpill ${st==='disabled'?'paused':st}">${st==='disabled'?'paused':st}</span>${ms}`;
+  });
+}
+
+function saveDashLayout(){
+  const cont=dashCont(); if(!cont) return blankLayout();
+  const L=getDashLayout();
+  L.order=[...cont.querySelectorAll('.widget[data-wkey]')].map(w=>w.getAttribute('data-wkey'));
+  L.hidden=[...cont.querySelectorAll('.widget.w-hidden[data-wkey]')].map(w=>w.getAttribute('data-wkey'));
+  const sel=document.getElementById('dashCols');
+  if(sel) L.cols=Math.max(1, Math.min(4, parseInt(sel.value,10)||2));
+  return L;
+}
 function getDragAfterElement(container, y){
   const els=[...container.querySelectorAll('.widget:not(.dragging)')];
   let closest={offset:-Infinity, el:null};
@@ -794,12 +880,99 @@ function initDashDrag(){
 }
 function setEditLayout(on){
   document.body.classList.toggle('edit-layout', on);
-  document.getElementById('dashSaveLayout').style.display=on?'':'none';
-  document.getElementById('dashResetLayout').style.display=on?'':'none';
-  document.getElementById('dashEditLayout').style.display=on?'none':'';
-  document.getElementById('dashLayoutMsg').textContent=on?'Drag widgets to any position, then SAVE':'';
+  const show=(id,v)=>{ const el=document.getElementById(id); if(el) el.style.display=v?'':'none'; };
+  show('dashSaveLayout', on); show('dashResetLayout', on);
+  show('dashAddWidget', on); show('dashColsWrap', on);
+  show('dashExport', on); show('dashImportWrap', on);
+  show('dashEditLayout', !on);
+  document.getElementById('dashLayoutMsg').textContent=on
+    ? 'Drag to reorder, ✕ to remove, + ADD WIDGET to bring one back — then SAVE'
+    : '';
+  // In edit mode a hidden widget is shown ghosted rather than gone, so it can
+  // be dragged and unhidden; outside edit mode it is simply absent.
+  document.body.classList.toggle('show-hidden', on);
+  decorateWidgets(on);
   if(on) initDashDrag();
-  else { const cont=document.getElementById('dashWidgets'); if(cont) cont.querySelectorAll('.widget').forEach(w=>w.draggable=false); }
+  else { const cont=dashCont(); if(cont) cont.querySelectorAll('.widget').forEach(w=>w.draggable=false); }
+}
+
+/* One ✕ per widget, added only while editing so the chrome never shows in
+   normal use. Removing a built-in hides it; removing a user tile deletes it,
+   because nothing else refers to it. */
+function decorateWidgets(on){
+  const cont=dashCont(); if(!cont) return;
+  cont.querySelectorAll('.wkill').forEach(b=>b.remove());
+  if(!on) return;
+  cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
+    const key=w.getAttribute('data-wkey');
+    const btn=document.createElement('button');
+    btn.type='button'; btn.className='wkill';
+    const isLink=key.startsWith('link:');
+    btn.title=isLink?'Delete this tile':'Hide this widget';
+    btn.textContent='✕';
+    btn.onclick=(e)=>{
+      e.stopPropagation(); e.preventDefault();
+      if(isLink){
+        const L=getDashLayout();
+        L.links=(L.links||[]).filter(t=>t.key!==key);
+        L.order=(L.order||[]).filter(k=>k!==key);
+        putDashLayout(L); applyDashLayout(); decorateWidgets(true); initDashDrag();
+      }else{
+        w.classList.add('w-hidden');
+      }
+    };
+    w.appendChild(btn);
+  });
+}
+
+/* ---------- widget picker ---------- */
+function openWidgetPicker(){
+  const L=getDashLayout();
+  const hidden=new Set(L.hidden||[]);
+  const list=document.getElementById('wmHidden');
+  const items=builtinWidgets().filter(w=>hidden.has(w.key));
+  list.innerHTML=items.length
+    ? items.map(w=>`<button class="btn ghost sm wmadd" data-k="${esc(w.key)}">+ ${esc(w.title)}</button>`).join('')
+    : '<span class="muted">Nothing is hidden — every built-in widget is already on the dashboard.</span>';
+  list.querySelectorAll('.wmadd').forEach(b=>{
+    b.onclick=()=>{
+      const cont=dashCont();
+      const el=cont?.querySelector('.widget[data-wkey="'+CSS.escape(b.getAttribute('data-k'))+'"]');
+      if(el) el.classList.remove('w-hidden');
+      openWidgetPicker();   // reflect that it is no longer hidden
+      decorateWidgets(true); initDashDrag();
+    };
+  });
+  // monitors to bind a tile to, if the user can see them at all
+  const sel=document.getElementById('wmMonitor');
+  sel.innerHTML='<option value="">— none —</option>';
+  if(canDo('tools.heartbeat')){
+    api('/api/heartbeat/state?hours=1').then(async r=>{
+      if(!r||!r.ok) return;
+      const j=await r.json().catch(()=>null);
+      (j&&j.monitors||[]).forEach(m=>{
+        const o=document.createElement('option');
+        o.value=String(m.id); o.textContent=m.name||('monitor '+m.id);
+        sel.appendChild(o);
+      });
+    });
+  }
+  wmIcon=''; renderWmIcon();
+  document.getElementById('wmTitle').value='';
+  document.getElementById('wmUrl').value='';
+  document.getElementById('wmDesc').value='';
+  document.getElementById('wmTarget').value='_blank';
+  document.getElementById('wmIconMsg').textContent='';
+  document.getElementById('widgetModal').classList.add('show');
+}
+
+let wmIcon='';
+function renderWmIcon(){
+  const img=document.getElementById('wmIconPrev');
+  const clr=document.getElementById('wmClearIcon');
+  if(!img) return;
+  if(wmIcon){ img.src=wmIcon; img.style.display=''; if(clr) clr.style.display=''; }
+  else { img.removeAttribute('src'); img.style.display='none'; if(clr) clr.style.display='none'; }
 }
 
 /* ---------- modal / crud ---------- */
@@ -2657,12 +2830,15 @@ async function loadDashHeartbeat(){
   const body=document.getElementById('dashHbBody'); if(!body) return;
   const widget=document.querySelector('.widget[data-wkey="heartbeat"]');
   const hide=()=>{ if(widget) widget.style.display='none'; };
-  if(!canDo('tools.heartbeat')){ hide(); return; }
+  if(!canDo('tools.heartbeat')){ hide(); paintLinkStates([]); return; }
   const r=await api('/api/heartbeat/state?hours=24');
   if(!r||!r.ok){ hide(); return; }
   const j=await r.json().catch(()=>null);
   if(!j){ hide(); return; }
   if(widget) widget.style.display='';
+  // user tiles bound to a monitor read this same response rather than each
+  // polling on its own timer
+  paintLinkStates(j.monitors);
   const c=j.counts||{};
   const label=(k)=>k==='pending'?'checking':(k==='disabled'?'paused':k);
   const cn=document.getElementById('dashHbCounts');
@@ -3667,8 +3843,124 @@ const ne=document.getElementById('navExport'); if(ne) ne.onclick=()=>window.loca
 const na2=document.getElementById('navAdd'); if(na2) na2.onclick=()=>openModal();
 document.getElementById('navHome').onclick=()=>showPage('page-dashboard');
 document.getElementById('dashEditLayout').onclick=()=>setEditLayout(true);
-document.getElementById('dashSaveLayout').onclick=()=>{ const o=saveDashLayout(); try{ localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(o)); }catch(e){} setEditLayout(false); document.getElementById('dashLayoutMsg').textContent='✓ Layout saved'; };
-document.getElementById('dashResetLayout').onclick=()=>{ try{ localStorage.removeItem(DASH_LAYOUT_KEY); }catch(e){} document.getElementById('dashLayoutMsg').textContent='↺ Reset to default'; location.reload(); };
+document.getElementById('dashSaveLayout').onclick=()=>{
+  putDashLayout(saveDashLayout());
+  applyDashLayout();
+  setEditLayout(false);
+  document.getElementById('dashLayoutMsg').textContent='✓ Layout saved';
+};
+document.getElementById('dashResetLayout').onclick=()=>{
+  // both keys: leaving v1 behind would have it migrated straight back in
+  try{ localStorage.removeItem(DASH_LAYOUT_KEY2); localStorage.removeItem(DASH_LAYOUT_KEY); }catch(e){}
+  document.getElementById('dashLayoutMsg').textContent='↺ Reset to default';
+  location.reload();
+};
+document.getElementById('dashAddWidget').onclick=openWidgetPicker;
+
+/* Type-to-find, matching a widget's heading and a tile's title/address.
+   Purely visual -- it never touches the saved layout. */
+const dashFilterEl=document.getElementById('dashFilter');
+if(dashFilterEl) dashFilterEl.oninput=()=>{
+  const q=dashFilterEl.value.trim().toLowerCase();
+  const cont=dashCont(); if(!cont) return;
+  cont.classList.toggle('filtering', !!q);
+  cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
+    if(!q){ w.classList.remove('w-nomatch'); return; }
+    const hay=[w.querySelector('.secthead')?.textContent,
+               w.querySelector('.wlink-host')?.textContent,
+               w.querySelector('.wlink-sub')?.textContent,
+               w.querySelector('.wlink-body')?.getAttribute('href')]
+              .join(' ').toLowerCase();
+    w.classList.toggle('w-nomatch', !hay.includes(q));
+  });
+};
+
+/* The layout lives in this browser's localStorage, so it does not follow the
+   user to another machine. Export/import is the honest fix for that until it
+   is stored server-side: one small JSON file, icons and all. */
+document.getElementById('dashExport').onclick=()=>{
+  const blob=new Blob([JSON.stringify(saveDashLayout(), null, 2)], {type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='itvault-dashboard.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
+  document.getElementById('dashLayoutMsg').textContent='⭳ Layout exported';
+};
+document.getElementById('dashImport').onchange=(e)=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  const msg=document.getElementById('dashLayoutMsg');
+  const fr=new FileReader();
+  fr.onload=()=>{
+    let o=null;
+    try{ o=JSON.parse(String(fr.result||'')); }catch(err){ msg.textContent='✕ That file is not valid JSON'; return; }
+    if(!o||typeof o!=='object'||Array.isArray(o)){ msg.textContent='✕ That is not a dashboard layout'; return; }
+    // merged onto a blank layout so a file missing a field cannot leave the
+    // dashboard in a half-configured state
+    const L=Object.assign(blankLayout(), {
+      cols: Math.max(1, Math.min(4, parseInt(o.cols,10)||2)),
+      order: Array.isArray(o.order)?o.order.filter(k=>typeof k==='string'):[],
+      hidden: Array.isArray(o.hidden)?o.hidden.filter(k=>typeof k==='string'):[],
+      links: Array.isArray(o.links)?o.links.filter(t=>t&&typeof t.url==='string'
+               &&/^https?:\/\//i.test(t.url)):[],
+    });
+    putDashLayout(L); applyDashLayout();
+    decorateWidgets(document.body.classList.contains('edit-layout'));
+    initDashDrag();
+    msg.textContent='⭱ Layout imported';
+  };
+  fr.onerror=()=>{ msg.textContent='✕ Could not read that file'; };
+  fr.readAsText(f);
+  e.target.value='';
+};
+document.getElementById('dashCols').onchange=(e)=>{
+  const n=Math.max(1, Math.min(4, parseInt(e.target.value,10)||2));
+  dashCont()?.style.setProperty('--dashcols', String(n));
+};
+document.getElementById('wmFetchIcon').onclick=async()=>{
+  const url=document.getElementById('wmUrl').value.trim();
+  const msg=document.getElementById('wmIconMsg');
+  if(!url){ msg.textContent='Enter the address first'; return; }
+  msg.textContent='Looking…';
+  const r=await api('/api/widget/icon?url='+encodeURIComponent(url));
+  const j=r?await r.json().catch(()=>({})):{};
+  if(j&&j.icon){ wmIcon=j.icon; renderWmIcon(); msg.textContent='Found it'; }
+  else { msg.textContent=(j&&j.error)||'No icon found at that address'; }
+};
+document.getElementById('wmIconFile').onchange=(e)=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  const msg=document.getElementById('wmIconMsg');
+  // the tile is stored in localStorage, so the icon has to stay small
+  if(f.size > 512*1024){ msg.textContent='That image is over 512KB — use a smaller one'; return; }
+  const fr=new FileReader();
+  fr.onload=()=>{ wmIcon=String(fr.result||''); renderWmIcon(); msg.textContent='Uploaded'; };
+  fr.onerror=()=>{ msg.textContent='Could not read that file'; };
+  fr.readAsDataURL(f);
+};
+document.getElementById('wmClearIcon').onclick=()=>{ wmIcon=''; renderWmIcon(); };
+document.getElementById('wmAdd').onclick=()=>{
+  const title=document.getElementById('wmTitle').value.trim();
+  const url=document.getElementById('wmUrl').value.trim();
+  const mon=document.getElementById('wmMonitor').value;
+  const msg=document.getElementById('wmIconMsg');
+  if(!title||!url){ msg.textContent='A title and an address are both needed'; return; }
+  // only ever a link the browser will actually open
+  let safe=url; if(!/^https?:\/\//i.test(safe)) safe='http://'+safe;
+  try{ new URL(safe); }catch(e){ msg.textContent='That address is not valid'; return; }
+  const L=getDashLayout();
+  const key='link:'+Math.random().toString(36).slice(2,10);
+  const desc=document.getElementById('wmDesc').value.trim();
+  const target=document.getElementById('wmTarget').value==='_self'?'_self':'_blank';
+  L.links=(L.links||[]).concat([{key, title, url:safe, icon:wmIcon||'',
+                                 monitor:mon?Number(mon):null, desc, target}]);
+  L.order=(L.order||[]).concat([key]);
+  putDashLayout(L);
+  applyDashLayout();
+  decorateWidgets(document.body.classList.contains('edit-layout'));
+  initDashDrag();
+  document.getElementById('widgetModal').classList.remove('show');
+  toast('✓ TILE ADDED');
+};
 document.getElementById('navAssets').onclick=()=>showPage('page-assets');
 
 function showFatal(msg){
@@ -3702,7 +3994,7 @@ window.repairDashStructure=repairDashStructure;
 // old empty-column or bad-layout selection can't blank the UI for returning users.
 (function healStorage(){
   try{
-    const KEEP=new Set(['itvault_dash_layout_v1','itvault_cols','itvault_sess','itvault_scan_last']);
+    const KEEP=new Set(['itvault_dash_layout_v1','itvault_dash_layout_v2','itvault_cols','itvault_sess','itvault_scan_last']);
     const bad=[];
     for(let i=localStorage.length-1;i>=0;i--){
       const k=localStorage.key(i);
