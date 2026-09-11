@@ -9,18 +9,20 @@
 # (Python + waitress). Nothing dead-ends on declining Docker.
 #
 # It offers to install MariaDB too, asking for the database name, username and
-# password, then creating the network and volume, starting MariaDB, and handing
-# IT-Vault the connection -- so there is no setup wizard to fill in and no
-# GRANT to get wrong. Say no and IT-Vault connects to whatever MariaDB/MySQL
-# you already run instead, with the first-run wizard asking for the details;
-# either way your database version, backups and retention stay yours.
+# password, then handing IT-Vault the connection -- so there is no setup
+# wizard to fill in and no GRANT to get wrong. On Docker this is a container
+# (network + volume, MariaDB image). On --no-docker it is the same offer
+# through the host's own package manager (apt/dnf/yum/pacman on Linux, brew
+# on macOS) instead. Say no either way and IT-Vault connects to whatever
+# MariaDB/MySQL you already run, with the first-run wizard asking for the
+# details; either way your database version, backups and retention stay yours.
 #
 # Flags: --port (5000), --tag (latest), --name (itvault), --yes, --dry-run,
 #        --no-docker (install on the host, no Docker), --dir (install path),
 #        --with-db (install MariaDB without being asked),
 #        --no-db (do not ask, use the browser wizard),
 #        --db-name / --db-user / --db-pass (unattended, implies --with-db),
-#        --db-image (database image, default mariadb:latest).
+#        --db-image (Docker only: database image, default mariadb:latest).
 set -eu
 
 IMAGE="ghcr.io/shatheitguy/it-vault"
@@ -34,6 +36,17 @@ NO_DB="${ITVAULT_NO_DB:-}"
 NET="${ITVAULT_NET:-itvault-net}"
 DB_NAME_V="${ITVAULT_DB_NAME:-itvault}"
 DB_USER_V="${ITVAULT_DB_USER:-itvault}"
+# Tracks whether this run actually chose the name/user above, as opposed to
+# just landing on the default -- load_conf()'s own merge treats "itvault"
+# as already decided, which the Docker path gets away with because an
+# existing database container's real env always wins on adoption regardless.
+# install_native() has no such adoption step, so it uses these to tell "the
+# default" from "what a previous run saved" instead of silently creating a
+# second, empty database under the default name on every re-run.
+DB_NAME_EXPLICIT=""
+[ -n "${ITVAULT_DB_NAME:-}" ] && DB_NAME_EXPLICIT=1
+DB_USER_EXPLICIT=""
+[ -n "${ITVAULT_DB_USER:-}" ] && DB_USER_EXPLICIT=1
 DB_CONTAINER="${ITVAULT_DB_NAME_CONTAINER:-itvault-db}"
 # Tracks upstream by default. Safe for a fresh install, because the volume is
 # created in the same breath as the container -- whatever "latest" is that day
@@ -68,8 +81,8 @@ while [ $# -gt 0 ]; do
         --no-docker) NO_DOCKER=1; shift ;;
         --with-db) WITH_DB=1; shift ;;
         --no-db)   WITH_DB=""; NO_DB=1; shift ;;
-        --db-name) WITH_DB=1; DB_NAME_V="${2:?--db-name needs a value}"; shift 2 ;;
-        --db-user) WITH_DB=1; DB_USER_V="${2:?--db-user needs a value}"; shift 2 ;;
+        --db-name) WITH_DB=1; DB_NAME_V="${2:?--db-name needs a value}"; DB_NAME_EXPLICIT=1; shift 2 ;;
+        --db-user) WITH_DB=1; DB_USER_V="${2:?--db-user needs a value}"; DB_USER_EXPLICIT=1; shift 2 ;;
         --db-pass) WITH_DB=1; DB_PASS_V="${2:?--db-pass needs a value}"; shift 2 ;;
         --db-image) DB_IMAGE="${2:?--db-image needs a value}"; shift 2 ;;
         --dir)     DIR="${2:?--dir needs a value}"; shift 2 ;;
@@ -665,6 +678,118 @@ provision_db() {
     return 0
 }
 
+# Same concept as provision_db(), for a host that has no Docker at all: install
+# MariaDB with whatever package manager is on hand, start it, and create the
+# database and user IT-Vault will use -- so a --no-docker install lands
+# connected too, with nothing for the setup wizard to ask.
+_native_sql_root() {
+    # $1 = the SQL. Runs it against the freshly-installed server as root,
+    # via the unix socket (no password set yet on a fresh install), with
+    # sudo only when this process is not already root.
+    if [ "$(id -u)" = "0" ]; then
+        "$MYSQL_BIN" -uroot -e "$1" 2>/dev/null
+    elif command -v sudo >/dev/null 2>&1; then
+        sudo "$MYSQL_BIN" -uroot -e "$1" 2>/dev/null
+    else
+        "$MYSQL_BIN" -uroot -e "$1" 2>/dev/null
+    fi
+}
+
+provision_db_native() {
+    MYSQL_BIN=""
+    os="$(uname -s)"
+    case "$os" in
+        Linux)
+            _sudo=""
+            [ "$(id -u)" = "0" ] || _sudo="sudo"
+            if [ -n "$_sudo" ] && ! command -v sudo >/dev/null 2>&1; then
+                warn "Not root, and sudo isn't available -- can't install MariaDB automatically."
+                return 1
+            fi
+            if command -v mariadb >/dev/null 2>&1 || command -v mysql >/dev/null 2>&1; then
+                say "    MariaDB/MySQL client already on this host -- reusing it"
+            elif command -v apt-get >/dev/null 2>&1; then
+                step "Installing MariaDB (apt-get)"
+                $_sudo apt-get update -qq && $_sudo apt-get install -y -qq mariadb-server \
+                    || { warn "apt-get install mariadb-server failed."; return 1; }
+            elif command -v dnf >/dev/null 2>&1; then
+                step "Installing MariaDB (dnf)"
+                $_sudo dnf install -y -q mariadb-server \
+                    || { warn "dnf install mariadb-server failed."; return 1; }
+            elif command -v yum >/dev/null 2>&1; then
+                step "Installing MariaDB (yum)"
+                $_sudo yum install -y -q mariadb-server \
+                    || { warn "yum install mariadb-server failed."; return 1; }
+            elif command -v pacman >/dev/null 2>&1; then
+                step "Installing MariaDB (pacman)"
+                $_sudo pacman -S --noconfirm --needed mariadb \
+                    || { warn "pacman -S mariadb failed."; return 1; }
+                # Arch ships an empty data directory -- first-run init is on us.
+                if [ ! -d /var/lib/mysql/mysql ]; then
+                    $_sudo mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql >/dev/null 2>&1
+                fi
+            else
+                warn "No supported package manager found (apt-get/dnf/yum/pacman) --"
+                warn "can't install MariaDB automatically."
+                return 1
+            fi
+            step "Starting MariaDB"
+            if command -v systemctl >/dev/null 2>&1; then
+                $_sudo systemctl enable --now mariadb >/dev/null 2>&1 \
+                    || $_sudo systemctl enable --now mysql >/dev/null 2>&1 \
+                    || $_sudo systemctl enable --now mysqld >/dev/null 2>&1
+            elif command -v service >/dev/null 2>&1; then
+                $_sudo service mariadb start >/dev/null 2>&1 || $_sudo service mysql start >/dev/null 2>&1
+            fi
+            MYSQL_BIN="$(command -v mariadb || command -v mysql)"
+            ;;
+        Darwin)
+            if command -v mariadb >/dev/null 2>&1 || command -v mysql >/dev/null 2>&1; then
+                say "    MariaDB/MySQL client already on this host -- reusing it"
+            elif command -v brew >/dev/null 2>&1; then
+                step "Installing MariaDB (brew)"
+                brew install mariadb >/dev/null 2>&1 || { warn "brew install mariadb failed."; return 1; }
+            else
+                warn "Homebrew isn't installed -- can't install MariaDB automatically on macOS."
+                warn "Install it from https://brew.sh, or install MariaDB yourself."
+                return 1
+            fi
+            step "Starting MariaDB"
+            brew services start mariadb >/dev/null 2>&1
+            MYSQL_BIN="$(command -v mariadb || command -v mysql)"
+            ;;
+        *)
+            warn "Don't know how to install MariaDB natively on $os."
+            return 1
+            ;;
+    esac
+    [ -n "$MYSQL_BIN" ] || { warn "MariaDB client not found after install."; return 1; }
+
+    # The server takes a moment to start accepting connections after the
+    # service manager reports it launched.
+    i=0
+    while [ "$i" -lt 30 ]; do
+        _native_sql_root "SELECT 1" >/dev/null 2>&1 && break
+        i=$((i + 1)); sleep 1
+    done
+    if [ "$i" -ge 30 ]; then
+        warn "MariaDB didn't come up in time -- see the manual steps below."
+        return 1
+    fi
+
+    [ -n "$DB_PASS_V" ] || DB_PASS_V="$(gen_pass)"
+    step "Creating database '$DB_NAME_V' and user '$DB_USER_V'"
+    _native_sql_root "
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME_V\`;
+CREATE USER IF NOT EXISTS '$DB_USER_V'@'localhost' IDENTIFIED BY '$DB_PASS_V';
+GRANT ALL PRIVILEGES ON \`$DB_NAME_V\`.* TO '$DB_USER_V'@'localhost';
+FLUSH PRIVILEGES;" || { warn "Could not create the database automatically."; return 1; }
+
+    DB_HOST_V="127.0.0.1"
+    say "    database ready: $DB_NAME_V (user $DB_USER_V)"
+    return 0
+}
+
 # IT-Vault is a Flask app, so it runs perfectly well straight on the host --
 # Docker is just the packaged route. This is the fallback for anyone who says
 # no to installing Docker: same app, run under waitress from a virtualenv.
@@ -700,20 +825,74 @@ install_native() {
     ( cd "$DIR" && "$PY" -m venv .venv ) || die "Couldn't create a virtualenv in $DIR/.venv."
     ( cd "$DIR" && .venv/bin/pip install --quiet --upgrade pip         && .venv/bin/pip install --quiet -r requirements.txt )         || die "Couldn't install the Python dependencies."
 
-    say ""
-    say "${G}IT-Vault is installed at${N} ${B}$DIR${N}"
-    say ""
-    say "It still needs a database -- any MariaDB 10.6+ / MySQL 8+. Point it at one"
-    say "with the DB_* environment variables, then start it:"
-    say ""
-    say "  ${B}cd $DIR${N}"
-    say "  ${B}export DB_HOST=127.0.0.1 DB_USER=itvault DB_PASS=your-password DB_NAME=itvault${N}"
-    say "  ${B}ITVAULT_PORT=$PORT .venv/bin/python serve.py${N}"
-    say ""
-    say "Then open ${B}http://localhost:$PORT${N} for the setup wizard."
-    say ""
-    say "No database yet? Start one in a line (needs Docker) or install MariaDB from"
-    say "your package manager -- see ${B}https://github.com/shatheitguy/it-vault#step-1--get-a-database${N}"
+    # Same concept as the Docker path: offer to install and wire up the
+    # database here too, so a --no-docker install doesn't dead-end at the
+    # browser's setup wizard either. This is called from install_native's own
+    # entry points (offer_native_or_die, --no-docker) which return before the
+    # main flow's own WITH_DB decision ever runs, so it is made again here.
+    load_conf && [ -n "$DB_PASS_V" ] && WITH_DB=1
+    # load_conf() only backfills DB_NAME_V/DB_USER_V when they are empty, and
+    # both already carry the "itvault" default by this point -- so restore
+    # the saved name/user explicitly here, unless this run chose its own.
+    [ -n "$DB_NAME_EXPLICIT" ] || [ -z "${SAVED_DB_NAME:-}" ] || DB_NAME_V="$SAVED_DB_NAME"
+    [ -n "$DB_USER_EXPLICIT" ] || [ -z "${SAVED_DB_USER:-}" ] || DB_USER_V="$SAVED_DB_USER"
+    if [ -z "$WITH_DB" ] && [ -z "$NO_DB" ]; then
+        if db_prompt; then WITH_DB=1; fi
+    fi
+
+    DB_READY=""
+    if [ -n "$WITH_DB" ]; then
+        if provision_db_native; then
+            DB_READY=1
+            save_conf "$DB_HOST_V" "$DB_NAME_V" "$DB_USER_V" "$DB_PASS_V"
+        else
+            warn "Couldn't provision a database automatically -- falling back to the manual steps below."
+        fi
+    fi
+
+    if [ -n "$DB_READY" ]; then
+        # A start script beats telling people to re-type four exports every
+        # time: this is what "no setup wizard to fill in" means on the host
+        # install too.
+        cat > "$DIR/start.sh" <<STARTSH
+#!/bin/sh
+# Written by the IT-Vault installer. Starts IT-Vault with the database
+# provisioned during install -- edit the DB_* lines if that ever changes.
+export DB_HOST="$DB_HOST_V"
+export DB_NAME="$DB_NAME_V"
+export DB_USER="$DB_USER_V"
+export DB_PASS="$DB_PASS_V"
+export ITVAULT_PORT="$PORT"
+cd "$DIR"
+exec .venv/bin/python serve.py
+STARTSH
+        chmod +x "$DIR/start.sh"
+
+        say ""
+        say "${G}IT-Vault is installed at${N} ${B}$DIR${N} ${G}and connected to its own MariaDB${N} --"
+        say "${G}no setup wizard to fill in.${N}"
+        say ""
+        say "Start it:"
+        say "  ${B}$DIR/start.sh${N}"
+        say ""
+        say "Then open ${B}http://localhost:$PORT${N} and sign in with the admin account you set up."
+        say ""
+    else
+        say ""
+        say "${G}IT-Vault is installed at${N} ${B}$DIR${N}"
+        say ""
+        say "It still needs a database -- any MariaDB 10.6+ / MySQL 8+. Point it at one"
+        say "with the DB_* environment variables, then start it:"
+        say ""
+        say "  ${B}cd $DIR${N}"
+        say "  ${B}export DB_HOST=127.0.0.1 DB_USER=itvault DB_PASS=your-password DB_NAME=itvault${N}"
+        say "  ${B}ITVAULT_PORT=$PORT .venv/bin/python serve.py${N}"
+        say ""
+        say "Then open ${B}http://localhost:$PORT${N} for the setup wizard."
+        say ""
+        say "No database yet? Start one in a line (needs Docker) or install MariaDB from"
+        say "your package manager -- see ${B}https://github.com/shatheitguy/it-vault#step-1--get-a-database${N}"
+    fi
 }
 
 # Called wherever Docker is missing and the user declines to install it: offer
