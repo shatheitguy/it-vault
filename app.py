@@ -1864,11 +1864,25 @@ def migrate_schema():
             cur.execute("ALTER TABLE Users ADD COLUMN avatar MEDIUMTEXT")
         except Exception:
             pass
+    # Offline (Android) sync needs a last-modified timestamp on every
+    # syncable record so the newest edit wins. Only Tickets had one; add
+    # it to Assets/Contracts/Employees and backfill existing rows so a
+    # fresh phone edit always sorts above untouched server data.
+    for tbl, col in (("Assets", "UpdatedAt"), ("Contracts", "updated_at"), ("Employees", "updated_at")):
+        try: cur.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} DATETIME NULL")
+        except Exception: pass
+    try: cur.execute("UPDATE Assets SET UpdatedAt=COALESCE(UpdatedAt, created_at, NOW()) WHERE UpdatedAt IS NULL")
+    except Exception: pass
+    try: cur.execute("UPDATE Contracts SET updated_at=COALESCE(updated_at, NOW()) WHERE updated_at IS NULL")
+    except Exception: pass
+    try: cur.execute("UPDATE Employees SET updated_at=COALESCE(updated_at, NOW()) WHERE updated_at IS NULL")
+    except Exception: pass
     c.commit(); c.close()
 
 def row_to_dict(row):
     return {"_id": row["_id"], "InvoiceFile": row.get("InvoiceFile", "") or "",
             "SignatureData": row.get("SignatureData", "") or "",
+            "UpdatedAt": (str(row["UpdatedAt"]) if row.get("UpdatedAt") else ""),
             **{col: row.get(col, "") for col in COLUMNS}}
 
 def lan_base_url():
@@ -2273,8 +2287,8 @@ def create_employee():
         "Email": data.get("Email") or "",
         "source": "manual"
     }
-    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
+    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source, updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
                 (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["source"]))
     c.commit(); c.close()
     return jsonify(emp)
@@ -2287,7 +2301,7 @@ def update_employee(e_id):
     cur.execute("SELECT _id FROM Employees WHERE _id=%s", [e_id])
     if not cur.fetchone():
         c.close(); return jsonify({"error": "not found"}), 404
-    cur.execute("""UPDATE Employees SET EmployeeID=%s, EmpCode=%s, EmployeeName=%s, Designation=%s, Department=%s, Email=%s
+    cur.execute("""UPDATE Employees SET EmployeeID=%s, EmpCode=%s, EmployeeName=%s, Designation=%s, Department=%s, Email=%s, updated_at=NOW()
                    WHERE _id=%s""",
                 (data.get("EmployeeID") or "", data.get("EmpCode") or "", data.get("EmployeeName") or "", data.get("Designation") or "",
                  data.get("Department") or "", data.get("Email") or "", e_id))
@@ -2406,7 +2420,7 @@ def ldap_sync_employees():
 def list_assets():
     c = conn(); cur = c.cursor()
     q = request.args.get("q", "").strip(); sf = request.args.get("status", "").strip(); cf = request.args.get("col", "").strip()
-    sql = "SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=0"
+    sql = "SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, UpdatedAt FROM Assets WHERE is_deleted=0"
     where = []; params = []
     if sf: where.append("Status=%s"); params.append(sf)
     if q:
@@ -2491,9 +2505,10 @@ def create_asset():
     if data.get("Status") == "Checked-Out" and (data.get("EmployeeID") or "").strip():
         data["ReceivedBy"] = _resolve_employee_name(cur, data["EmployeeID"])
         data["NotesReceived"] = datetime.now().strftime("%Y-%m-%d")
-    vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [datetime.now().strftime("%Y-%m-%d %H:%M:%S")]
-    cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at"
-    ph = ", ".join(["%s"] * (len(COLUMNS) + 2))
+    _now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [_now, _now]
+    cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
+    ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
     cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
     send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.")
     if (data.get("EmployeeID") or "").strip():
@@ -2537,7 +2552,7 @@ def update_asset(a_id):
         data["NotesReceived"] = ""
     sets = ", ".join(f"`{col}`=%s" for col in COLUMNS)
     vals = [coerce_val(col, data.get(col)) for col in COLUMNS] + [a_id]
-    cur.execute(f"UPDATE Assets SET {sets} WHERE _id=%s", vals)
+    cur.execute(f"UPDATE Assets SET {sets}, UpdatedAt=NOW() WHERE _id=%s", vals)
     if became_checked_out:
         cur.execute("INSERT INTO Checkouts (asset_id, username, checkout_date, expected_checkin, note) VALUES (%s,%s,%s,%s,%s)",
                     (a_id, recv_by or "", nowstr(), "", ""))
@@ -4594,8 +4609,8 @@ def contracts_api():
     if request.method == "POST":
         d = request.get_json(force=True)
         tag = (d.get("contract_tag") or "").strip() or _next_contract_tag(cur)
-        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, billing_period, contract_tag, asset_id, employee_id, location, department, license_key, note)
-                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        cur.execute("""INSERT INTO Contracts (name, vendor, vendor_email, type, start_date, end_date, cost, billing_period, contract_tag, asset_id, employee_id, location, department, license_key, note, updated_at)
+                       VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
                      float(d.get("cost") or 0), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
@@ -4609,7 +4624,7 @@ def contracts_api():
         cur.execute("SELECT employee_id FROM Contracts WHERE id=%s", [cid]); old = cur.fetchone() or {}
         tag = (d.get("contract_tag") or "").strip() or _next_contract_tag(cur)
         cur.execute("""UPDATE Contracts SET name=%s, vendor=%s, vendor_email=%s, type=%s, start_date=%s, end_date=%s, cost=%s, billing_period=%s, contract_tag=%s, asset_id=%s,
-                       employee_id=%s, location=%s, department=%s, license_key=%s, note=%s, expiry_notified_at='' WHERE id=%s""",
+                       employee_id=%s, location=%s, department=%s, license_key=%s, note=%s, expiry_notified_at='', updated_at=NOW() WHERE id=%s""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
                      float(d.get("cost") or 0), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",

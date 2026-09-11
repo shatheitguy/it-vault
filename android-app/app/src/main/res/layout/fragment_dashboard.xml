@@ -8,7 +8,22 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="16dp"
+        android:layoutAnimation="@anim/layout_stagger">
+
+        <TextView
+            style="@style/HeadingLarge"
+            android:layout_marginTop="6dp"
+            android:text="Overview" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:layout_marginBottom="14dp"
+            android:text="Your infrastructure at a glance"
+            android:textColor="@color/muted"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/offlineBanner"

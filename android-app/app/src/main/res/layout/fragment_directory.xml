@@ -59,5 +59,6 @@
         android:layout_gravity="bottom|end"
         android:layout_margin="20dp"
         app:backgroundTint="@color/accent"
-        app:srcCompat="@android:drawable/ic_input_add" />
+        app:srcCompat="@drawable/ic_add"
+        app:tint="@color/on_accent" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
