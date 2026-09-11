@@ -12,4 +12,9 @@
     <color name="muted">#5C6A80</color>
     <color name="outline">#DCE1EA</color>
     <color name="bar_track">#E6EAF1</color>
+    <!-- Heartbeat status. Chosen to stay legible on the light surface,
+         which the web palette's neon greens do not. -->
+    <color name="hb_up">#1FA971</color>
+    <color name="hb_down">#E03B3B</color>
+    <color name="hb_pending">#C07A10</color>
 </resources>

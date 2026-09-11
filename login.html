@@ -38,7 +38,11 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
   transition:filter .15s,transform .15s,box-shadow .15s}
 .btn:hover{filter:brightness(1.08);transform:translateY(-1px);box-shadow:0 6px 18px var(--accent-soft)}
 .btn:active{transform:translateY(1px);box-shadow:none}
-.rem{display:flex;align-items:center;gap:9px;margin-top:16px;color:var(--muted);font-size:13px;cursor:pointer}
+.rem{display:flex;align-items:center;gap:9px;margin-top:16px;color:var(--muted);font-size:13px;cursor:pointer;
+  /* the checkbox is 15px, so the label is the tap target -- give it a
+     height a thumb can actually hit rather than the 16px the text
+     happened to occupy */
+  min-height:40px;padding:4px 2px;margin-left:-2px}
 .rem input{accent-color:var(--accent);width:15px;height:15px;cursor:pointer;margin:0}
 .err{color:var(--red);font-size:13px;text-align:center;min-height:0;margin-top:14px;line-height:1.4}
 .shake{animation:sh .4s}@keyframes sh{10%,90%{transform:translateX(-2px)}30%,70%{transform:translateX(4px)}50%{transform:translateX(-5px)}}

@@ -132,3 +132,89 @@ data class IdRequest(val id: Int)
 data class ScanDevice(val ip: String, val mac: String?, val type: String?, val host: String?, val vendor: String?)
 data class BackupItem(val file: String, val scope: String, val created: String, val size: Long)
 data class RestoreResponse(val ok: Boolean?, val statements: Int?, val error: String?)
+
+// ---- Heartbeat: uptime monitoring ----
+// `bars` is the status of each recent check, oldest first, and `series` the
+// response times of the ones that answered. EcgView draws the trace from
+// exactly these two, the same way the web page does.
+data class HbMonitor(
+    val id: Int,
+    val name: String?,
+    val kind: String?,
+    val target: String?,
+    val port: Int?,
+    val keyword: String?,
+    val tag: String?,
+    val note: String?,
+    val status: String?,
+    val enabled: Int?,
+    val notify: Int?,
+    val upside_down: Int?,
+    val fails: Int?,
+    val fail_threshold: Int?,
+    val interval_s: Int?,
+    val timeout_s: Int?,
+    val retry_interval_s: Int?,
+    val resend_every: Int?,
+    val last_ms: Int?,
+    val last_error: String?,
+    val last_check: String?,
+    val last_change: String?,
+    val cert_days: Int?,
+    val uptime: Double?,
+    val avg_ms: Int?,
+    val samples: Int?,
+    val accepted_codes: String?,
+    val http_method: String?,
+    val ignore_tls: Int?,
+    val keyword_invert: Int?,
+    val channels: String?,
+    val asset_id: String?,
+    val next_check: String?,
+    val bars: List<String>?,
+    val series: List<Int>?
+) {
+    /** Paused is not a server status: it is what enabled=0 means to a reader. */
+    val uiStatus: String get() = if ((enabled ?: 1) == 0) "paused" else (status ?: "pending")
+    val label: String get() = name?.takeIf { it.isNotBlank() } ?: target.orEmpty()
+    val where: String get() = (target.orEmpty()) + (port?.let { ":$it" } ?: "")
+}
+
+data class HbCounts(val up: Int?, val down: Int?, val pending: Int?, val disabled: Int?)
+data class HbChannelLite(val id: Int, val name: String?, val kind: String?, val enabled: Int?)
+data class HbState(
+    val monitors: List<HbMonitor>?,
+    val counts: HbCounts?,
+    val channels: List<HbChannelLite>?,
+    val window_hours: Int?,
+    val retain_days: Int?
+)
+data class HbWindow(val uptime: Double?, val checks: Int?, val avg_ms: Int?)
+data class HbPoint(val t: String?, val status: String?, val ms: Int?)
+data class HbEvent(val t: String?, val kind: String?, val message: String?)
+data class HbDetail(
+    val monitor: HbMonitor?,
+    val windows: Map<String, HbWindow>?,
+    val series: List<HbPoint>?,
+    val events: List<HbEvent>?,
+    val window_hours: Int?
+)
+data class HbCheckResponse(val ok: Boolean?, val checked: Int?)
+data class HbCreateResponse(val ok: Boolean?, val id: Int?, val error: String?)
+
+/** Only the fields the phone form actually sets -- nulls are left to the
+ *  server's own defaults, and on an edit to the monitor's stored values. */
+data class HbMonitorRequest(
+    val name: String?,
+    val kind: String?,
+    val target: String?,
+    val port: Int?,
+    val keyword: String?,
+    val tag: String?,
+    val note: String?,
+    val interval_s: Int?,
+    val fail_threshold: Int?,
+    val timeout_s: Int?,
+    val notify: Boolean?,
+    val enabled: Boolean?
+)
