@@ -674,6 +674,8 @@ async function loadDashboard(){
   if(eb) eb.innerHTML=exp.map(c=>`<tr style="cursor:pointer" onclick="showPage('page-contracts');openContractModal(${c.id})"><td>${esc(c.name)}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.type||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${c.days_left}d</td></tr>`).join('');
   const ee=document.getElementById('dashContractsExpEmpty'); if(ee) ee.style.display=exp.length?'none':'block';
   applyDashLayout();
+  // the cached copy has already painted; this corrects it from the server
+  syncDashLayout();
   loadDashHeartbeat();
   // widget bodies (recent assets / open tickets / activity) must refresh too --
   // previously these only reloaded when you navigated to the page
@@ -767,7 +769,38 @@ function getDashLayout(){
   }catch(e){}
   return L;
 }
-function putDashLayout(L){ try{ localStorage.setItem(DASH_LAYOUT_KEY2, JSON.stringify(L)); }catch(e){} }
+/* Written to both: the server so it is the user's layout wherever they sign
+   in (and so it lands in the backup, which is why it moved off the browser),
+   and localStorage so the dashboard paints in the right shape on the next
+   load without waiting for a round trip. */
+function putDashLayout(L){
+  try{ localStorage.setItem(DASH_LAYOUT_KEY2, JSON.stringify(L)); }catch(e){}
+  api('/api/dash/layout', {method:'PUT', headers:{'Content-Type':'application/json'},
+                           body:JSON.stringify({layout:L})})
+    .then(async r=>{
+      if(r&&r.ok) return;
+      const j=r?await r.json().catch(()=>({})):{};
+      // saved locally either way, so say what did not happen rather than
+      // pretending the whole save failed
+      toast('✕ Saved on this device only: '+((j&&j.error)||'server refused'));
+    }).catch(()=>toast('✕ Saved on this device only — server unreachable'));
+}
+
+/* Pulls the stored layout once per dashboard visit. The cached copy has
+   already painted by now, so this only corrects it -- and when it differs,
+   re-applies rather than reloading the page. */
+async function syncDashLayout(){
+  try{
+    const r=await api('/api/dash/layout');
+    if(!r||!r.ok) return;
+    const j=await r.json().catch(()=>null);
+    if(!j||!j.layout) return;
+    const server=JSON.stringify(Object.assign(blankLayout(), j.layout));
+    if(server===JSON.stringify(getDashLayout())) return;
+    try{ localStorage.setItem(DASH_LAYOUT_KEY2, server); }catch(e){}
+    applyDashLayout();
+  }catch(e){}
+}
 function dashCont(){ return document.getElementById('dashWidgets'); }
 
 /* Built-in widgets are whatever the markup ships with; a title for the picker
@@ -883,7 +916,6 @@ function setEditLayout(on){
   const show=(id,v)=>{ const el=document.getElementById(id); if(el) el.style.display=v?'':'none'; };
   show('dashSaveLayout', on); show('dashResetLayout', on);
   show('dashAddWidget', on); show('dashColsWrap', on);
-  show('dashExport', on); show('dashImportWrap', on);
   show('dashEditLayout', !on);
   document.getElementById('dashLayoutMsg').textContent=on
     ? 'Drag to reorder, ✕ to remove, + ADD WIDGET to bring one back — then SAVE'
@@ -3875,44 +3907,6 @@ if(dashFilterEl) dashFilterEl.oninput=()=>{
   });
 };
 
-/* The layout lives in this browser's localStorage, so it does not follow the
-   user to another machine. Export/import is the honest fix for that until it
-   is stored server-side: one small JSON file, icons and all. */
-document.getElementById('dashExport').onclick=()=>{
-  const blob=new Blob([JSON.stringify(saveDashLayout(), null, 2)], {type:'application/json'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='itvault-dashboard.json';
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(a.href), 5000);
-  document.getElementById('dashLayoutMsg').textContent='⭳ Layout exported';
-};
-document.getElementById('dashImport').onchange=(e)=>{
-  const f=e.target.files&&e.target.files[0]; if(!f) return;
-  const msg=document.getElementById('dashLayoutMsg');
-  const fr=new FileReader();
-  fr.onload=()=>{
-    let o=null;
-    try{ o=JSON.parse(String(fr.result||'')); }catch(err){ msg.textContent='✕ That file is not valid JSON'; return; }
-    if(!o||typeof o!=='object'||Array.isArray(o)){ msg.textContent='✕ That is not a dashboard layout'; return; }
-    // merged onto a blank layout so a file missing a field cannot leave the
-    // dashboard in a half-configured state
-    const L=Object.assign(blankLayout(), {
-      cols: Math.max(1, Math.min(4, parseInt(o.cols,10)||2)),
-      order: Array.isArray(o.order)?o.order.filter(k=>typeof k==='string'):[],
-      hidden: Array.isArray(o.hidden)?o.hidden.filter(k=>typeof k==='string'):[],
-      links: Array.isArray(o.links)?o.links.filter(t=>t&&typeof t.url==='string'
-               &&/^https?:\/\//i.test(t.url)):[],
-    });
-    putDashLayout(L); applyDashLayout();
-    decorateWidgets(document.body.classList.contains('edit-layout'));
-    initDashDrag();
-    msg.textContent='⭱ Layout imported';
-  };
-  fr.onerror=()=>{ msg.textContent='✕ Could not read that file'; };
-  fr.readAsText(f);
-  e.target.value='';
-};
 document.getElementById('dashCols').onchange=(e)=>{
   const n=Math.max(1, Math.min(4, parseInt(e.target.value,10)||2));
   dashCont()?.style.setProperty('--dashcols', String(n));

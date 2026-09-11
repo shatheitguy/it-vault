@@ -1864,6 +1864,18 @@ def migrate_schema():
             cur.execute("ALTER TABLE Users ADD COLUMN avatar MEDIUMTEXT")
         except Exception:
             pass
+    # Each user arranges their own dashboard, and it is kept here rather than
+    # in the browser so it survives a new machine, a cleared cache, and --
+    # the reason it moved -- so it is in the backup. Users is dumped in the
+    # config and all scopes, and _dump_table reads SHOW COLUMNS, so this rides
+    # along with no change to the backup code.
+    try:
+        cur.execute("SELECT dash_layout FROM Users LIMIT 1")
+    except Exception:
+        try:
+            cur.execute("ALTER TABLE Users ADD COLUMN dash_layout MEDIUMTEXT")
+        except Exception:
+            pass
     # Offline (Android) sync needs a last-modified timestamp on every
     # syncable record so the newest edit wins. Only Tickets had one; add
     # it to Assets/Contracts/Employees and backfill existing rows so a
@@ -5326,6 +5338,60 @@ def widget_icon():
         return jsonify({"ok": True, "icon": "data:image/png;base64," + b64,
                         "source": url or raw})
     return jsonify({"error": "No icon found at that address"}), 404
+
+@app.route("/api/dash/layout", methods=["GET", "PUT"])
+@auth_required()
+def dash_layout():
+    """The signed-in user's dashboard arrangement.
+
+    It used to live in localStorage, which meant it was one browser's
+    opinion: gone on a new machine, gone with a cleared cache, and -- the
+    reason it moved here -- absent from every backup. Stored per user
+    rather than globally because arranging a dashboard is a personal act;
+    two admins should not fight over the column count.
+
+    Kept as opaque JSON on purpose. The server has no opinion about what a
+    widget is, so a layout written by a newer front-end round-trips
+    through an older server untouched. The only checks are the ones that
+    protect the server: it must be a JSON object, and it must be small.
+    """
+    user = session.get("user")
+    if not user:
+        # an API-key caller has no per-user dashboard to speak of
+        row = _resolve_session_from_api_key()
+        user = row and row.get("username")
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    if request.method == "GET":
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT dash_layout FROM Users WHERE username=%s", [user])
+        r = cur.fetchone(); c.close()
+        raw = (r or {}).get("dash_layout") or ""
+        if not raw:
+            return jsonify({"ok": True, "layout": None})
+        try:
+            return jsonify({"ok": True, "layout": json.loads(raw)})
+        except Exception:
+            # a corrupt row should not lock someone out of their dashboard
+            return jsonify({"ok": True, "layout": None})
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "expected a layout object"}), 400
+    payload = body.get("layout", body)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "expected a layout object"}), 400
+    text = json.dumps(payload, separators=(",", ":"))
+    # Icons are stored inline as data URIs, so a layout is bigger than it
+    # looks -- but MEDIUMTEXT is 16MB and a dashboard has no business
+    # approaching it.
+    if len(text) > 512 * 1024:
+        return jsonify({"error": "That layout is too large -- use smaller icons"}), 413
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET dash_layout=%s WHERE username=%s", (text, user))
+    c.commit(); c.close()
+    return jsonify({"ok": True, "bytes": len(text)})
 
 @app.route("/api/branding")
 def branding():
