@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night just flips the status-bar icon colour; everything else resolves
+         through @color/* which already picks values-night automatically. -->
+    <style name="Theme.ItGuyAssets" parent="Base.Theme.ItGuyAssets">
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

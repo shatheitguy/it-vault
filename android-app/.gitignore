@@ -1,0 +1,17 @@
+*.iml
+.gradle/
+build/
+local.properties
+.idea/
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+# Signing material -- NEVER commit. The whole keystore/ dir is excluded so
+# backups and *.properties variants can't slip through on a suffix.
+keystore/
+keystore.properties
+keystore.properties.*
+*.keystore
+*.jks
+*.apk

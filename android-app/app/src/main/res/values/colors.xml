@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 light palette (brand red accent kept) -->
+    <color name="bg">#F5F7FB</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#EDF0F6</color>
+    <color name="accent">#FF3B30</color>
+    <color name="accent2">#C0392B</color>
+    <color name="accent_container">#FFE3E0</color>
+    <color name="on_accent">#FFFFFF</color>
+    <color name="text">#141B26</color>
+    <color name="muted">#5C6A80</color>
+    <color name="outline">#DCE1EA</color>
+    <color name="bar_track">#E6EAF1</color>
+    <!-- Heartbeat status. Chosen to stay legible on the light surface,
+         which the web palette's neon greens do not. -->
+    <color name="hb_up">#1FA971</color>
+    <color name="hb_down">#E03B3B</color>
+    <color name="hb_pending">#C07A10</color>
+</resources>

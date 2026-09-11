@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IT-Vault — Support Portal</title>
+<style>
+  /* kept byte-for-byte identical to what the JS below computes for the
+     app's actual default theme, so the first paint doesn't flash from an
+     older palette to the real one once settings load. */
+  :root{ --bg:#000000; --comp:#000000; --comp2:#000000; --line:#1a1a1a;
+         --acc:#ff3b30; --acc2:#c0392b; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
+         --grn:#3ddc97; --red:#ff6b6b; --amber:#ffb454;
+         --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif; }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font);background:var(--bg);color:var(--txt);min-height:100vh;
+    display:flex;align-items:center;justify-content:center;padding:24px;-webkit-font-smoothing:antialiased}
+  .card{width:100%;max-width:560px;background:var(--comp);border:1px solid var(--line);border-radius:12px;
+    padding:32px;box-shadow:0 1px 2px rgba(0,0,0,.3),0 8px 28px rgba(0,0,0,.28)}
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:8px}
+  .brand img{height:36px;width:auto;object-fit:contain}
+  .brand .name{font-weight:650;font-size:20px;letter-spacing:-.01em}
+  .sub{color:var(--mut);font-size:14px;line-height:1.55;margin:0 0 24px}
+  h2{margin:0 0 2px;font-size:17px;font-weight:650;letter-spacing:-.01em}
+  label{display:block;font-size:12.5px;font-weight:500;color:var(--mut);margin:15px 0 6px}
+  input,textarea,select{width:100%;background:var(--comp2);border:1px solid var(--line);color:var(--txt);
+    border-radius:8px;padding:11px 12px;font-size:14px;font-family:inherit;transition:.15s}
+  input::placeholder,textarea::placeholder{color:var(--mut2)}
+  input:focus,textarea:focus,select:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(59,158,255,.12)}
+  textarea{resize:vertical;min-height:110px;line-height:1.55}
+  .row{display:flex;gap:12px}
+  .row>div{flex:1}
+  button{margin-top:22px;width:100%;background:var(--acc);color:var(--btn-text,#04121f);border:0;border-radius:8px;padding:12px;
+    font-size:14.5px;font-weight:600;font-family:inherit;cursor:pointer;transition:.15s}
+  button:hover:not(:disabled){filter:brightness(1.08)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  .msg{margin-top:16px;padding:12px 14px;border-radius:8px;font-size:13.5px;line-height:1.5;display:none}
+  .msg.ok{display:block;background:rgba(61,220,151,.10);border:1px solid rgba(61,220,151,.45);color:var(--grn)}
+  .msg.err{display:block;background:rgba(255,107,107,.10);border:1px solid rgba(255,107,107,.45);color:var(--red)}
+  .foot{margin-top:22px;text-align:center;color:var(--mut2);font-size:12px}
+  .tabs{display:flex;gap:8px;margin-bottom:22px}
+  .tab{background:transparent;border:1px solid var(--line);color:var(--mut);padding:10px 18px;border-radius:8px;
+    cursor:pointer;font-weight:500;font-family:inherit;font-size:13.5px;flex:1;text-align:center;margin:0;transition:.15s}
+  .tab.active{background:var(--acc);color:var(--btn-text,#04121f);border-color:transparent;font-weight:600}
+  .tab:hover:not(.active){border-color:var(--acc);color:var(--txt)}
+  .status-view{margin-top:18px;padding:16px;background:var(--comp2);border:1px solid var(--line);border-radius:10px;display:none}
+  .status-view.show{display:block}
+  .live-badge{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;color:var(--grn);margin-bottom:10px}
+  .live-dot{width:7px;height:7px;border-radius:50%;background:var(--grn);animation:live-pulse 1.6s ease-in-out infinite}
+  @keyframes live-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.75)}}
+  .status-row{display:flex;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+  .status-row:last-child{border-bottom:none}
+  .status-row b{color:var(--mut);font-weight:500}
+  .replies{margin-top:16px;border-top:1px solid var(--line);padding-top:16px}
+  .reply{padding:11px 12px;background:var(--comp);border:1px solid var(--line);border-radius:8px;margin-bottom:8px;font-size:13.5px;line-height:1.5}
+  .reply .meta{color:var(--mut2);font-size:11.5px;margin-bottom:5px}
+  .prio{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600}
+  .prio.Low{background:rgba(138,152,176,.16);color:var(--mut)}
+  .prio.Normal{background:rgba(59,158,255,.16);color:#7cc0ff}
+  .prio.High{background:rgba(255,180,84,.16);color:#ffc879}
+  .prio.Urgent{background:rgba(255,107,107,.16);color:#ff9b9b}
+  .prio.Emergency{background:rgba(255,107,107,.28);color:#ff8585}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600}
+  .badge.s_Open{background:rgba(59,158,255,.16);color:#7cc0ff}
+  .badge.s_InProgress{background:rgba(255,180,84,.16);color:#ffc879}
+  .badge.s_Pending{background:rgba(138,152,176,.16);color:var(--mut)}
+  .badge.s_Resolved{background:rgba(61,220,151,.16);color:#5fe0ac}
+  .badge.s_Closed{background:rgba(138,152,176,.16);color:var(--mut)}
+  /* photo attachments: a phone camera is the fastest bug report there is,
+     so the picker is a big tap target and every pick gets a thumbnail the
+     visitor can remove before they submit. */
+  .drop{margin-top:6px;border:1px dashed var(--line);border-radius:10px;background:var(--comp2);
+    padding:18px 14px;text-align:center;cursor:pointer;transition:.15s}
+  .drop:hover,.drop.over{border-color:var(--acc);background:var(--comp)}
+  .drop .di{font-size:22px;line-height:1;margin-bottom:6px}
+  .drop .dt{font-size:13.5px;color:var(--txt)}
+  .drop .dh{font-size:12px;color:var(--mut2);margin-top:4px}
+  .shots{display:flex;flex-wrap:wrap;gap:10px;margin-top:12px}
+  .shot{position:relative;width:78px;height:78px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line);background:var(--comp2)}
+  .shot img{width:100%;height:100%;object-fit:cover;display:block}
+  .shot .x{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;
+    border:0;margin:0;padding:0;background:rgba(0,0,0,.66);color:#fff;font-size:13px;
+    line-height:20px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .shot .x:hover{background:var(--red)}
+  .shot .nm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.6);color:#fff;
+    font-size:9.5px;padding:2px 3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .warn{margin-top:10px;font-size:12.5px;color:var(--amber);line-height:1.5}
+  .atts{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}
+  .atts a{display:block;width:78px;height:78px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line)}
+  .atts img{width:100%;height:100%;object-fit:cover;display:block}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand"><img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'"><span class="name" id="appName">IT-Vault Request Portal</span></div>
+    <p class="sub">Submit a support ticket or request. We'll assign it to our IT team and keep you updated by email.</p>
+    
+    <div class="tabs">
+      <button class="tab active" id="tabNew">New ticket</button>
+      <button class="tab" id="tabStatus">Check status</button>
+    </div>
+
+    <!-- NEW TICKET FORM -->
+    <div id="newTicketView">
+      <h2>New ticket or request</h2>
+      <form id="f">
+        <div class="row">
+          <div><label>Your name</label><input id="requester" required placeholder="John Doe"></div>
+          <div><label>Email</label><input id="requester_email" type="email" required placeholder="you@company.com"></div>
+        </div>
+        <label>Subject</label><input id="subject" required placeholder="e.g. Laptop not turning on">
+        <div class="row">
+          <div><label>Priority</label>
+            <select id="priority"><option>Low</option><option selected>Normal</option><option>High</option><option>Urgent</option></select>
+          </div>
+          <div><label>Category</label>
+            <select id="category"><option>Hardware</option><option>Software</option><option>Network</option><option>Access/Permissions</option><option>Email/Communication</option><option>Printer</option><option>CCTV/Security</option><option>Other</option></select>
+          </div>
+        </div>
+        <label>Description</label><textarea id="description" required placeholder="Describe the issue or request in detail..."></textarea>
+        <label>Photos <span style="color:var(--mut2)">- optional, up to 4</span></label>
+        <div class="drop" id="drop">
+          <div class="di">&#128247;</div>
+          <div class="dt" id="dropText">Add a photo (optional)</div>
+          <div class="dh">A picture of the error, the screen or the device. JPEG, PNG, GIF, WebP or HEIC, up to 4MB each.</div>
+        </div>
+        <input type="file" id="photos" accept="image/*" multiple style="display:none">
+        <div class="shots" id="shots"></div>
+        <div class="warn" id="photoWarn"></div>
+        <button id="submit" type="submit">Submit ticket</button>
+      </form>
+      <div class="msg" id="msg"></div>
+    </div>
+
+    <!-- STATUS LOOKUP -->
+    <div id="statusView" style="display:none">
+      <h2>Check ticket status</h2>
+      <p class="sub" style="margin:0 0 14px">Enter your ticket code to see its current status. This refreshes automatically while you're viewing it.</p>
+      <label>Ticket code</label><input id="lookupCode" placeholder="e.g. TK-20260826-ABC123">
+      <button id="lookupBtn">LOOKUP STATUS</button>
+      <div id="statusResult"></div>
+    </div>
+
+    <div class="foot">⚡ powered by <b>Sha The IT Guy</b></div>
+  </div>
+<script>
+(function(){
+  var params = new URLSearchParams(location.search);
+  var token = params.get('t') || '';
+
+  /* ---- same color math as the main app / login / sign pages, mapped onto this
+     page's own --bg/--comp/--acc-style variable names, so the public portal
+     always matches whatever theme is actually configured instead of a
+     permanently hardcoded dark-navy palette. ---- */
+  function hex6(v, fb){
+    var s=String(v==null?'':v).trim();
+    if(/^#[0-9a-fA-F]{6}$/.test(s)) return s.toLowerCase();
+    if(/^#[0-9a-fA-F]{3}$/.test(s)) return ('#'+s[1]+s[1]+s[2]+s[2]+s[3]+s[3]).toLowerCase();
+    return fb;
+  }
+  function hexRgb(h){ var s=hex6(h,'#000000'); return [parseInt(s.slice(1,3),16),parseInt(s.slice(3,5),16),parseInt(s.slice(5,7),16)]; }
+  function shade(h,amt){ var c=hexRgb(h); function f(n){var v=Math.max(0,Math.min(255,Math.round(n+255*amt)));return v.toString(16).padStart(2,'0');} return '#'+f(c[0])+f(c[1])+f(c[2]); }
+  function isLightHex(h){ var c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.114)>150; }
+  function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
+  function muteFor(bgHex,k){ var light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
+  function contrastRatio(a,b){ function L(h){var c=hexRgb(h).map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];} var la=L(a),lb=L(b); var hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
+  function bestTextOn(bgHex){ var dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
+  function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; var a=hexRgb(accent),s=hexRgb(surface); var mix=a.map(function(v,i){return Math.round(v*0.65+s[i]*0.35);}); return '#'+mix.map(function(v){return v.toString(16).padStart(2,'0');}).join(''); }
+  function applyPortalTheme(b){
+    try{
+      var bgType = b.bg_type==='gradient' ? 'gradient' : 'solid';
+      var bgRaw = String(b.bg||'').trim();
+      var bgA='#0a0d13', bgB='#121826';
+      if(bgType==='gradient'){
+        var found = bgRaw.match(/#[0-9a-fA-F]{3,6}/g) || [];
+        bgA = hex6(found[0],'#0a0d13'); bgB = hex6(found[1],'#121826');
+      }
+      var baseHex = bgType==='gradient' ? bgA : hex6(bgRaw,'#0a0d13');
+      var bgValue = bgType==='gradient' ? ('linear-gradient(135deg, '+bgA+', '+bgB+')') : baseHex;
+      var surface = hex6(b.comp_bg,'#121826');
+      var surfaceLight = isLightHex(surface);
+      var accent = ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
+      var accent2 = ensureAccentVisible(hex6(b.accent2,'#c0392b'), surface);
+      var radius = Math.max(0, Math.min(24, parseInt(b.radius,10)||12));
+      var r = document.documentElement.style;
+      r.setProperty('--bg', bgValue);
+      r.setProperty('--comp', surface);
+      r.setProperty('--comp2', surfaceLight?shade(surface,-0.04):shade(surface,-0.02));
+      r.setProperty('--line', surfaceLight?shade(surface,-0.14):shade(surface,0.10));
+      r.setProperty('--txt', onBg(baseHex));
+      r.setProperty('--mut', muteFor(baseHex,'muted'));
+      r.setProperty('--mut2', muteFor(baseHex,'muted2'));
+      r.setProperty('--acc', accent);
+      r.setProperty('--acc2', accent2);
+      r.setProperty('--btn-text', bestTextOn(accent));
+      document.documentElement.style.setProperty('--radius', radius+'px');
+      document.querySelector('.card').style.borderRadius = radius+'px';
+    }catch(e){}
+  }
+
+  fetch('/api/branding').then(function(r){return r.json()}).then(function(b){
+    var shortName = b.logo_text || b.app_name || 'IT-Vault';
+    document.getElementById('appName').textContent = shortName + ' Request Portal';
+    document.title = shortName + ' Request Portal';
+    if(b.logo){ document.getElementById('logo').src='/logo.png?t='+Date.now(); }
+    applyPortalTheme(b);
+  }).catch(function(){});
+
+  // Tabs
+  document.getElementById('tabNew').onclick = function() {
+    stopPolling();
+    document.getElementById('tabNew').classList.add('active');
+    document.getElementById('tabStatus').classList.remove('active');
+    document.getElementById('newTicketView').style.display = '';
+    document.getElementById('statusView').style.display = 'none';
+  };
+  document.getElementById('tabStatus').onclick = function() {
+    document.getElementById('tabStatus').classList.add('active');
+    document.getElementById('tabNew').classList.remove('active');
+    document.getElementById('statusView').style.display = '';
+    document.getElementById('newTicketView').style.display = 'none';
+  };
+
+  /* ---- photo attachments ----
+     Files are held in a list of our own rather than read back off the input,
+     because assigning to input.files is not portable and a visitor who picks
+     three photos in two goes expects to end up with three, not the last two.
+     "capture" is deliberately absent from the input: on a phone the OS menu
+     already offers Camera alongside Photos, and forcing capture takes the
+     existing-screenshot option away. */
+  var PHOTO_MAX = 4, PHOTO_MAX_BYTES = 4 * 1024 * 1024;
+  var picked = [];
+  var drop = document.getElementById('drop');
+  var fileInput = document.getElementById('photos');
+  var shots = document.getElementById('shots');
+  var photoWarn = document.getElementById('photoWarn');
+
+  function renderShots(){
+    shots.innerHTML = '';
+    picked.forEach(function(f, i){
+      var d = document.createElement('div'); d.className = 'shot';
+      var img = document.createElement('img'); img.alt = f.name;
+      // object URLs are revoked on submit/reset so a long-lived form doesn't
+      // pin every photo the visitor ever picked in memory
+      img.src = f._url = URL.createObjectURL(f);
+      var x = document.createElement('button');
+      x.type = 'button'; x.className = 'x'; x.title = 'Remove'; x.textContent = '×';
+      x.onclick = function(){ releaseUrls([f]); picked.splice(i, 1); renderShots(); };
+      var nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = f.name;
+      d.appendChild(img); d.appendChild(x); d.appendChild(nm);
+      shots.appendChild(d);
+    });
+    document.getElementById('dropText').textContent = picked.length
+      ? (picked.length + ' photo' + (picked.length > 1 ? 's' : '') + ' attached - add another')
+      : 'Add a photo (optional)';
+  }
+  function releaseUrls(list){
+    (list || []).forEach(function(f){ if(f._url){ try{ URL.revokeObjectURL(f._url); }catch(e){} f._url = null; } });
+  }
+  function addFiles(list){
+    var msgs = [];
+    Array.prototype.forEach.call(list || [], function(f){
+      if(picked.length >= PHOTO_MAX){ msgs.push('Up to ' + PHOTO_MAX + ' photos.'); return; }
+      if(!/^image\//i.test(f.type||'') && !/\.(jpe?g|png|gif|webp|heic|heif)$/i.test(f.name||'')){
+        msgs.push(f.name + ' is not an image.'); return;
+      }
+      if(f.size > PHOTO_MAX_BYTES){ msgs.push(f.name + ' is over 4MB.'); return; }
+      if(picked.some(function(p){ return p.name === f.name && p.size === f.size; })) return;
+      picked.push(f);
+    });
+    // deduped: picking six photos at once shouldn't repeat "Up to 4" six times
+    photoWarn.textContent = msgs.length ? msgs.filter(function(m,i){return msgs.indexOf(m)===i;}).join(' ') : '';
+    renderShots();
+  }
+  drop.onclick = function(){ fileInput.click(); };
+  fileInput.onchange = function(){ addFiles(fileInput.files); fileInput.value = ''; };
+  ['dragenter','dragover'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('over'); });
+  });
+  ['dragleave','drop'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('over'); });
+  });
+  drop.addEventListener('drop', function(e){
+    if(e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files);
+  });
+  function clearPhotos(){ releaseUrls(picked); picked = []; photoWarn.textContent = ''; renderShots(); }
+  renderShots();
+
+  // Submit ticket
+  document.getElementById('f').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var btn = document.getElementById('submit'); btn.disabled = true;
+    var msg = document.getElementById('msg'); msg.className = 'msg';
+    var body = {
+      requester: document.getElementById('requester').value.trim(),
+      requester_email: document.getElementById('requester_email').value.trim(),
+      subject: document.getElementById('subject').value.trim(),
+      priority: document.getElementById('priority').value,
+      category: document.getElementById('category').value,
+      description: document.getElementById('description').value.trim(),
+      token: token
+    };
+    // Photos force multipart; without them the request stays JSON so nothing
+    // changes for the Android app or anyone posting to this endpoint directly.
+    var req;
+    if(picked.length){
+      var fd = new FormData();
+      Object.keys(body).forEach(function(k){ fd.append(k, body[k]); });
+      picked.forEach(function(f){ fd.append('photos', f, f.name); });
+      req = fetch('/api/portal/tickets', {method:'POST', body: fd});
+    } else {
+      req = fetch('/api/portal/tickets', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    }
+    req
+      .then(function(r){return r.json().then(function(j){return {r:r, j:j}})})
+      .then(function(d){
+        if(d.r.ok){
+          msg.className='msg ok';
+          var txt = '✓ Ticket '+d.j.code+' submitted! Our IT team has been assigned and you\'ll get email updates.';
+          if(d.j.photos) txt += ' '+d.j.photos+' photo'+(d.j.photos>1?'s':'')+' attached.';
+          if(d.j.photo_warnings && d.j.photo_warnings.length) txt += ' Not attached: '+d.j.photo_warnings.join('; ')+'.';
+          msg.textContent = txt;
+          document.getElementById('f').reset(); clearPhotos();
+        }
+        else { msg.className='msg err'; msg.textContent='✕ '+(d.j.error||'Submission failed'); }
+      })
+      .catch(function(){ msg.className='msg err'; msg.textContent='✕ Network error'; })
+      .finally(function(){ btn.disabled = false; });
+  });
+
+  // Lookup ticket — code only, and once found, polls quietly in the background
+  // so the status view stays live without the visitor re-submitting the form.
+  var pollTimer = null;
+  var lastReplyCount = null;
+  function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+  function renderStatus(t, reps, atts, opts){
+    opts = opts || {};
+    var result = document.getElementById('statusResult');
+    var prioClass = t.priority || 'Normal';
+    var statusClass = 's_' + (t.status||'').replace(' ','');
+    var newReplies = (lastReplyCount != null && reps.length > lastReplyCount);
+    lastReplyCount = reps.length;
+    var html = '<div class="status-view show">' +
+      '<div class="live-badge"' + (opts.silent ? '' : '') + '><span class="live-dot"></span>Live — auto-refreshing</div>' +
+      '<div class="status-row"><b>Code</b><span>'+t.code+'</span></div>' +
+      '<div class="status-row"><b>Subject</b><span>'+(t.subject||'')+'</span></div>' +
+      '<div class="status-row"><b>Status</b><span class="badge '+statusClass+'">'+t.status+'</span></div>' +
+      '<div class="status-row"><b>Priority</b><span class="prio '+prioClass+'">'+t.priority+'</span></div>' +
+      '<div class="status-row"><b>Category</b><span>'+(t.category||'—')+'</span></div>' +
+      '<div class="status-row"><b>Assignee</b><span>'+(t.assignee||'—')+'</span></div>' +
+      '<div class="status-row"><b>Due</b><span>'+(t.due_date||'—')+'</span></div>' +
+      '<div class="status-row"><b>Created</b><span>'+(t.created_at||'')+'</span></div>' +
+      '<div class="status-row"><b>Updated</b><span>'+(t.updated_at||'')+'</span></div>';
+    if(atts && atts.length){
+      html += '<div class="replies"><b style="color:var(--mut);font-size:12px;text-transform:uppercase">Photos ('+atts.length+')</b><div class="atts">';
+      atts.forEach(function(a){
+        // served through the ticket code, which is the same key that got the
+        // visitor this far -- opening in a new tab lets them see it full size
+        var u = '/api/portal/attachments/'+encodeURIComponent(t.code)+'/'+a.id;
+        html += '<a href="'+u+'" target="_blank" rel="noopener" title="'+(a.filename||'photo')+'"><img src="'+u+'" alt=""></a>';
+      });
+      html += '</div></div>';
+    }
+    if(reps.length) {
+      html += '<div class="replies"><b style="color:var(--mut);font-size:12px;text-transform:uppercase">Replies ('+reps.length+')</b>';
+      reps.forEach(function(rp){
+        html += '<div class="reply"><div class="meta">'+rp.author+' · '+(rp.author_role||'')+' · '+(rp.created_at||'')+'</div><div>'+rp.body+'</div></div>';
+      });
+      html += '</div>';
+    } else {
+      html += '<p class="muted" style="margin-top:12px">No replies yet.</p>';
+    }
+    html += '</div>';
+    result.innerHTML = html;
+    if(newReplies && opts.silent) result.scrollIntoView({behavior:'smooth', block:'nearest'});
+  }
+  function lookupTicket(code, silent){
+    var result = document.getElementById('statusResult');
+    if(!silent) result.innerHTML='<p class="muted">Looking up...</p>';
+    return fetch('/api/portal/status', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({code:code})})
+      .then(function(r){return r.json().then(function(j){return {r:r, j:j}})})
+      .then(function(d){
+        if(!d.r.ok){
+          stopPolling();
+          if(!silent) result.innerHTML='<div class="msg err" style="display:block">✕ '+(d.j.error||'Not found')+'</div>';
+          return;
+        }
+        renderStatus(d.j.ticket, d.j.replies || [], d.j.attachments || [], {silent: silent});
+        if(!pollTimer){ pollTimer = setInterval(function(){ lookupTicket(code, true); }, 15000); }
+      })
+      .catch(function(){ if(!silent) result.innerHTML='<div class="msg err" style="display:block">✕ Network error</div>'; });
+  }
+  document.getElementById('lookupBtn').onclick = function() {
+    var code = document.getElementById('lookupCode').value.trim().toUpperCase();
+    var result = document.getElementById('statusResult');
+    if(!code){ result.innerHTML='<div class="msg err" style="display:block">Enter your ticket code.</div>'; return; }
+    stopPolling(); lastReplyCount = null;
+    lookupTicket(code, false);
+  };
+})();
+</script>
+</body>
+</html>

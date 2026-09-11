@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Single-item entrance used by the staggered layout animations. -->
+<set xmlns:android="http://schemas.android.com/apk/res/android"
+    android:interpolator="@android:interpolator/decelerate_quint">
+    <alpha android:fromAlpha="0" android:toAlpha="1" android:duration="300" />
+    <translate android:fromYDelta="14%p" android:toYDelta="0" android:duration="320" />
+</set>

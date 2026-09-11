@@ -1,0 +1,45 @@
+# --- runtime data / secrets: never commit real org data or credentials ---
+itvault_config.json
+.secret_key
+.env
+*.env
+backups/
+invoices/
+logo.png
+letterhead.png
+logs/
+
+# --- real / non-generic sample data ---
+sample-assets.xlsx
+screenshots/
+legacy/
+ui_backup_20260901/
+
+# --- local-machine dev tooling (Windows-path-specific, not portable) ---
+run_server.bat
+start-itvault.bat
+start_all.bat
+itvault_spawn.py
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# --- node (test deps only, no package.json tracked) ---
+node_modules/
+
+# --- editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local DB dumps (contain password hashes) — never commit
+*_dump.sql
+
+# Release APKs are attached to GitHub Releases, not committed
+*.apk
+
