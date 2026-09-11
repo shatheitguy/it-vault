@@ -5237,6 +5237,96 @@ def ldap_test():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:300]}), 400
 
+@app.route("/api/widget/icon")
+@auth_required(module="settings", level="write")
+def widget_icon():
+    """Fetch a site's icon so a dashboard tile can wear it.
+
+    The browser cannot do this itself: the target is another origin (and
+    often plain http on the LAN), so the fetch is blocked by CORS and by
+    mixed-content rules. The server can, and returns a small data URI the
+    layout can store inline -- no second request when the dashboard loads,
+    and no broken image when the target is only reachable from the server.
+
+    It will happily fetch a private address, which is the point: the tiles
+    people want are the UniFi controller, the NAS, the switch. That does
+    mean an admin can aim this at anything the server can reach, so it is
+    gated on settings:write -- the same permission as changing branding --
+    and it returns only a re-encoded image, never the response body.
+    """
+    import urllib.request
+    import urllib.parse
+    import re as _re
+
+    raw = (request.args.get("url") or "").strip()
+    if not raw:
+        return jsonify({"error": "no url"}), 400
+    # Bare "10.0.0.1:8443" is how people actually type an address, so a missing
+    # scheme is filled in -- but only when one is genuinely absent. Prefixing
+    # blind turned "javascript:alert(1)" into "http://javascript:alert(1)",
+    # which passed the scheme check and failed later as a connection error
+    # instead of being refused outright.
+    if not _re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:", raw):
+        raw = "http://" + raw
+    parts = urllib.parse.urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return jsonify({"error": "only http:// and https:// addresses"}), 400
+
+    MAX_BYTES = 512 * 1024
+
+    def grab(url):
+        req = urllib.request.Request(url, headers={"User-Agent": f"IT-Vault/{APP_VERSION}"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return r.read(MAX_BYTES + 1), (r.headers.get("Content-Type") or "")
+
+    origin = f"{parts.scheme}://{parts.netloc}"
+    candidates = []
+    # If the address IS an image, that is the answer -- someone pasting a
+    # direct PNG should not be told there is no icon at it.
+    direct = None
+    # What the page itself declares, first -- /favicon.ico is the fallback,
+    # not the answer, and plenty of sites no longer serve one.
+    try:
+        html, ctype = grab(origin + (parts.path or "/") +
+                           (("?" + parts.query) if parts.query else ""))
+        low = ctype.lower()
+        if low.startswith("image/") or _sniff_image(html)[0]:
+            direct = html
+        elif "html" in low:
+            text = html[:200000].decode("utf-8", "replace")
+            for m in _re.finditer(
+                    r'<link[^>]+rel=["\']?[^"\'>]*icon[^"\'>]*["\']?[^>]*>',
+                    text, _re.I):
+                href = _re.search(r'href=["\']([^"\']+)["\']', m.group(0), _re.I)
+                if href:
+                    candidates.append(urllib.parse.urljoin(
+                        origin + (parts.path or "/"), href.group(1)))
+    except Exception:
+        pass
+    candidates.append(origin + "/favicon.ico")
+
+    for url in ([None] if direct else []) + candidates[:6]:
+        try:
+            data, ctype = (direct, "") if url is None else grab(url)
+        except Exception:
+            continue
+        if not data or len(data) > MAX_BYTES:
+            continue
+        kind = _sniff_image(data)[0]
+        if not kind:
+            # an .ico is not something _sniff_image knows, and it is still
+            # the most common favicon there is
+            if not data.startswith(b"\x00\x00\x01\x00"):
+                continue
+        try:
+            png = _fit_png(data, 64, 24 * 1024)
+        except Exception:
+            continue
+        b64 = base64.b64encode(png).decode()
+        return jsonify({"ok": True, "icon": "data:image/png;base64," + b64,
+                        "source": url or raw})
+    return jsonify({"error": "No icon found at that address"}), 404
+
 @app.route("/api/branding")
 def branding():
     c = conn(); cur = c.cursor()
