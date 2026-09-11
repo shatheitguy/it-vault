@@ -42,3 +42,6 @@ Thumbs.db
 
 # Release APKs are attached to GitHub Releases, not committed
 *.apk
+
+# local editor/preview scratch
+.claude/

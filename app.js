@@ -13,10 +13,10 @@ function fmtMoney(v,cur){
 
 // --- i18n: applied to [data-i18n] elements + document.dir for ar ---
 const I18N={
-  en:{Home:'Home',Assets:'Assets',AddAsset:'Add Asset',ImportExcel:'Import Excel',ExportExcel:'Export Excel',AuditLog:'Audit Log',Tickets:'Tickets',Contracts:'Contracts',Locations:'Locations',Trash:'Trash',Customization:'Customization',NetworkScan:'Network Scan',BackupRestore:'Backup / Restore',Settings:'Settings',System:'System',Employees:'Employees',Save:'Save',Add:'Add',Edit:'Edit',Delete:'Delete',Search:'Search',Dashboard:'IT Guy - The Assets Manager'},
-  ar:{Home:'الرئيسية',Assets:'الأصول',AddAsset:'إضافة أصل',ImportExcel:'استيراد إكسل',ExportExcel:'تصدير إكسل',AuditLog:'سجل التدقيق',Tickets:'التذاكر',Contracts:'العقود',Locations:'المواقع',Trash:'السلة',Customization:'التخصيص',NetworkScan:'فحص الشبكة',BackupRestore:'النسخ الاحتياطي',Settings:'الإعدادات',System:'النظام',Employees:'الموظفون',Save:'حفظ',Add:'إضافة',Edit:'تعديل',Delete:'حذف',Search:'بحث',Dashboard:'IT Guy // مصفوفة الأصول'},
-  ta:{Home:'முகப்பு',Assets:'சொத்துகள்',AddAsset:'சொத்து சேர்',ImportExcel:'எக்செல் இறக்குமதி',ExportExcel:'எக்செல் ஏற்றுமதி',AuditLog:'தணிக்கை பதிவு',Tickets:'டிக்கெட்டுகள்',Contracts:'ஒப்பந்தங்கள்',Locations:'இடங்கள்',Trash:'குப்பை',Customization:'தனிப்பயனாக்கம்',NetworkScan:'பிணைய ஸ்கேன்',BackupRestore:'காப்புப்பு',Settings:'அமைப்புகள்',System:'கணினி',Employees:'ஊழியர்கள்',Save:'சேமி',Add:'சேர்',Edit:'திருத்து',Delete:'நீக்கு',Search:'தேடல்',Dashboard:'IT Guy // சொத்து மேட்ரிக்ஸ்'},
-  fr:{Home:'Accueil',Assets:'Actifs',AddAsset:'Ajouter',ImportExcel:'Importer Excel',ExportExcel:'Exporter Excel',AuditLog:'Journal',Tickets:'Tickets',Contracts:'Contrats',Locations:'Emplacements',Trash:'Corbeille',Customization:'Personnalisation',NetworkScan:'Scan réseau',BackupRestore:'Sauvegarde',Settings:'Paramètres',System:'Système',Employees:'Employés',Save:'Enregistrer',Add:'Ajouter',Edit:'Modifier',Delete:'Supprimer',Search:'Rechercher',Dashboard:'IT Guy // Matrice'}
+  en:{Home:'Home',Assets:'Assets',AddAsset:'Add Asset',ImportExcel:'Import Excel',ExportExcel:'Export Excel',AuditLog:'Log',Tickets:'Tickets',Contracts:'Contracts',Locations:'Locations',Trash:'Trash',Customization:'Customization',NetworkScan:'Network Scan',Heartbeat:'Heartbeat',BackupRestore:'Backup / Restore',Settings:'Settings',System:'System',Employees:'Employees',Save:'Save',Add:'Add',Edit:'Edit',Delete:'Delete',Search:'Search',Dashboard:'IT Guy - The Assets Manager'},
+  ar:{Home:'الرئيسية',Assets:'الأصول',AddAsset:'إضافة أصل',ImportExcel:'استيراد إكسل',ExportExcel:'تصدير إكسل',AuditLog:'سجل التدقيق',Tickets:'التذاكر',Contracts:'العقود',Locations:'المواقع',Trash:'السلة',Customization:'التخصيص',NetworkScan:'فحص الشبكة',Heartbeat:'مراقبة الأجهزة',BackupRestore:'النسخ الاحتياطي',Settings:'الإعدادات',System:'النظام',Employees:'الموظفون',Save:'حفظ',Add:'إضافة',Edit:'تعديل',Delete:'حذف',Search:'بحث',Dashboard:'IT Guy // مصفوفة الأصول'},
+  ta:{Home:'முகப்பு',Assets:'சொத்துகள்',AddAsset:'சொத்து சேர்',ImportExcel:'எக்செல் இறக்குமதி',ExportExcel:'எக்செல் ஏற்றுமதி',AuditLog:'தணிக்கை பதிவு',Tickets:'டிக்கெட்டுகள்',Contracts:'ஒப்பந்தங்கள்',Locations:'இடங்கள்',Trash:'குப்பை',Customization:'தனிப்பயனாக்கம்',NetworkScan:'பிணைய ஸ்கேன்',Heartbeat:'கண்காணிப்பு',BackupRestore:'காப்புப்பு',Settings:'அமைப்புகள்',System:'கணினி',Employees:'ஊழியர்கள்',Save:'சேமி',Add:'சேர்',Edit:'திருத்து',Delete:'நீக்கு',Search:'தேடல்',Dashboard:'IT Guy // சொத்து மேட்ரிக்ஸ்'},
+  fr:{Home:'Accueil',Assets:'Actifs',AddAsset:'Ajouter',ImportExcel:'Importer Excel',ExportExcel:'Exporter Excel',AuditLog:'Journal',Tickets:'Tickets',Contracts:'Contrats',Locations:'Emplacements',Trash:'Corbeille',Customization:'Personnalisation',NetworkScan:'Scan réseau',Heartbeat:'Supervision',BackupRestore:'Sauvegarde',Settings:'Paramètres',System:'Système',Employees:'Employés',Save:'Enregistrer',Add:'Ajouter',Edit:'Modifier',Delete:'Supprimer',Search:'Rechercher',Dashboard:'IT Guy // Matrice'}
 };
 // ---- column visibility (persisted) ----
 // First-ever visit (nothing saved yet): show a concise, uncluttered default instead of
@@ -53,13 +53,117 @@ function applyLanguage(lang){
 }
 const STATUSES=['Available','Checked-Out','Under-Maintenance','Reserved','Retired','Lost/Stolen'];
 {const _sf=document.getElementById('statusFilter'); if(_sf)_sf.innerHTML='<option value="">All statuses</option>'+STATUSES.map(s=>`<option>${s}</option>`).join('');}
-const LABEL_FIELD_KEYS=['Name','Type','AssetID','Serial','Status','Location','ReceivedBy','ReceiverDate','EmployeeID','Department','Warranty','PurchaseDate','Note'];
+const LABEL_FIELD_KEYS=['Name','Type','AssetID','Serial','Status','Location','ReceivedBy','ReceiverDate','EmployeeID','EmployeeName','Department','Warranty','PurchaseDate','Note'];
 const ROLE_ADMIN='admin', ROLE_EDIT='read-write', ROLE_VIEW='read-only';
 const ROLE_LABELS={'admin':'Admin','read-write':'Editor','read-only':'Read-only'};
 const TICKET_STATUSES=['Open','In Progress','Pending','Resolved','Closed'];
 const PRIORITIES=['Low','Normal','High','Urgent','Emergency'];
 const TICKET_CATEGORIES=['Hardware','Software','Network','Access/Permissions','Email/Communication','Printer','CCTV/Security','Other'];
 let assets=[],sortCol='',sortDir=1,groupBy='',expTimer=null,MY_ROLE=ROLE_VIEW;
+// Per-module rights straight from /api/me. A custom role can grant tickets
+// and nothing else, so the sidebar has to ask about the module rather than
+// guess from the role name.
+let MY_PERMS={};
+// The individual permissions this role was granted (see FEATURE_GROUPS in
+// app.py). Read through canDo() rather than directly.
+let MY_FEATURES=[];
+// Each settings section maps to one catalogue leaf, so a role can be given
+// Branding and nothing else. My Account is everyone's -- it is where their own
+// password and avatar live -- and the admin-only sections (Users, Database,
+// Danger Zone) have no leaf on purpose: granting those is granting admin.
+const SETTINGS_ALWAYS = ['account'];
+const SETTINGS_FEATURE = {
+  general: 'settings.general',
+  branding: 'settings.branding',
+  custom:   'settings.branding',
+  notif:    'settings.email',
+  sla:      'settings.sla',
+  label:    'settings.labels',
+  ldap:     'settings.ldap',
+  unifi:    'settings.unifi',
+};
+function applySettingsPermissions(){
+  const secOk = sec => SETTINGS_ALWAYS.indexOf(sec)>=0
+    || (SETTINGS_FEATURE[sec] ? canDo(SETTINGS_FEATURE[sec]) : MY_ROLE===ROLE_ADMIN);
+  const allowed = MY_ROLE===ROLE_ADMIN ? null
+    : [...document.querySelectorAll('#cfgNav .cfgitem')].map(b=>b.dataset.sec).filter(secOk);
+  document.querySelectorAll('#cfgNav .cfgitem').forEach(btn=>{
+    const ok = !allowed || allowed.indexOf(btn.dataset.sec)>=0;
+    btn.style.display = ok ? '' : 'none';
+  });
+  document.querySelectorAll('.cfg-sec').forEach(sec=>{
+    if(allowed && allowed.indexOf(sec.dataset.sec)<0) sec.style.display='none';
+  });
+  // If the section on screen is now hidden, fall back to the first allowed one.
+  if(allowed){
+    const shown=[...document.querySelectorAll('.cfg-sec')]
+      .find(s=>s.style.display!=='none' && allowed.indexOf(s.dataset.sec)>=0);
+    if(!shown){
+      const first=document.querySelector('#cfgNav .cfgitem[data-sec="account"]')
+              || document.querySelector('#cfgNav .cfgitem:not([style*="none"])');
+      if(first)first.click();
+    }
+  }
+}
+
+// Show only what this user can actually open. A role granted tickets and
+// nothing else shouldn't see an Assets link that answers 403, and everyone
+// keeps Settings because their own account lives in there.
+function applyNavPermissions(){
+  const show=(id,on)=>{const el=document.getElementById(id); if(el)el.style.display=on?'':'none';};
+
+  // Main
+  show('navAssets',    canSee('assets'));
+  show('navContracts', canSee('contracts'));
+  show('navTickets',   canSee('tickets'));
+
+  // Records -- these are all views over assets/directory
+  show('navDirectory', canSee('directory'));
+  show('navAudit',     canDo('tools.audit'));
+
+  // Tools
+  show('navScan',      canDo('tools.scan'));
+  show('navHeartbeat', canDo('tools.heartbeat'));
+  show('navBackup',    canDo('tools.backup'));
+
+  // Settings stays for everyone: My Account is in there. The page itself
+  // hides the sections a user has no rights to.
+  show('navSettings',  true);
+
+  // Asset-page actions follow their own permission, so a role can be allowed
+  // to add an asset without also being allowed to bulk-import or export one.
+  show('navAdd',    canDo('assets.create'));
+  show('navImport', canDo('assets.import'));
+  show('navExport', canDo('assets.export'));
+  show('navCatalog', canDo('assets.catalog'));
+  show('navTrash',   canDo('assets.trash'));
+
+  // Group headings are noise when everything under them is hidden.
+  const groups=[
+    ['Records', ['navDirectory','navCatalog','navTrash','navAudit']],
+    ['Tools',   ['navScan','navHeartbeat','navBackup']],
+  ];
+  document.querySelectorAll('.nav-grp').forEach(g=>{
+    const hit=groups.find(([name])=>g.textContent.trim()===name);
+    if(!hit)return;
+    const any=hit[1].some(id=>{const el=document.getElementById(id);return el&&el.style.display!=='none';});
+    g.style.display=any?'':'none';
+  });
+
+  // If the landing page is one they can't see, move them somewhere they can.
+  if(!canSee('assets')&&document.getElementById('page-assets')&&
+     document.getElementById('page-assets').classList.contains('show')){
+    if(canSee('tickets'))showPage('page-tickets'); else showPage('page-dashboard');
+  }
+}
+
+function permOf(m){return (MY_PERMS&&MY_PERMS[m])||'none';}
+function canSee(m){return MY_ROLE===ROLE_ADMIN||permOf(m)!=='none';}
+function canWrite(m){return MY_ROLE===ROLE_ADMIN||permOf(m)==='write';}
+// One catalogue leaf, e.g. canDo('tickets.delete'). The module helpers above
+// answer "can they reach this area at all"; this answers "may they do this
+// one thing", which is what a role built from individual permissions needs.
+function canDo(f){return MY_ROLE===ROLE_ADMIN||MY_FEATURES.indexOf(f)>=0;}
 
 const TIMEOUT_MS=5*60*1000;
 let sessEnd=0;
@@ -97,7 +201,37 @@ function drawMatrix(){
 function esc(v){return(v==null?'':String(v)).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function statusClass(s){s=(s||'').toLowerCase();return s==='reserved'?'s-reserved':s==='retired'?'s-retired':s==='lost/stolen'?'s-lost':'s-default';}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
-async function api(u,opt){const r=await fetch(u,opt);if(r.status===401){location.href='/';return null;}return r;}
+// Every request in the app goes through here, which makes it the one place
+// that can guarantee a failure is never silent. fetch() REJECTS on a dropped
+// connection, a reset by a proxy or tunnel, or a mixed-content block -- and an
+// async click handler that rejects shows the user absolutely nothing. That is
+// what "I press save and nothing happens" was: not a server that refused the
+// request, but a request whose failure had nowhere to go.
+async function api(u,opt){
+  let r;
+  try{
+    r=await fetch(u,opt);
+  }catch(e){
+    toast('✕ NO RESPONSE FROM SERVER — '+((e&&e.message)||'connection failed'));
+    console.error('api() failed',u,e);
+    return null;
+  }
+  if(r.status===401){location.href='/';return null;}
+  return r;
+}
+
+// A failing response is not necessarily JSON. Anything in front of the app --
+// a reverse proxy, a Cloudflare tunnel -- answers with HTML, and calling
+// r.json() on that threw inside the very branch meant to report the error, so
+// the user saw nothing. Falls back to the status line, which is always there.
+async function apiError(r){
+  if(!r) return 'no response';
+  try{
+    const j=await r.json();
+    if(j && j.error) return j.error;
+  }catch(e){}
+  return ('HTTP '+r.status+' '+(r.statusText||'')).trim();
+}
 function canEdit(){return MY_ROLE===ROLE_ADMIN||MY_ROLE===ROLE_EDIT;}
 function toggleSelectAll(checked){
   document.querySelectorAll('.row-chk').forEach(cb=>{cb.checked=checked;});
@@ -540,6 +674,7 @@ async function loadDashboard(){
   if(eb) eb.innerHTML=exp.map(c=>`<tr style="cursor:pointer" onclick="showPage('page-contracts');openContractModal(${c.id})"><td>${esc(c.name)}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.type||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${c.days_left}d</td></tr>`).join('');
   const ee=document.getElementById('dashContractsExpEmpty'); if(ee) ee.style.display=exp.length?'none':'block';
   applyDashLayout();
+  loadDashHeartbeat();
   // widget bodies (recent assets / open tickets / activity) must refresh too --
   // previously these only reloaded when you navigated to the page
   loadDashboardPage();
@@ -1055,7 +1190,7 @@ function fillEmpDeptDesig(empId){
 async function delInvoice(id){
   if(!confirm('Remove invoice file?'))return;
   const r=await api('/api/assets/'+id+'/invoice',{method:'DELETE'});
-  if(r&&r.ok){toast('✕ INVOICE REMOVED');await openModal(id);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✕ INVOICE REMOVED');await openModal(id);}else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveModal(){
   const row={};COLUMNS.forEach(c=>{const el=document.getElementById('f_'+c);row[c]=el?el.value.trim():'';});
@@ -1079,7 +1214,7 @@ async function saveModal(){
         if(!r2||!r2.ok){const j=await r2.json().catch(()=>({}));toast('✕ invoice: '+(j.error||'upload failed'));}
       }
       toast('✓ ADDED');closeModal();load();loadDashboard();
-    }else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+    }else if(r){toast('✕ '+await apiError(r));}
   }
 }
 function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;closeCamScan();}
@@ -1092,12 +1227,12 @@ async function doCheckout(){
   const note=document.getElementById('coNote').value.trim();
   if(!user){toast('Select user');return;}
   const r=await api('/api/assets/'+coAsset+'/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:user,signed_date:signedDate,expected,note})});
-  if(r&&r.ok){document.getElementById('checkoutModal').classList.remove('show');toast('✓ CHECKED OUT');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){document.getElementById('checkoutModal').classList.remove('show');toast('✓ CHECKED OUT');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function checkinAsset(id){
   if(!confirm('CHECK IN this asset?'))return;
   const r=await api('/api/assets/'+id+'/checkin',{method:'POST'});
-  if(r&&r.ok){toast('✓ CHECKED IN');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ CHECKED IN');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 let maintAsset=null;
 async function openMaint(id){
@@ -1111,12 +1246,12 @@ async function addMaint(){
   const body={mtype:document.getElementById('mType').value.trim(),cost:document.getElementById('mCost').value,note:document.getElementById('mNote').value.trim(),date:document.getElementById('mDate').value};
   if(!body.mtype){toast('Type required');return;}
   const r=await api('/api/assets/'+maintAsset+'/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){toast('✓ LOGGED');openMaint(maintAsset);load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ LOGGED');openMaint(maintAsset);load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function delMaint(mid){
   if(!mid)return;
   const r=await api('/api/assets/'+maintAsset+'/maintenance?id='+mid,{method:'DELETE'});
-  if(r&&r.ok){toast('✓ REMOVED');openMaint(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ REMOVED');openMaint(maintAsset);}else if(r){toast('✕ '+await apiError(r));}
 }
 function openQR(id){window.open('/label/'+id,'_blank');}
 
@@ -1135,12 +1270,12 @@ async function addMaintInline(){
   const body={mtype:document.getElementById('mType2').value.trim(),cost:document.getElementById('mCost2').value,note:document.getElementById('mNote2').value.trim(),date:document.getElementById('mDate2').value};
   if(!body.mtype){toast('Type required');return;}
   const r=await api('/api/assets/'+maintAsset+'/maintenance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();await openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ LOGGED');await load();loadDashboard();await openModal(maintAsset);}else if(r){toast('✕ '+await apiError(r));}
 }
 async function delMaintInline(mid){
   if(!mid)return;
   const r=await api('/api/assets/'+maintAsset+'/maintenance?id='+mid,{method:'DELETE'});
-  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();await openModal(maintAsset);}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ REMOVED');await load();loadDashboard();await openModal(maintAsset);}else if(r){toast('✕ '+await apiError(r));}
 }
 document.getElementById('mAdd2').onclick=addMaintInline;
 async function printAsset(id){
@@ -1241,6 +1376,16 @@ async function doScan(){
   lastScan=Array.isArray(j)?j:[];
   saveLastScan(lastScan);
   renderScan(lastScan);
+  // An empty result is ambiguous -- a quiet network looks exactly like a
+  // container that cannot see one. Ask the server which it was.
+  if(!lastScan.length) explainEmptyScan();
+}
+async function explainEmptyScan(){
+  const st=document.getElementById('scanStatus'); if(!st) return;
+  const r=await api('/api/scan/capabilities');
+  if(!r||!r.ok) return;
+  const c=await r.json().catch(()=>null);
+  if(c&&c.hint) st.innerHTML='&#9888; '+esc(c.hint);
 }
 function renderScan(devs){
   const nodes=devs.map((d,i)=>`<tr><td>${esc(d.ip||'')}</td><td>${esc(d.host||'')||'<span class="muted">—</span>'}</td><td>${esc(d.mac||d.hw||'')}</td><td>${esc(d.vendor||'')||'<span class="muted">—</span>'}</td><td>${esc(d.type||'LAN')}</td><td><button class="btn sm ghost" onclick="addScannedAsAsset('${i}')">Add as asset</button></td></tr>`).join('');
@@ -1452,7 +1597,7 @@ async function doRestore(){
   if(!confirm('Restore "'+file.name+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
   const fd=new FormData();fd.append('file',file);
   const r=await api('/api/restore',{method:'POST',body:fd});
-  if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function restoreFromBackup(file){
   if(!confirm('Restore "'+file+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
@@ -1481,17 +1626,58 @@ function toggleBackupRowMenu(e,file){
 }
 
 /* ---------- signature ---------- */
+let signAssetId=null;   // the asset the open signModal belongs to
 async function openSign(id){
   const r=await api('/api/assets/'+id+'/sign/link');
   const j=r?await r.json():{};
   if(!j.ok){toast('✕ '+(j.error||'failed'));return;}
+  signAssetId=id;
   showSignLink(j.url);
+  showSignMailTarget(j);
 }
 function showSignLink(url){
   document.getElementById('signUrl').value=url;
   const shareBtn=document.getElementById('signShareBtn');
   if(shareBtn)shareBtn.style.display=(navigator.share)?'':'none';
   document.getElementById('signModal').classList.add('show');
+}
+// Say who the mail would go to, and when it can't go, say why -- an offer to
+// email with no address on file is just a button that fails.
+function showSignMailTarget(j){
+  const row=document.getElementById('signMailRow');
+  const who=document.getElementById('signMailWho');
+  const btn=document.getElementById('signMailBtn');
+  if(!row||!who||!btn)return;
+  btn.disabled=!j.can_email;
+  btn.textContent='📧 SEND LINK';
+  if(j.can_email){
+    who.innerHTML='Sends to <b>'+esc(j.assignee||'')+'</b> &lt;'+esc(j.assignee_email)+'&gt;';
+  }else if(!j.assignee){
+    who.textContent='Not assigned to anyone yet — assign the asset to email the link.';
+  }else if(!j.assignee_email){
+    who.innerHTML='No email on file for <b>'+esc(j.assignee)+'</b> — add one on the Employees page.';
+  }else{
+    who.textContent='Email is not set up — add an SMTP server under Settings.';
+  }
+}
+async function emailSignLink(){
+  const btn=document.getElementById('signMailBtn');
+  if(!signAssetId||!btn||btn.disabled)return;
+  const label=btn.textContent;
+  btn.disabled=true; btn.textContent='SENDING…';
+  try{
+    const r=await api('/api/assets/'+signAssetId+'/sign/send',{method:'POST'});
+    const j=r?await r.json():{};
+    if(j&&j.ok){
+      // each send issues a fresh link, so the box has to show the one that
+      // was actually mailed -- otherwise a copied link is already dead
+      if(j.url)document.getElementById('signUrl').value=j.url;
+      toast('✓ SENT TO '+(j.sent_to||'employee'));
+    }else{
+      toast('✕ '+((j&&j.error)||'Could not send'));
+    }
+  }catch(e){ toast('✕ Could not send'); }
+  btn.textContent=label; btn.disabled=false;
 }
 async function copySignLink(){
   const url=document.getElementById('signUrl').value;
@@ -1508,6 +1694,7 @@ async function shareSignLink(){
   catch(e){/* user cancelled the share sheet -- not an error */}
 }
 document.getElementById('signCopyBtn').onclick=copySignLink;
+document.getElementById('signMailBtn').onclick=emailSignLink;
 document.getElementById('signShareBtn').onclick=shareSignLink;
 
 /* ---------- users ---------- */
@@ -1579,60 +1766,130 @@ async function addUser(){
 async function delUser(un){
   if(!confirm('DELETE USER?'))return;
   const r=await api('/api/users/'+encodeURIComponent(un),{method:'DELETE'});
-  if(r&&r.ok){toast('✓ User deleted');if(window.loadCfgUsers)loadCfgUsers();if(document.getElementById('usersModal').classList.contains('show'))openUsers();}else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  if(r&&r.ok){toast('✓ User deleted');if(window.loadCfgUsers)loadCfgUsers();if(document.getElementById('usersModal').classList.contains('show'))openUsers();}else if(r){toast('✕ '+await apiError(r));}
 }
 
 /* ---------- custom roles (Assets/Contracts/Directory/Tickets read/write) ---------- */
-const PERM_LABEL={none:'No access',read:'Read-only',write:'Read & write'};
+// Roles are built from individual permissions rather than one level per
+// module, so an admin can grant exactly one thing -- "reply to tickets" and
+// nothing else. The module columns the rest of the app checks are derived
+// server-side from whatever is ticked here, so the two can't drift.
+let FEATURE_CATALOGUE=[];
 let editingRoleId=null;
+
+async function loadFeatureCatalogue(){
+  if(FEATURE_CATALOGUE.length)return FEATURE_CATALOGUE;
+  const r=await api('/api/features');
+  FEATURE_CATALOGUE=r?await r.json():[];
+  return FEATURE_CATALOGUE;
+}
+
+function renderPermTree(granted){
+  const have=new Set(granted||[]);
+  document.getElementById('rl_tree').innerHTML=FEATURE_CATALOGUE.map(g=>`
+    <div class="permgrp">
+      <div class="permhead">
+        <label class="chk"><input type="checkbox" class="permall" data-grp="${g.key}"
+          ${g.items.every(i=>have.has(i.key))?'checked':''}><span>${esc(g.label)}</span></label>
+        <span class="permcount" id="pc_${g.key}"></span>
+      </div>
+      <div class="permitems">
+        ${g.items.map(i=>`<label class="chk permitem">
+          <input type="checkbox" class="permleaf" data-grp="${g.key}" value="${i.key}"
+            ${have.has(i.key)?'checked':''}>
+          <span>${esc(i.label)}${i.level==='admin_only'?' <em class="permnote">extra</em>':''}</span>
+        </label>`).join('')}
+      </div>
+    </div>`).join('');
+  // group header toggles everything under it; leaves keep the header honest
+  document.querySelectorAll('#rl_tree .permall').forEach(box=>{
+    box.onchange=()=>{
+      document.querySelectorAll(`#rl_tree .permleaf[data-grp="${box.dataset.grp}"]`)
+        .forEach(l=>{l.checked=box.checked;});
+      updatePermCounts();
+    };
+  });
+  document.querySelectorAll('#rl_tree .permleaf').forEach(l=>{ l.onchange=updatePermCounts; });
+  updatePermCounts();
+}
+
+function updatePermCounts(){
+  FEATURE_CATALOGUE.forEach(g=>{
+    const leaves=[...document.querySelectorAll(`#rl_tree .permleaf[data-grp="${g.key}"]`)];
+    const on=leaves.filter(l=>l.checked).length;
+    const el=document.getElementById('pc_'+g.key);
+    if(el)el.textContent=on?`${on} of ${leaves.length}`:'no access';
+    const all=document.querySelector(`#rl_tree .permall[data-grp="${g.key}"]`);
+    if(all){all.checked=on===leaves.length; all.indeterminate=on>0&&on<leaves.length;}
+  });
+  const total=document.querySelectorAll('#rl_tree .permleaf:checked').length;
+  const t=document.getElementById('rl_total');
+  if(t)t.textContent=total?`${total} permission${total===1?'':'s'} selected`:'Nothing selected yet';
+}
+
+function checkedFeatures(){
+  return [...document.querySelectorAll('#rl_tree .permleaf:checked')].map(l=>l.value);
+}
+
 function roleFormReset(){
   editingRoleId=null;
-  document.getElementById('rl_name').value=''; document.getElementById('rl_name').disabled=false;
-  document.getElementById('rl_assets').value='none'; document.getElementById('rl_contracts').value='none';
-  document.getElementById('rl_directory').value='none'; document.getElementById('rl_tickets').value='none';
-  document.getElementById('rl_settings').value='none';
-  document.getElementById('rl_save').textContent='＋ ADD ROLE';
+  const n=document.getElementById('rl_name');
+  n.value=''; n.disabled=false;
+  renderPermTree([]);
+  document.getElementById('rl_save').textContent='+ ADD ROLE';
 }
+
+// A role's grants are the summary people actually want in the list: "6
+// permissions" tells you more than five repetitions of "No access".
+function roleSummary(x){
+  const n=(x.features||[]).length;
+  if(!n)return '<span class="muted">no access</span>';
+  const byGrp={};
+  (x.features||[]).forEach(f=>{const g=f.split('.')[0];byGrp[g]=(byGrp[g]||0)+1;});
+  return Object.keys(byGrp).sort().map(g=>`<span class="permtag">${esc(g)} ${byGrp[g]}</span>`).join(' ');
+}
+
 async function loadRolesModal(){
+  await loadFeatureCatalogue();
   const r=await api('/api/roles'); const roles=r?await r.json():[];
   document.getElementById('rolesBody').innerHTML=roles.map(x=>`<tr>
-      <td>${esc(x.name)}</td><td>${PERM_LABEL[x.perm_assets]||'No access'}</td><td>${PERM_LABEL[x.perm_contracts]||'No access'}</td>
-      <td>${PERM_LABEL[x.perm_directory]||'No access'}</td><td>${PERM_LABEL[x.perm_tickets]||'No access'}</td>
-      <td>${PERM_LABEL[x.perm_settings]||'No access'}</td>
-      <td class="row-actions"><button class="btn sm ghost" onclick="editRoleForm(${x.id},'${esc(x.name)}','${x.perm_assets}','${x.perm_contracts}','${x.perm_directory}','${x.perm_tickets}','${x.perm_settings||'none'}')">EDIT</button><button class="btn sm danger" onclick="delRole(${x.id})">DEL</button></td>
-    </tr>`).join('')||'<tr><td colspan=7 style="color:var(--muted)">No custom roles yet</td></tr>';
+      <td>${esc(x.name)}</td>
+      <td>${roleSummary(x)}</td>
+      <td class="row-actions">
+        <button class="btn sm ghost" onclick='editRoleForm(${JSON.stringify(x.id)},${JSON.stringify(x.name)},${JSON.stringify(x.features||[])})'>EDIT</button>
+        <button class="btn sm danger" onclick="delRole(${x.id})">DEL</button>
+      </td>
+    </tr>`).join('')||'<tr><td colspan=3 style="color:var(--muted)">No custom roles yet</td></tr>';
   roleFormReset();
   document.getElementById('rolesModal').classList.add('show');
 }
-function editRoleForm(id,name,pa,pc,pd,pt,ps){
+
+function editRoleForm(id,name,features){
   editingRoleId=id;
-  document.getElementById('rl_name').value=name; document.getElementById('rl_name').disabled=true;
-  document.getElementById('rl_assets').value=pa; document.getElementById('rl_contracts').value=pc;
-  document.getElementById('rl_directory').value=pd; document.getElementById('rl_tickets').value=pt;
-  document.getElementById('rl_settings').value=ps||'none';
+  const n=document.getElementById('rl_name');
+  n.value=name; n.disabled=true;
+  renderPermTree(features||[]);
   document.getElementById('rl_save').textContent='✓ UPDATE ROLE';
+  document.getElementById('rl_name').scrollIntoView({behavior:'smooth',block:'nearest'});
 }
+
 async function saveRole(){
-  const body={
-    name: document.getElementById('rl_name').value.trim(),
-    perm_assets: document.getElementById('rl_assets').value,
-    perm_contracts: document.getElementById('rl_contracts').value,
-    perm_directory: document.getElementById('rl_directory').value,
-    perm_tickets: document.getElementById('rl_tickets').value,
-    perm_settings: document.getElementById('rl_settings').value
-  };
+  const body={name:document.getElementById('rl_name').value.trim(), features:checkedFeatures()};
   if(!editingRoleId && !body.name){toast('✕ Role name required');return;}
+  if(!body.features.length && !confirm('This role has no permissions at all. Save it anyway?'))return;
   const r=editingRoleId
     ? await api('/api/roles/'+editingRoleId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     : await api('/api/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ ROLE SAVED');loadRolesModal();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
+
 async function delRole(id){
   if(!confirm('Delete this custom role?'))return;
   const r=await api('/api/roles/'+id,{method:'DELETE'});
   if(r&&r.ok){toast('✓ ROLE DELETED');loadRolesModal();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
+
 document.getElementById('manageRolesBtn').onclick=loadRolesModal;
 document.getElementById('rolesClose').onclick=()=>document.getElementById('rolesModal').classList.remove('show');
 document.getElementById('rl_save').onclick=saveRole;
@@ -1647,7 +1904,7 @@ async function delRow(id){
 
 /* ---------- settings / profile ---------- */
 async function loadSettings(){
-  // /api/settings is admin-only — a read-only/read-write user gets {error:...} back here,
+  // /api/settings needs settings rights — a user without them gets {error:...} back here,
   // not a settings object. Skip populating these admin-only fields in that case instead of
   // blanking them out with garbage; loadProfile() (My Account) still runs for everyone below.
   const r=await api('/api/settings');
@@ -1685,7 +1942,7 @@ async function saveLdap(){
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LDAP SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function testLdap(){
   const body={
@@ -1708,13 +1965,13 @@ async function saveSettings(){
   const body={matrix_on:(document.getElementById('matrixOn')||{checked:false}).checked?1:0,smtp_host:document.getElementById('s_host').value.trim(),smtp_port:parseInt(document.getElementById('s_port').value||'587',10),smtp_from:document.getElementById('s_from').value.trim(),smtp_user:document.getElementById('s_user').value.trim(),smtp_pass:document.getElementById('s_pass').value,notify_new:document.getElementById('uNew').checked?1:0,notify_delete:document.getElementById('uDel').checked?1:0};
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ SETTINGS SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveProfile(){
   const body={display:document.getElementById('pDisplay').value.trim(),email:document.getElementById('p_email').value.trim()};
   const r=await api('/api/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ PROFILE SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveBrand(){
   const fd=new FormData();fd.append('app_name',document.getElementById('b_name').value.trim());fd.append('logo_text',document.getElementById('b_logoText').value.trim());
@@ -1722,7 +1979,7 @@ async function saveBrand(){
   const logo=document.getElementById('b_logo').files[0]; if(logo)fd.append('logo',logo);
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ BRAND SAVED');document.getElementById('b_logo').value='';applyBranding();}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function saveLetterhead(){
   const f=document.getElementById('b_letterhead').files[0];
@@ -1744,7 +2001,7 @@ async function removeLogo(){
   const fd=new FormData();fd.append('app_name',document.getElementById('b_name').value.trim());fd.append('logo_text',document.getElementById('b_logoText').value.trim());fd.append('remove_logo','1');
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ LOGO REMOVED');document.getElementById('b_logo').value='';applyBranding();}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 async function applyBranding(){
   const me=await fetch('/api/me').then(r=>r.json());
@@ -1781,7 +2038,7 @@ async function saveLabel(){
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LABEL SETTINGS SAVED');}
-  else if(r){const j=await r.json();toast('✕ '+(j.error||'failed'));}
+  else if(r){toast('✕ '+await apiError(r));}
 }
 
 /* ---------- events ---------- */
@@ -1838,6 +2095,634 @@ document.getElementById('auditSearch').oninput=renderAuditRows;
 document.getElementById('auditClearBtn').onclick=clearAuditLog;
 document.getElementById('navScan').onclick=openScan;
 document.getElementById('scanBtn').onclick=doScan;
+
+// ---- Heartbeat: uptime monitoring ----
+// The engine is server side: it probes each monitor on its own interval around
+// the clock, keeps the history and sends the alert. This is the window onto it.
+//
+// Rows are ordered down first, then still-being-retried, then healthy, then
+// paused. That is the order that matters when someone opens this in a hurry.
+let HB={monitors:[],counts:{},channels:[],window_hours:24};
+let hbTimer=null, hbEditId=null, hbDetailId=null, hbChanEditId=null;
+const HB_RANK={down:0,pending:1,up:2,paused:3};
+const HB_KIND_HINT={
+  ping:'Ping is the right check for switches, access points, printers and cameras — anything that should simply be reachable.',
+  http:'HTTP asks for the page and treats anything outside the accepted codes as down. Certificate trust is a separate question — the expiry is reported in its own column instead of failing the check.',
+  keyword:'Fetches the page and looks for your text in the body. Catches the case a plain HTTP check misses: the server answers 200 while the application behind it is broken.',
+  port:'Opens a TCP connection and closes it again. Use it for a service that answers on a port but not over HTTP — SQL on 3306, RDP on 3389, SMTP on 25.',
+  dns:'Resolves the name and fails if it stops resolving. Worth having on anything whose DNS you depend on but do not control.'
+};
+const HB_CHAN_HINT={
+  email:'Email uses the SMTP server and notification address already configured in Settings.',
+  webhook:'Every alert is POSTed as JSON: event, monitor, target, status, error and the message text. Point it at whatever you already run.',
+  slack:'Create an incoming webhook in Slack (Apps ▸ Incoming Webhooks) and paste the URL here.',
+  telegram:'Talk to @BotFather to create a bot and get its token, then add the bot to the chat and use that chat id.'
+};
+
+function hbStatusOf(m){ return !m.enabled ? 'paused' : (m.status||'pending'); }
+function hbRank(s){ return HB_RANK[s]===undefined ? 9 : HB_RANK[s]; }
+function hbAgo(ts){
+  if(!ts) return '—';
+  const t=Date.parse(String(ts).replace(' ','T'));
+  if(isNaN(t)) return '—';
+  const s=Math.max(0,Math.round((Date.now()-t)/1000));
+  if(s<60) return s+'s ago';
+  if(s<3600) return Math.round(s/60)+'m ago';
+  if(s<86400) return Math.round(s/3600)+'h ago';
+  return Math.round(s/86400)+'d ago';
+}
+
+// ---- the ECG trace ----------------------------------------------------
+// One heartbeat per recorded check, oldest on the left. An up check draws a
+// full QRS complex; a failed check draws a flatline, which is the honest
+// picture and reads instantly. The bright segment sweeping along the trace is
+// the same idea as a bedside monitor -- it says the thing is still being
+// watched right now, not that the data is moving.
+function hbEcg(m, opts){
+  opts=opts||{};
+  const st=hbStatusOf(m);
+  const beats=(m.bars||[]).slice(-(opts.beats||22));
+  const W=opts.w||136, H=opts.h||30, mid=H/2;
+  const ms=(m.series||[]).slice(-(opts.beats||22));
+  const lo=Math.min.apply(null, ms.length?ms:[0]), hi=Math.max.apply(null, ms.length?ms:[1]);
+  const span=(hi-lo)||1;
+  let msi=0;
+  let d='M0 '+mid.toFixed(1);
+  if(!beats.length){
+    // never checked yet: a bare baseline, still sweeping so it reads as armed
+    d+=' L'+W+' '+mid.toFixed(1);
+  } else {
+    const seg=W/beats.length;
+    beats.forEach((s,i)=>{
+      const x=i*seg;
+      const at=(f)=>(x+seg*f).toFixed(1);
+      if(s==='up'){
+        // a quicker response draws a taller spike, so the trace carries the
+        // response shape as well as the up/down record
+        const v=ms[msi++];
+        const amp=(v===undefined) ? 10 : (7+6*(1-(v-lo)/span));
+        d+=' L'+at(0.10)+' '+mid.toFixed(1)
+         + ' Q'+at(0.17)+' '+(mid-2.5)+' '+at(0.24)+' '+mid.toFixed(1)
+         + ' L'+at(0.32)+' '+(mid+1.8).toFixed(1)
+         + ' L'+at(0.40)+' '+(mid-amp).toFixed(1)
+         + ' L'+at(0.48)+' '+(mid+amp*0.42).toFixed(1)
+         + ' L'+at(0.56)+' '+mid.toFixed(1)
+         + ' Q'+at(0.72)+' '+(mid-3.2)+' '+at(0.86)+' '+mid.toFixed(1)
+         + ' L'+at(1)+' '+mid.toFixed(1);
+      } else if(s==='down'){
+        d+=' L'+at(1)+' '+mid.toFixed(1);                 // flatline
+      } else {
+        d+=' L'+at(0.44)+' '+mid.toFixed(1)
+         + ' L'+at(0.52)+' '+(mid-3.5).toFixed(1)
+         + ' L'+at(0.60)+' '+mid.toFixed(1)
+         + ' L'+at(1)+' '+mid.toFixed(1);
+      }
+    });
+  }
+  const cls='hbecg '+st+(beats.length?'':' idle');
+  return `<svg class="${cls}" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"
+     preserveAspectRatio="none" role="img"
+     aria-label="${beats.length} recent checks, ${beats.filter(b=>b==='up').length} up">
+    <path class="hbecg-base" d="${d}" pathLength="1000"/>
+    <path class="hbecg-live" d="${d}" pathLength="1000"/>
+  </svg>`;
+}
+
+function hbAvgResponse(mons){
+  const v=mons.filter(m=>m.enabled&&m.status==='up'&&m.last_ms!=null).map(m=>m.last_ms);
+  if(!v.length) return '—';
+  return Math.round(v.reduce((a,b)=>a+b,0)/v.length)+' ms';
+}
+
+async function loadHeartbeat(){
+  const st=document.getElementById('hbStatus'); if(!st) return;
+  const hrs=(document.getElementById('hbWindow')||{}).value||'24';
+  const r=await api('/api/heartbeat/state?hours='+encodeURIComponent(hrs));
+  if(!r) return;                                   // api() already reported it
+  if(r.status===403){ st.textContent='No access to Heartbeat.'; return; }
+  const j=await r.json().catch(()=>null);
+  if(!j){ st.textContent='✕ could not read monitor status'; return; }
+  HB=j; st.textContent='';
+  const cb=document.getElementById('hbChanBtn');
+  if(cb) cb.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+  renderHeartbeat();
+  if(hbDetailId) loadHbDetail(hbDetailId, true);
+}
+
+function renderHeartbeat(){
+  const body=document.getElementById('hbBody'); if(!body) return;
+  const wrap=document.getElementById('hbTableWrap'), empty=document.getElementById('hbEmpty');
+  const q=((document.getElementById('hbSearch')||{}).value||'').trim().toLowerCase();
+  const f=(document.getElementById('hbFilter')||{}).value||'';
+  const all=(HB.monitors||[]).slice().sort((a,b)=>
+    (hbRank(hbStatusOf(a))-hbRank(hbStatusOf(b))) ||
+    String(a.name||'').toLowerCase().localeCompare(String(b.name||'').toLowerCase()));
+  const mons=all.filter(m=>{
+    if(f && hbStatusOf(m)!==f) return false;
+    if(!q) return true;
+    return [m.name,m.kind,m.target,m.port,m.tag].some(x=>String(x||'').toLowerCase().includes(q));
+  });
+
+  const c=HB.counts||{};
+  const set=(id,v)=>{const el=document.getElementById(id); if(el) el.textContent=v;};
+  set('hbNDown',c.down||0); set('hbNPending',c.pending||0);
+  set('hbNUp',c.up||0); set('hbNPaused',c.disabled||0);
+  set('hbAvg',hbAvgResponse(all));
+  set('hbMeta',all.length ? (mons.length===all.length
+        ? all.length+' monitor'+(all.length===1?'':'s')+' · '+hbWindowLabel(HB.window_hours)
+        : mons.length+' of '+all.length+' shown') : '');
+
+  if(!all.length){
+    wrap.style.display='none'; empty.style.display='block';
+    empty.textContent='NO MONITORS YET — ADD ONE, OR RUN A NETWORK SCAN AND WATCH WHAT IT FINDS';
+    return;
+  }
+  if(!mons.length){
+    wrap.style.display='none'; empty.style.display='block';
+    empty.textContent='NOTHING MATCHES THAT FILTER';
+    return;
+  }
+  empty.style.display='none'; wrap.style.display='';
+  body.innerHTML=mons.map(m=>{
+    const st=hbStatusOf(m), paused=!m.enabled;
+    const err=(m.last_error&&st!=='up'&&st!=='paused')
+      ?`<div class="hberr" title="${esc(m.last_error)}">${esc(m.last_error)}</div>`:'';
+    const mute=m.notify?'':'<span class="hbmute" title="alerts are off for this monitor">🔇</span>';
+    const ud=m.upside_down?'<span class="hbtag" title="upside down: this should not respond">INVERTED</span>':'';
+    const tag=m.tag?`<span class="hbtag">${esc(m.tag)}</span>`:'';
+    const cert=(m.cert_days==null)?'<span class="muted">—</span>'
+      :`<span class="${m.cert_days<14?'hbcert-bad':(m.cert_days<30?'hbcert-warn':'')}">${esc(String(m.cert_days))}d</span>`;
+    return `<tr class="${st==='down'?'hb-down':''}">
+      <td><span class="hbdot ${st}"></span>${st==='pending'?'CHECKING':st.toUpperCase()}</td>
+      <td class="hblink" onclick="hbOpen(${m.id})"><b>${esc(m.name||'')}</b>${mute}${tag}${ud}${err}</td>
+      <td>${esc((m.kind||'').toUpperCase())}</td>
+      <td class="mono">${esc(m.target||'')}${m.port?':'+esc(String(m.port)):''}</td>
+      <td>${m.last_ms==null?'<span class="muted">—</span>':esc(String(m.last_ms))+' ms'}</td>
+      <td class="hbecg-cell">${hbEcg(m)}</td>
+      <td>${m.uptime==null?'<span class="muted">—</span>':esc(String(m.uptime))+'%'}</td>
+      <td>${cert}</td>
+      <td class="muted">${esc(hbAgo(m.last_change))}</td>
+      <td><div class="row-actions">
+        <button class="btn sm ghost" onclick="hbToggle(${m.id})" title="${paused?'resume checking':'stop checking, keep the monitor'}">${paused?'▶':'❚❚'}</button>
+        <button class="btn sm" onclick="hbEdit(${m.id})">EDIT</button>
+        <button class="btn sm danger" onclick="hbDel(${m.id})">DEL</button>
+      </div></td></tr>`;
+  }).join('');
+}
+
+function hbWindowLabel(h){
+  h=parseInt(h||24,10);
+  if(h<=1) return '1h window';
+  if(h<48) return h+'h window';
+  if(h<720) return Math.round(h/24)+'d window';
+  if(h<8760) return Math.round(h/24)+'d window';
+  return '1y window';
+}
+
+async function hbCheckNow(){
+  const b=document.getElementById('hbCheckBtn'); const old=b.textContent;
+  b.disabled=true; b.textContent='CHECKING…';
+  const r=await api('/api/heartbeat/check',{method:'POST'});
+  b.disabled=false; b.textContent=old;
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  const j=await r.json().catch(()=>({}));
+  toast('✓ CHECKED '+(j.checked||0)+' MONITOR'+((j.checked||0)===1?'':'S'));
+  loadHeartbeat();
+}
+
+// ---- add / edit -------------------------------------------------------
+function hbKindUI(){
+  const k=document.getElementById('hb_kind').value;
+  const show=(id,on)=>{const e=document.getElementById(id); if(e) e.style.display=on?'':'none';};
+  const web=(k==='http'||k==='keyword');
+  show('hb_portWrap', k==='port');
+  show('hb_kwWrap', k==='keyword');
+  show('hb_kwOpts', k==='keyword');
+  show('hb_methodWrap', web);
+  show('hb_codesWrap', web);
+  show('hb_tlsOpts', web);
+  document.getElementById('hb_targetLabel').textContent=
+    web ? 'URL or host' : (k==='dns' ? 'Hostname to resolve' : 'IP or hostname');
+  document.getElementById('hb_target').placeholder=
+    web ? 'e.g. https://intranet.local/health'
+        : (k==='dns' ? 'e.g. mail.company.com' : 'e.g. 192.168.0.1');
+  document.getElementById('hb_kindHint').textContent=HB_KIND_HINT[k]||'';
+  hbThreshHint();
+}
+// Spelling out when the alert actually arrives, because the retry count is
+// the setting people get wrong -- too low and it cries wolf, too high and an
+// outage sits unreported.
+function hbThreshHint(){
+  const el=document.getElementById('hb_thHint'); if(!el) return;
+  const iv=parseInt(document.getElementById('hb_interval').value||'60',10);
+  const th=parseInt(document.getElementById('hb_thresh').value||'2',10);
+  const rs=parseInt(document.getElementById('hb_resend').value||'0',10);
+  if(!iv||!th){ el.textContent=''; return; }
+  const secs=iv*th, mins=Math.round(secs/60);
+  const when=secs<60?(secs+' seconds'):(mins+' minute'+(mins===1?'':'s'));
+  let s='You will hear about an outage roughly '+when+' after it starts — '+th+
+        ' failed check'+(th===1?'':'s')+' at '+iv+'s apart — and once more when it recovers.';
+  s+= rs>0 ? (' While it stays down you get a reminder every '+rs+' further failed check'+(rs===1?'':'s')+'.')
+           : ' Nothing in between.';
+  el.textContent=s;
+}
+function hbChanChecklist(selected){
+  const box=document.getElementById('hb_chanBox');
+  const list=document.getElementById('hb_chanList');
+  const chans=(HB.channels||[]);
+  if(!chans.length){
+    box.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+    list.innerHTML='<p class="muted" style="margin:0">No channels set up yet. '
+      +'<a class="mlink" onclick="openHbChannels()">Add one ↗</a> or leave this alone and '
+      +'alerts go to the notification address in Settings.</p>';
+    return;
+  }
+  box.style.display='';
+  const want=new Set(String(selected||'').split(',').filter(Boolean));
+  list.innerHTML=chans.map(ch=>`<label class="permitem"><input type="checkbox" class="hb-chan-chk"
+      value="${ch.id}"${want.has(String(ch.id))?' checked':''}${ch.enabled?'':' disabled'}>
+      <span>${esc(ch.name)} <span class="permtag">${esc(ch.kind)}</span>${ch.enabled?'':' <span class="muted">(inactive)</span>'}</span></label>`).join('');
+}
+async function openHbModal(id){
+  hbEditId=id||null;
+  const m=id?(HB.monitors||[]).find(x=>x.id===id):null;
+  const set=(el,v)=>{const e=document.getElementById(el); if(e) e.value=v;};
+  const chk=(el,v)=>{const e=document.getElementById(el); if(e) e.checked=!!v;};
+  document.getElementById('hbModalTitle').textContent=m?'EDIT MONITOR':'ADD MONITOR';
+  set('hb_name',m?(m.name||''):'');
+  set('hb_kind',m?(m.kind||'ping'):'ping');
+  set('hb_target',m?(m.target||''):'');
+  set('hb_port',(m&&m.port)?m.port:'');
+  set('hb_keyword',m?(m.keyword||''):'');
+  set('hb_method',m?(m.http_method||'GET'):'GET');
+  set('hb_codes',m?(m.accepted_codes||'200-299'):'200-299');
+  set('hb_tag',m?(m.tag||''):'');
+  set('hb_note',m?(m.note||''):'');
+  set('hb_interval',m?(m.interval_s||60):60);
+  set('hb_thresh',m?(m.fail_threshold||2):2);
+  set('hb_timeout',m?(m.timeout_s||8):8);
+  set('hb_retryEvery',m?(m.retry_interval_s||0):0);
+  set('hb_resend',m?(m.resend_every||0):0);
+  chk('hb_notify',m?m.notify:true);
+  chk('hb_enabled',m?m.enabled:true);
+  chk('hb_upside',m?m.upside_down:false);
+  chk('hb_kwInvert',m?m.keyword_invert:false);
+  chk('hb_ignoreTls',m?m.ignore_tls:true);
+  document.getElementById('hbDelete').style.display=m?'':'none';
+  hbKindUI();
+  hbChanChecklist(m?m.channels:'');
+  // the asset list is only needed while the form is open, so fetch it here
+  const sel=document.getElementById('hb_asset');
+  sel.innerHTML='<option value="">-- none --</option>';
+  try{
+    const r=await api('/api/assets');
+    if(r&&r.ok){
+      const list=await r.json();
+      sel.innerHTML='<option value="">-- none --</option>'+(list||[]).map(a=>
+        `<option value="${esc(a._id)}">${esc(a.Name||a.AssetTag||a._id)}${a.AssetTag?' ('+esc(a.AssetTag)+')':''}</option>`).join('');
+    }
+  }catch(e){}
+  sel.value=(m&&m.asset_id)?m.asset_id:'';
+  document.getElementById('hbModal').classList.add('show');
+  document.getElementById('hb_name').focus();
+}
+async function saveHbMonitor(){
+  const g=(id)=>document.getElementById(id);
+  const kind=g('hb_kind').value;
+  const target=g('hb_target').value.trim();
+  if(!target){ toast('✕ enter an IP, hostname or URL'); return; }
+  const port=g('hb_port').value.trim();
+  if(kind==='port' && !port){ toast('✕ a port check needs a port number'); return; }
+  if(kind==='keyword' && !g('hb_keyword').value.trim()){ toast('✕ enter the keyword to look for'); return; }
+  const body={
+    name:g('hb_name').value.trim()||target,
+    kind, target, port:port?parseInt(port,10):null,
+    keyword:g('hb_keyword').value.trim(),
+    keyword_invert:g('hb_kwInvert').checked,
+    http_method:g('hb_method').value,
+    accepted_codes:g('hb_codes').value.trim()||'200-299',
+    ignore_tls:g('hb_ignoreTls').checked,
+    tag:g('hb_tag').value.trim(),
+    note:g('hb_note').value.trim(),
+    interval_s:parseInt(g('hb_interval').value||'60',10),
+    fail_threshold:parseInt(g('hb_thresh').value||'2',10),
+    timeout_s:parseInt(g('hb_timeout').value||'8',10),
+    retry_interval_s:parseInt(g('hb_retryEvery').value||'0',10),
+    resend_every:parseInt(g('hb_resend').value||'0',10),
+    notify:g('hb_notify').checked,
+    enabled:g('hb_enabled').checked,
+    upside_down:g('hb_upside').checked,
+    channels:[...document.querySelectorAll('.hb-chan-chk:checked')].map(c=>c.value),
+    asset_id:g('hb_asset').value||''
+  };
+  const editing=hbEditId;
+  const r=await api(editing?('/api/heartbeat/monitors/'+editing):'/api/heartbeat/monitors',
+    {method:editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  const j=await r.json().catch(()=>({}));
+  document.getElementById('hbModal').classList.remove('show');
+  toast(editing?'✓ MONITOR UPDATED':'✓ MONITOR ADDED');
+  hbEditId=null;
+  // probe it straight away rather than leaving the row blank until the tick
+  const id=editing||j.id;
+  if(id) await api('/api/heartbeat/monitors/'+id+'/check',{method:'POST'});
+  loadHeartbeat();
+}
+window.hbEdit=(id)=>openHbModal(id);
+window.hbDel=async(id)=>{
+  const m=(HB.monitors||[]).find(x=>x.id===id);
+  if(!confirm('Delete monitor "'+((m&&m.name)||id)+'" and its history?')) return;
+  const r=await api('/api/heartbeat/monitors/'+id,{method:'DELETE'});
+  if(r&&r.ok){
+    toast('✓ MONITOR DELETED');
+    if(hbDetailId===id){ document.getElementById('hbDetailModal').classList.remove('show'); hbDetailId=null; }
+    loadHeartbeat();
+  } else if(r){ toast('✕ '+await apiError(r)); }
+};
+window.hbToggle=async(id)=>{
+  const m=(HB.monitors||[]).find(x=>x.id===id); if(!m) return;
+  const r=await api('/api/heartbeat/monitors/'+id,{method:'PUT',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({kind:m.kind,target:m.target,port:m.port,keyword:m.keyword,enabled:!m.enabled})});
+  if(r&&r.ok){ toast(m.enabled?'❚❚ PAUSED':'▶ RESUMED'); loadHeartbeat(); }
+  else if(r){ toast('✕ '+await apiError(r)); }
+};
+
+// ---- detail view ------------------------------------------------------
+window.hbOpen=(id)=>{ hbDetailId=id; document.getElementById('hbDetailModal').classList.add('show'); loadHbDetail(id); };
+async function loadHbDetail(id, quiet){
+  const hrs=(document.getElementById('hbdWindow')||{}).value||'24';
+  const r=await api('/api/heartbeat/monitors/'+id+'/detail?hours='+encodeURIComponent(hrs));
+  if(!r||!r.ok) return;
+  const j=await r.json().catch(()=>null); if(!j) return;
+  const m=j.monitor||{}, st=hbStatusOf(m);
+  document.getElementById('hbdTitle').textContent=(m.name||'MONITOR').toUpperCase();
+  document.getElementById('hbdDot').className='hbdot '+st;
+  document.getElementById('hbdStatus').textContent=
+    (st==='pending'?'CHECKING':st.toUpperCase())+(m.last_change?(' · since '+hbAgo(m.last_change)):'');
+  document.getElementById('hbdTarget').textContent=
+    (m.kind||'').toUpperCase()+' · '+(m.target||'')+(m.port?(':'+m.port):'')
+    +' · every '+(m.interval_s||60)+'s'+(m.note?(' · '+m.note):'');
+  const w=j.windows||{};
+  // 100% in the default accent read as an alarm; uptime is a verdict, so it
+  // gets a verdict colour
+  const put=(id,v)=>{
+    const el=document.getElementById(id);
+    el.textContent = v==null ? '—' : (v+'%');
+    el.className='kpi-v '+(v==null?'none':(v>=99.5?'ok':(v>=95?'warn':'bad')));
+  };
+  put('hbdU24',(w['24h']||{}).uptime);
+  put('hbdU7',(w['7d']||{}).uptime);
+  put('hbdU30',(w['30d']||{}).uptime);
+  put('hbdU1y',(w['1y']||{}).uptime);
+  const avg=(w['24h']||{}).avg_ms;
+  document.getElementById('hbdAvg').textContent=avg==null?'—':(avg+' ms');
+  // the ECG for the detail view uses the same generator, just wider
+  const bars=(j.series||[]).map(p=>p.status==='mixed'?'pending':p.status);
+  const msv=(j.series||[]).filter(p=>p.ms!=null).map(p=>p.ms);
+  document.getElementById('hbdEcg').innerHTML=hbEcg({bars, series:msv, enabled:m.enabled, status:m.status},
+                                                    {w:760,h:64,beats:40});
+  document.getElementById('hbdChart').innerHTML=hbSparkChart(j.series||[]);
+  document.getElementById('hbdChartHint').textContent=
+    (j.series||[]).length ? ((j.window_hours<=48)
+      ? (j.series.length+' checks in the last '+hbWindowLabel(j.window_hours).replace(' window',''))
+      : ('hourly averages over the last '+hbWindowLabel(j.window_hours).replace(' window','')))
+    : 'No checks recorded in this window yet.';
+  const evb=document.getElementById('hbdEvents');
+  const evs=j.events||[];
+  evb.innerHTML=evs.map(e=>`<tr>
+      <td class="mono">${esc(e.t||'')}</td>
+      <td><span class="hbdot ${e.kind==='up'?'up':(e.kind==='down'?'down':'paused')}"></span>${esc((e.kind||'').toUpperCase())}</td>
+      <td>${esc(e.message||'')}</td></tr>`).join('');
+  document.getElementById('hbdEventsEmpty').style.display=evs.length?'none':'block';
+  const pb=document.getElementById('hbdPause');
+  pb.textContent=m.enabled?'❚❚ PAUSE':'▶ RESUME';
+  if(!quiet) document.getElementById('hbdWindow').focus();
+}
+// A plain inline chart -- no library, so it cannot fail to load and cannot
+// drift out of step with the theme.
+function hbSparkChart(series){
+  const pts=series.filter(p=>p.ms!=null);
+  if(!pts.length) return '<div class="empty" style="padding:16px">NO RESPONSE DATA IN THIS WINDOW</div>';
+  const W=760, H=120, pad=18;
+  const hi=Math.max.apply(null,pts.map(p=>p.ms)), lo=0;
+  const span=(hi-lo)||1;
+  const step=pts.length>1?(W-pad*2)/(pts.length-1):0;
+  const xy=(p,i)=>[(pad+i*step).toFixed(1), (H-pad-((p.ms-lo)/span)*(H-pad*2)).toFixed(1)];
+  const line=pts.map((p,i)=>xy(p,i).join(',')).join(' ');
+  const area=`${pad},${H-pad} ${line} ${(pad+(pts.length-1)*step).toFixed(1)},${H-pad}`;
+  const downs=series.map((p,i)=>({p,i})).filter(x=>x.p.status==='down');
+  const allStep=series.length>1?(W-pad*2)/(series.length-1):0;
+  const bands=downs.map(x=>`<rect class="hbc-down" x="${(pad+x.i*allStep-1).toFixed(1)}" y="${pad}"
+      width="${Math.max(2,allStep).toFixed(1)}" height="${H-pad*2}"/>`).join('');
+  return `<svg class="hbchart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+      aria-label="response time, peak ${hi} ms">
+    <line class="hbc-axis" x1="${pad}" y1="${H-pad}" x2="${W-pad}" y2="${H-pad}"/>
+    <line class="hbc-axis" x1="${pad}" y1="${pad}" x2="${W-pad}" y2="${pad}"/>
+    ${bands}
+    <polygon class="hbc-area" points="${area}"/>
+    <polyline class="hbc-line" points="${line}"/>
+    <text class="hbc-lbl" x="${pad}" y="${pad-5}">${hi} ms</text>
+    <text class="hbc-lbl" x="${pad}" y="${H-pad+13}">0</text>
+  </svg>`;
+}
+
+// ---- alert channels ---------------------------------------------------
+window.openHbChannels=async()=>{
+  document.getElementById('hbChanModal').classList.add('show');
+  hbcReset();
+  await loadHbChannels();
+};
+async function loadHbChannels(){
+  const body=document.getElementById('hbChanBody'); if(!body) return;
+  const r=await api('/api/heartbeat/channels');
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  const list=await r.json().catch(()=>[]);
+  HB.channels=list.map(c=>({id:c.id,name:c.name,kind:c.kind,enabled:c.enabled}));
+  window.HB_CHAN_FULL=list;
+  body.innerHTML=list.map(c=>{
+    const cfg=c.config||{};
+    const where=c.kind==='email' ? 'Settings ▸ Notifications'
+      : (c.kind==='telegram' ? ('chat '+esc(cfg.chat_id||'—')) : esc(cfg.url||'—'));
+    return `<tr>
+      <td><b>${esc(c.name)}</b></td>
+      <td>${esc((c.kind||'').toUpperCase())}</td>
+      <td class="mono" style="max-width:260px;overflow-wrap:anywhere">${where}</td>
+      <td>${c.enabled?'<span class="hbpill up">ACTIVE</span>':'<span class="hbpill paused">OFF</span>'}</td>
+      <td><div class="row-actions">
+        <button class="btn sm ghost" onclick="hbcTest(${c.id})">TEST</button>
+        <button class="btn sm" onclick="hbcEdit(${c.id})">EDIT</button>
+        <button class="btn sm danger" onclick="hbcDel(${c.id})">DEL</button>
+      </div></td></tr>`;
+  }).join('');
+  document.getElementById('hbChanEmpty').style.display=list.length?'none':'block';
+}
+function hbcKindUI(){
+  const k=document.getElementById('hbc_kind').value;
+  const show=(id,on)=>{document.getElementById(id).style.display=on?'':'none';};
+  show('hbc_urlWrap', k==='webhook'||k==='slack');
+  show('hbc_tokenWrap', k==='telegram');
+  show('hbc_chatWrap', k==='telegram');
+  document.getElementById('hbc_urlLabel').textContent=k==='slack'?'Slack webhook URL':'Webhook URL';
+  document.getElementById('hbc_hint').textContent=HB_CHAN_HINT[k]||'';
+}
+function hbcReset(){
+  hbChanEditId=null;
+  document.getElementById('hbChanFormTitle').textContent='ADD A CHANNEL';
+  ['hbc_name','hbc_url','hbc_token','hbc_chat'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('hbc_kind').value='email';
+  document.getElementById('hbc_enabled').checked=true;
+  document.getElementById('hbcReset').style.display='none';
+  document.getElementById('hbcSave').textContent='SAVE CHANNEL';
+  hbcKindUI();
+}
+window.hbcEdit=(id)=>{
+  const c=(window.HB_CHAN_FULL||[]).find(x=>x.id===id); if(!c) return;
+  hbChanEditId=id;
+  const cfg=c.config||{};
+  document.getElementById('hbChanFormTitle').textContent='EDIT CHANNEL';
+  document.getElementById('hbc_name').value=c.name||'';
+  document.getElementById('hbc_kind').value=c.kind||'email';
+  document.getElementById('hbc_url').value=cfg.url||'';
+  document.getElementById('hbc_chat').value=cfg.chat_id||'';
+  document.getElementById('hbc_token').value='';
+  document.getElementById('hbc_token').placeholder=cfg.token_set?'leave blank to keep current':'123456:ABC-DEF...';
+  document.getElementById('hbc_enabled').checked=!!c.enabled;
+  document.getElementById('hbcReset').style.display='';
+  document.getElementById('hbcSave').textContent='UPDATE CHANNEL';
+  hbcKindUI();
+};
+async function saveHbChannel(){
+  const g=(id)=>document.getElementById(id);
+  const kind=g('hbc_kind').value;
+  const cfg={};
+  if(kind==='webhook'||kind==='slack') cfg.url=g('hbc_url').value.trim();
+  if(kind==='telegram'){ cfg.token=g('hbc_token').value.trim(); cfg.chat_id=g('hbc_chat').value.trim(); }
+  const body={name:g('hbc_name').value.trim()||kind, kind, config:cfg, enabled:g('hbc_enabled').checked};
+  const editing=hbChanEditId;
+  const r=await api(editing?('/api/heartbeat/channels/'+editing):'/api/heartbeat/channels',
+    {method:editing?'PUT':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r) return;
+  if(!r.ok){ toast('✕ '+await apiError(r)); return; }
+  toast(editing?'✓ CHANNEL UPDATED':'✓ CHANNEL ADDED');
+  hbcReset();
+  await loadHbChannels();
+}
+window.hbcTest=async(id)=>{
+  const r=await api('/api/heartbeat/channels/'+id+'/test',{method:'POST'});
+  if(!r) return;
+  const j=await r.json().catch(()=>({}));
+  toast(r.ok ? ('✓ '+(j.message||'sent')) : ('✕ '+(j.error||'failed')));
+};
+window.hbcDel=async(id)=>{
+  const c=(window.HB_CHAN_FULL||[]).find(x=>x.id===id);
+  if(!confirm('Delete channel "'+((c&&c.name)||id)+'"? Monitors using only this channel fall back to the notification address.')) return;
+  const r=await api('/api/heartbeat/channels/'+id,{method:'DELETE'});
+  if(r&&r.ok){ toast('✓ CHANNEL DELETED'); hbcReset(); loadHbChannels(); loadHeartbeat(); }
+  else if(r){ toast('✕ '+await apiError(r)); }
+};
+
+// ---- auto-refresh, only while the page is actually on screen ----------
+function startHbAuto(){
+  stopHbAuto();
+  if(!(document.getElementById('hbAuto')||{}).checked) return;
+  hbTimer=setInterval(()=>{
+    const p=document.getElementById('page-heartbeat');
+    if(!p||p.style.display==='none'){ stopHbAuto(); return; }
+    loadHeartbeat();
+  },30000);
+}
+function stopHbAuto(){ if(hbTimer){ clearInterval(hbTimer); hbTimer=null; } }
+
+// ---- dashboard widget -------------------------------------------------
+async function loadDashHeartbeat(){
+  const body=document.getElementById('dashHbBody'); if(!body) return;
+  const widget=document.querySelector('.widget[data-wkey="heartbeat"]');
+  const hide=()=>{ if(widget) widget.style.display='none'; };
+  if(!canDo('tools.heartbeat')){ hide(); return; }
+  const r=await api('/api/heartbeat/state?hours=24');
+  if(!r||!r.ok){ hide(); return; }
+  const j=await r.json().catch(()=>null);
+  if(!j){ hide(); return; }
+  if(widget) widget.style.display='';
+  const c=j.counts||{};
+  const label=(k)=>k==='pending'?'checking':(k==='disabled'?'paused':k);
+  const cn=document.getElementById('dashHbCounts');
+  if(cn) cn.innerHTML=['down','pending','up','disabled'].filter(k=>c[k])
+    .map(k=>`<span class="hbpill ${k==='disabled'?'paused':k}">${c[k]} ${label(k)}</span>`).join(' ')
+    || '<span class="muted">no monitors yet</span>';
+  // worst first, and only enough rows to notice something is wrong
+  const mons=(j.monitors||[]).slice().sort((a,b)=>
+    (hbRank(hbStatusOf(a))-hbRank(hbStatusOf(b))) ||
+    String(a.name||'').toLowerCase().localeCompare(String(b.name||'').toLowerCase())).slice(0,12);
+  body.innerHTML=mons.map(m=>{
+    const st=hbStatusOf(m);
+    return `<tr style="cursor:pointer" onclick="showPage('page-heartbeat')">
+      <td><span class="hbdot ${st}"></span>${st==='pending'?'CHECKING':st.toUpperCase()}</td>
+      <td>${esc(m.name||'')}</td>
+      <td class="hbecg-cell">${hbEcg(m,{w:96,h:22,beats:14})}</td>
+      <td>${m.last_ms==null?'—':esc(String(m.last_ms))+' ms'}</td>
+      <td>${m.uptime==null?'—':esc(String(m.uptime))+'%'}</td></tr>`;
+  }).join('');
+  const emp=document.getElementById('dashHbEmpty');
+  if(emp) emp.style.display=mons.length?'none':'block';
+}
+
+document.getElementById('navHeartbeat').onclick=()=>showPage('page-heartbeat');
+document.getElementById('hbAddBtn').onclick=()=>openHbModal(null);
+document.getElementById('hbCheckBtn').onclick=hbCheckNow;
+document.getElementById('hbChanBtn').onclick=()=>openHbChannels();
+document.getElementById('hbSearch').oninput=renderHeartbeat;
+document.getElementById('hbFilter').onchange=renderHeartbeat;
+document.getElementById('hbWindow').onchange=loadHeartbeat;
+document.getElementById('hbAuto').onchange=startHbAuto;
+document.getElementById('hb_kind').onchange=hbKindUI;
+['hb_interval','hb_thresh','hb_resend'].forEach(id=>{
+  document.getElementById(id).oninput=hbThreshHint;
+});
+document.getElementById('hbCancel').onclick=()=>{document.getElementById('hbModal').classList.remove('show');hbEditId=null;};
+document.getElementById('hbSave').onclick=saveHbMonitor;
+document.getElementById('hbDelete').onclick=()=>{
+  if(!hbEditId) return;
+  const id=hbEditId;
+  document.getElementById('hbModal').classList.remove('show');
+  hbEditId=null;
+  window.hbDel(id);
+};
+document.getElementById('hbdClose').onclick=()=>{
+  document.getElementById('hbDetailModal').classList.remove('show'); hbDetailId=null;
+};
+document.getElementById('hbdWindow').onchange=()=>{ if(hbDetailId) loadHbDetail(hbDetailId,true); };
+document.getElementById('hbdCheck').onclick=async()=>{
+  if(!hbDetailId) return;
+  const b=document.getElementById('hbdCheck'); b.disabled=true;
+  await api('/api/heartbeat/monitors/'+hbDetailId+'/check',{method:'POST'});
+  b.disabled=false;
+  loadHbDetail(hbDetailId,true); loadHeartbeat();
+};
+document.getElementById('hbdPause').onclick=async()=>{
+  if(!hbDetailId) return;
+  await window.hbToggle(hbDetailId);
+  loadHbDetail(hbDetailId,true);
+};
+document.getElementById('hbdEdit').onclick=()=>{
+  if(!hbDetailId) return;
+  document.getElementById('hbDetailModal').classList.remove('show');
+  const id=hbDetailId; hbDetailId=null;
+  openHbModal(id);
+};
+document.getElementById('hbChanClose').onclick=()=>{
+  document.getElementById('hbChanModal').classList.remove('show');
+  loadHeartbeat();
+};
+document.getElementById('hbc_kind').onchange=hbcKindUI;
+document.getElementById('hbcSave').onclick=saveHbChannel;
+document.getElementById('hbcReset').onclick=hbcReset;
+window.loadHeartbeat=loadHeartbeat;
+window.loadDashHeartbeat=loadDashHeartbeat;
 document.getElementById('scanDeep').onchange=e=>{
   const row=document.getElementById('scanPrefixRow');
   row.style.display=e.target.checked?'':'none';
@@ -1866,14 +2751,7 @@ document.getElementById('tkFormSave').onclick=saveNewTicket;
 document.getElementById('tkSearch').oninput=loadTickets;
 document.getElementById('tkStatus').onchange=loadTickets;
 document.getElementById('tkReplyBtn').onclick=sendReply;
-document.getElementById('tkAssignBtn').onclick=async()=>{
-  if(!curTicketId)return;
-  const a=document.getElementById('tkAssignee').value;
-  const m=document.getElementById('tkAssignMsg'); m.textContent='saving…';
-  const r=await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignee:a})});
-  if(r&&r.ok){ m.textContent='✓ assigned'+(a?' → '+a:''); m.style.color='var(--grn)'; openTicket(curTicketId); await loadTickets(); toast('✓ ASSIGNED'+(a?' to '+a:'')); }
-  else { m.textContent='✕ failed'; m.style.color='var(--red)'; }
-};
+
 document.getElementById('openMonitorBtn').onclick=()=>window.open('/monitor','_blank');
 document.getElementById('sharePortalBtn').onclick=async()=>{
   const r=await api('/api/portal/link'); if(!r){toast('✕ error');return;} const j=await r.json();
@@ -1881,6 +2759,8 @@ document.getElementById('sharePortalBtn').onclick=async()=>{
   catch(e){ window.prompt('Copy portal link:', j.url); }
 };
 document.getElementById('tkModalClose').onclick=()=>document.getElementById('tkModal').classList.remove('show');
+document.getElementById('tkSaveBtn').onclick=saveTicketEdits;
+document.getElementById('tkDeleteBtn').onclick=deleteTicket;
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
 document.getElementById('newContractBtn').onclick=()=>openContractModal(null);
 document.getElementById('ctSearch').oninput=renderContracts;
@@ -1899,16 +2779,17 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
   const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-tickets':'navTickets',
     'page-contracts':'navContracts','page-catalog':'navCatalog',
-    'page-usettings':'navSettings','page-scan':'navScan',
+    'page-usettings':'navSettings','page-scan':'navScan','page-heartbeat':'navHeartbeat',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
   const n=map[id]?document.getElementById(map[id]):null;
   if(n)n.classList.add('active');
   if(id==='page-dashboard')startUnifiAutoRefresh(); else stopUnifiAutoRefresh();
+  if(id!=='page-heartbeat') stopHbAuto();
   if(id==='page-dashboard'){ loadDashboard(); }   // loadDashboard() chains loadDashboardPage() + applyDashLayout()
   else if(id==='page-assets'){ load(); loadStats(); }
   else if(id==='page-employees')loadDirectory();
@@ -1918,6 +2799,7 @@ function showPage(id){
   else if(id==='page-catalog')loadCatalog();
   else if(id==='page-usettings'){loadUserSettings();loadSettings();loadCustom();}
   else if(id==='page-scan')openScan();
+  else if(id==='page-heartbeat'){loadHeartbeat();startHbAuto();}
   else if(id==='page-audit')openAudit();
 }
 window.showPage=showPage;
@@ -2147,7 +3029,7 @@ document.getElementById('dirImportFile').onchange=async()=>{
 let _usersCache=null;
 async function getUsersCached(){
   if(_usersCache) return _usersCache;
-  // /api/users is admin-only; read-write/read-only users get a 403 {error:...} body here,
+  // /api/users is admin-only; everyone else gets a 403 {error:"No access"} here,
   // not an array — never trust the shape without checking r.ok and Array.isArray first.
   try{
     const r=await api('/api/users');
@@ -2203,40 +3085,231 @@ let curTicketId=null;
 async function openTicket(id){
   curTicketId=id;
   const r=await api('/api/tickets/'+id); if(!r)return; const d=await r.json();
-  const t=d.ticket, reps=d.replies||[];
+  const t=d.ticket, reps=d.replies||[], atts=d.attachments||[];
   document.getElementById('tkModalTitle').textContent=t.code+' · '+t.subject;
-  // populate assignee select from Users
-  try{
-    const users=await getUsersCached();
-    const sel=document.getElementById('tkAssignee');
-    sel.innerHTML='<option value="">— Unassigned —</option>'+users.map(u=>`<option ${u.username===t.assignee?'selected':''}>${esc(u.username)}</option>`).join('');
-  }catch(e){}
+  const catList=TICKET_CATEGORIES.slice();
+  const curCat=(t.category||'').trim();
+  const catKnown=!curCat||catList.indexOf(curCat)>=0;
+  const isAdmin=canDo('tickets.edit');   // may change the ticket's details
+  const mayQueue=canDo('tickets.queue'); // status / priority / assignee
+  const ro=(label,value,extra='')=>`<div class="field2" ${extra}><label>${label}</label><input value="${esc(value==null?'':String(value))}" readonly disabled></div>`;
+  // Laid out with the same invbox / grid2 / field2 blocks as the asset form,
+  // so a ticket reads like every other record in the app. Nothing appears
+  // twice: whoever may change a field gets the input, everyone else the
+  // read-only copy of it.
   document.getElementById('tkDetail').innerHTML=`
-    <div class="tkmeta">
-      <div><b>Priority:</b> <span class="prio ${t.priority}">${esc(t.priority)}</span></div>
-      <div><b>Status:</b> ${esc(t.status)}</div>
-      <div><b>Category:</b> ${esc(t.category||'—')}</div>
-      <div><b>Requester:</b> ${esc(t.requester||'—')} ${t.requester_email?('('+esc(t.requester_email)+')'):''}</div>
-      <div><b>Assignee:</b> ${esc(t.assignee||'—')}</div>
-      <div><b>Source:</b> ${esc(t.source||'Web')}</div>
-      <div><b>Asset:</b> ${esc(t.asset_id||'—')}</div>
-      <div><b>Due:</b> ${esc(t.due_date||'—')} <b>SLA:</b> ${t.sla_hours}h</div>
+    ${mayQueue?`
+    <div class="invbox">
+      <label>QUEUE</label>
+      <div class="grid2">
+        <div class="field2"><label>Status</label>
+          <select id="tkStatusUpd">${TICKET_STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select>
+        </div>
+        <div class="field2"><label>Priority</label>
+          <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select>
+        </div>
+        <div class="field2" style="grid-column:1/-1"><label>Assigned to</label>
+          <select id="tkAssignee"><option value="">-- unassigned --</option></select>
+        </div>
+      </div>
+    </div>`:''}
+
+    <div class="invbox">
+      <label>TICKET DETAILS${isAdmin?'':' <span class="muted" style="font-weight:400">(you cannot change these)</span>'}</label>
+      <div class="grid2">
+        ${isAdmin?`
+        <div class="field2" style="grid-column:1/-1"><label>Subject</label>
+          <input id="tkeSubject" value="${esc(t.subject||'')}">
+        </div>
+        <div class="field2"><label>Category</label>
+          <select id="tkeCategorySel">
+            <option value="">-- none --</option>
+            ${catList.map(c=>`<option value="${esc(c)}" ${c===curCat?'selected':''}>${esc(c)}</option>`).join('')}
+            <option value="__custom" ${catKnown?'':'selected'}>+ type another...</option>
+          </select>
+        </div>
+        <div class="field2" id="tkeCategoryWrap" ${catKnown?'style="display:none"':''}><label>Category (typed)</label>
+          <input id="tkeCategory" value="${catKnown?'':esc(curCat)}" placeholder="e.g. Telephony">
+        </div>
+        <div class="field2"><label>Requester</label><input id="tkeRequester" value="${esc(t.requester||'')}"></div>
+        <div class="field2"><label>Requester Email</label><input id="tkeRequesterEmail" type="email" value="${esc(t.requester_email||'')}"></div>
+        <div class="field2"><label>Asset ID</label><input id="tkeAssetId" value="${esc(t.asset_id||'')}"></div>
+        <div class="field2"><label>Due Date</label><input id="tkeDueDate" type="date" value="${esc((t.due_date||'').toString().slice(0,10))}"></div>
+        <div class="field2"><label>SLA Hours</label><input id="tkeSlaHours" type="number" min="1" value="${esc(String(t.sla_hours||''))}"></div>`:`
+        ${ro('Subject',t.subject||'-','style="grid-column:1/-1"')}
+        ${mayQueue?'':ro('Status',t.status||'-')}
+        ${mayQueue?'':ro('Priority',t.priority||'-')}
+        ${ro('Category',curCat||'-')}
+        ${ro('Requester',t.requester||'-')}
+        ${ro('Requester Email',t.requester_email||'-')}
+        ${ro('Asset ID',t.asset_id||'-')}
+        ${ro('Due Date',(t.due_date||'').toString().slice(0,10)||'-')}
+        ${ro('SLA Hours',t.sla_hours||'-')}`}
+        <div class="field2"><label>Source</label><input value="${esc(t.source||'Web')}" readonly disabled></div>
+      </div>
     </div>
-    <div class="tkdesc">${esc(t.description||'')}</div>
-    <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> · ${esc(rp.author_role)} · ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
-    <div class="tkactions">
-      <label>Status <select id="tkStatusUpd">${TICKET_STATUSES.map(s=>`<option ${s===t.status?'selected':''}>${s}</option>`).join('')}</select></label>
-      <label>Priority <select id="tkPrioUpd">${PRIORITIES.map(s=>`<option ${s===t.priority?'selected':''}>${s}</option>`).join('')}</select></label>
+
+    <div class="invbox">
+      <label>DESCRIPTION</label>
+      ${isAdmin?`<textarea id="tkeDescription" rows="4">${esc(t.description||'')}</textarea>`
+               :`<textarea rows="4" readonly disabled>${esc(t.description||'')}</textarea>`}
+    </div>
+
+    ${ticketPhotosHtml(atts,id)}
+
+    <div class="invbox">
+      <label>REPLIES</label>
+      <div class="tkreplies">${reps.map(rp=>`<div class="rep ${rp.author_role}"><div class="repmeta"><b>${esc(rp.author)}</b> &middot; ${esc(rp.author_role)} &middot; ${esc(rp.created_at)}</div><div>${esc(rp.body)}</div></div>`).join('')||'<div class="muted">No replies yet.</div>'}</div>
     </div>`;
+  loadTicketHistory(id);
+  // the assignee select is rendered as part of the panel, so it is filled
+  // after the markup exists rather than before it
+  const asel=document.getElementById('tkAssignee');
+  if(asel){
+    try{
+      const users=await getUsersCached();
+      asel.innerHTML='<option value="">-- unassigned --</option>'+
+        users.map(u=>`<option ${u.username===t.assignee?'selected':''}>${esc(u.username)}</option>`).join('');
+    }catch(e){}
+  }
+  const photoIn=document.getElementById('tkPhotoInput');
+  if(photoIn)photoIn.onchange=()=>{uploadTicketPhotos(photoIn.files);};
+  // "type another..." reveals a text box rather than throwing a prompt() at
+  // the user, so the typed value is visible before it is saved.
+  const catSel=document.getElementById('tkeCategorySel');
+  if(catSel){
+    catSel.onchange=()=>{
+      const wrap=document.getElementById('tkeCategoryWrap');
+      const custom=catSel.value==='__custom';
+      if(wrap)wrap.style.display=custom?'':'none';
+      if(custom){const i=document.getElementById('tkeCategory'); if(i)i.focus();}
+    };
+  }
+  const delBtn=document.getElementById('tkDeleteBtn');
+  if(delBtn)delBtn.style.display=canDo('tickets.delete')?'':'none';
+  // Read-write on tickets may move the queue, so they need SAVE CHANGES too.
+  const saveBtn=document.getElementById('tkSaveBtn');
+  if(saveBtn)saveBtn.style.display=mayQueue?'':'none';
   document.getElementById('tkModal').classList.add('show');
 }
 window.openTicketById=(id)=>openTicket(id);
+// Photos a requester attached from the portal, plus a way for whoever is
+// working the ticket to add their own (the repair, the replaced part). The
+// bytes are fetched one at a time by their own route, so a ticket with four
+// photos doesn't bloat the detail response.
+async function uploadTicketPhotos(files){
+  if(!curTicketId||!files||!files.length)return;
+  const fd=new FormData();
+  Array.prototype.forEach.call(files,f=>fd.append('photos',f,f.name));
+  const r=await api('/api/tickets/'+curTicketId+'/attachments',{method:'POST',body:fd});
+  if(!r){toast('✕ upload failed');return;}
+  const j=await r.json().catch(()=>({}));
+  if(!r.ok){toast('✕ '+(j.error||'upload failed'));return;}
+  if(j.warnings&&j.warnings.length)toast('⚠ '+j.warnings.join('; '));
+  else toast('✓ '+j.saved+' PHOTO'+(j.saved===1?'':'S')+' ADDED');
+  openTicket(curTicketId);
+}
+
+async function deleteTicketPhoto(attId){
+  if(!curTicketId)return;
+  if(!confirm('Delete this photo? It cannot be recovered.'))return;
+  const r=await api('/api/tickets/'+curTicketId+'/attachments/'+attId,{method:'DELETE'});
+  if(r&&r.ok){toast('✓ PHOTO DELETED');openTicket(curTicketId);}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
+}
+
+// Rendered as a block of thumbnails; clicking one opens the full-size image
+// in a new tab rather than building a lightbox nobody asked for.
+function ticketPhotosHtml(atts,ticketId){
+  const mayDelete=canDo('tickets.delete');
+  const canAdd=canDo('tickets.photos');
+  if(!atts.length&&!canAdd)return '';
+  const kb=n=>n>=1048576?((n/1048576).toFixed(1)+' MB'):(Math.max(1,Math.round(n/1024))+' KB');
+  const thumbs=atts.map(a=>{
+    const u='/api/tickets/'+ticketId+'/attachments/'+a.id;
+    return `<div class="shot">
+      <a href="${u}" target="_blank" rel="noopener" title="${esc(a.filename)} &middot; ${kb(a.size)} &middot; ${esc(a.uploaded_by)}">
+        <img src="${u}" alt="${esc(a.filename)}" loading="lazy">
+      </a>
+      ${mayDelete?`<button type="button" class="x" title="Delete photo" onclick="deleteTicketPhoto(${a.id})">&times;</button>`:''}
+      <div class="nm">${esc(a.filename)}</div>
+    </div>`;
+  }).join('');
+  return `
+    <div class="invbox">
+      <label>PHOTOS${atts.length?` <span class="muted" style="font-weight:400">(${atts.length})</span>`:''}</label>
+      ${atts.length?`<div class="shots">${thumbs}</div>`:'<p class="muted" style="margin:0">No photos attached.</p>'}
+      ${canAdd?`<div style="margin-top:12px">
+        <input type="file" id="tkPhotoInput" accept="image/*" multiple style="display:none">
+        <button type="button" class="btn sm ghost" onclick="document.getElementById('tkPhotoInput').click()">+ ADD PHOTO</button>
+        <span class="muted" style="margin-left:8px;font-size:11.5px">JPEG, PNG, GIF, WebP or HEIC &middot; up to 4MB each &middot; 4 per ticket</span>
+      </div>`:''}
+    </div>`;
+}
+
+// Field-change trail for a ticket, rendered like an asset's history: who
+// changed what, from what, when. Loaded after the panel renders so a slow
+// query never holds up the rest of the view.
+async function loadTicketHistory(id){
+  const box=document.getElementById('tkHistory');
+  if(!box)return;
+  box.innerHTML='<div class="muted">Loading…</div>';
+  const r=await api('/api/tickets/'+id+'/history');
+  if(!r||!r.ok){box.innerHTML='<div class="muted">History unavailable.</div>';return;}
+  const rows=await r.json();
+  if(!rows.length){box.innerHTML='<div class="muted">No changes recorded yet.</div>';return;}
+  // Same markup and classes as the asset history block, so the two read
+  // identically instead of inventing a second style for the same idea.
+  box.innerHTML=rows.map(e=>`<div class="hist"><span class="hfield">${esc(e.field)}</span> <span class="hold">${esc(e.old_val||'—')}</span> → <span class="hnew">${esc(e.new_val||'—')}</span> <span class="hmeta">${esc(e.user)} · ${esc(e.ts)}</span></div>`).join('');
+}
+// Full ticket edit. The API already accepts every one of these fields on PUT;
+// the UI simply never offered them, so only status/priority could be changed.
+async function saveTicketEdits(){
+  if(!curTicketId){return;}
+  const val=id=>{const el=document.getElementById(id);return el?el.value.trim():undefined;};
+  const payload={};
+  const map={tkeSubject:'subject',tkeDescription:'description',
+             tkeRequester:'requester',tkeRequesterEmail:'requester_email',
+             tkeAssetId:'asset_id',tkeDueDate:'due_date'};
+  for(const [el,field] of Object.entries(map)){const v=val(el);if(v!==undefined)payload[field]=v;}
+  // category: the dropdown, or the typed box when "type another..." is picked
+  const catSel=document.getElementById('tkeCategorySel');
+  if(catSel)payload.category=(catSel.value==='__custom')?(val('tkeCategory')||''):catSel.value;
+  const sla=val('tkeSlaHours'); if(sla)payload.sla_hours=parseInt(sla,10);
+  const st=document.getElementById('tkStatusUpd'), pr=document.getElementById('tkPrioUpd');
+  const as=document.getElementById('tkAssignee');
+  if(st)payload.status=st.value; if(pr)payload.priority=pr.value;
+  // assignee travels with the rest: the standalone ASSIGN button and its
+  // separate request are gone, so one save does the whole queue.
+  if(as)payload.assignee=as.value;
+  // The subject box only exists for an admin; a tickets-write user is saving
+  // status and priority on their own, so don't demand a field they can't see.
+  if(document.getElementById('tkeSubject')&&!payload.subject){toast('✕ SUBJECT REQUIRED');return;}
+  if(!Object.keys(payload).length){toast('✕ NOTHING TO SAVE');return;}
+  const r=await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  if(r&&r.ok){toast('✓ TICKET SAVED');openTicket(curTicketId);await loadTickets();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'save failed'));}
+}
+// Deletion is admin-only and enforced server-side too -- this just hides the
+// button for everyone else rather than letting them discover a 403.
+async function deleteTicket(){
+  if(!curTicketId)return;
+  if(MY_ROLE!==ROLE_ADMIN){toast('✕ ADMIN ONLY');return;}
+  if(!confirm('Delete this ticket and its entire reply history? This cannot be undone.'))return;
+  const r=await api('/api/tickets/'+curTicketId,{method:'DELETE'});
+  if(r&&r.ok){document.getElementById('tkModal').classList.remove('show');curTicketId=null;toast('✓ TICKET DELETED');await loadTickets();}
+  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
+}
 async function sendReply(){
   if(!curTicketId)return;
   const body=document.getElementById('tkReply').value.trim(); if(!body){toast('✕ empty');return;}
   const r=await api('/api/tickets/'+curTicketId+'/reply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({body})});
-  const su=document.getElementById('tkStatusUpd').value, pr=document.getElementById('tkPrioUpd').value;
-  await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:su,priority:pr})});
+  // Only editors get the status/priority controls, so a read-only replier
+  // shouldn't hit a null here -- and shouldn't send an empty update either.
+  const stEl=document.getElementById('tkStatusUpd'), prEl=document.getElementById('tkPrioUpd');
+  if(stEl&&prEl){
+    await api('/api/tickets/'+curTicketId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:stEl.value,priority:prEl.value})});
+  }
   if(r&&r.ok){document.getElementById('tkReply').value='';openTicket(curTicketId);await loadTickets();toast('✓ REPLY SENT');}
 }
 async function openNewTicket(){
@@ -2635,6 +3708,10 @@ window.repairDashStructure=repairDashStructure;
   const me=await fetch('/api/me').then(r=>r.json());
   if(!me.user){location.href='/'+(location.search||'');return;}
   MY_ROLE=me.role;
+  MY_PERMS=me.perms||{};
+  MY_FEATURES=me.features||[];
+  applyNavPermissions();
+  applySettingsPermissions();
   window.sessionUser=me.user;
   {const dz=document.getElementById('navDangerZone'); if(dz)dz.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';}
   applyTheme(me.theme||'dark');
@@ -2648,6 +3725,7 @@ window.repairDashStructure=repairDashStructure;
   const navShow = {
     navAudit: true,
     navScan: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navHeartbeat: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navDirectory: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navContracts: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
@@ -2935,10 +4013,11 @@ async function loadCustom(){
   try{ s = await api_json('/api/settings'); }
   catch(e){ dbg('loadCustom FETCH ERROR: '+e.message); showCustomError('network/fetch error: '+e.message); console.error(e); return; }
   if(!s){ dbg('loadCustom settings NULL (unauthorized)'); showCustomError('unauthorized (settings returned null)'); return; }
-  // /api/settings is admin-only: a read-only/read-write user gets back {error:"forbidden"},
+  // /api/settings needs settings rights: a user without them gets back
+  // {error:"No access"},
   // not a settings object. Applying that would reset everyone's live theme to hardcoded
   // defaults just from opening Settings — bail out instead and leave the theme untouched.
-  if(s.error || s.bg===undefined){ dbg('loadCustom: not a settings object (likely forbidden) — leaving theme untouched'); showCustomError('Only admins can view or change appearance settings.'); return; }
+  if(s.error || s.bg===undefined){ dbg('loadCustom: not a settings object (no access) — leaving theme untouched'); showCustomError('No access — appearance settings need the Branding permission.'); return; }
   dbg('loadCustom settings: '+(s?('keys='+Object.keys(s).length):'NULL'));
   const c = applyCustomVars(s);
   fillCustomForm(c);
@@ -3263,6 +4342,7 @@ async function loadUserSettings(){
   };
   // System Config sub-nav: toggle section panels
   const nav = document.getElementById('cfgNav');
+  applySettingsPermissions();
   if (nav) {
   nav.querySelectorAll('.cfgitem').forEach(btn => {
     btn.onclick = () => {
@@ -3402,7 +4482,7 @@ async function loadUserSettings(){
   };
   if (g('unifi_pass').value) body.unifi_pass = g('unifi_pass').value;
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
-  if (r && r.ok){ toast('✓ UNIFI SAVED'); loadUnifiWidgets(true); }
+  if (r && r.ok){ toast('✓ INTEGRATIONS SAVED'); loadUnifiWidgets(true); }
   else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'save failed')); }
   };
   // Asset Label save button

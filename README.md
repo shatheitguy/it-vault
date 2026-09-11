@@ -3,12 +3,28 @@
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
 [![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/it-vault)
 [![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)
+[![Android APK](https://img.shields.io/badge/Android-download%20APK-red.svg?logo=android&logoColor=white)](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)
 
 A self-hosted IT asset & helpdesk manager: track assets, employees, checkouts,
 maintenance history, support tickets (with a public portal + a live wallboard
-monitor), audit logging, LDAP/AD sync, network scanning, and full theming —
+monitor), uptime monitoring with alerting, audit logging, LDAP/AD sync, network
+scanning, and full theming —
 built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
 for storage.
+
+## Android app
+
+A native Android companion app — assets, tickets, contracts and the directory on
+your phone, with **offline-first editing** that syncs when you're back online, QR /
+barcode scanning, and **built-in updates** (the app checks for new versions itself,
+no store required). It also picks up your server's own name and logo after login,
+so it wears your branding rather than the defaults.
+
+**[⬇ Download IT-Vault.apk](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)**
+
+Android will warn that the app is from an unknown developer — that's expected for
+any app installed outside the Play Store. Tap **More details → Install anyway**.
+Once installed, the app updates itself from **Settings → Check for updates**.
 
 ## Screenshots
 
@@ -36,6 +52,129 @@ flips to `Checked-Out`, and the signature stays attached to it.
 *A factory-new install — the theme, layout and branding above are what you
 get on first run. Every asset, name and serial is invented.*
 
+## Heartbeat — uptime monitoring
+
+IT-Vault watches your network itself. **Tools → Network Scan → Heartbeat.**
+
+Each monitor is checked on its own interval, around the clock, for as long as
+IT-Vault is running. Five kinds of check:
+
+| Check | What it answers |
+|---|---|
+| **Ping** (ICMP) | Is the device reachable at all — switches, APs, printers, cameras |
+| **HTTP(S)** | Is the web service answering, with the status codes you accept |
+| **HTTP keyword** | Does the page actually say the right thing — catches a server that returns 200 while the app behind it is broken |
+| **TCP port** | Is the service listening — SQL on 3306, RDP on 3389, SMTP on 25 |
+| **DNS** | Does the name still resolve |
+
+**Alerts arrive once, not forty times.** A monitor has to fail its retry count
+before it counts as down, and the alert goes out on the *transition* — once on
+the way down, once on the way back up. A flapping access point cannot fill your
+inbox overnight. If you want nagging, set a reminder every N further failures;
+by default there is nothing in between.
+
+Alerts go to **email, a webhook, Slack or Telegram** — set them up under the
+**Alerts** button, and test each one before an outage has to rely on it. With no
+channel configured they fall back to the notification address in
+**Settings → Notifications**.
+
+**History is kept indefinitely.** Uptime over 24 hours, 7 days, 30 days or a
+year; a response-time chart; and an event log of every state change with the
+reason. An hourly roll-up is written as checks land and never pruned, so a long
+window stays fast — raw per-check rows are only discarded if you ask, with
+`ITVAULT_HB_RETAIN_DAYS`.
+
+Each row draws a **live ECG trace**: one heartbeat per recorded check, oldest on
+the left. A check that answered draws a QRS complex whose height follows its
+response time; a failed check draws a flatline. An outage is visible at a glance,
+and so is when it started.
+
+Per monitor you can also set a timeout, a shorter re-check interval while it is
+down, **upside-down mode** (alert if it *does* respond — for a port that should
+be closed), the HTTP method, certificate-expiry tracking, a tag, and a linked
+asset. Pause one while you work on it without losing its history.
+
+Two IT-Vault instances pointed at the same database will not both report the
+same outage — a monitor is claimed before it is probed.
+
+It is a separate permission (`tools.heartbeat`), so a role can have the network
+scan without it, or the other way round.
+
+## Install IT-Vault and a database, in one step
+
+On a Linux server (or macOS) this is the whole thing. The Windows
+installer doesn't set up a database yet -- there, IT-Vault starts on its
+own and the browser wizard asks for a MariaDB/MySQL you point it at:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
+```
+
+It asks whether to install MariaDB alongside IT-Vault, then asks for three
+things and does the rest:
+
+```
+Database
+
+  IT-Vault needs MariaDB or MySQL. It can install one here as a container
+  and wire itself up, or you can point it at a server you already run.
+
+Install MariaDB here and connect IT-Vault to it? [y/N] y
+
+  Database name     [itvault]: itvault
+  Database username [itvault]: itvault
+  Database password [Enter = generate one]:
+  confirm:
+
+    database  itvault
+    username  itvault
+    password  set
+```
+
+From those answers it creates the `itvault-net` network and the `itvault_db`
+volume, starts MariaDB on that network, waits for it to finish initialising,
+and starts IT-Vault already connected with the credentials in place — so
+there is no setup wizard to fill in, no `CREATE USER`, no `GRANT`, and none
+of the `1045 Access denied` that a missed step produces. Press Enter at the
+password prompt and it generates a strong one; MariaDB's own `root` password
+is always generated separately and is never the one the application uses.
+
+Open **http://localhost:5000** and create the admin account. That's it.
+
+Say **no** to the database question and IT-Vault starts on its own, with the
+first-run wizard in the browser asking for a MariaDB/MySQL you already run.
+Either way the database is yours — IT-Vault never upgrades or deletes it, so
+your version, backups and retention policy stay your decision.
+
+To skip the questions entirely — for a scripted or unattended install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh -s -- \
+  --db-name itvault --db-user itvault --db-pass 'choose-something-long'
+```
+
+Or `--with-db --yes` to accept every default with a generated password, and
+`--no-db` to skip the question and use the browser wizard.
+
+### What it creates
+
+Nothing hidden — the same four objects you would create by hand:
+
+| | |
+|---|---|
+| network `itvault-net` | lets IT-Vault reach the database by container name, so port 3306 is never published to your LAN |
+| volume `itvault_db` | MariaDB's data directory |
+| container `itvault-db` | `mariadb:latest`, on that network, with a healthcheck. Override with `--db-image` (e.g. `mariadb:12`, `mysql:8`) |
+| container `itvault` | IT-Vault, on that network, with `DB_HOST=itvault-db` already set |
+
+`--dry-run` prints all of it and changes nothing, on a machine with no Docker
+at all:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh
+less install.sh && sh install.sh --dry-run
+```
+
 ## Install in one line
 
 ```bash
@@ -60,20 +199,33 @@ you it worked. **No Docker? It offers to install it** — Docker's own script on
 Linux, Homebrew on macOS, winget on Windows — and waits for the engine to come
 up before carrying on. It asks first unless you pass `--yes`.
 
-It installs **IT-Vault only**. The database stays yours to choose, so the
-installer finishes by printing the MariaDB one-liner if you haven't got one.
-An existing IT-Vault container is started if stopped, and otherwise left
-alone — it owns your data volumes.
+**Don't want Docker?** Say no when it offers to install it and it will offer to
+install IT-Vault directly on the machine instead (Python + waitress in a
+virtualenv) -- or skip straight there with `--no-docker`. You bring your own
+database either way.
+
+It offers to install **MariaDB** too — see
+[Install IT-Vault and a database, in one step](#install-it-vault-and-a-database-in-one-step)
+above. Decline and the database stays yours to point at, and the installer
+finishes by printing the MariaDB one-liner if you haven't got one. An existing
+IT-Vault container is started if stopped, and otherwise left alone — it owns
+your data volumes.
 
 Options, as environment variables or flags:
 
 | | |
 |---|---|
 | `--port 8080` / `$env:ITVAULT_PORT` | host port, default 5000 |
-| `--tag 1.6.2` / `$env:ITVAULT_TAG` | image tag, default `latest` |
+| `--tag 1.7.0` / `$env:ITVAULT_TAG` | image tag, default `latest` |
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
 | `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
+| `--with-db` / `$env:ITVAULT_WITH_DB` | install MariaDB without being asked, wire it up and skip the setup wizard *(install.sh only)* |
+| `--no-db` / `$env:ITVAULT_NO_DB` | don't ask about MariaDB; use the browser wizard *(install.sh only)* |
+| `--db-name` / `--db-user` / `--db-pass` | answer the database questions up front, implies `--with-db` *(install.sh only)* |
+| `--db-image` / `$env:ITVAULT_DB_IMAGE` | database image, default `mariadb:latest`; pin it (`mariadb:12`) to stay on one major *(install.sh only)* |
+| `--no-docker` / `$env:ITVAULT_NO_DOCKER` | skip Docker and install IT-Vault straight on the host (Python + waitress) |
+| `--dir` / `$env:ITVAULT_DIR` | where a no-Docker install lands, default `~/it-vault` |
 
 Piping a script from the internet into a shell is worth being fussy about.
 To read it first:
@@ -164,12 +316,22 @@ docker run -d --name itvault-db --restart unless-stopped \
   -e MARIADB_USER=itvault \
   -e MARIADB_PASSWORD='<a-strong-password>' \
   -v itvault_db:/var/lib/mysql \
-  mariadb:11
+  mariadb:latest
 ```
 
 That creates the database and user for you, so you can skip the SQL below.
 Keep the volume — it *is* your data. Don't publish port 3306 unless you
 genuinely need outside access; IT-Vault reaches it over the Docker network.
+
+A note on `mariadb:latest`, because it is not the same call as for IT-Vault's
+own image. A fresh install is fine: the volume is created in the same breath
+as the container, so whatever `latest` is that day initialises it and the two
+agree. What you must not do is point a *newer* major at a data directory an
+older one wrote — MariaDB rewrites the directory in place, one way, with no
+prompt. So if you keep the volume and recreate the container later, pin the
+version that wrote it (`mariadb:12`, say) rather than taking whatever `latest`
+has become. `install.sh` checks that for you and stops rather than letting you
+find out afterwards; by hand it is on you.
 
 To let the two containers talk, put them on one network:
 
@@ -252,11 +414,12 @@ docker run -d --name itvault -p 5000:5000 \
   -v invoices_data:/app/invoices \
   -v backups_data:/app/backups \
   -e ITVAULT_DATA_DIR=/app/data \
-  ghcr.io/shatheitguy/it-vault:1.6.0
+  ghcr.io/shatheitguy/it-vault:latest
 ```
 
-Then open the setup wizard and enter your database details. Pin a version
-tag for anything real; `latest` moves whenever a release is published.
+Then open the setup wizard and enter your database details. `latest` follows
+`main`, so a pull always brings down the current build; pin a version tag
+instead if you want to stay on a fixed one.
 
 Keep `/app/data` on a volume: it holds the generated session-signing key and
 the saved database pointer, so an image update doesn't sign everyone out.
@@ -282,6 +445,45 @@ docker compose pull && docker compose up -d
 Either way your database is untouched (it isn't ours to touch), invoices,
 backups and the session key live on volumes that survive the swap, and the
 schema migrates itself on start.
+
+### Updating a plain `docker run` install
+
+Without compose, one thing first: **`docker restart` does not update
+anything.** Restarting reuses the image the container was created from, so it
+comes back on exactly the version it was already running. Updating means
+pulling the new image and recreating the container:
+
+```bash
+docker pull ghcr.io/shatheitguy/it-vault:latest
+
+docker rm -f itvault
+docker run -d --name itvault --restart unless-stopped \
+  -p 5000:5000 \
+  -e ITVAULT_DATA_DIR=/app/data \
+  -v itvault_data:/app/data \
+  -v invoices_data:/app/invoices \
+  -v backups_data:/app/backups \
+  ghcr.io/shatheitguy/it-vault:latest
+```
+
+Removing the *container* is safe. Removing its *volumes* is not:
+`itvault_data` holds the saved database pointer and the generated session key,
+so keep all three `-v` flags exactly as they were, or you will come back to
+the setup wizard with everyone signed out.
+
+Add back any other flags your install uses — `--network`, a different
+`--port`, `ITVAULT_WATCHTOWER_TOKEN`. If you can't remember them, read them
+off the running container before you remove it:
+
+```bash
+docker inspect itvault --format '{{range .Config.Env}}{{println .}}{{end}}'
+```
+
+Then check the new version is actually live:
+
+```bash
+docker exec itvault cat VERSION
+```
 
 ### One-click and automatic updates for containers
 
@@ -322,6 +524,17 @@ docker run -d --name watchtower --restart unless-stopped \
 …then start IT-Vault with `-e ITVAULT_WATCHTOWER_TOKEN=<the-same-token>` on
 the same Docker network.
 
+That last part matters: `ITVAULT_WATCHTOWER_URL` defaults to
+`http://watchtower:8080`, and that name only resolves on a user-defined Docker
+network, so both containers have to share one. If IT-Vault runs with
+`--network host` — which the network scanner needs in order to see your LAN —
+the name won't resolve at all. Publish Watchtower's port with `-p 8080:8080`
+and point IT-Vault at it instead:
+
+```
+ITVAULT_WATCHTOWER_URL=http://127.0.0.1:8080
+```
+
 If you'd rather stay deliberate about upgrades, skip Watchtower entirely:
 pin a version in `.env` (`ITVAULT_TAG=1.6.1`) and bump it when you choose.
 
@@ -342,6 +555,28 @@ Runtime settings that change *inside* the app — branding, theme colors,
 SMTP, LDAP, ticket SLAs, roles — live in the database via Settings → \* in
 the UI, not in environment variables.
 
+### If branding won't save, or the database pointer keeps resetting
+
+Symptoms: uploading a letterhead returns `Permission denied`, an uploaded
+logo never appears, or the setup wizard asks for the database again after
+every update.
+
+All three are the same cause. Docker seeds a *new* named volume from the
+directory it shadows — ownership included — but if that directory isn't in
+the image it creates the volume empty and owned by `root`. IT-Vault runs as
+uid 1000, so nothing can be written into `/app/data`. Images from this commit
+onward ship the directory, so new installs are fine; a volume created by an
+older image keeps its root ownership and needs fixing once:
+
+```bash
+docker run --rm -v itvault_data:/data alpine chown -R 1000:1000 /data
+```
+
+Then restart IT-Vault. Nothing is lost either way — branding and settings are
+stored in the database, and `/app/data` is only a cache for them — but the
+session key and the saved database pointer do need a writable volume. The
+startup log prints this same command if the directory isn't writable.
+
 ## Database
 
 - **You own it.** IT-Vault connects to whatever MariaDB/MySQL you give it —
@@ -353,10 +588,11 @@ the UI, not in environment variables.
   upgrade needs no manual SQL.
 - **Backups**: Settings → Backup / Restore exports and restores archives by
   scope (everything, config only, or assets only). An "everything" archive
-  includes the uploaded logo and letterhead, which live on disk rather than
-  in the database. Restoring clears each table before repopulating it, so it
-  reverts to that point in time rather than merging.
-- **What's on volumes**: `/app/data` (session key + saved DB pointer),
+  includes the uploaded logo and letterhead, which are stored in the database
+  (with a copy on disk as a cache). Restoring clears each table before
+  repopulating it, so it reverts to that point in time rather than merging.
+- **What's on volumes**: `/app/data` (session key, saved DB pointer, and a
+  cache of the uploaded branding),
   `/app/invoices` (uploaded invoices) and `/app/backups` (generated
   archives). These survive `docker compose down`; only `down -v` destroys
   them. Your database lives wherever you installed it and is untouched by
@@ -383,3 +619,13 @@ That last part is the difference between the AGPL and the ordinary GPL, and
 it's deliberate: IT-Vault is a web app, so "hosting it" is how it's used.
 
 Copyright (C) 2026 Sharqan Ahamed (Sha The IT Guy)
+
+## Author
+
+**Sharqan Ahamed** — *Sha The IT Guy*
+
+- 🌐 Website: [shatheitguy.in](https://shatheitguy.in)
+- 💻 More projects: [github.com/shatheitguy](https://github.com/shatheitguy)
+
+Built and maintained with 💻 and ☕. If IT-Vault is useful to you, a ⭐ on the
+repo is appreciated.
