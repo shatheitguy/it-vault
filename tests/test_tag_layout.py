@@ -35,6 +35,11 @@ def check(name, cond, detail=""):
         fails.append(name)
 
 
+def read(*parts):
+    # utf-8-sig: a file saved by a Windows editor carries a BOM
+    return io.open(os.path.join(ROOT, *parts), encoding="utf-8-sig").read()
+
+
 A.app.config["TESTING"] = True
 cl = A.app.test_client()
 with cl.session_transaction() as sess:
@@ -121,6 +126,42 @@ try:
               "max-height:" in html and "flex:1 1 auto" in html)
         print()
 
+    print("The asset name is a choice, not furniture")
+    # It was rendered unconditionally -- first in the header, then at the top
+    # of the column -- so unticking it in Settings did nothing at all.
+    off = page("50.8x25.4", "AssetID,Type,Serial,Status")
+    off_body = off[off.index("<body"):]
+    check("  unticked: no name element", "class=name" not in off_body)
+    check("  unticked: the name is nowhere on the tag", NAME not in off_body)
+    check("  unticked: the ID is still there", TAGNO in off_body)
+    on = page("50.8x25.4", "Name,AssetID,Type,Serial,Status")
+    on_body = on[on.index("<body"):]
+    check("  ticked: the name is back", NAME in on_body)
+    # the space it would have used goes to the fields, not to nothing
+    m_off = re.search(r"\.kv\{font-size:([\d.]+)mm", off)
+    m_on = re.search(r"\.kv\{font-size:([\d.]+)mm", on)
+    check("  unticked: the fields get the freed space",
+          bool(m_off) and bool(m_on) and float(m_off.group(1)) >= float(m_on.group(1)),
+          "%s vs %s" % (m_off.group(1) if m_off else "?", m_on.group(1) if m_on else "?"))
+
+    print()
+    print("The sidebar shows Logo Text, not the organisation name")
+    # Two separate settings, and the field is labelled "Logo Text (sidebar)".
+    # applyBranding read app_name for both, so the sidebar always showed the
+    # company name and the setting appeared to do nothing.
+    appjs = read("app.js")
+    check("  the sidebar is set from logo_text",
+          "me.logo_text" in appjs, "no reference to me.logo_text")
+    check("  it falls back to the app name when blank",
+          "(me.logo_text||'').trim()||nm" in appjs)
+    check("  the browser tab still uses the organisation name",
+          "document.title=nm+' // Assets Manager'" in appjs)
+    check("  nothing still assigns the app name to the sidebar",
+          not re.search(r"sideName'\)\.textContent=nm;", appjs)
+          and not re.search(r"st\.textContent=nm;", appjs))
+    check("  the server supplies it", '"logo_text": s.get("logo_text"' in read("app.py"))
+
+    print()
     print("Every chosen field is printed, even when there are many")
     html = page("50.8x25.4", "Name,AssetID,Type,Serial,Status,Location,Department,Warranty")
     for label in ("Category", "Serial", "Status", "Location", "Warranty"):
