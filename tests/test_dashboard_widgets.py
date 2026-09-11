@@ -172,7 +172,36 @@ check("a backup carries the dash_layout column", "dash_layout" in text)
 check("and the tiles inside it", "10.0.0.9" in text)
 
 print()
-print("10. The browser copy is a cache, not the record")
+print("10. A tile you added can be edited, and removing means removed")
+check("user tiles get a pencil", "pen.title='Edit this tile'" in appjs)
+check("built-ins do not", "if(isLink){" in appjs and "openWidgetPicker(key)" in appjs)
+check("the picker doubles as the editor", "function openWidgetPicker(editKey)" in appjs)
+check("the form pre-fills", "existing?(existing.title||''):''" in appjs)
+check("an edit replaces in place", "t.key===wmEditKey?tile:t" in appjs)
+check("it does not append a duplicate", "wmEditKey||('link:'" in appjs)
+check("the dialog says which job it is doing", "'EDIT TILE':'ADD WIDGET'" in appjs)
+# a removed widget used to linger, greyed out, still taking up the grid
+check("removing records it as hidden immediately",
+      "L.hidden=Array.from(new Set((L.hidden||[]).concat([key])))" in appjs)
+check("nothing ghosts it back into view",
+      "show-hidden" not in appjs and "show-hidden" not in css)
+check("hidden really is display:none",
+      "#dashWidgets .widget.w-hidden{display:none}" in css)
+
+print()
+print("11. It holds up on a phone")
+check("one column whatever the setting says",
+      "grid-template-columns:1fr!important" in css)
+check("tall panels are capped so the page can be thumbed",
+      "max-height:240px!important" in css)
+check("the toolbar wraps", ".dash-tools{flex-wrap:wrap" in css)
+# the base .dashfilter rule sits later in the file, so an override inside the
+# earlier media block could never win -- it is stated again at the end
+check("the filter gets its own row",
+      css.rindex(".dashfilter{flex:1 1 100%") > css.index(".dashfilter{background"))
+
+print()
+print("12. The browser copy is a cache, not the record")
 check("saving writes through to the server", "'/api/dash/layout', {method:'PUT'" in appjs)
 check("and still paints from the local copy first",
       "localStorage.setItem(DASH_LAYOUT_KEY2" in appjs)
