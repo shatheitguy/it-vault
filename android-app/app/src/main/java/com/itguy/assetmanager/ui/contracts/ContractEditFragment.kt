@@ -15,7 +15,9 @@ import android.widget.ArrayAdapter
 import android.widget.EditText
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import android.widget.Toast
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.Repository
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.model.Asset
 import com.itguy.assetmanager.data.model.Contract
@@ -277,13 +279,17 @@ class ContractEditFragment : Fragment() {
         b.saveBtn.isEnabled = false
         lifecycleScope.launch {
             try {
-                val api = ApiClient.api()
-                val resp = if (contractId == 0) api.addContract(contract) else api.updateContract(contract.copy(id = contractId))
-                if (resp.isSuccessful && resp.body()?.ok == true) {
-                    requireActivity().onBackPressedDispatcher.onBackPressed()
-                } else {
-                    val msg = resp.body()?.error ?: "Save failed"
-                    if (_b != null) { b.formError.text = msg; b.formError.visibility = View.VISIBLE }
+                val toSave = if (contractId == 0) contract else contract.copy(id = contractId)
+                when (val r = Repository.saveContract(requireContext(), toSave, isNew = contractId == 0)) {
+                    is Repository.SaveResult.Synced ->
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    is Repository.SaveResult.Queued -> {
+                        Toast.makeText(requireContext(),
+                            "Saved offline — will sync when online", Toast.LENGTH_LONG).show()
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    }
+                    is Repository.SaveResult.Error ->
+                        if (_b != null) { b.formError.text = r.message; b.formError.visibility = View.VISIBLE }
                 }
             } catch (e: Exception) {
                 if (_b != null) { b.formError.text = "Save failed: ${e.message}"; b.formError.visibility = View.VISIBLE }
@@ -301,7 +307,9 @@ class ContractEditFragment : Fragment() {
             .setPositiveButton("Delete") { _, _ ->
                 lifecycleScope.launch {
                     try {
-                        ApiClient.api().deleteContract(IdRequest(contractId))
+                        val r = Repository.deleteContract(requireContext(), contractId)
+                        if (r is Repository.SaveResult.Queued)
+                            Toast.makeText(requireContext(), "Deleted offline — will sync when online", Toast.LENGTH_LONG).show()
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     } catch (e: Exception) {
                         if (_b != null) { b.formError.text = "Delete failed: ${e.message}"; b.formError.visibility = View.VISIBLE }

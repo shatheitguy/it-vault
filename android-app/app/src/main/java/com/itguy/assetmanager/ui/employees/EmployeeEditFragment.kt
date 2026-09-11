@@ -9,7 +9,9 @@ import android.widget.ArrayAdapter
 import android.widget.EditText
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import android.widget.Toast
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.Repository
 import com.itguy.assetmanager.data.model.Employee
 import com.itguy.assetmanager.data.model.NameOnly
 import com.itguy.assetmanager.data.model.NamedItem
@@ -160,10 +162,17 @@ class EmployeeEditFragment : Fragment() {
         b.saveBtn.isEnabled = false
         lifecycleScope.launch {
             try {
-                val api = ApiClient.api()
-                val eid = employeeId
-                if (eid == null) api.createEmployee(emp) else api.updateEmployee(eid, emp)
-                requireActivity().onBackPressedDispatcher.onBackPressed()
+                when (val r = Repository.saveEmployee(requireContext(), emp, employeeId)) {
+                    is Repository.SaveResult.Synced ->
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    is Repository.SaveResult.Queued -> {
+                        Toast.makeText(requireContext(),
+                            "Saved offline — will sync when online", Toast.LENGTH_LONG).show()
+                        requireActivity().onBackPressedDispatcher.onBackPressed()
+                    }
+                    is Repository.SaveResult.Error ->
+                        if (_b != null) { b.formError.text = r.message; b.formError.visibility = View.VISIBLE }
+                }
             } catch (e: Exception) {
                 if (_b != null) { b.formError.text = "Save failed: ${e.message}"; b.formError.visibility = View.VISIBLE }
             } finally {
@@ -181,7 +190,9 @@ class EmployeeEditFragment : Fragment() {
             .setPositiveButton("Delete") { _, _ ->
                 lifecycleScope.launch {
                     try {
-                        ApiClient.api().deleteEmployee(id)
+                        val r = Repository.deleteEmployee(requireContext(), id)
+                        if (r is Repository.SaveResult.Queued)
+                            Toast.makeText(requireContext(), "Deleted offline — will sync when online", Toast.LENGTH_LONG).show()
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     } catch (e: Exception) {
                         if (_b != null) { b.formError.text = "Delete failed: ${e.message}"; b.formError.visibility = View.VISIBLE }

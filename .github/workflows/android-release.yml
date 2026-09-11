@@ -1,0 +1,62 @@
+name: Android Release
+
+# Build + sign the APK and publish a GitHub Release whenever a v* tag is pushed.
+# Requires these repo secrets (Settings -> Secrets and variables -> Actions):
+#   KEYSTORE_BASE64    base64 -w0 of your release.keystore
+#   KEYSTORE_PASSWORD  keystore store password
+#   KEY_ALIAS          key alias (e.g. itvault)
+#   KEY_PASSWORD       key password
+# After the release publishes, bump docs/app/latest.json so installed apps see it.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Restore keystore
+        working-directory: android-app
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
+          cat > keystore.properties <<EOF
+          storeFile=release.keystore
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: Build signed release APK
+        working-directory: android-app
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Stage APK as IT-Vault.apk
+        run: cp android-app/app/build/outputs/apk/release/app-release.apk IT-Vault.apk
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: IT-Vault.apk
+          generate_release_notes: true
+
+      - name: Clean up secrets on runner
+        if: always()
+        working-directory: android-app
+        run: rm -f release.keystore keystore.properties
