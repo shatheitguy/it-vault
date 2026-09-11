@@ -5894,6 +5894,10 @@ def label_page(a_id):
     # what will actually be printed, so the row style can be chosen on fit
     # Name and Asset ID are rendered explicitly at the top of the column,
     # so they must not also come through as generic rows.
+    # The name is one of the chosen fields, not furniture: unticking it in
+    # Settings has to actually drop it. Decided here rather than at render
+    # time because the height budget below spends its space.
+    show_name = "Name" in chosen
     printable = [k for k in chosen
                  if k not in ("Name", "AssetID") and k in field_defs
                  and field_defs[k][1] not in (None, "")]
@@ -5901,7 +5905,8 @@ def label_page(a_id):
     # is one -- measured against what is left of the row once the ID and
     # the name have taken their share.
     STACKED_MM, LINE_MM = 6.6, 3.05
-    rows_mm = max(2.0, avail_h_mm - aid_mm - nm_mm)
+    rows_mm = max(2.0, avail_h_mm - aid_mm
+                  - (nm_mm if show_name else 0.0))
     rows_compact = compact or (len(printable) * STACKED_MM > rows_mm)
     # Each row gets an equal share of what is actually left, rather than a
     # fixed height that may not fit. Type shrinks with it, down to a floor:
@@ -5924,7 +5929,8 @@ def label_page(a_id):
     # order, at the top of the column the QR sits beside.
     aid_val = asset.get("AssetTag") or asset["_id"][:12]
     meta_head = (f'<div class=aid>{aid_val}</div>'
-                 f'<div class=name>{asset["Name"]}</div>')
+                 + (f'<div class=name>{asset["Name"]}</div>'
+                    if show_name else ''))
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Label {asset['Name']}</title>
 <style>
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
@@ -6045,8 +6051,10 @@ def labels_page():
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if (show_logo and logo_uri) else ""
     # One stylesheet serves the whole sheet, so the row size comes from the
     # chosen fields -- the upper bound -- and every tag on it fits.
+    show_name = "Name" in chosen
     _n_rows = max(1, len([k for k in chosen if k not in ("Name", "AssetID")]))
-    rows_mm = max(2.0, avail_h_mm - aid_mm - nm_mm)
+    rows_mm = max(2.0, avail_h_mm - aid_mm
+                  - (nm_mm if show_name else 0.0))
     kv_mm = max(1.75, min(2.62, rows_mm / _n_rows))
     kv_font_mm = round(min(2.05, kv_mm * 0.74), 2)
     boxes_html = ""
@@ -6087,7 +6095,8 @@ def labels_page():
         head_block = f'<div class=head><span class=brand>{app_name}</span>{logo_html}</div>'
         aid_val = asset.get("AssetTag") or asset["_id"][:12]
         meta_head = (f'<div class=aid>{aid_val}</div>'
-                     f'<div class=name>{asset["Name"]}</div>')
+                     + (f'<div class=name>{asset["Name"]}</div>'
+                        if show_name else ''))
         qr_id = f"qr{idx}"
         boxes_html += f"""<div class=box>
  {head_block}
