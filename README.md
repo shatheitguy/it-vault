@@ -102,12 +102,16 @@ scan without it, or the other way round.
 
 ## Install IT-Vault and a database, in one step
 
-On a Linux server (or macOS) this is the whole thing. The Windows
-installer doesn't set up a database yet -- there, IT-Vault starts on its
-own and the browser wizard asks for a MariaDB/MySQL you point it at:
+On Linux, macOS, and Windows this is the whole thing -- every installer
+offers to set up MariaDB and wire it up, so nothing dead-ends at a blank
+setup form:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.sh | sh
+```
+
+```powershell
+irm https://raw.githubusercontent.com/shatheitguy/it-vault/main/install.ps1 | iex
 ```
 
 It asks whether to install MariaDB alongside IT-Vault, then asks for three
@@ -145,6 +149,13 @@ Say **no** to the database question and IT-Vault starts on its own, with the
 first-run wizard in the browser asking for a MariaDB/MySQL you already run.
 Either way the database is yours — IT-Vault never upgrades or deletes it, so
 your version, backups and retention policy stay your decision.
+
+**No Docker?** The same offer follows you to `--no-docker` / `ITVAULT_NO_DOCKER`
+too — on Linux/macOS it installs MariaDB with whatever package manager is on
+the host (`apt-get`, `dnf`, `yum`, `pacman`, or `brew`) instead of a
+container; on Windows it uses `winget`. Either way you get a `start.sh` /
+`start.ps1` in the install directory that starts IT-Vault already connected,
+so there's still nothing for the setup wizard to ask.
 
 To skip the questions entirely — for a scripted or unattended install:
 
@@ -201,10 +212,9 @@ up before carrying on. It asks first unless you pass `--yes`.
 
 **Don't want Docker?** Say no when it offers to install it and it will offer to
 install IT-Vault directly on the machine instead (Python + waitress in a
-virtualenv) -- or skip straight there with `--no-docker`. You bring your own
-database either way.
+virtualenv) -- or skip straight there with `--no-docker`.
 
-It offers to install **MariaDB** too — see
+It offers to install **MariaDB** either way — see
 [Install IT-Vault and a database, in one step](#install-it-vault-and-a-database-in-one-step)
 above. Decline and the database stays yours to point at, and the installer
 finishes by printing the MariaDB one-liner if you haven't got one. An existing
@@ -218,12 +228,12 @@ Options, as environment variables or flags:
 | `--port 8080` / `$env:ITVAULT_PORT` | host port, default 5000 |
 | `--tag 1.7.0` / `$env:ITVAULT_TAG` | image tag, default `latest` |
 | `--name myvault` / `$env:ITVAULT_NAME` | container name, default `itvault` |
-| `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker |
+| `--yes` / `$env:ITVAULT_YES` | don't ask before installing Docker or MariaDB |
 | `--dry-run` / `$env:ITVAULT_DRY` | print the plan, change nothing |
-| `--with-db` / `$env:ITVAULT_WITH_DB` | install MariaDB without being asked, wire it up and skip the setup wizard *(install.sh only)* |
-| `--no-db` / `$env:ITVAULT_NO_DB` | don't ask about MariaDB; use the browser wizard *(install.sh only)* |
-| `--db-name` / `--db-user` / `--db-pass` | answer the database questions up front, implies `--with-db` *(install.sh only)* |
-| `--db-image` / `$env:ITVAULT_DB_IMAGE` | database image, default `mariadb:latest`; pin it (`mariadb:12`) to stay on one major *(install.sh only)* |
+| `--with-db` / `$env:ITVAULT_WITH_DB` | install MariaDB without being asked, wire it up and skip the setup wizard |
+| `--no-db` / `$env:ITVAULT_NO_DB` | don't ask about MariaDB; use the browser wizard |
+| `--db-name` / `--db-user` / `--db-pass` (install.sh) or `$env:ITVAULT_DB_NAME` / `_DB_USER` / `_DB_PASS` (both) | answer the database questions up front, implies `--with-db` |
+| `--db-image` / `$env:ITVAULT_DB_IMAGE` | Docker only: database image, default `mariadb:latest`; pin it (`mariadb:12`) to stay on one major |
 | `--no-docker` / `$env:ITVAULT_NO_DOCKER` | skip Docker and install IT-Vault straight on the host (Python + waitress) |
 | `--dir` / `$env:ITVAULT_DIR` | where a no-Docker install lands, default `~/it-vault` |
 
