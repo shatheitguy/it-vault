@@ -1516,12 +1516,21 @@ async function wireUpdateCheck(){
                     : 'One click pulls the new code, installs any new requirements and restarts. Your database is untouched.')
                 : 'One-click updating needs Watchtower running alongside IT-Vault — a container can\'t replace itself. Click UPDATE NOW for the exact steps, or copy the command and run it yourself.'
             }</div>
-            ${cmd?`<pre class="mono updlog" id="updCmd">${esc(cmd)}</pre>`:''}
+            ${cmd?`<pre class="mono updlog updcmd" id="updCmd" title="Click to copy">${esc(cmd)}</pre>`:''}
             <div id="updLive" style="margin-top:8px"></div>
           </div>`;
         const live=document.getElementById('updLive');
         const nowBtn=document.getElementById('updNowBtn');
         if(nowBtn) nowBtn.onclick=()=>applyUpdate(nowBtn, live, j.current);
+        const copyCmd=async(el,done,back)=>{
+          try{
+            await navigator.clipboard.writeText(cmd);
+            if(el){el.textContent=done;setTimeout(()=>{el.textContent=back;},1800);}
+            else toast('✓ COPIED');
+          }catch(e){ toast('✕ Copy failed — select and copy manually'); }
+        };
+        const pre=document.getElementById('updCmd');
+        if(pre) pre.onclick=()=>copyCmd(null);
         const cp=document.getElementById('updCopyBtn');
         if(cp) cp.onclick=async()=>{
           try{
