@@ -35,7 +35,8 @@ data class Asset(
     var WarrantyMonths: Int = 12,
     var Price: String = "0",
     var EmployeeID: String = "",
-    val InvoiceFile: String? = null
+    val InvoiceFile: String? = null,
+    @SerializedName("UpdatedAt") var updatedAt: String = ""
 )
 
 data class CreateAssetResponse(val ok: Boolean?, @SerializedName("_id") val id: String?, val error: String?)
@@ -50,7 +51,8 @@ data class Employee(
     var Designation: String = "",
     var Department: String = "",
     var Email: String = "",
-    val source: String? = null
+    val source: String? = null,
+    @SerializedName("updated_at") var updatedAt: String = ""
 )
 
 data class Ticket(
@@ -96,7 +98,8 @@ data class Contract(
     var location: String = "",
     var department: String = "",
     var license_key: String = "",
-    var note: String = ""
+    var note: String = "",
+    @SerializedName("updated_at") var updatedAt: String = ""
 )
 
 data class AuditEntry(val id: Int, val ts: String, val actor: String?, val action: String?, val asset_id: String?, val detail: String?)

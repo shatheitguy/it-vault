@@ -67,6 +67,19 @@
             android:textColor="@color/accent"
             android:visibility="gone" />
 
+        <TextView style="@style/SectionLabel" android:text="OFFLINE &amp; SYNC" />
+        <TextView
+            android:id="@+id/syncStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:background="@color/surface"
+            android:padding="12dp"
+            android:text="All changes synced" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/syncNowBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:backgroundTint="@color/accent" android:text="Sync now" />
+        <com.google.android.material.button.MaterialButton android:id="@+id/exportXmlBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Export data as XML" android:textColor="@color/accent" app:strokeColor="@color/accent" xmlns:app="http://schemas.android.com/apk/res-auto" />
+
         <TextView style="@style/SectionLabel" android:text="SERVER" />
         <TextView
             android:id="@+id/serverText"
@@ -78,12 +91,30 @@
             android:padding="12dp" />
         <com.google.android.material.button.MaterialButton android:id="@+id/changeServerBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Change server / Logout" android:textColor="@color/accent" app:strokeColor="@color/accent" xmlns:app="http://schemas.android.com/apk/res-auto" />
 
+        <TextView style="@style/SectionLabel" android:text="APP UPDATES" />
+        <TextView
+            android:id="@+id/versionText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/muted"
+            android:textSize="13sp"
+            android:background="@color/surface"
+            android:padding="12dp"
+            android:text="Version" />
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/checkUpdateBtn"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:backgroundTint="@color/accent"
+            android:text="Check for updates" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="24dp"
             android:gravity="center"
-            android:text="IT-Vault · v1.0"
+            android:text="IT-Vault — self-hosted · offline sync"
             android:textColor="@color/muted"
             android:textSize="11sp" />
     </LinearLayout>

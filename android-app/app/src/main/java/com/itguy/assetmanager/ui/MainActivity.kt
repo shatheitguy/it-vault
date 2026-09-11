@@ -6,8 +6,12 @@ import androidx.appcompat.app.ActionBarDrawerToggle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
+import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Prefs
+import com.itguy.assetmanager.data.SyncManager
+import com.itguy.assetmanager.data.SyncStore
+import kotlinx.coroutines.launch
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
 import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
@@ -27,14 +31,42 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var b: ActivityMainBinding
     private lateinit var drawerToggle: ActionBarDrawerToggle
 
+    /** Guards against the bottom bar re-firing while we mirror the drawer's selection into it. */
+    private var syncingNav = false
+
+    /** Paints the server's cached name + logo into the drawer header and toolbar. */
+    private fun applyBranding() {
+        if (!::b.isInitialized) return
+        val header = b.navView.getHeaderView(0) ?: return
+        com.itguy.assetmanager.data.Branding.apply(
+            this,
+            header.findViewById(com.itguy.assetmanager.R.id.navHeaderBrand),
+            header.findViewById(com.itguy.assetmanager.R.id.navHeaderLogo)
+        )
+    }
+
+    /** Mirrors the current destination into the bottom bar when it has a matching item. */
+    private fun syncBottomNav(itemId: Int) {
+        b.bottomNav.menu.findItem(itemId) ?: return
+        if (b.bottomNav.selectedItemId == itemId) return
+        syncingNav = true
+        b.bottomNav.selectedItemId = itemId
+        syncingNav = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         Prefs.init(applicationContext)
         Prefs.applyThemeMode()
         super.onCreate(savedInstanceState)
         OfflineCache.init(applicationContext)
+        SyncStore.init(applicationContext)
         if (!Prefs.isLoggedIn) {
             startActivity(Intent(this, LoginActivity::class.java)); finish(); return
         }
+        // Replay anything queued offline as soon as we're up, and keep watching
+        // for the network returning so later edits sync on their own.
+        SyncManager.startAutoSync(applicationContext)
+        lifecycleScope.launch { runCatching { SyncManager.syncNow(applicationContext) } }
 
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
@@ -45,9 +77,24 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         drawerToggle.syncState()
 
         b.navView.setNavigationItemSelectedListener(this)
+
+        // Bottom bar handles the top-level destinations; it shares the drawer's
+        // item ids so both route through onNavigationItemSelected().
+        b.bottomNav.setOnItemSelectedListener { item ->
+            if (!syncingNav) onNavigationItemSelected(item)
+            true
+        }
         val header = b.navView.getHeaderView(0)
         header.findViewById<android.widget.TextView>(com.itguy.assetmanager.R.id.navHeaderUser).text =
             "${Prefs.displayName.ifBlank { Prefs.username }} · ${Prefs.role}"
+
+        // Wear the server's own branding rather than the bundled defaults: paint
+        // whatever is cached right away, then refresh from the server in the background.
+        applyBranding()
+        lifecycleScope.launch {
+            runCatching { com.itguy.assetmanager.data.Branding.refresh(applicationContext) }
+            applyBranding()
+        }
 
         b.swipeRefresh.setOnRefreshListener {
             val f = supportFragmentManager.findFragmentById(com.itguy.assetmanager.R.id.fragmentContainer)
@@ -67,6 +114,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             showFragment(DashboardFragment(), "Dashboard")
             b.navView.setCheckedItem(com.itguy.assetmanager.R.id.nav_dashboard)
         }
+
+        // Self-hosted update check (throttled to once a day; prompts only if newer).
+        com.itguy.assetmanager.ui.update.AppUpdater.checkOnLaunch(this)
     }
 
     /** Finds the actual scrollable view inside whichever fragment is showing
@@ -99,6 +149,12 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     fun showFragment(fragment: Fragment, title: String, addToBackStack: Boolean = false) {
         supportActionBar?.title = title
         val tx = supportFragmentManager.beginTransaction()
+            .setCustomAnimations(
+                com.itguy.assetmanager.R.anim.frag_enter,
+                com.itguy.assetmanager.R.anim.frag_exit,
+                com.itguy.assetmanager.R.anim.frag_pop_enter,
+                com.itguy.assetmanager.R.anim.frag_pop_exit
+            )
             .replace(com.itguy.assetmanager.R.id.fragmentContainer, fragment)
         if (addToBackStack) tx.addToBackStack(null)
         else supportFragmentManager.popBackStack(null, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
@@ -137,6 +193,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_settings -> showFragment(SettingsFragment(), "Settings")
         }
         item.isChecked = true
+        syncBottomNav(item.itemId)
         return true
     }
 }
