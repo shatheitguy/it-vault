@@ -71,9 +71,15 @@ class AssetEditFragment : Fragment() {
     }
 
     companion object {
-        fun newInstance(assetId: String?): AssetEditFragment {
+        /** [assignNow] opens the Assign dialog as soon as the asset has
+         * loaded, so the action can be reached in one tap from the list
+         * instead of only from inside this screen. */
+        fun newInstance(assetId: String?, assignNow: Boolean = false): AssetEditFragment {
             val f = AssetEditFragment()
-            f.arguments = Bundle().apply { putString("assetId", assetId) }
+            f.arguments = Bundle().apply {
+                putString("assetId", assetId)
+                putBoolean("assignNow", assignNow)
+            }
             return f
         }
 
@@ -192,6 +198,13 @@ class AssetEditFragment : Fragment() {
         val isExisting = assetId != null
         b.checkOutBtn.visibility = if (isExisting && current.Status != "Checked-Out") View.VISIBLE else View.GONE
         b.checkInBtn.visibility = if (isExisting && current.Status == "Checked-Out") View.VISIBLE else View.GONE
+
+        // Opened from the list's Assign action: show the dialog straight away,
+        // and only once, so returning to this screen does not reopen it.
+        if (arguments?.getBoolean("assignNow") == true && b.checkOutBtn.visibility == View.VISIBLE) {
+            arguments?.putBoolean("assignNow", false)
+            b.checkOutBtn.post { if (isAdded) openCheckoutDialog() }
+        }
     }
 
     /** Assign to an employee -- same "Signed Date defaults to today, only

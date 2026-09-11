@@ -41,7 +41,13 @@ class AssetsListFragment : Fragment(), Refreshable {
                             AssetEditFragment.newInstance(asset.id), "Edit Asset", addToBackStack = true
                         )
                     },
-                    onChanged = { refresh() }
+                    onChanged = { refresh() },
+                    onAssign = {
+                        (activity as? MainActivity)?.showFragment(
+                            AssetEditFragment.newInstance(asset.id, assignNow = true),
+                            "Assign Asset", addToBackStack = true
+                        )
+                    }
                 )
             }
         )

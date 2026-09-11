@@ -57,6 +57,41 @@ object Prefs {
         get() = prefs.getString("brand_name", "") ?: ""
         set(v) = prefs.edit().putString("brand_name", v).apply()
 
+    /**
+     * The deployment's theme, cached as the raw hex the server reports.
+     *
+     * Cached rather than fetched on demand for one reason: it has to be
+     * readable *before the first frame is drawn*. Waiting on /api/branding
+     * means the app paints in the bundled red and then snaps to the real
+     * colours a moment later, which is the flicker. Read from disk, the
+     * palette is already right by the time anything is inflated.
+     *
+     * Blank means "never fetched" -- the bundled palette is used, which is
+     * also what a fresh install shows until its first successful refresh.
+     */
+    var brandAccent: String
+        get() = prefs.getString("brand_accent", "") ?: ""
+        set(v) = prefs.edit().putString("brand_accent", v).apply()
+
+    var brandAccent2: String
+        get() = prefs.getString("brand_accent2", "") ?: ""
+        set(v) = prefs.edit().putString("brand_accent2", v).apply()
+
+    /** Page background. May be a single hex or a gradient's first colour. */
+    var brandBg: String
+        get() = prefs.getString("brand_bg", "") ?: ""
+        set(v) = prefs.edit().putString("brand_bg", v).apply()
+
+    /** Card / component background. */
+    var brandSurface: String
+        get() = prefs.getString("brand_surface", "") ?: ""
+        set(v) = prefs.edit().putString("brand_surface", v).apply()
+
+    /** Corner radius in dp, as configured on the server. 0 means unset. */
+    var brandRadius: Int
+        get() = prefs.getInt("brand_radius", 0)
+        set(v) = prefs.edit().putInt("brand_radius", v).apply()
+
     /** Epoch millis of the last silent in-app update check (throttled to once a day). */
     var lastUpdateCheck: Long
         get() = prefs.getLong("last_update_check", 0L)
