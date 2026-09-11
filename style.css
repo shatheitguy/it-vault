@@ -736,3 +736,8 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   background:var(--bg1);border:1px solid var(--line)}
 .tkhist .hist:last-child{border-bottom:none}
 .tkhist .muted{padding:10px 2px}
+
+/* The update command is the thing people reach for, so it behaves like a
+   button: whole block copies on click. */
+.updcmd{cursor:pointer;word-break:break-all;white-space:pre-wrap}
+.updcmd:hover{border-color:var(--accent);color:var(--txt)}
