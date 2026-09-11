@@ -66,21 +66,64 @@ def wait_for_db(timeout_s: int = 300) -> None:
             time.sleep(min(5, attempt))
 
 
+def _warn_if_data_not_persistent():
+    """Say so, loudly, before anything is lost.
+
+    Without `-v itvault_data:/app/data` the saved database pointer and the
+    session key live in the container's writable layer, so replacing the
+    container -- which is how an update happens -- throws them away and the
+    next start comes up on the setup wizard with everyone signed out. That is
+    a miserable thing to discover mid-upgrade, so it goes in the log on every
+    boot instead.
+    """
+    try:
+        if _app.IS_DOCKER and not _app._data_dir_persistent():
+            bar = "!" * 72
+            print(bar, flush=True)
+            print("[serve] WARNING: " + _app.DATA_DIR + " is NOT a mounted volume.", flush=True)
+            print("[serve] The saved database settings and session key will be LOST when this",
+                  flush=True)
+            print("[serve] container is replaced -- which is exactly how updating works.",
+                  flush=True)
+            print("[serve] Re-create it with:  -v itvault_data:/app/data", flush=True)
+            print(bar, flush=True)
+    except Exception:
+        pass          # a warning must never be the thing that stops startup
+
+
 def main():
+    _warn_if_data_not_persistent()
     # A brand-new container has no database configured yet, and the setup
     # wizard is served BY this process -- so a missing database can't be
     # fatal here or there'd be nowhere to enter one. Wait briefly for a
     # database that's merely still starting, then start regardless: app.py
     # serves /setup until one is configured and an admin exists.
     try:
-        wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+        try:
+            wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+        except Exception:
+            # The saved pointer has had its full wait and still isn't
+            # answering. If the environment carries credentials that DO work,
+            # follow those instead of sitting on the setup wizard: the saved
+            # file normally wins, which is what makes a database survive its
+            # container, but a pointer that has stopped being true then has no
+            # way to be corrected from outside the volume.
+            if _app.reconcile_db_config():
+                wait_for_db(int(os.environ.get("DB_WAIT_SECONDS", 90)))
+            else:
+                raise
         _app.init_db()
         _app.migrate_schema()
+        # The database answered, so the credentials that got us here are worth
+        # keeping. Without this they live only in the container's environment
+        # and `docker rm -f itvault` sends the next start back to the wizard.
+        _app.persist_env_db_config()
     except Exception as e:
         print(f"[serve] no database yet ({type(e).__name__}) -- starting in setup mode; "
               f"open /setup to configure one", flush=True)
     _app.start_ldap_scheduler()
     _app.start_backup_scheduler()
+    _app.start_heartbeat_runner()    # runs IT-Vault's own checks
     _app.start_contract_expiry_scheduler()
 
     host = os.environ.get("HOST", "0.0.0.0")

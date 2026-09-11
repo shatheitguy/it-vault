@@ -1,0 +1,5 @@
+# IT-Vault project site
+User-agent: *
+Allow: /
+
+Sitemap: https://shatheitguy.github.io/it-vault/sitemap.xml

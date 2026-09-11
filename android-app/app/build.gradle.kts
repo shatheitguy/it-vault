@@ -19,8 +19,13 @@ android {
         applicationId = "com.itguy.assetmanager"
         minSdk = 24
         targetSdk = 34
-        versionCode = 11
-        versionName = "1.6.2"
+        // This build carries both lines of work: Heartbeat (1.8.0, code
+        // 10) and offline sync plus the Material 3 redesign (1.6.2, code
+        // 11). The in-app updater offers an update on versionCode alone,
+        // so it has to clear both -- keeping either side's number would
+        // leave a build that will not install over the other.
+        versionCode = 12
+        versionName = "1.9.0"
     }
 
     signingConfigs {

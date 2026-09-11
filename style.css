@@ -92,6 +92,11 @@ canvas#sessBar{position:fixed;bottom:0;left:0;height:3px;width:100%;z-index:60;
 .btn{background:var(--accent);color:var(--btn-text,#04121f);border:none;border-radius:8px;padding:9px 16px;font-weight:600;
   font-family:var(--font);letter-spacing:0;cursor:pointer;font-size:13px;transition:.15s}
 .btn:hover{filter:brightness(1.08)}
+/* There was no rule for this, so a disabled button looked exactly like a
+   live one -- full accent, pointer cursor, hover brighten and all. Any
+   button the app switches off now reads as switched off. */
+.btn:disabled,.btn[disabled]{opacity:.45;cursor:not-allowed;filter:none}
+.btn:disabled:hover,.btn[disabled]:hover{filter:none}
 .btn.mag{background:var(--accent2);color:var(--btn-mag-text,#fff)}
 .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--muted)}
 .btn.ghost:hover{color:var(--txt);border-color:var(--accent)}
@@ -202,11 +207,31 @@ tbody tr.group-head:hover td{background:var(--bg1)}
   padding-bottom:12px;border-bottom:1px solid var(--line)}
 .modal-box > .modal-title-row{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 clamp(12px,1.6vw,18px);padding-bottom:12px;border-bottom:1px solid var(--line)}
 .modal-box > .modal-title-row h3{margin:0;padding:0;border:0;color:var(--accent);font-family:var(--font);font-size:clamp(15px,1.4vw,17px);font-weight:650;letter-spacing:-.01em}
-.modal-box > *:not(h3):not(.m-actions):not(.modal-title-row){overflow:auto;flex:1 1 auto;min-height:0}
-.camscan-view{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;flex:0 0 auto!important}
+/* One scroll area per modal, and only one. This used to read
+   ".modal-box > *:not(h3):not(.m-actions):not(.modal-title-row)", which gave
+   EVERY direct child overflow:auto and flex:1 1 auto -- so a modal with a
+   header bar, a body and a reply box grew three scrollbars that each clipped
+   their own content and fought over the same 90vh. Every modal now wraps its
+   body in .modal-scroll, so this applies exactly once. */
+.modal-box > .modal-scroll{overflow-y:auto;overflow-x:hidden;flex:1 1 auto;min-height:0;
+  display:flex;flex-direction:column;gap:12px;
+  /* room for the scrollbar so panels don't run underneath it, and a stable
+     gutter so content doesn't shift sideways when it appears */
+  padding-right:8px;scrollbar-gutter:stable}
+.modal-box > .modal-scroll > *{margin-bottom:0}
+/* Anything still sitting directly under .modal-box is a header or a footer:
+   it keeps its height and never scrolls. */
+.modal-box > *:not(.modal-scroll){flex:0 0 auto}
+/* A table inside the one scroll area must not open a second VERTICAL
+   scrollbar -- but it still needs the horizontal one, or a table wider than
+   the modal is simply clipped with no way to reach the rest of it. Dropping
+   the height cap is what removes the vertical scroll: with no max-height the
+   wrapper grows to fit its rows, so overflow-y never triggers. */
+.modal-box .modal-scroll .tablewrap{max-height:none;overflow-x:auto;overflow-y:visible}
+.camscan-view{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
 .camscan-view video{width:100%;height:100%;object-fit:cover}
-.camscan-status{margin-top:10px;font-family:var(--font);font-size:13px;color:var(--muted);min-height:18px;flex:0 0 auto!important}
-.camscan-upload-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;flex:0 0 auto!important;overflow:visible!important}
+.camscan-status{margin-top:10px;font-family:var(--font);font-size:13px;color:var(--muted);min-height:18px;flex:0 0 auto}
+.camscan-upload-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;flex:0 0 auto}
 .modal-box .m-actions{flex:0 0 auto;position:sticky;bottom:0;background:var(--surface);display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
 .invbox{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
 .invbox label{display:block;font-family:var(--font);font-weight:700;letter-spacing:.6px;color:var(--muted);
@@ -237,6 +262,7 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 
 /* compact data tables inside modals (audit, maintenance, scan, backups) */
 .modal-box .tablewrap{border-radius:var(--radius);max-height:min(46vh,380px);box-shadow:none;max-width:100%}
+.modal-box .tablewrap.noscroll{max-height:none;overflow:visible}
 /* backups list: fixed metadata columns that never wrap/reflow, one compact
    kebab-menu button for actions instead of a row of buttons -- a long
    filename plus 3 buttons was forcing the date/size columns to wrap
@@ -244,7 +270,7 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 #backupModal .dtable td,#backupModal .dtable th{white-space:nowrap;padding-left:9px;padding-right:9px}
 #backupModal .dtable td:first-child{color:var(--text)}
 .muted{color:var(--muted)}
-.m-actions .muted,.toolbar .muted,.assignbar .muted,.dash-tools .muted{font-size:12.5px}
+.m-actions .muted,.toolbar .muted,.dash-tools .muted{font-size:12.5px}
 
 .dtable,.tbl{font-size:12.5px}
 .dtable thead th,.tbl thead th{padding:9px 12px}
@@ -287,6 +313,9 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .field2 label{font-family:var(--font);font-weight:600;letter-spacing:.5px;color:var(--muted);font-size:11px;text-transform:uppercase}
 .field2 input,.field2 select,.field2 textarea{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:8px 11px;font-family:var(--font);font-size:13px;min-height:38px}
 .field2 input:focus,.field2 select:focus,.field2 textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.field2 input:disabled,.field2 select:disabled,.field2 textarea:disabled,
+.invbox input:disabled,.invbox select:disabled,.invbox textarea:disabled{
+  opacity:.62;cursor:not-allowed;background:var(--surface2)}
 .brandfoot{margin-top:14px;color:var(--muted);font-size:11px;font-family:var(--font)}
 .count{font-family:var(--font);color:var(--muted);font-size:12.5px;white-space:nowrap;margin-right:2px}
 
@@ -298,9 +327,6 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .prio.Urgent{background:rgba(255,107,107,.16);color:#ff9b9b}
 .prio.Emergency{background:rgba(255,107,107,.25);color:#ff8585}
 .status.s_Open{color:var(--accent)}.status.s_InProgress{color:var(--amber)}.status.s_Pending{color:var(--muted2)}.status.s_Resolved{color:var(--grn)}.status.s_Closed{color:var(--muted)}
-.tkmeta{display:grid;grid-template-columns:1fr 1fr;gap:6px 20px;font-size:13px;margin-bottom:12px}
-.tkmeta b{color:var(--muted);font-weight:600}
-.tkdesc{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:12px;font-size:13px;white-space:pre-wrap;margin-bottom:12px}
 .tkreplies{display:flex;flex-direction:column;gap:8px;max-height:240px;overflow:auto;margin-bottom:12px}
 .rep{background:var(--surface2);border:1px solid var(--line);border-radius:8px;padding:9px 12px;font-size:13px}
 .rep.agent{border-left:3px solid var(--accent)}
@@ -308,13 +334,7 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .repmeta{color:var(--muted);font-size:11px;margin-bottom:4px}
 .replybox label{display:block;font-family:var(--font);font-weight:600;letter-spacing:.6px;color:var(--muted);margin-bottom:6px}
 .replybox textarea{width:100%;background:var(--bg1);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:9px;font-family:var(--font);resize:vertical}
-.assignbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--bg1);border:1px solid var(--line);border-radius:8px;padding:9px 12px;margin:4px 0 14px}
-.assignbar label{font-family:var(--font);font-weight:700;letter-spacing:.6px;color:var(--muted);font-size:12px}
-.assignbar select{flex:1;min-width:160px;background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:7px 9px}
 .rowassign{background:var(--bg1);color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:5px 7px;font-size:13px;max-width:150px}
-.tkactions{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px}
-.tkactions label{font-size:12px;color:var(--muted);display:flex;flex-direction:column;gap:4px}
-.tkactions select,.tkactions input{background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:6px;padding:7px 9px}
 .loclist{list-style:none;padding:0;max-width:480px}
 .loclist li{display:flex;justify-content:space-between;align-items:center;padding:9px 13px;border:1px solid var(--line);border-radius:8px;margin-bottom:6px;background:var(--surface)}
 
@@ -525,3 +545,194 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
 .updwarn{color:var(--amber);border-left:2px solid var(--amber);padding-left:10px;
   line-height:1.5}
 .updacts a.btn{display:inline-flex;align-items:center;text-decoration:none}
+
+/* a read-only value that sits in a .field2 where an input would go */
+.ro{background:var(--bg1);border:1px solid var(--line);border-radius:8px;
+  padding:9px 11px;font-size:13px;color:var(--muted);min-height:38px;
+  display:flex;align-items:center;overflow-wrap:anywhere}
+
+/* permission tree: one column per module group, leaves as checkboxes. A role
+   is assembled from these rather than from a level per module, so the list
+   has to stay scannable at ~40 leaves. */
+.permtree{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));
+  gap:10px;align-items:start}
+.permgrp{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:9px 11px 10px}
+.permhead{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding-bottom:6px;margin-bottom:6px;border-bottom:1px solid var(--line)}
+.permhead .chk{gap:7px}
+.permhead .chk span{font-family:var(--font);font-weight:650;font-size:11px;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--txt);line-height:1.25}
+.permcount{font-family:var(--font);font-size:10px;color:var(--muted);white-space:nowrap}
+.permitems{display:flex;flex-direction:column;gap:3px}
+.permitem{gap:7px;padding:1px 0}
+.permitem input{width:14px;height:14px}
+.permitem span{font-size:12px;line-height:1.3;color:var(--muted)}
+.permitem input:checked + span{color:var(--txt)}
+.permnote{font-style:normal;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--amber);border:1px solid var(--amber);border-radius:4px;padding:0 3px;
+  margin-left:4px;opacity:.85}
+.permtag{display:inline-block;font-family:var(--font);font-size:10.5px;padding:2px 7px;
+  border-radius:20px;background:var(--accent-soft);color:var(--accent);white-space:nowrap}
+@media(max-width:560px){.permtree{grid-template-columns:minmax(0,1fr)}}
+
+/* Phones. The 64px icon rail from the 980px breakpoint is fine on a tablet
+   but eats a sixth of a 375px screen, which left 283px for the content --
+   the tables were containing their own overflow correctly, they just had
+   almost nowhere to do it. Narrowing the rail and the gutters gives roughly
+   40px back, and tighter cells fit another column before anyone has to
+   scroll sideways. */
+@media(max-width:560px){
+  .side{flex:0 0 48px;width:48px;padding:12px 4px}
+  .logo img{width:26px;height:26px}
+  .nav a{padding:9px 0}
+  .nav a span.ni{font-size:15px}
+  .main{padding:12px 9px}
+  .topbar h2{font-size:17px}
+  .crumb{font-size:9.5px}
+  thead th{padding:9px 9px;font-size:10px}
+  tbody td{padding:8px 9px}
+  table{font-size:12.5px}
+  .dtable thead th,.tbl thead th{padding:8px 9px}
+  /* one comfortable row of buttons rather than four cramped ones */
+  .m-actions{flex-wrap:wrap}
+  .m-actions .btn{flex:1 1 auto;min-height:42px}
+  .modal-box{padding:14px 13px}
+  .invbox{padding:11px}
+  .kpis,.stats{grid-template-columns:minmax(0,1fr)}
+  /* the count and the search box were sharing a line and squeezing each other */
+  .toolbar{gap:8px}
+  .toolbar input[type=search],.toolbar input[type=text]{flex:1 1 100%}
+}
+/* the roles list is short; a scroll frame around three rows is just noise */
+#rolesBody td{padding-top:7px;padding-bottom:7px}
+
+/* Heartbeat: monitor status. A dot plus the word, not a
+   colour alone -- the state has to survive being read by someone who cannot
+   distinguish red from green. */
+.hbdot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
+  vertical-align:middle;background:var(--muted2)}
+.hbdot.up{background:var(--grn)}
+.hbdot.down{background:var(--red);box-shadow:0 0 0 3px rgba(255,107,107,.18)}
+.hbdot.pending{background:var(--amber)}
+.hbdot.maintenance{background:var(--cyan)}
+.hbcounts{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center}
+.hbpill{font-family:var(--font);font-size:10.5px;font-weight:650;letter-spacing:.03em;
+  text-transform:uppercase;padding:2px 8px;border-radius:20px;white-space:nowrap;
+  background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.hbpill.up{color:var(--grn);border-color:var(--grn)}
+.hbpill.down{color:var(--red);border-color:var(--red)}
+.hbpill.pending{color:var(--amber);border-color:var(--amber)}
+.hbpill.maintenance{color:var(--cyan);border-color:var(--cyan)}
+.hbdot.paused{background:var(--muted2)}
+.hbpill.paused{color:var(--muted);border-color:var(--line)}
+
+/* The KPI colours elsewhere are positional (c1..c5). Here the number means a
+   state, so red has to mean down and green has to mean up -- a green "1 DOWN"
+   reads as reassuring, which is the opposite of true. */
+.kpi.hbk-down .kpi-v,.kpi.hbk-down .kpi-ico{color:var(--red)}
+.kpi.hbk-pending .kpi-v,.kpi.hbk-pending .kpi-ico{color:var(--amber)}
+.kpi.hbk-up .kpi-v,.kpi.hbk-up .kpi-ico{color:var(--grn)}
+.kpi.hbk-paused .kpi-v,.kpi.hbk-paused .kpi-ico{color:var(--muted)}
+.kpi.hbk-avg .kpi-v,.kpi.hbk-avg .kpi-ico{color:var(--cyan)}
+
+/* The ECG trace. One heartbeat per recorded check, oldest on the left: an up
+   check draws a QRS complex, a failed check draws a flatline. The bright
+   segment travelling along it is the bedside-monitor idea -- it says the thing
+   is being watched right now. The trace itself is history and does not move,
+   which matters: a moving trace would imply data that is not there. */
+.hbecg{display:block;overflow:visible}
+.hbecg path{fill:none;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.hbecg .hbecg-base{stroke:currentColor;stroke-width:1.5;opacity:.28}
+.hbecg .hbecg-live{stroke:currentColor;stroke-width:1.9;
+  stroke-dasharray:130 870;stroke-dashoffset:1000;
+  filter:drop-shadow(0 0 3px currentColor);
+  animation:hbsweep 2.6s linear infinite}
+.hbecg.up{color:var(--grn)}
+.hbecg.down{color:var(--red)}
+.hbecg.pending{color:var(--amber)}
+.hbecg.paused{color:var(--muted2)}
+/* a paused monitor is not being checked, so nothing should be sweeping */
+.hbecg.paused .hbecg-live{animation:none;stroke-dasharray:none;stroke-dashoffset:0;
+  opacity:.5;filter:none}
+/* down: slower sweep, so a flatline reads as a flatline rather than as activity */
+.hbecg.down .hbecg-live{animation-duration:3.6s}
+.hbecg.idle .hbecg-live{animation-duration:4.4s;opacity:.7}
+@keyframes hbsweep{from{stroke-dashoffset:1000}to{stroke-dashoffset:0}}
+.hbecg-cell{width:1%;white-space:nowrap;padding-top:4px;padding-bottom:4px}
+.hblink{cursor:pointer}
+.hblink:hover b{color:var(--accent)}
+.hbtag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:20px;
+  font-size:9.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--surface2);color:var(--muted);border:1px solid var(--line)}
+.hbcert-warn{color:var(--amber)}
+.hbcert-bad{color:var(--red);font-weight:650}
+
+/* monitor detail */
+.hbd-head{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.hbd-state{font-weight:650;letter-spacing:.03em}
+.hbd-kpis{margin-bottom:14px}
+.hbd-kpis .kpi-v{font-size:20px}
+/* uptime carries a verdict, so it is coloured like one -- the default accent
+   made a healthy 100% render in alarm red */
+.hbd-kpis .kpi-v.ok{color:var(--grn)}
+.hbd-kpis .kpi-v.warn{color:var(--amber)}
+.hbd-kpis .kpi-v.bad{color:var(--red)}
+.hbd-kpis .kpi-v.none{color:var(--muted)}
+.hbd-ecg .hbecg{width:100%;height:64px}
+.hbd-chart{overflow-x:auto}
+.hbchart{display:block;width:100%;min-width:420px;height:120px}
+.hbchart .hbc-axis{stroke:var(--line);stroke-width:1}
+.hbchart .hbc-line{fill:none;stroke:var(--cyan);stroke-width:1.8;stroke-linejoin:round}
+.hbchart .hbc-area{fill:var(--cyan);opacity:.12;stroke:none}
+.hbchart .hbc-down{fill:var(--red);opacity:.16}
+.hbchart .hbc-lbl{fill:var(--muted);font-size:9px;font-family:var(--mono,monospace)}
+
+/* a monitor's alert-channel picker reuses the permission-tree item styling */
+.permitem-wrap{display:flex;flex-direction:column;gap:2px}
+
+@media (prefers-reduced-motion: reduce){
+  .hbecg .hbecg-live{animation:none;stroke-dasharray:none;stroke-dashoffset:0;filter:none}
+}
+
+/* The reason a monitor is down belongs next to its name. Kept to one line:
+   a socket error can be a paragraph long, and letting it wrap turned one bad
+   row into half the table. The full text is in the title attribute. */
+.hberr{font-size:11px;color:var(--red);margin-top:3px;max-width:260px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:400}
+.hbmute{margin-left:6px;opacity:.65;font-size:11px}
+.hb-down td{background:rgba(255,107,107,.06)}
+#page-heartbeat .topbar select,#page-heartbeat .topbar .toggle{flex:0 0 auto}
+#page-heartbeat .dtable{min-width:1060px}
+#page-heartbeat .dtable td{vertical-align:middle}
+#page-heartbeat .dtable td:nth-child(2){min-width:190px}
+
+/* phones: the strip and the actions are what run out of room first */
+@media(max-width:560px){
+  .hbecg{width:90px}
+  .hberr{max-width:160px}
+}
+
+/* ticket photos: a grid of thumbnails, each a link to the full-size image.
+   Same shape as the portal's picker so a photo looks the same to the person
+   who sent it and the person fixing it. */
+.shots{display:flex;flex-wrap:wrap;gap:10px}
+.shot{position:relative;width:84px;height:84px;border-radius:8px;overflow:hidden;
+  border:1px solid var(--line);background:var(--bg1)}
+.shot a{display:block;width:100%;height:100%}
+.shot img{width:100%;height:100%;object-fit:cover;display:block}
+.shot .x{position:absolute;top:3px;right:3px;width:20px;height:20px;padding:0;
+  border:0;border-radius:50%;background:rgba(0,0,0,.66);color:#fff;font-size:14px;
+  line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.shot .x:hover{background:var(--red)}
+.shot .nm{position:absolute;left:0;right:0;bottom:0;background:rgba(0,0,0,.62);
+  color:#fff;font-size:9.5px;padding:2px 4px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;pointer-events:none}
+
+/* ticket detail: the modal reuses the asset form's invbox / grid2 / field2
+   blocks, so all that is left here is a scroll frame for the change trail --
+   it reuses .hist from the asset history and only needs to be stopped from
+   stretching the modal when a ticket has been through a lot of hands. */
+.tkhist{max-height:210px;min-height:46px;overflow:auto;border-radius:8px;padding:4px 10px;
+  background:var(--bg1);border:1px solid var(--line)}
+.tkhist .hist:last-child{border-bottom:none}
+.tkhist .muted{padding:10px 2px}

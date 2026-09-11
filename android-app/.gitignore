@@ -7,7 +7,7 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
-# Signing material — NEVER commit. The whole keystore/ dir is excluded so that
+# Signing material -- NEVER commit. The whole keystore/ dir is excluded so
 # backups and *.properties variants can't slip through on a suffix.
 keystore/
 keystore.properties
