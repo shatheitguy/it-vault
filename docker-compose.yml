@@ -10,6 +10,21 @@
 #   GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'%';
 #
 # The schema builds itself on first start, and migrates itself on upgrade.
+#
+# Updating, and why this file is the safe way to do it:
+#
+#     docker compose pull
+#     docker compose up -d
+#
+# Compose recreates the containers from THIS file, so the volumes, the network
+# and the DB_* values come back exactly as declared. Nothing to remember and
+# nothing to retype. The equivalent by hand -- `docker rm -f itvault` then a
+# fresh `docker run` -- loses whatever was only ever in the old container's
+# environment, and the database credentials used to be exactly that: the setup
+# wizard would then ask for a database on an install that already had one.
+#
+# Keep this file and your .env together, and treat them the way you would
+# Nextcloud's config.php: they are the configuration, the containers are not.
 
 services:
   web:
@@ -83,7 +98,53 @@ services:
   #   # if nobody visits Settings. Drop it to only ever update on request.
   #   command: --interval 86400 itvault
 
+  # Optional: let this file run the database too, for anyone who does not
+  # already have one. Behind a profile so the default above stays "bring your
+  # own":
+  #
+  #     docker compose --profile with-db up -d
+  #
+  # Then set DB_HOST=db in .env (the service name is the hostname on the
+  # compose network) along with DB_USER, DB_PASS and DB_ROOT_PASSWORD.
+  #
+  # The credentials live in .env, not inside a container, so an update cannot
+  # lose them -- which is the whole reason to prefer this over `docker run`.
+  db:
+    profiles: ["with-db"]
+    image: mariadb:${MARIADB_TAG:-latest}
+    container_name: itvault-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
+      MARIADB_DATABASE: ${DB_NAME:-itvault}
+      MARIADB_USER: ${DB_USER:-itvault}
+      MARIADB_PASSWORD: ${DB_PASS:-}
+    volumes:
+      - itvault_db:/var/lib/mysql
+    # Deliberately not published: only the web service needs it, and it
+    # reaches it by service name over the private compose network.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+# Named explicitly, and that matters more than it looks.
+#
+# Compose normally prefixes volumes with the project name, so in a directory
+# called itvault these would become itvault_itvault_data and so on -- BRAND
+# NEW, EMPTY volumes. Anyone moving an existing install onto this file would
+# bring compose up and find every asset, ticket and setting apparently gone,
+# while the real data sat untouched in the unprefixed volumes next to it.
+#
+# Pinning `name:` keeps the exact names install.sh creates, so this file is a
+# drop-in for an install that already exists as well as a fresh one.
 volumes:
   itvault_data:
+    name: itvault_data
   invoices_data:
+    name: invoices_data
   backups_data:
+    name: backups_data
+  itvault_db:
+    name: itvault_db

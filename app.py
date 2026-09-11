@@ -21,7 +21,8 @@ Docker-ready. No Access DB.
 import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading, sys
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
-from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect
+from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect, make_response
+from flask import g, has_request_context
 import pymysql
 from dbutils.pooled_db import PooledDB
 from openpyxl import Workbook, load_workbook
@@ -46,6 +47,290 @@ except Exception:
 
 # ---- persistent DB config (itvault_config.json) ----
 # Lets you point the app at a different MariaDB container/server from the UI.
+# Uploaded branding belongs with the rest of the persistent state, not in the
+# image. Written to BASE it lived in the container's writable layer, so every
+# update -- which replaces the container -- silently wiped the logo and
+# letterhead. (default_logo.png stays in BASE: it ships with the image.)
+LOGO_PATH = os.path.join(DATA_DIR, "logo.png")
+LETTERHEAD_PATH = os.path.join(DATA_DIR, "letterhead.png")
+
+
+def _dir_writable(path):
+    """Can this process actually create a file in here?
+
+    os.access() consults the mode bits and gets this wrong often enough to be
+    useless -- a root-owned Docker volume mounted under a non-root USER is
+    exactly the case it misreports. So try it for real.
+    """
+    probe = os.path.join(path, ".itvault_write_probe")
+    try:
+        with open(probe, "wb") as fp:
+            fp.write(b"1")
+        os.remove(probe)
+        return True
+    except Exception:
+        return False
+
+
+# A named volume is created empty and root-owned unless the image already
+# contains the directory it shadows, and the container runs as uid 1000. When
+# that happens every write in here fails, which used to take the uploaded
+# branding, the saved database pointer and the session key down with it.
+# Nothing may depend on this being True.
+DATA_DIR_WRITABLE = _dir_writable(DATA_DIR)
+if not DATA_DIR_WRITABLE:
+    print(f"[itvault] WARNING: {DATA_DIR} is not writable by this process "
+          f"(uid {os.getuid() if hasattr(os, 'getuid') else '?'}). Branding and "
+          f"settings are still safe -- they live in the database -- but fix the "
+          f"volume with:  docker run --rm -v itvault_data:/data alpine "
+          f"chown -R 1000:1000 /data", flush=True)
+
+
+def _brand_blob(col):
+    """The stored logo/letterhead bytes, or None.
+
+    The file on disk is only ever a cache. The database is what actually
+    survives a container being replaced, so it is the source of truth -- which
+    is why branding used to vanish on update even though it was still in here.
+    """
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT `%s` FROM Settings WHERE id=1" % col)
+        r = cur.fetchone(); c.close()
+        return (r or {}).get(col) or None
+    except Exception:
+        return None
+
+
+# What we are willing to push into a single INSERT. A PDF page rasterized at
+# 144dpi can be several megabytes, and sending that to a database over a slow
+# or TLS-wrapped link is what made the letterhead save time out.
+BRAND_MAX_BYTES = 3 * 1024 * 1024
+BRAND_MAX_EDGE = 1600
+# A logo is a mark in a sidebar and on a printed label, never a page: no
+# surface renders it above a couple of hundred pixels. Shrinking an
+# oversized one is a better answer than refusing it, which is what a hard
+# 500KB cap did -- and it is the same treatment the letterhead gets.
+LOGO_MAX_EDGE = 512
+LOGO_MAX_BYTES = 400 * 1024
+
+
+def _fit_png(data, max_edge=BRAND_MAX_EDGE, max_bytes=BRAND_MAX_BYTES):
+    """Bring a rendered image within something one statement can carry.
+
+    1600px is already more than the print surfaces use (A4 at 144dpi is
+    1191px wide), so the cap costs nothing visible; if the result is still
+    over budget it steps down until it fits.
+
+    Every candidate is measured and the smallest kept, and the original wins
+    if nothing beat it -- re-encoding at a smaller size is not guaranteed to
+    produce fewer bytes (downscaling averages neighbouring pixels, which can
+    cost more entropy than the dropped pixels saved), and returning something
+    larger than what came in would defeat the point. Without PIL, or on any
+    failure, the input is returned untouched rather than losing the upload.
+    """
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(data))
+        w, h = img.size
+    except Exception:
+        return data
+    if w <= max_edge and h <= max_edge and len(data) <= max_bytes:
+        return data
+    best = data
+    for edge in (max_edge, 1200, 900, 700):
+        if edge >= max(w, h) and len(data) <= max_bytes:
+            continue
+        try:
+            im = PILImage.open(io.BytesIO(data))
+            im.thumbnail((edge, edge))
+            buf = io.BytesIO()
+            im.convert("RGB").save(buf, format="PNG", optimize=True)
+            cand = buf.getvalue()
+        except Exception:
+            break
+        if len(cand) < len(best):
+            best = cand
+        if len(best) <= max_bytes:
+            break
+    return best
+
+
+def _brand_store(col, path, data, cur=None):
+    """Save branding to the database, and cache it on disk if we can.
+
+    Returns (ok, error). Only the database write decides that: the file is a
+    convenience, and on an install whose data volume is root-owned it can
+    never succeed. Failing the upload over it -- or swallowing a real database
+    error so the upload merely looks like it worked -- is what made this
+    impossible to diagnose from the UI.
+
+    Pass `cur` when the caller already has a transaction open on Settings
+    id=1, and the write joins it instead of opening a connection of its own.
+    That is not tidiness: /api/settings updates that row and holds the lock
+    until it returns, so a second connection writing the same row deadlocked
+    against its own request and sat there until innodb_lock_wait_timeout.
+    The caller owns the commit in that case.
+    """
+    if cur is not None:
+        try:
+            cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
+        except Exception as e:
+            print(f"[itvault] could not store {col}: {e}", flush=True)
+            return False, _brand_store_help(col, e)
+        try:
+            with open(path, "wb") as fp:
+                fp.write(data)
+        except Exception as e:
+            print(f"[itvault] {col} stored but not cached at {path}: {e}", flush=True)
+        return True, None
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (data,))
+        # An UPDATE matching no row is a success that changed nothing. If the
+        # Settings row is missing there is no error to see, and the image
+        # simply never appears -- so the row count is checked, not assumed.
+        touched = cur.rowcount
+        c.commit()
+        if touched == 0:
+            cur.execute("SELECT COUNT(*) AS n FROM Settings WHERE id=1")
+            if not (cur.fetchone() or {}).get("n"):
+                print(f"[itvault] {col}: no Settings row with id=1 -- nothing was saved", flush=True)
+                return False, ("This database has no settings row yet. Restart IT-Vault so it "
+                               "can create one, then try the upload again.")
+    except Exception as e:
+        # Rolled back and released explicitly rather than relying on the
+        # request teardown: this also runs from the scheduled jobs, which have
+        # no request to tear down. Leaving it open held the lock on Settings
+        # id=1 and made every later settings save time out too.
+        if c is not None:
+            try: c.rollback()
+            except Exception: pass
+        print(f"[itvault] could not store {col} in the database: {e}", flush=True)
+        return False, _brand_store_help(col, e)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    try:
+        with open(path, "wb") as fp:
+            fp.write(data)
+    except Exception as e:
+        print(f"[itvault] {col} saved to the database but not cached at {path}: {e}", flush=True)
+    return True, None
+
+
+def _brand_store_help(col, exc):
+    """Turn a driver error on a branding write into something actionable."""
+    msg = str(exc)
+    code = exc.args[0] if getattr(exc, "args", None) else None
+    if code in (1406, 1366) or "Data too long" in msg or "Incorrect string value" in msg:
+        return (f"The Settings.{col} column can't hold image data on this database. "
+                f"Run:  ALTER TABLE Settings MODIFY {col} MEDIUMBLOB;")
+    if code == 1054 or "Unknown column" in msg:
+        return (f"This database has no Settings.{col} column. Restart IT-Vault so it "
+                f"can add it, or run:  ALTER TABLE Settings ADD COLUMN {col} MEDIUMBLOB;")
+    if code == 1153 or "max_allowed_packet" in msg:
+        return ("The image is larger than the database will accept in one statement. "
+                "Use a smaller file, or raise max_allowed_packet on the server.")
+    if code in (2013, 2006) or "Lost connection" in msg or "timed out" in msg:
+        return ("The database stopped responding while the image was being saved. "
+                "That usually means the file is large and the connection to the "
+                "database is slow -- try a smaller image. If it keeps happening, "
+                "raise ITVAULT_DB_TIMEOUT (currently "
+                f"{DB_TIMEOUT}s) or move the database closer to the app.")
+    return f"Database rejected the upload: {msg}"
+
+
+def _brand_restore(col, path):
+    """Re-create the on-disk cache from the database when it's missing.
+
+    Called by the serving routes, so the first request after an update quietly
+    repopulates the file instead of showing a blank logo. Returns False when
+    there is nothing stored OR the cache can't be written -- callers fall back
+    to serving the bytes straight out of the database.
+    """
+    if os.path.exists(path) and os.path.getsize(path) > 0:
+        return True
+    data = _brand_blob(col)
+    if not data:
+        return False
+    try:
+        with open(path, "wb") as fp:
+            fp.write(data)
+        print(f"[itvault] restored {col} from the database", flush=True)
+        return True
+    except Exception:
+        return False
+
+
+def _brand_render_file(col, path):
+    """A real file a PDF renderer can open, or None.
+
+    reportlab needs a path on disk, and the cache is the only thing that is
+    one. When the cache is missing -- a replaced container, a volume the app
+    cannot write -- fall back to a temporary copy of the database blob.
+    Reading only the cache is what silently dropped the letterhead from
+    every printed page while it was still sitting in the database.
+
+    Returns (path, is_temp); the caller deletes it when is_temp.
+    """
+    if _brand_restore(col, path) and os.path.exists(path) and os.path.getsize(path) > 0:
+        return path, False
+    data = _brand_blob(col)
+    if not data:
+        return None, False
+    try:
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix=f"itvault_{col}_", suffix=".png")
+        with os.fdopen(fd, "wb") as fp:
+            fp.write(bytes(data))
+        return tmp, True
+    except Exception as e:
+        print(f"[itvault] could not materialize {col} for printing: {e}", flush=True)
+        return None, False
+
+
+def _brand_send(col, path, filename):
+    """Serve branding from the disk cache, or straight from the database.
+
+    The database path is what keeps the logo visible on an install whose data
+    volume the app can't write to -- there, the cache never materializes and
+    every request would otherwise fall through to the default mark.
+    """
+    if _brand_restore(col, path) and os.path.exists(path) and os.path.getsize(path) > 0:
+        return send_from_directory(DATA_DIR, filename)
+    data = _brand_blob(col)
+    if not data:
+        return None
+    resp = make_response(bytes(data))
+    resp.headers["Content-Type"] = "image/png"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+def _migrate_branding_to_data_dir():
+    """Move a logo/letterhead left in BASE by an older build into DATA_DIR.
+
+    Runs once, on the first start after upgrading, so an install that already
+    had branding keeps it instead of coming up blank.
+    """
+    if DATA_DIR == BASE:
+        return
+    import shutil
+    for name, dest in (("logo.png", LOGO_PATH), ("letterhead.png", LETTERHEAD_PATH)):
+        src = os.path.join(BASE, name)
+        try:
+            if (os.path.exists(src) and os.path.getsize(src) > 0
+                    and not (os.path.exists(dest) and os.path.getsize(dest) > 0)):
+                shutil.copy2(src, dest)
+                print(f"[itvault] migrated {name} into {DATA_DIR}", flush=True)
+        except Exception as e:
+            print(f"[itvault] could not migrate {name}: {e}", flush=True)
+
+
+_migrate_branding_to_data_dir()
+
 CONFIG_PATH = os.path.join(DATA_DIR, "itvault_config.json")
 def load_config():
     """An install with no config file lands on the first-run setup wizard,
@@ -63,6 +348,14 @@ DB_PORT = int(_cfg.get("db_port", os.environ.get("DB_PORT", 3306)))
 DB_NAME = _cfg.get("db_name", os.environ.get("DB_NAME", "itguy_assets"))
 DB_USER = _cfg.get("db_user", os.environ.get("DB_USER", "itguy"))
 DB_PASS = _cfg.get("db_pass", os.environ.get("DB_PASS", "itguypass"))
+# How long a query may stall before the request gives up on it. A bound is
+# essential (see the pool below), but 30s is not always enough for a large
+# letterhead going over a slow or TLS-wrapped link, so it is raisable without
+# rebuilding the image.
+try:
+    DB_TIMEOUT = max(5, int(os.environ.get("ITVAULT_DB_TIMEOUT") or 30))
+except Exception:
+    DB_TIMEOUT = 30
 def save_db_config(h, p, n, u, pw):
     global DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS = h, int(p), n, u, pw
@@ -71,6 +364,102 @@ def save_db_config(h, p, n, u, pw):
             json.dump({"db_host": h, "db_port": int(p), "db_name": n, "db_user": u, "db_pass": pw}, f, indent=2)
     except Exception:
         pass
+def _db_reachable(host, port, name, user, pw, timeout=6):
+    """Can these exact credentials open a connection right now?
+
+    Deliberately not the pool: the pool was built with whatever config the
+    app resolved at import, and the point here is to test something else.
+    """
+    try:
+        c = pymysql.connect(host=host, port=int(port), user=user, password=pw,
+                            database=name, connect_timeout=timeout,
+                            read_timeout=timeout, write_timeout=timeout)
+        c.close()
+        return True
+    except Exception:
+        return False
+
+
+def reconcile_db_config():
+    """Follow the environment when the saved pointer has stopped working.
+
+    itvault_config.json takes precedence over the environment, which is what
+    makes a database survive its container being replaced. The cost is that a
+    pointer which stops being true -- the database moved, was renamed, joined
+    a different network, had its password rotated -- cannot be corrected by
+    passing new environment variables, because the file keeps winning. The
+    install then sits on the setup wizard with no way out but editing a file
+    inside a volume.
+
+    So: if the saved pointer cannot connect and the environment's credentials
+    can, the environment wins and the file is rewritten. Only ever called
+    after the saved pointer has had its full startup wait, so a database that
+    is merely slow to boot is never mistaken for a wrong one.
+    """
+    env_host = os.environ.get("DB_HOST")
+    env_name = os.environ.get("DB_NAME")
+    if not (env_host or env_name):
+        return False                      # nothing to fall back to
+    e_host = env_host or DB_HOST
+    e_port = int(os.environ.get("DB_PORT") or DB_PORT)
+    e_name = env_name or DB_NAME
+    e_user = os.environ.get("DB_USER") or DB_USER
+    e_pass = os.environ.get("DB_PASS")
+    if e_pass is None:
+        e_pass = DB_PASS
+    if (e_host, e_port, e_name, e_user, e_pass) == (DB_HOST, DB_PORT, DB_NAME,
+                                                    DB_USER, DB_PASS):
+        return False                      # identical: nothing to reconcile
+    if not _db_reachable(e_host, e_port, e_name, e_user, e_pass):
+        return False                      # no better than what we have
+    print(f"[itvault] the saved database pointer ({DB_USER}@{DB_HOST}/{DB_NAME}) "
+          f"did not answer, but the environment's ({e_user}@{e_host}/{e_name}) "
+          f"does -- following it and updating {CONFIG_PATH}", flush=True)
+    save_db_config(e_host, e_port, e_name, e_user, e_pass)
+    _cfg.update({"db_host": e_host, "db_port": e_port, "db_name": e_name,
+                 "db_user": e_user, "db_pass": e_pass})
+    # no need to touch the pool: _db_pool() is keyed on the config and
+    # rebuilds itself as soon as these globals change
+    return True
+
+
+def persist_env_db_config():
+    """Record environment-provided database credentials in the config file.
+
+    install.sh passes DB_HOST/DB_NAME/DB_USER/DB_PASS as container
+    environment, and that is the ONLY place they live. So `docker rm -f
+    itvault` followed by a plain `docker run` loses them and the setup wizard
+    asks for a database again -- on an install that already had a perfectly
+    good one. Recording them changes nothing about how they resolve, since
+    load_config() already takes precedence over the environment; it just
+    means the pointer outlives the container that was told it.
+
+    Only ever called once the database has actually answered, so a typo in
+    the environment is never written down as though it worked. An existing
+    entry is left alone: a value set through Settings is the user's, not the
+    environment's.
+    """
+    if _cfg.get("db_host"):
+        return False
+    if not (os.environ.get("DB_HOST") or os.environ.get("DB_NAME")):
+        return False
+    before = os.path.exists(CONFIG_PATH)
+    save_db_config(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS)
+    if os.path.exists(CONFIG_PATH):
+        _cfg["db_host"] = DB_HOST
+        print(f"[itvault] database pointer saved to {CONFIG_PATH} -- it now "
+              f"survives the container being replaced", flush=True)
+        print(f"[itvault] that file is the source of truth for the database "
+              f"connection; keep {DATA_DIR} on a volume and updates cannot "
+              f"lose it", flush=True)
+        return True
+    print(f"[itvault] could not write {CONFIG_PATH}"
+          + ("" if before else " (directory not writable?)")
+          + " -- the database pointer will be lost when this container is "
+            "replaced, and the setup wizard will ask again", flush=True)
+    return False
+
+
 # ---- first-run setup state ----
 # The app has to be able to boot with NO working database, otherwise there's
 # nowhere to ask the user for one -- so instead of refusing to start, it
@@ -294,6 +683,192 @@ def _role_perms(role_name):
             "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none",
             "settings": r.get("perm_settings") or "none"}
 
+# ---------- ticket photo attachments ----------
+# A phone camera is the fastest bug report there is, so the portal lets a
+# requester attach one. That endpoint is public, so nothing the browser says
+# about the file is trusted: the type is read back out of the bytes and only
+# real raster images are kept. SVG is deliberately absent -- it is a script
+# carrier, and these are served from the app's own origin.
+ATTACH_MAX_BYTES = 4 * 1024 * 1024
+ATTACH_MAX_PER_TICKET = 4
+# Signatures as hex, so the table stays readable next to the byte counts.
+_IMAGE_MAGIC = (
+    (bytes.fromhex("ffd8ff"), "image/jpeg", "jpg"),
+    (bytes.fromhex("89504e470d0a1a0a"), "image/png", "png"),
+    (b"GIF87a", "image/gif", "gif"),
+    (b"GIF89a", "image/gif", "gif"),
+)
+
+def _sniff_image(data):
+    """Return (mimetype, extension) for real image bytes, else (None, None).
+
+    The signature is read from the file itself; a .png that is really a zip,
+    or an SVG renamed to .jpg, does not get through."""
+    if not data or len(data) < 12:
+        return None, None
+    for magic, mime, ext in _IMAGE_MAGIC:
+        if data.startswith(magic):
+            return mime, ext
+    # RIFF....WEBP -- the size field sits between the two markers
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp", "webp"
+    # ISO-BMFF: HEIC/HEIF, which is what an iPhone hands over by default
+    if data[4:8] == b"ftyp":
+        brand = data[8:12]
+        if brand in (b"heic", b"heix", b"hevc", b"heim", b"heis", b"hevm", b"mif1", b"msf1"):
+            return "image/heic", "heic"
+    return None, None
+
+def _store_ticket_photos(cur, ticket_id, files, uploaded_by):
+    """Validate and save uploaded photos. Returns (saved, [skip reasons])."""
+    saved, skipped = 0, []
+    cur.execute("SELECT COUNT(*) AS n FROM TicketAttachments WHERE ticket_id=%s", [ticket_id])
+    have = (cur.fetchone() or {}).get("n", 0) or 0
+    for f in files:
+        if not f or not getattr(f, "filename", ""):
+            continue
+        if have + saved >= ATTACH_MAX_PER_TICKET:
+            skipped.append(f"{f.filename}: only {ATTACH_MAX_PER_TICKET} photos per ticket")
+            continue
+        data = f.read(ATTACH_MAX_BYTES + 1)
+        if len(data) > ATTACH_MAX_BYTES:
+            skipped.append(f"{f.filename}: over {ATTACH_MAX_BYTES // (1024 * 1024)}MB")
+            continue
+        mime, ext = _sniff_image(data)
+        if not mime:
+            skipped.append(f"{f.filename}: not a JPEG, PNG, GIF, WebP or HEIC image")
+            continue
+        # The stored name is ours, not theirs -- a filename from a public form
+        # has no business steering a path or a header.
+        name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(f.filename or ""))[:180] or ("photo." + ext)
+        cur.execute("""INSERT INTO TicketAttachments (ticket_id, filename, mimetype, size, uploaded_by, data)
+                       VALUES (%s,%s,%s,%s,%s,%s)""",
+                    (ticket_id, name, mime, len(data), (uploaded_by or "portal")[:80], data))
+        saved += 1
+    return saved, skipped
+
+def _ticket_hist(cur, ticket_id, who, field, old_val, new_val):
+    """One row on a ticket's change trail. Same shape as an asset's history,
+    which is what lets the UI render both with the same markup."""
+    cur.execute("INSERT INTO TicketHistory (ticket_id, ts, user, field, old_val, new_val) "
+                "VALUES (%s, NOW(), %s, %s, %s, %s)",
+                [ticket_id, who, field, old_val, new_val])
+
+
+def _attachment_rows(cur, ticket_id):
+    """Metadata only -- the bytes are fetched one at a time by their own route."""
+    cur.execute("""SELECT id, filename, mimetype, size, uploaded_by, created_at
+                   FROM TicketAttachments WHERE ticket_id=%s ORDER BY id""", [ticket_id])
+    # Built key by key rather than dict(row), so the image bytes can never
+    # ride along into a JSON response if this SELECT is ever widened.
+    return [{"id": r["id"], "filename": r.get("filename") or "photo",
+             "mimetype": r.get("mimetype") or "", "size": r.get("size") or 0,
+             "uploaded_by": r.get("uploaded_by") or "",
+             "created_at": str(r.get("created_at") or "")} for r in cur.fetchall()]
+
+def _attachment_response(row):
+    """Send image bytes with the type WE sniffed, never the uploader's, and
+    tell the browser not to second-guess it."""
+    resp = make_response(row["data"])
+    resp.headers["Content-Type"] = row.get("mimetype") or "application/octet-stream"
+    resp.headers["Content-Disposition"] = "inline; filename=\"%s\"" % (row.get("filename") or "photo")
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return resp
+
+def _is_admin():
+    """True only for the admin role, for actions that must never fall to an
+    editor -- deletion, chiefly. Mirrors _module_write_allowed()'s
+    session-or-API-key resolution so it holds for the mobile app too."""
+    urole = session.get("role")
+    if not session.get("user"):
+        row = _resolve_session_from_api_key()
+        if not row:
+            return False
+        urole = row["role"]
+    return urole == ROLE_ADMIN
+
+
+def _data_dir_persistent():
+    """Is DATA_DIR on a mounted volume, or will it die with the container?
+
+    A container started without `-v itvault_data:/app/data` keeps
+    itvault_config.json in its writable layer, so replacing the container --
+    which is exactly how you update it -- silently throws away the database
+    pointer and the session key, and the next start lands on the setup wizard.
+    Better to say so up front than let someone find out mid-upgrade.
+    """
+    if not IS_DOCKER:
+        return True
+    try:
+        with open("/proc/self/mountinfo", encoding="utf-8") as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) > 4 and parts[4] == DATA_DIR:
+                    return True
+        return False
+    except Exception:
+        return True          # never cry wolf on a platform we can't inspect
+
+
+def _db_error_help(exc, host=""):
+    """A driver error, rewritten as something a person can act on.
+
+    pymysql surfaces the server's raw text -- "Access denied for user
+    'x'@'172.17.0.1'" -- which says what happened but not what to do, and the
+    two commonest causes under Docker are invisible from it: a grant that
+    doesn't cover the container's source address, and a pre-existing volume
+    that made MariaDB skip creating the user at all.
+    """
+    raw = str(exc)
+    code = exc.args[0] if getattr(exc, "args", None) and isinstance(exc.args[0], int) else None
+    nl = "\n"
+
+    if code == 1045:                                   # bad credentials / no grant
+        m = re.search(r"'([^']*)'@'([^']*)'", raw)
+        user, from_host = (m.group(1), m.group(2)) if m else ("", "")
+        u = user or "itvault"
+        tips = []
+        if from_host and re.match(r"^(172\.(1[6-9]|2\d|3[01])\.|10\.|192\.168\.)", from_host):
+            tips.append(
+                "MariaDB sees this login arriving from " + from_host + " -- Docker's address, "
+                "not localhost -- and a MariaDB user is per-host. Grant it for that range:" + nl
+                + "    CREATE USER '" + u + "'@'%' IDENTIFIED BY '<password>';" + nl
+                + "    GRANT ALL PRIVILEGES ON <database>.* TO '" + u + "'@'%';" + nl
+                + "    FLUSH PRIVILEGES;")
+        tips.append(
+            "If the database runs in a container you re-created over an EXISTING volume, "
+            "MariaDB skipped its own setup and kept the old password -- the MARIADB_USER / "
+            "MARIADB_PASSWORD you passed were ignored. Those only apply to a brand-new volume.")
+        return ("Wrong username or password, or that user is not allowed to connect from here."
+                + nl + nl + (nl + nl).join(tips))
+
+    if code == 2003:                                   # connection refused
+        return ("Nothing is listening on " + (host or "that host") + ":3306 yet." + nl + nl
+                + "A database container needs 10-20 seconds to initialise before it accepts "
+                "connections -- if you have just started it, wait and try again." + nl + nl
+                + "Otherwise check the host: from inside this container 127.0.0.1 means the "
+                "container itself. Use the database container's name on a shared Docker "
+                "network, or host.docker.internal for a database on the Docker host.")
+
+    if code == 2005:                                   # name does not resolve
+        return ("The name '" + host + "' does not resolve from inside this container." + nl + nl
+                + "Container names only resolve on a user-defined Docker network, so both "
+                "containers have to share one. For a database on the Docker host, use "
+                "host.docker.internal instead.")
+
+    if code == 1049:                                   # no such database
+        return ("That database does not exist yet. Create it, then try again:" + nl
+                + "    CREATE DATABASE <name> CHARACTER SET utf8mb4;")
+
+    if code == 1044:                                   # connected, no rights
+        return ("The user connected, but has no rights on that database:" + nl
+                + "    GRANT ALL PRIVILEGES ON <database>.* TO '<user>'@'%';" + nl
+                + "    FLUSH PRIVILEGES;")
+
+    return raw
+
+
 def _module_write_allowed(module):
     """For routes that combine GET (read) with POST/PUT/DELETE (write) under
     one decorator -- call this inside the view for the write branches."""
@@ -306,6 +881,203 @@ def _module_write_allowed(module):
     if urole == ROLE_ADMIN:
         return True
     return _PERM_ORDER.get(_role_perms(urole).get(module, "none"), 0) >= _PERM_ORDER["write"]
+
+# ---------- granular permissions ----------
+# A role's five module levels (none/read/write) are coarse: "write on assets"
+# also means import, export, delete and the trash. This catalogue breaks each
+# module into the individual things a person can actually do, so a role can be
+# given one of them and nothing else.
+#
+# Each leaf declares the module it belongs to and the level it implies, and the
+# module columns on Roles are DERIVED from the granted leaves when a role is
+# saved. Every existing module+level check therefore keeps working untouched --
+# the leaves refine what a module already allows, they never reach past it.
+#
+# "admin_only" leaves are the ones a coarse module level never granted in the
+# first place (the audit log, the network scan, backup/restore). They stay
+# refused unless explicitly granted to a role, and they are enforced with
+# _feature_allowed() at the route rather than by a module level.
+FEATURE_GROUPS = [
+    {"key": "assets", "label": "Assets", "module": "assets", "items": [
+        ("assets.view",     "View assets",                  "read"),
+        ("assets.create",   "Add an asset",                  "write"),
+        ("assets.edit",     "Edit an asset",                 "write"),
+        ("assets.delete",   "Delete an asset",               "write"),
+        ("assets.checkout", "Check out / check in",          "write"),
+        ("assets.import",   "Import from Excel",             "write"),
+        ("assets.export",   "Export to Excel",               "read"),
+        ("assets.labels",   "Print QR labels",               "read"),
+        ("assets.catalog",  "Product catalog",               "read"),
+        ("assets.trash",    "Trash (restore / purge)",       "write"),
+    ]},
+    {"key": "contracts", "label": "Contracts", "module": "contracts", "items": [
+        ("contracts.view",   "View contracts",               "read"),
+        ("contracts.create", "Add a contract",               "write"),
+        ("contracts.edit",   "Edit a contract",              "write"),
+        ("contracts.delete", "Delete a contract",            "write"),
+        ("contracts.print",  "Print / export",               "read"),
+    ]},
+    {"key": "directory", "label": "Directory (Employees)", "module": "directory", "items": [
+        ("directory.view",     "View employees",             "read"),
+        ("directory.create",   "Add an employee",            "write"),
+        ("directory.edit",     "Edit an employee",           "write"),
+        ("directory.delete",   "Delete an employee",         "write"),
+        ("directory.ldap",     "Sync from Active Directory", "write"),
+        ("directory.reflists", "Departments / designations / locations", "admin_only"),
+    ]},
+    {"key": "tickets", "label": "Tickets", "module": "tickets", "items": [
+        ("tickets.view",   "View tickets",                   "read"),
+        ("tickets.create", "Raise a ticket",                 "write"),
+        ("tickets.reply",  "Reply to a ticket",              "write"),
+        ("tickets.queue",  "Set status, priority, assignee", "write"),
+        ("tickets.edit",   "Edit a ticket's details",        "admin_only"),
+        ("tickets.photos", "Add photos",                     "write"),
+        ("tickets.delete", "Delete a ticket",                "admin_only"),
+    ]},
+    {"key": "settings", "label": "Settings", "module": "settings", "items": [
+        ("settings.general",  "General (name, language, currency)", "write"),
+        ("settings.branding", "Branding (logo, letterhead, theme)", "write"),
+        ("settings.email",    "Email / SMTP",                "write"),
+        ("settings.sla",      "Ticket SLAs and automation",   "write"),
+        ("settings.labels",   "QR labels",                    "write"),
+        ("settings.ldap",     "LDAP / Active Directory",      "write"),
+        ("settings.unifi",    "UniFi",                        "write"),
+        ("settings.portal",   "Support portal",               "write"),
+    ]},
+    {"key": "tools", "label": "Tools and records", "module": None, "items": [
+        ("tools.scan",    "Network scan",                     "admin_only"),
+        ("tools.heartbeat",     "Heartbeat (uptime monitoring + alerts)",       "admin_only"),
+        ("tools.audit",   "Audit log",                        "admin_only"),
+        ("tools.backup",  "Backup and restore",               "admin_only"),
+        ("tools.monitor", "Monitor screen",                   "admin_only"),
+    ]},
+]
+
+# Reaches outside the module levels that the built-in roles already have
+# today, so moving these routes onto feature checks takes nothing away from
+# them. read-write can scan the network, read the audit log and open the
+# monitor; both built-ins can open the monitor; backup/restore stays admin.
+BUILTIN_EXTRA_FEATURES = {
+    ROLE_EDIT: {"tools.scan", "tools.heartbeat", "tools.audit", "tools.monitor",
+                "directory.reflists", "assets.import"},
+    ROLE_VIEW: {"tools.monitor"},
+}
+
+# flat lookups
+FEATURE_LEVEL = {k: lvl for g in FEATURE_GROUPS for (k, _lbl, lvl) in g["items"]}
+FEATURE_MODULE = {k: g["module"] for g in FEATURE_GROUPS for (k, _l, _v) in g["items"]}
+ALL_FEATURES = list(FEATURE_LEVEL.keys())
+
+
+def _features_from_modules(perms):
+    """Everything a role with these module levels could already do.
+
+    Used for the built-in roles and for a custom role saved before this
+    catalogue existed, so nobody loses access on upgrade. admin_only leaves
+    are never included -- a module level never granted them.
+    """
+    out = set()
+    for key, lvl in FEATURE_LEVEL.items():
+        if lvl == "admin_only":
+            continue
+        mod = FEATURE_MODULE.get(key)
+        have = (perms or {}).get(mod, "none")
+        if _PERM_ORDER.get(have, 0) >= _PERM_ORDER.get(lvl, 2):
+            out.add(key)
+    return out
+
+
+def _modules_from_features(granted):
+    """Derive the five module levels from a set of granted leaves.
+
+    A module is 'write' if any write-level leaf under it is granted, 'read' if
+    only read-level ones are, 'none' if none are. This keeps the coarse
+    columns -- which every existing route check reads -- in step with the
+    leaves an admin actually ticked.
+    """
+    perms = {"assets": "none", "contracts": "none", "directory": "none",
+             "tickets": "none", "settings": "none"}
+    for key in granted:
+        mod = FEATURE_MODULE.get(key)
+        lvl = FEATURE_LEVEL.get(key)
+        if mod not in perms or lvl not in ("read", "write"):
+            continue
+        if lvl == "write":
+            perms[mod] = "write"
+        elif perms[mod] == "none":
+            perms[mod] = "read"
+    return perms
+
+
+def _role_features(role_name):
+    """The set of feature keys a role may use."""
+    if role_name == ROLE_ADMIN:
+        return set(ALL_FEATURES)
+    if role_name in BUILTIN_ROLE_PERMS:
+        return (_features_from_modules(BUILTIN_ROLE_PERMS[role_name])
+                | BUILTIN_EXTRA_FEATURES.get(role_name, set()))
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT perm_assets, perm_contracts, perm_directory, perm_tickets, "
+                    "perm_settings, perms_json FROM Roles WHERE name=%s", [role_name])
+        r = cur.fetchone(); c.close()
+    except Exception:
+        return set()
+    if not r:
+        return set()
+    raw = r.get("perms_json")
+    if raw:
+        try:
+            stored = json.loads(raw)
+            if isinstance(stored, dict):
+                return {k for k, v in stored.items() if v and k in FEATURE_LEVEL}
+            if isinstance(stored, list):
+                return {k for k in stored if k in FEATURE_LEVEL}
+        except Exception:
+            pass
+    # saved before the catalogue existed -- fall back to what its module
+    # levels already allowed, so the upgrade takes nothing away
+    return _features_from_modules({
+        "assets": r.get("perm_assets") or "none", "contracts": r.get("perm_contracts") or "none",
+        "directory": r.get("perm_directory") or "none", "tickets": r.get("perm_tickets") or "none",
+        "settings": r.get("perm_settings") or "none"})
+
+
+def feature_required(key):
+    """Gate a route on one catalogue leaf.
+
+    Used for the things a module level never expressed -- the network scan,
+    the audit log, backup/restore -- which were previously pinned to the
+    built-in roles and so unreachable by any custom role however it was
+    configured.
+    """
+    from functools import wraps
+    def deco(f):
+        @wraps(f)
+        def wrap(*a, **k):
+            if not session.get("user") and not _resolve_session_from_api_key():
+                return jsonify({"error": "unauthorized"}), 401
+            if not _feature_allowed(key):
+                return jsonify({"error": "No access"}), 403
+            return f(*a, **k)
+        return wrap
+    return deco
+
+
+def _feature_allowed(key):
+    """Can the current caller do this one thing? Mirrors
+    _module_write_allowed()'s session-or-API-key resolution, so it holds for
+    the mobile app too."""
+    urole = session.get("role")
+    if not session.get("user"):
+        row = _resolve_session_from_api_key()
+        if not row:
+            return False
+        urole = row["role"]
+    if urole == ROLE_ADMIN:
+        return True
+    return key in _role_features(urole)
+
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
@@ -323,6 +1095,33 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # UniFi Controller integration -- cached device/client snapshot (see _unifi_refresh)
 _unifi_cache = {"ts": 0, "devices": [], "clients": [], "error": None}
 _UNIFI_CACHE_TTL = 20
+
+@app.teardown_request
+def _release_db_connections(exc):
+    """Give every pooled connection back at the end of the request.
+
+    A query that raises -- a socket timeout above all -- used to leave the
+    connection checked out mid-transaction, so whatever row it had written
+    stayed locked. The next request touching that row then blocked until it
+    timed out as well, and one slow write turned into every later write
+    failing. Rolling back on the way out keeps a failure with the request
+    that caused it.
+
+    Views that close their own connection are unaffected: PooledDB's close()
+    is a no-op once the connection has been returned.
+    """
+    conns = None
+    try:
+        conns = g.pop("_db_conns", None)
+    except Exception:
+        return
+    for c in conns or []:
+        if exc is not None:
+            try: c.rollback()
+            except Exception: pass
+        try: c.close()
+        except Exception: pass
+
 
 @app.after_request
 def _no_cache(resp):
@@ -379,8 +1178,8 @@ def _db_pool():
                 # Bounded waits let a stuck query fail its own request and
                 # release the connection instead of taking the server down.
                 connect_timeout=10,
-                read_timeout=30,
-                write_timeout=30,
+                read_timeout=DB_TIMEOUT,
+                write_timeout=DB_TIMEOUT,
                 mincached=0,          # lazy: build connections on demand, so constructing the
                                       # pool itself can't fail (a bad repoint via the DB-settings
                                       # UI then surfaces per-request and recovers once fixed,
@@ -398,8 +1197,33 @@ def _db_pool():
                 except Exception: pass
         return _pool_obj
 
+_db_pointer_saved = False
+
+
 def conn():
-    return _db_pool().connection()
+    c = _db_pool().connection()
+    # The first connection that succeeds is proof the credentials work, so
+    # that is the moment to write them down. Doing this only at startup was
+    # not enough: a database that took longer than the boot wait, or came up
+    # after it, left the pointer unsaved forever -- and the next time the
+    # container was replaced the setup wizard asked for a database again on
+    # an install that had been running fine for months.
+    global _db_pointer_saved
+    if not _db_pointer_saved:
+        _db_pointer_saved = True          # set first: never re-enter
+        try:
+            persist_env_db_config()
+        except Exception:
+            pass
+    # Remembered for the request teardown below. A view that raises before its
+    # own c.close() would otherwise hand the connection back to nobody, with
+    # its transaction still open and the rows it touched still locked.
+    if has_request_context():
+        try:
+            g.setdefault("_db_conns", []).append(c)
+        except Exception:
+            pass
+    return c
 
 def init_db():
     c = conn(); cur = c.cursor()
@@ -437,6 +1261,13 @@ def init_db():
         field VARCHAR(80), old_val TEXT, new_val TEXT,
         INDEX idx_hist (asset_id)
     )""")
+    # Per-ticket field trail, the same shape as History above so the ticket
+    # view can show "who changed what, when" exactly like an asset does.
+    cur.execute("""CREATE TABLE IF NOT EXISTS TicketHistory (
+        id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT, ts DATETIME, user VARCHAR(80),
+        field VARCHAR(80), old_val TEXT, new_val TEXT,
+        INDEX idx_tkhist (ticket_id)
+    )""")
     # GLPI-style: Contracts (warranty/vendor) and Locations (site tree)
     cur.execute("""CREATE TABLE IF NOT EXISTS Contracts (
         id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(200), vendor VARCHAR(160),
@@ -459,6 +1290,73 @@ def init_db():
         id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT, author VARCHAR(80), author_role VARCHAR(20),
         body TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         INDEX idx_tk (ticket_id)
+    )""")
+    # Photos a requester attaches to a ticket. The bytes live in the database
+    # rather than on disk: a container replaced by "docker pull" takes its
+    # writable layer with it, and losing the photo of a broken screen along
+    # with it is exactly the class of bug that moved branding in here too.
+    cur.execute("""CREATE TABLE IF NOT EXISTS TicketAttachments (
+        id INT AUTO_INCREMENT PRIMARY KEY, ticket_id INT,
+        filename VARCHAR(255), mimetype VARCHAR(60), size INT DEFAULT 0,
+        uploaded_by VARCHAR(80), created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        data MEDIUMBLOB,
+        INDEX idx_tkatt (ticket_id)
+    )""")
+    # One row per check. Kept indefinitely unless ITVAULT_HB_RETAIN_DAYS
+    # says otherwise -- the hourly roll-up below is what long windows read,
+    # so uptime history survives even if raw detail is ever pruned.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatSamples (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        monitor_id INT DEFAULT 0, monitor VARCHAR(190), ts DATETIME,
+        status VARCHAR(20), response_ms INT NULL,
+        INDEX idx_hb (monitor, ts), INDEX idx_hb_ts (ts), INDEX idx_hb_mid (monitor_id, ts)
+    )""")
+    # The monitors. fail_threshold is the flap guard: a monitor must fail
+    # this many checks in a row before it is called down, and an alert goes
+    # out on the transition only, never on every failed probe.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatMonitors (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(190), kind VARCHAR(12) DEFAULT 'ping',
+        target VARCHAR(255), port INT NULL,
+        interval_s INT DEFAULT 60, enabled TINYINT DEFAULT 1,
+        notify TINYINT DEFAULT 1, fail_threshold INT DEFAULT 2,
+        timeout_s INT DEFAULT 8, retry_interval_s INT DEFAULT 0,
+        resend_every INT DEFAULT 0, upside_down TINYINT DEFAULT 0,
+        ignore_tls TINYINT DEFAULT 1, keyword VARCHAR(255) DEFAULT '',
+        keyword_invert TINYINT DEFAULT 0,
+        accepted_codes VARCHAR(120) DEFAULT '200-299',
+        http_method VARCHAR(10) DEFAULT 'GET',
+        tag VARCHAR(60) DEFAULT '', channels VARCHAR(255) DEFAULT '',
+        note VARCHAR(255) DEFAULT '', cert_days INT NULL,
+        asset_id VARCHAR(40) DEFAULT '',
+        status VARCHAR(20) DEFAULT 'pending', fails INT DEFAULT 0,
+        last_ms INT NULL, last_check DATETIME NULL, last_change DATETIME NULL,
+        next_check DATETIME NULL, last_error VARCHAR(255) DEFAULT '',
+        INDEX idx_hbm (enabled, next_check)
+    )""")
+    # One row per monitor per hour, updated as checks land. Never pruned:
+    # a year of this is a few hundred thousand rows, which is what makes
+    # "uptime over the last 12 months" answerable at all.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatHourly (
+        monitor_id INT NOT NULL, hour DATETIME NOT NULL,
+        checks INT DEFAULT 0, ups INT DEFAULT 0, sum_ms BIGINT DEFAULT 0,
+        min_ms INT NULL, max_ms INT NULL,
+        PRIMARY KEY (monitor_id, hour), INDEX idx_hbh (hour)
+    )""")
+    # The incident log: what changed and when, per monitor.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatEvents (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        monitor_id INT NOT NULL, ts DATETIME, kind VARCHAR(12),
+        message VARCHAR(255) DEFAULT '',
+        INDEX idx_hbe (monitor_id, ts)
+    )""")
+    # Where alerts go. Empty table means "use the notification address in
+    # Settings", so monitoring works before anyone configures anything.
+    cur.execute("""CREATE TABLE IF NOT EXISTS HeartbeatChannels (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(120), kind VARCHAR(20) DEFAULT 'email',
+        config TEXT, enabled TINYINT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
@@ -484,6 +1382,14 @@ def init_db():
         cur.execute("SELECT perm_settings FROM Roles LIMIT 1")
     except Exception:
         try: cur.execute("ALTER TABLE Roles ADD COLUMN perm_settings VARCHAR(10) DEFAULT 'none'")
+        except Exception: pass
+    # migrate: per-feature grants (see FEATURE_GROUPS). A role saved before
+    # this column existed leaves it NULL, and _role_features() then derives
+    # its leaves from the module columns, so the upgrade takes nothing away.
+    try:
+        cur.execute("SELECT perms_json FROM Roles LIMIT 1")
+    except Exception:
+        try: cur.execute("ALTER TABLE Roles ADD COLUMN perms_json TEXT")
         except Exception: pass
     cur.execute("""CREATE TABLE IF NOT EXISTS Employees (
         _id VARCHAR(40) PRIMARY KEY,
@@ -617,6 +1523,13 @@ def init_db():
         cur.execute("SELECT SignatureData FROM Assets LIMIT 1")
     except Exception:
         cur.execute("ALTER TABLE Assets ADD COLUMN SignatureData TEXT")
+    # The nonce of the ONE sign link that is currently valid for this asset.
+    # Set when a link is issued, cleared the moment it is used, so a link
+    # cannot be signed twice and issuing a new one retires the old.
+    try:
+        cur.execute("SELECT SignNonce FROM Assets LIMIT 1")
+    except Exception:
+        cur.execute("ALTER TABLE Assets ADD COLUMN SignNonce VARCHAR(32) DEFAULT ''")
     # migrate: add SLA policy columns to Settings if missing
     for col, typ in [("sla_low","INT DEFAULT 72"),("sla_normal","INT DEFAULT 24"),("sla_high","INT DEFAULT 8"),("sla_urgent","INT DEFAULT 4"),("sla_breach_notify","BOOLEAN DEFAULT 1"),("auto_assign_roundrobin","BOOLEAN DEFAULT 0"),("notify_on_create","BOOLEAN DEFAULT 1"),("notify_on_resolve","BOOLEAN DEFAULT 1"),("notify_on_reply","BOOLEAN DEFAULT 1")]:
         try:
@@ -670,8 +1583,8 @@ def init_db():
     cur.execute("SELECT COUNT(*) AS n FROM Settings")
     if cur.fetchone()["n"] == 0:
         cur.execute("INSERT INTO Settings (id, theme) VALUES (1, 'dark')")
-    if not os.path.exists(os.path.join(BASE, "logo.png")):
-        open(os.path.join(BASE, "logo.png"), "wb").close()  # placeholder
+    if not os.path.exists(LOGO_PATH):
+        open(LOGO_PATH, "wb").close()  # placeholder
     # Seed the first admin ONLY for an unattended install, i.e. one where the
     # password was supplied deliberately via the environment. Seeding
     # unconditionally meant a restart after a factory reset quietly recreated
@@ -692,6 +1605,47 @@ def init_db():
 def migrate_schema():
     """Add new columns for the Customization engine / Profile / User Settings without dropping data."""
     c = conn(); cur = c.cursor()
+    # Heartbeat: the monitor table grew a lot of per-check options, and the
+    # roll-up / event / channel tables are new. ADD COLUMN is a no-op once
+    # the column exists, so this is safe to run on every start.
+    hb_cols = {
+        "timeout_s": "INT DEFAULT 8",
+        "retry_interval_s": "INT DEFAULT 0",
+        "resend_every": "INT DEFAULT 0",
+        "upside_down": "TINYINT DEFAULT 0",
+        "ignore_tls": "TINYINT DEFAULT 1",
+        "keyword": "VARCHAR(255) DEFAULT ''",
+        "keyword_invert": "TINYINT DEFAULT 0",
+        "accepted_codes": "VARCHAR(120) DEFAULT '200-299'",
+        "http_method": "VARCHAR(10) DEFAULT 'GET'",
+        "tag": "VARCHAR(60) DEFAULT ''",
+        "channels": "VARCHAR(255) DEFAULT ''",
+        "note": "VARCHAR(255) DEFAULT ''",
+        "cert_days": "INT NULL",
+        "next_check": "DATETIME NULL",
+    }
+    for col, typ in hb_cols.items():
+        try:
+            cur.execute(f"ALTER TABLE HeartbeatMonitors ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # kind used to be VARCHAR(10), too short for "keyword"
+    try:
+        cur.execute("ALTER TABLE HeartbeatMonitors MODIFY COLUMN kind VARCHAR(12) DEFAULT 'ping'")
+    except Exception:
+        pass
+    # settings left behind by the retired external-monitor integration
+    for col in ("kuma_enabled", "kuma_url", "kuma_api_key", "kuma_verify_ssl"):
+        try:
+            cur.execute(f"ALTER TABLE Settings DROP COLUMN {col}")
+        except Exception:
+            pass
+    # samples recorded by that integration had no monitor of their own
+    try:
+        cur.execute("DELETE FROM HeartbeatSamples WHERE monitor_id=0")
+    except Exception:
+        pass
+    c.commit()
     # Settings: theme engine + i18n + region
     set_cols = {
         "theme_preset": "VARCHAR(20) DEFAULT 'deepdark'",
@@ -815,6 +1769,7 @@ def migrate_schema():
         "company_address": "VARCHAR(255) DEFAULT ''",
         "has_letterhead": "TINYINT DEFAULT 0",
         "logo": "MEDIUMBLOB",
+        "letterhead": "MEDIUMBLOB",
     }
     for col, typ in branding_cols.items():
         try:
@@ -977,6 +1932,29 @@ def _pending_2fa_user():
         return None
     return u
 
+def _mail_from(addr, brand):
+    """The sender line a recipient actually reads.
+
+    Every notification went out with a bare address, so an inbox showed the
+    mailbox it was sent from -- it@example.com -- in place of the
+    organisation the install is branded as. Recipients could not tell at a
+    glance who the mail was from, and some of them are people who have never
+    logged in and only know the organisation by name.
+
+    An address the admin has already given a display name of its own keeps
+    it: that is a deliberate choice, not a default worth overriding.
+    """
+    from email.utils import formataddr, parseaddr
+    raw = str(addr or "")
+    name, mailbox = parseaddr(raw)
+    if "@" not in mailbox:
+        # not something to put a name in front of. parseaddr hands back any
+        # junk it was given as the mailbox, and wrapping that in angle
+        # brackets only makes a misconfigured From harder to read in the bounce.
+        return raw
+    return formataddr((name or (brand or "IT-Vault"), mailbox))
+
+
 def _send_login_otp_email(username, to_email):
     if not to_email:
         return False
@@ -994,7 +1972,7 @@ def _send_login_otp_email(username, to_email):
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage()
         msg["Subject"] = f"{bn}: your sign-in code is {code}"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email
         msg.set_content(f"Your {bn} sign-in verification code is: {code}\n\nThis code expires in 5 minutes. If you didn't request this, you can ignore this email." + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
@@ -1053,7 +2031,7 @@ def _send_password_reset_email(username, to_email, code):
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage()
         msg["Subject"] = f"{bn}: password reset code"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email
         msg.set_content(f"Your {bn} password reset code is: {code}\n\nThis code expires in 10 minutes. "
                          f"If you didn't request this, you can safely ignore this email -- your password "
@@ -1131,7 +2109,12 @@ def me():
     cur.execute("SELECT theme, ldap_server, ldap_domain, ldap_bind_user, ldap_base_dn, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, matrix_on, app_name, logo_text, logo, has_letterhead FROM Settings WHERE id=1")
     s = cur.fetchone() or {"theme":"dark"}
     c.close()
+    # The sidebar can only hide what it can't reach if it knows the actual
+    # per-module rights, so send them with the identity rather than making the
+    # UI infer access from the role name (which custom roles make impossible).
     return jsonify({"user": session["user"], "role": session["role"],
+                    "perms": _role_perms(session["role"]),
+                    "features": sorted(_role_features(session["role"])),
                     "display": row.get("display", ""), "email": row.get("email", ""),
                     "avatar": row.get("avatar", ""), "api_key": row.get("api_key", ""),
                     "last_login": row.get("last_login", ""),
@@ -1203,9 +2186,9 @@ def auth_required(role=None, module=None, level="write"):
                 if urole != ROLE_ADMIN:
                     have = _role_perms(urole).get(module, "none")
                     if _PERM_ORDER.get(have, 0) < _PERM_ORDER.get(level, 2):
-                        return jsonify({"error": "forbidden"}), 403
+                        return jsonify({"error": "No access"}), 403
             elif role and urole not in (role if isinstance(role, list) else [role]):
-                return jsonify({"error": "forbidden"}), 403
+                return jsonify({"error": "No access"}), 403
             return f(*a, **k)
         return wrap
     return deco
@@ -1721,7 +2704,7 @@ def contract_types_api():
         return jsonify({"ok": True})
 
 @app.route("/api/departments", methods=["GET", "POST", "DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("directory.reflists")
 def departments_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -1738,7 +2721,7 @@ def departments_api():
         return jsonify({"ok": True})
 
 @app.route("/api/designations", methods=["GET", "POST", "DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("directory.reflists")
 def designations_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -1775,7 +2758,7 @@ def models_api():
         return jsonify({"ok": True})
 
 @app.route("/api/import", methods=["POST"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("assets.import")
 def import_excel():
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
@@ -1933,7 +2916,7 @@ def import_directory():
     return jsonify({"ok": True, "departments": added_dep, "locations": added_loc, "designations": added_des})
 
 @app.route("/api/export")
-@auth_required()
+@feature_required("assets.export")
 def export_excel():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=0 ORDER BY Name")
@@ -2084,36 +3067,73 @@ def delete_user(u):
 
 PERM_LEVELS = ("none", "read", "write")
 
+@app.route("/api/features")
+@auth_required([ROLE_ADMIN])
+def list_features():
+    """The permission catalogue the role editor renders."""
+    return jsonify([{"key": g["key"], "label": g["label"], "module": g["module"],
+                     "items": [{"key": k, "label": lbl, "level": lvl}
+                               for (k, lbl, lvl) in g["items"]]}
+                    for g in FEATURE_GROUPS])
+
+
 @app.route("/api/roles")
 @auth_required([ROLE_ADMIN])
 def list_roles():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings FROM Roles ORDER BY name")
+    cur.execute("SELECT id, name, perm_assets, perm_contracts, perm_directory, perm_tickets, "
+                "perm_settings, perms_json FROM Roles ORDER BY name")
     rows = cur.fetchall(); c.close()
-    return jsonify([dict(r) for r in rows])
+    out = []
+    for r in rows:
+        d = {k: v for k, v in dict(r).items() if k != "perms_json"}
+        # resolved rather than raw, so a legacy role reports the leaves it
+        # actually has rather than an empty list
+        d["features"] = sorted(_role_features(r["name"]))
+        out.append(d)
+    return jsonify(out)
+
 
 def _role_body(d):
+    """Read a role off the wire.
+
+    Feature leaves are authoritative when present, and the module columns are
+    derived from them -- one source of truth, so the coarse levels every
+    existing route check reads can never drift from what the admin ticked.
+    Callers that still send only perm_* (the Android app, scripts) keep
+    working: their module levels are expanded into the matching leaves.
+    """
     name = (d.get("name") or "").strip()[:50]
-    perms = {}
-    for k in ("assets", "contracts", "directory", "tickets", "settings"):
-        v = (d.get(f"perm_{k}") or "none").lower()
-        perms[k] = v if v in PERM_LEVELS else "none"
-    return name, perms
+    if isinstance(d.get("features"), list):
+        granted = {k for k in d["features"] if k in FEATURE_LEVEL}
+        perms = _modules_from_features(granted)
+    else:
+        perms = {}
+        for k in ("assets", "contracts", "directory", "tickets", "settings"):
+            v = (d.get(f"perm_{k}") or "none").lower()
+            perms[k] = v if v in PERM_LEVELS else "none"
+        granted = _features_from_modules(perms)
+    return name, perms, sorted(granted)
+
 
 @app.route("/api/roles", methods=["POST"])
 @auth_required([ROLE_ADMIN])
 def create_role():
     d = request.get_json(force=True) or {}
-    name, perms = _role_body(d)
+    name, perms, granted = _role_body(d)
     if not name: return jsonify({"error": "name required"}), 400
     if name in ROLES: return jsonify({"error": "that name is a built-in role"}), 409
     c = conn(); cur = c.cursor()
     cur.execute("SELECT id FROM Roles WHERE name=%s", [name])
     if cur.fetchone(): c.close(); return jsonify({"error": "a role with that name already exists"}), 409
-    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings) VALUES (%s,%s,%s,%s,%s,%s)",
-                (name, perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], perms["settings"]))
+    cur.execute("INSERT INTO Roles (name, perm_assets, perm_contracts, perm_directory, perm_tickets, perm_settings, perms_json) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (name, perms["assets"], perms["contracts"], perms["directory"],
+                 perms["tickets"], perms["settings"], json.dumps(granted)))
     c.commit(); c.close()
-    return jsonify({"ok": True})
+    audit(session.get("user"), "ROLE", name, f"created with {len(granted)} permission(s)")
+    return jsonify({"ok": True, "features": granted})
+
 
 @app.route("/api/roles/<int:rid>", methods=["PUT"])
 @auth_required([ROLE_ADMIN])
@@ -2122,11 +3142,14 @@ def update_role(rid):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT name FROM Roles WHERE id=%s", [rid]); existing = cur.fetchone()
     if not existing: c.close(); return jsonify({"error": "not found"}), 404
-    _, perms = _role_body(d)
-    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, perm_tickets=%s, perm_settings=%s WHERE id=%s",
-                (perms["assets"], perms["contracts"], perms["directory"], perms["tickets"], perms["settings"], rid))
+    _, perms, granted = _role_body(d)
+    cur.execute("UPDATE Roles SET perm_assets=%s, perm_contracts=%s, perm_directory=%s, "
+                "perm_tickets=%s, perm_settings=%s, perms_json=%s WHERE id=%s",
+                (perms["assets"], perms["contracts"], perms["directory"],
+                 perms["tickets"], perms["settings"], json.dumps(granted), rid))
     c.commit(); c.close()
-    return jsonify({"ok": True})
+    audit(session.get("user"), "ROLE", existing["name"], f"updated to {len(granted)} permission(s)")
+    return jsonify({"ok": True, "features": granted})
 
 @app.route("/api/roles/<int:rid>", methods=["DELETE"])
 @auth_required([ROLE_ADMIN])
@@ -2264,7 +3287,7 @@ def _send_simple_email(to_email, subject, body, html_body=None):
     try:
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
         if html_body:
             # a plain-text link (what mail clients were rendering before)
@@ -2357,7 +3380,7 @@ def test_db():
         c.close()
         return jsonify({"ok": True, "msg": f"Connected to {h}:{p}/{n}"})
     except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)}), 400
+        return jsonify({"ok": False, "msg": _db_error_help(e, h)}), 400
 
 @app.route("/api/test-ldap", methods=["POST"])
 @auth_required(module="settings", level="write")
@@ -2462,6 +3485,863 @@ def _unifi_refresh(force=False):
 
 _UNIFI_TYPE_LABELS = {"uap": "Access Point", "usw": "Switch", "ugw": "Gateway", "udm": "Gateway", "uxg": "Gateway"}
 
+# ================= Heartbeat: uptime monitoring =========================
+# IT-Vault's own monitoring engine. It checks every monitor on that monitor's
+# own interval, forever -- the runner starts with the app and never stops, and
+# nothing throttles it back or switches it off after a while.
+#
+# History is kept in two places on purpose:
+#   HeartbeatSamples  one row per check. Kept indefinitely by default, because
+#                     "how did last month look" is a fair question and there is
+#                     no reason to throw the answer away. Set
+#                     ITVAULT_HB_RETAIN_DAYS to prune if disk is tight.
+#   HeartbeatHourly   one row per monitor per hour, written as the checks come
+#                     in. Kept forever regardless. A year of uptime for fifty
+#                     monitors is ~440k rows here versus ~26M raw, so long
+#                     windows read from this and stay fast even if raw samples
+#                     are pruned.
+#
+# The setting that decides whether any of this is usable is the retry count.
+# Checking every 60s and mailing on every failed check means one wobbly access
+# point sends forty emails overnight and the feature gets switched off. So a
+# monitor has to fail `fail_threshold` times in a row before it is called
+# down, and mail goes out on the TRANSITION -- once down, once back up --
+# with an optional reminder every N further failures if you want one.
+HB_KINDS = ("ping", "http", "keyword", "port", "dns")
+HB_TICK_SECONDS = 5          # how often the runner looks for work
+HB_RETAIN_DAYS = int(os.environ.get("ITVAULT_HB_RETAIN_DAYS") or 0)   # 0 = keep everything
+HB_MIN_INTERVAL = 10
+HB_CHANNEL_KINDS = ("email", "webhook", "slack", "telegram")
+
+
+# ---- the checks --------------------------------------------------------
+def _hb_accepts(code, spec):
+    """Is this HTTP status accepted? Spec reads '200-299,301,404'."""
+    for part in (spec or "200-299").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            lo, _, hi = part.partition("-")
+            try:
+                if int(lo) <= code <= int(hi):
+                    return True
+            except ValueError:
+                continue
+        else:
+            try:
+                if code == int(part):
+                    return True
+            except ValueError:
+                continue
+    return False
+
+
+def _hb_url(target):
+    return target if re.match(r"^https?://", target or "") else "http://" + (target or "")
+
+
+def _hb_cert_days(url, timeout):
+    """Days until the TLS certificate expires, or None if not applicable.
+
+    Reachability and certificate trust are separate questions -- a self-signed
+    intranet box is up -- so this is reported alongside the check instead of
+    being allowed to fail it.
+    """
+    try:
+        import socket
+        import ssl
+        from urllib.parse import urlsplit
+        u = urlsplit(url)
+        if u.scheme != "https":
+            return None
+        host = u.hostname
+        port = u.port or 443
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as ss:
+                cert = ss.getpeercert()
+        if not cert:
+            # CERT_NONE gives an empty dict on some builds; fetch the DER and
+            # read notAfter from it instead of guessing
+            return None
+        import datetime
+        exp = datetime.datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y %Z")
+        return max(0, (exp - datetime.datetime.utcnow()).days)
+    except Exception:
+        return None
+
+
+def _hb_check_ping(mon, timeout):
+    if not _have_tool("ping"):
+        # blaming the device for a missing binary is what made this so hard
+        # to work out from the UI
+        return False, ("the ping command is not available in this container -- "
+                       "pull the latest image and recreate it"), None
+    ok = _ping_one(mon.get("target")) is not None
+    return ok, (None if ok else "no ICMP reply"), None
+
+
+def _hb_check_http(mon, timeout, want_keyword=False):
+    import urllib.error
+    import urllib.request
+    url = _hb_url(mon.get("target"))
+    method = (mon.get("http_method") or "GET").upper()
+    if method not in ("GET", "POST", "HEAD", "PUT", "PATCH", "DELETE", "OPTIONS"):
+        method = "GET"
+    if want_keyword and method == "HEAD":
+        method = "GET"          # a HEAD has no body to search
+    req = urllib.request.Request(url, method=method,
+                                 headers={"User-Agent": "IT-Vault-Heartbeat"})
+    ctx = None
+    if url.startswith("https://"):
+        import ssl
+        ctx = ssl.create_default_context()
+        if mon.get("ignore_tls", 1):
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+    body = ""
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
+            code = r.status
+            if want_keyword:
+                body = r.read(262144).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        code = e.code
+        if want_keyword:
+            try:
+                body = e.read(262144).decode("utf-8", "replace")
+            except Exception:
+                body = ""
+    except Exception as e:
+        return False, str(e)[:180], None
+    cert = _hb_cert_days(url, timeout)
+    if not _hb_accepts(code, mon.get("accepted_codes")):
+        return False, f"HTTP {code}", cert
+    if want_keyword:
+        kw = (mon.get("keyword") or "").strip()
+        if kw:
+            found = kw.lower() in body.lower()
+            if mon.get("keyword_invert"):
+                if found:
+                    return False, f'"{kw[:60]}" present but should not be', cert
+            elif not found:
+                return False, f'"{kw[:60]}" not in the response', cert
+    return True, None, cert
+
+
+def _hb_check_port(mon, timeout):
+    import socket
+    try:
+        with socket.create_connection((mon.get("target"), int(mon.get("port") or 0)),
+                                      timeout=timeout):
+            return True, None, None
+    except Exception as e:
+        return False, str(e)[:180], None
+
+
+def _hb_check_dns(mon, timeout):
+    import socket
+    old = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(timeout)
+        infos = socket.getaddrinfo(mon.get("target"), None)
+        addrs = sorted({i[4][0] for i in infos})
+        if not addrs:
+            return False, "no address returned", None
+        return True, None, None
+    except Exception as e:
+        return False, str(e)[:180], None
+    finally:
+        socket.setdefaulttimeout(old)
+
+
+def _hb_probe(mon):
+    """Run one check. Returns (up, response_ms, error, cert_days)."""
+    kind = (mon.get("kind") or "ping").lower()
+    target = (mon.get("target") or "").strip()
+    if not target:
+        return False, None, "no target", None
+    timeout = max(1, min(120, int(mon.get("timeout_s") or 8)))
+    t0 = time.time()
+    cert = None
+    try:
+        if kind == "http":
+            ok, err, cert = _hb_check_http(mon, timeout)
+        elif kind == "keyword":
+            ok, err, cert = _hb_check_http(mon, timeout, want_keyword=True)
+        elif kind == "port":
+            ok, err, cert = _hb_check_port(mon, timeout)
+        elif kind == "dns":
+            ok, err, cert = _hb_check_dns(mon, timeout)
+        else:
+            ok, err, cert = _hb_check_ping(mon, timeout)
+    except Exception as e:
+        ok, err = False, str(e)[:180]
+    ms = int(round((time.time() - t0) * 1000))
+    # "upside down" is for things that are supposed to be unreachable -- a port
+    # that should be closed, a page that should 404. The measurement is the
+    # same, the verdict is flipped.
+    if mon.get("upside_down"):
+        ok = not ok
+        err = None if ok else "responded, but this monitor expects it not to"
+    return ok, (ms if ok else None), err, cert
+
+
+# ---- applying a result ------------------------------------------------
+def _hb_apply_result(cur, mon, up, ms, err, cert):
+    """Update a monitor from one probe and decide whether to alert.
+
+    Returns a transition string when mail should go out:
+      "down"   it has just been declared down
+      "up"     it has just recovered
+      "still"  it is still down and the reminder interval came round
+    """
+    was = mon.get("status") or "pending"
+    fails = int(mon.get("fails") or 0)
+    thresh = max(1, int(mon.get("fail_threshold") or 2))
+    resend = max(0, int(mon.get("resend_every") or 0))
+    interval = max(HB_MIN_INTERVAL, int(mon.get("interval_s") or 60))
+    retry_in = int(mon.get("retry_interval_s") or 0) or interval
+    transition = None
+    if up:
+        new, fails = "up", 0
+        if was != "up":
+            transition = "up"
+        wait = interval
+    else:
+        fails += 1
+        # hold at "pending" until it has failed enough times to be believed
+        new = "down" if fails >= thresh else ("pending" if was == "up" else was)
+        if new == "down" and was != "down":
+            transition = "down"
+        elif new == "down" and resend and (fails - thresh) > 0 \
+                and (fails - thresh) % resend == 0:
+            transition = "still"
+        # while something is wrong, check on the retry interval instead
+        wait = retry_in if new != "up" else interval
+    cur.execute(
+        "UPDATE HeartbeatMonitors SET status=%s, fails=%s, last_ms=%s, last_error=%s, "
+        "cert_days=%s, last_check=NOW(), next_check=NOW() + INTERVAL %s SECOND" +
+        (", last_change=NOW()" if transition in ("up", "down") else "") +
+        " WHERE id=%s",
+        (new, fails, ms, (err or "")[:255], cert, wait, mon["id"]))
+    cur.execute("INSERT INTO HeartbeatSamples (monitor_id, monitor, ts, status, response_ms) "
+                "VALUES (%s,%s,NOW(),%s,%s)",
+                (mon["id"], (mon.get("name") or "")[:190], new, ms))
+    # the hourly roll-up, written as we go so no cron job has to catch up
+    cur.execute(
+        "INSERT INTO HeartbeatHourly (monitor_id, hour, checks, ups, sum_ms, min_ms, max_ms) "
+        "VALUES (%s, DATE_FORMAT(NOW(), '%%Y-%%m-%%d %%H:00:00'), 1, %s, %s, %s, %s) "
+        "ON DUPLICATE KEY UPDATE checks=checks+1, ups=ups+VALUES(ups), "
+        "sum_ms=sum_ms+VALUES(sum_ms), "
+        "min_ms=IF(VALUES(min_ms) IS NULL, min_ms, LEAST(COALESCE(min_ms, VALUES(min_ms)), VALUES(min_ms))), "
+        "max_ms=IF(VALUES(max_ms) IS NULL, max_ms, GREATEST(COALESCE(max_ms, VALUES(max_ms)), VALUES(max_ms)))",
+        (mon["id"], 1 if new == "up" else 0, ms or 0, ms, ms))
+    if transition in ("up", "down"):
+        cur.execute("INSERT INTO HeartbeatEvents (monitor_id, ts, kind, message) "
+                    "VALUES (%s, NOW(), %s, %s)",
+                    (mon["id"], transition,
+                     (err or ("recovered" if transition == "up" else ""))[:255]))
+    mon["status"], mon["fails"], mon["cert_days"] = new, fails, cert
+    return transition
+
+
+# ---- notification channels --------------------------------------------
+def _hb_channels_for(mon, all_channels):
+    """Which channels this monitor alerts through. Empty selection = all."""
+    sel = (mon.get("channels") or "").strip()
+    live = [c for c in all_channels if c.get("enabled")]
+    if not sel:
+        return live
+    want = {s.strip() for s in sel.split(",") if s.strip()}
+    return [c for c in live if str(c["id"]) in want]
+
+
+def _hb_send_email(cfg, subject, body):
+    return send_notification(subject, body)
+
+
+def _hb_send_webhook(cfg, subject, body, payload):
+    import urllib.request
+    url = (cfg.get("url") or "").strip()
+    if not url:
+        raise Exception("webhook URL is empty")
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json",
+                                          "User-Agent": "IT-Vault-Heartbeat"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status < 400
+
+
+def _hb_send_slack(cfg, subject, body, payload):
+    import urllib.request
+    url = (cfg.get("url") or "").strip()
+    if not url:
+        raise Exception("Slack webhook URL is empty")
+    text = f"*{subject}*\n{body}"
+    data = json.dumps({"text": text}).encode()
+    req = urllib.request.Request(url, data=data, method="POST",
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return r.status < 400
+
+
+def _hb_send_telegram(cfg, subject, body, payload):
+    import urllib.parse
+    import urllib.request
+    token = (cfg.get("token") or "").strip()
+    chat = (cfg.get("chat_id") or "").strip()
+    if not token or not chat:
+        raise Exception("Telegram needs both a bot token and a chat id")
+    q = urllib.parse.urlencode({"chat_id": chat, "text": f"{subject}\n\n{body}"})
+    url = f"https://api.telegram.org/bot{token}/sendMessage?{q}"
+    with urllib.request.urlopen(url, timeout=10) as r:
+        return r.status < 400
+
+
+_HB_SENDERS = {"email": _hb_send_email, "webhook": _hb_send_webhook,
+               "slack": _hb_send_slack, "telegram": _hb_send_telegram}
+
+
+def _hb_channel_cfg(row):
+    try:
+        return json.loads(row.get("config") or "{}") or {}
+    except Exception:
+        return {}
+
+
+def _hb_all_channels():
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT * FROM HeartbeatChannels ORDER BY id")
+        return [dict(r) for r in cur.fetchall()]
+    except Exception:
+        return []
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+
+
+def _hb_message(mon, transition, err):
+    name = mon.get("name") or mon.get("target") or "monitor"
+    where = mon.get("target") or ""
+    if mon.get("port"):
+        where = f"{where}:{mon['port']}"
+    kind = (mon.get("kind") or "ping")
+    if transition == "up":
+        return (f"RECOVERED: {name}",
+                f"{name} is responding again.\n\nTarget: {where}\nCheck:  {kind}\n")
+    lead = "is still down" if transition == "still" else "stopped responding"
+    tail = ("" if transition == "still" else
+            "\nYou are getting this once, not on every failed check. "
+            "Another email follows when it recovers.")
+    return (f"{'STILL DOWN' if transition == 'still' else 'DOWN'}: {name}",
+            f"{name} {lead}.\n\nTarget: {where}\nCheck:  {kind}\n"
+            f"Reason: {err or 'no response'}\n"
+            f"Failed checks in a row: {mon.get('fails')}\n{tail}")
+
+
+def _hb_notify(mon, transition, err, all_channels=None):
+    """Alert on a transition, through every channel this monitor uses.
+
+    A dead channel must never stop the others, and must never stop the next
+    check -- so each send is guarded on its own.
+    """
+    if not int(mon.get("notify") or 0):
+        return
+    subject, body = _hb_message(mon, transition, err)
+    payload = {"event": transition, "monitor": mon.get("name"),
+               "kind": mon.get("kind"), "target": mon.get("target"),
+               "port": mon.get("port"), "status": mon.get("status"),
+               "error": err or "", "fails": mon.get("fails"),
+               "response_ms": mon.get("last_ms"), "subject": subject, "message": body}
+    channels = _hb_channels_for(mon, all_channels if all_channels is not None
+                                else _hb_all_channels())
+    if not channels:
+        # nothing configured: fall back to the notification address in Settings
+        try:
+            send_notification(subject, body)
+        except Exception as e:
+            print(f"[itvault] heartbeat alert not sent for {mon.get('name')}: {e}", flush=True)
+        return
+    for ch in channels:
+        fn = _HB_SENDERS.get((ch.get("kind") or "").lower())
+        if not fn:
+            continue
+        try:
+            fn(_hb_channel_cfg(ch), subject, body, payload)
+        except Exception as e:
+            print(f"[itvault] heartbeat alert via {ch.get('name')} failed: {e}", flush=True)
+
+
+# ---- the runner -------------------------------------------------------
+def _hb_prune(cur):
+    """Only ever prunes raw samples, and only if a retention was asked for.
+
+    The hourly roll-up is never pruned, so uptime history stays complete even
+    when raw check-by-check detail is dropped.
+    """
+    if HB_RETAIN_DAYS > 0:
+        cur.execute("DELETE FROM HeartbeatSamples WHERE ts < NOW() - INTERVAL %s DAY",
+                    [HB_RETAIN_DAYS])
+
+
+def _hb_run_due(force_all=False, only_id=None):
+    """Check every enabled monitor whose next check has come round."""
+    checked = []
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        if only_id:
+            cur.execute("SELECT * FROM HeartbeatMonitors WHERE id=%s", [only_id])
+        elif force_all:
+            cur.execute("SELECT * FROM HeartbeatMonitors WHERE enabled=1")
+        else:
+            cur.execute("SELECT * FROM HeartbeatMonitors WHERE enabled=1 AND "
+                        "(next_check IS NULL OR next_check <= NOW())")
+        due = [dict(r) for r in cur.fetchall()]
+        for mon in due:
+            # Claim the row before probing. Two IT-Vault instances against
+            # one database would otherwise both probe the same monitor in
+            # the same window and could each decide it just went down --
+            # two alerts for one outage. Whoever moves next_check first
+            # owns this round; the other skips it.
+            if not (force_all or only_id):
+                cur.execute(
+                    "UPDATE HeartbeatMonitors SET next_check = NOW() + INTERVAL %s SECOND "
+                    "WHERE id=%s AND (next_check IS NULL OR next_check <= NOW())",
+                    (max(HB_MIN_INTERVAL, int(mon.get("interval_s") or 60)), mon["id"]))
+                c.commit()
+                if cur.rowcount != 1:
+                    continue
+            up, ms, err, cert = _hb_probe(mon)
+            transition = _hb_apply_result(cur, mon, up, ms, err, cert)
+            c.commit()
+            checked.append((mon, transition, err))
+        if due:
+            try:
+                _hb_prune(cur); c.commit()
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[itvault] heartbeat run failed: {e}", flush=True)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    # sending happens outside the database work, so a slow SMTP server cannot
+    # hold a transaction open or delay the next round of checks
+    if any(t for _, t, _ in checked):
+        chans = _hb_all_channels()
+        for mon, transition, err in checked:
+            if transition:
+                _hb_notify(mon, transition, err, chans)
+    return len(checked)
+
+
+def start_heartbeat_runner():
+    """Check due monitors on a short tick, for as long as the app is running.
+
+    Nothing here is allowed to raise: a failed round costs that round only.
+    """
+    def loop():
+        time.sleep(8)          # let the app finish coming up first
+        while True:
+            try:
+                _hb_run_due()
+            except Exception:
+                pass
+            time.sleep(HB_TICK_SECONDS)
+    t = threading.Thread(target=loop, name="heartbeat-runner", daemon=True)
+    t.start()
+    return t
+
+
+# ---- history queries --------------------------------------------------
+def _hb_uptime(cur, hours):
+    """Uptime per monitor over a window, from the hourly roll-up."""
+    out = {}
+    cur.execute("SELECT monitor_id, SUM(checks) n, SUM(ups) up, SUM(sum_ms) sms "
+                "FROM HeartbeatHourly WHERE hour >= NOW() - INTERVAL %s HOUR "
+                "GROUP BY monitor_id", [hours])
+    for r in cur.fetchall():
+        n = int(r["n"] or 0)
+        out[r["monitor_id"]] = {
+            "uptime": round(int(r["up"] or 0) * 100.0 / n, 2) if n else None,
+            "checks": n,
+            "avg_ms": int(round(int(r["sms"] or 0) / n)) if n else None}
+    return out
+
+
+def _hb_monitor_body(d, existing=None):
+    """Validate a monitor off the wire. Returns (fields, error).
+
+    A PUT is a partial update: anything the caller leaves out keeps the
+    value already stored. An explicit null counts as left out, because that
+    is what a typed client sends for "no opinion" -- the phone pauses a
+    monitor by sending enabled=false and nulls for the rest, and that must
+    not reset its interval and retries to the defaults.
+    """
+    ex = existing or {}
+    d = {k: v for k, v in (d or {}).items() if v is not None}
+    kind = (d.get("kind") or ex.get("kind") or "ping").lower()
+    if kind not in HB_KINDS:
+        return None, f"kind must be one of {', '.join(HB_KINDS)}"
+    target = (d.get("target", ex.get("target")) or "").strip()
+    if not target:
+        return None, "target is required"
+    port = d.get("port", ex.get("port"))
+    try:
+        port = int(port) if port not in (None, "", 0, "0") else None
+    except Exception:
+        return None, "port must be a number"
+    if kind == "port" and not port:
+        return None, "a port check needs a port number"
+
+    def num(key, default, lo, hi):
+        try:
+            return max(lo, min(hi, int(d.get(key, ex.get(key) or default) or default)))
+        except Exception:
+            return None
+    interval = num("interval_s", 60, HB_MIN_INTERVAL, 86400)
+    if interval is None:
+        return None, "interval must be a number of seconds"
+    thresh = num("fail_threshold", 2, 1, 10)
+    if thresh is None:
+        return None, "retries must be a number"
+    timeout = num("timeout_s", 8, 1, 120)
+    if timeout is None:
+        return None, "timeout must be a number of seconds"
+    retry_in = num("retry_interval_s", 0, 0, 86400)
+    resend = num("resend_every", 0, 0, 1000)
+    if retry_in is None or resend is None:
+        return None, "retry and resend must be numbers"
+    keyword = (d.get("keyword", ex.get("keyword")) or "").strip()
+    if kind == "keyword" and not keyword:
+        return None, "a keyword check needs the text to look for"
+    codes = (d.get("accepted_codes", ex.get("accepted_codes")) or "200-299").strip()
+    if not re.match(r"^[0-9,\-\s]+$", codes):
+        return None, "accepted status codes look like 200-299,301"
+    name = (d.get("name", ex.get("name")) or target).strip()[:190]
+    flag = lambda k, dflt: 1 if d.get(k, ex.get(k, dflt)) else 0
+    return {
+        "name": name, "kind": kind, "target": target[:255], "port": port,
+        "interval_s": interval, "fail_threshold": thresh, "timeout_s": timeout,
+        "retry_interval_s": retry_in, "resend_every": resend,
+        "enabled": flag("enabled", 1), "notify": flag("notify", 1),
+        "upside_down": flag("upside_down", 0), "ignore_tls": flag("ignore_tls", 1),
+        "keyword_invert": flag("keyword_invert", 0),
+        "keyword": keyword[:255], "accepted_codes": codes[:120],
+        "http_method": (d.get("http_method", ex.get("http_method")) or "GET").upper()[:10],
+        "tag": (d.get("tag", ex.get("tag")) or "").strip()[:60],
+        "channels": (",".join(str(x) for x in d["channels"])
+                     if isinstance(d.get("channels"), list)
+                     else (d.get("channels", ex.get("channels")) or ""))[:255],
+        "asset_id": (d.get("asset_id", ex.get("asset_id")) or "")[:40],
+        "note": (d.get("note", ex.get("note")) or "").strip()[:255],
+    }, None
+
+
+HB_MON_COLS = ("name", "kind", "target", "port", "interval_s", "fail_threshold",
+               "timeout_s", "retry_interval_s", "resend_every", "enabled", "notify",
+               "upside_down", "ignore_tls", "keyword_invert", "keyword",
+               "accepted_codes", "http_method", "tag", "channels", "asset_id", "note")
+
+
+@app.route("/api/heartbeat/monitors", methods=["GET", "POST"])
+@feature_required("tools.heartbeat")
+def heartbeat_monitors_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        fields, err = _hb_monitor_body(request.get_json(force=True) or {})
+        if err:
+            c.close(); return jsonify({"error": err}), 400
+        cols = ", ".join(HB_MON_COLS)
+        marks = ", ".join(["%s"] * len(HB_MON_COLS))
+        cur.execute(f"INSERT INTO HeartbeatMonitors ({cols}) VALUES ({marks})",
+                    [fields[k] for k in HB_MON_COLS])
+        mid = cur.lastrowid
+        cur.execute("INSERT INTO HeartbeatEvents (monitor_id, ts, kind, message) "
+                    "VALUES (%s, NOW(), 'created', %s)",
+                    (mid, f"{fields['kind']} check on {fields['target']}"[:255]))
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", fields["name"],
+              f"added {fields['kind']} monitor for {fields['target']}")
+        return jsonify({"ok": True, "id": mid})
+    cur.execute("SELECT * FROM HeartbeatMonitors ORDER BY name")
+    rows = [dict(r) for r in cur.fetchall()]
+    c.close()
+    for r in rows:
+        for k in ("last_check", "last_change", "next_check"):
+            r[k] = str(r[k]) if r.get(k) else None
+    return jsonify(rows)
+
+
+@app.route("/api/heartbeat/monitors/<int:mid>", methods=["PUT", "DELETE"])
+@feature_required("tools.heartbeat")
+def heartbeat_monitor_one(mid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatMonitors WHERE id=%s", [mid])
+    ex = cur.fetchone()
+    if not ex:
+        c.close(); return jsonify({"error": "not found"}), 404
+    ex = dict(ex)
+    if request.method == "DELETE":
+        for t in ("HeartbeatSamples", "HeartbeatHourly", "HeartbeatEvents"):
+            cur.execute(f"DELETE FROM {t} WHERE monitor_id=%s", [mid])
+        cur.execute("DELETE FROM HeartbeatMonitors WHERE id=%s", [mid])
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", ex["name"], "deleted monitor")
+        return jsonify({"ok": True})
+    fields, err = _hb_monitor_body(request.get_json(force=True) or {}, ex)
+    if err:
+        c.close(); return jsonify({"error": err}), 400
+    sets = ", ".join(f"{k}=%s" for k in HB_MON_COLS)
+    args = [fields[k] for k in HB_MON_COLS]
+    # a paused monitor should start checking again the moment it is resumed,
+    # and an edited interval should take effect now rather than after the old
+    # one elapses
+    cur.execute(f"UPDATE HeartbeatMonitors SET {sets}, next_check=NULL WHERE id=%s",
+                args + [mid])
+    if int(ex.get("enabled") or 0) != fields["enabled"]:
+        cur.execute("INSERT INTO HeartbeatEvents (monitor_id, ts, kind, message) "
+                    "VALUES (%s, NOW(), %s, '')",
+                    (mid, "resumed" if fields["enabled"] else "paused"))
+        if not fields["enabled"]:
+            cur.execute("UPDATE HeartbeatMonitors SET status='paused', fails=0 WHERE id=%s", [mid])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/heartbeat/check", methods=["POST"])
+@feature_required("tools.heartbeat")
+def heartbeat_check_now():
+    """The Check now button: probe everything without waiting for the tick."""
+    return jsonify({"ok": True, "checked": _hb_run_due(force_all=True)})
+
+
+@app.route("/api/heartbeat/monitors/<int:mid>/check", methods=["POST"])
+@feature_required("tools.heartbeat")
+def heartbeat_check_one(mid):
+    return jsonify({"ok": True, "checked": _hb_run_due(only_id=mid)})
+
+
+@app.route("/api/heartbeat/monitors/<int:mid>/detail")
+@feature_required("tools.heartbeat")
+def heartbeat_monitor_detail(mid):
+    """Everything the detail view shows: uptime windows, chart, event log."""
+    try:
+        hours = max(1, min(8760, int(request.args.get("hours") or 24)))
+    except Exception:
+        hours = 24
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatMonitors WHERE id=%s", [mid])
+    mon = cur.fetchone()
+    if not mon:
+        c.close(); return jsonify({"error": "not found"}), 404
+    mon = dict(mon)
+    for k in ("last_check", "last_change", "next_check"):
+        mon[k] = str(mon[k]) if mon.get(k) else None
+    windows = {}
+    for label, hrs in (("24h", 24), ("7d", 168), ("30d", 720), ("1y", 8760)):
+        u = _hb_uptime(cur, hrs).get(mid) or {}
+        windows[label] = {"uptime": u.get("uptime"), "checks": u.get("checks", 0),
+                          "avg_ms": u.get("avg_ms")}
+    # the chart reads the roll-up for long windows and raw checks for short
+    # ones, so a day looks detailed and a year still draws
+    if hours <= 48:
+        cur.execute("SELECT ts, status, response_ms FROM HeartbeatSamples "
+                    "WHERE monitor_id=%s AND ts >= NOW() - INTERVAL %s HOUR "
+                    "ORDER BY ts ASC LIMIT 2000", [mid, hours])
+        series = [{"t": str(r["ts"]), "status": r["status"], "ms": r["response_ms"]}
+                  for r in cur.fetchall()]
+    else:
+        cur.execute("SELECT hour, checks, ups, sum_ms FROM HeartbeatHourly "
+                    "WHERE monitor_id=%s AND hour >= NOW() - INTERVAL %s HOUR "
+                    "ORDER BY hour ASC LIMIT 2000", [mid, hours])
+        series = []
+        for r in cur.fetchall():
+            n = int(r["checks"] or 0) or 1
+            series.append({"t": str(r["hour"]),
+                           "status": "up" if int(r["ups"] or 0) == n else
+                                     ("down" if not int(r["ups"] or 0) else "mixed"),
+                           "ms": int(round(int(r["sum_ms"] or 0) / n))})
+    cur.execute("SELECT ts, kind, message FROM HeartbeatEvents WHERE monitor_id=%s "
+                "ORDER BY ts DESC LIMIT 100", [mid])
+    events = [{"t": str(r["ts"]), "kind": r["kind"], "message": r["message"]}
+              for r in cur.fetchall()]
+    c.close()
+    return jsonify({"monitor": mon, "windows": windows, "series": series,
+                    "events": events, "window_hours": hours})
+
+
+@app.route("/api/heartbeat/state")
+@feature_required("tools.heartbeat")
+def heartbeat_state():
+    """Everything the Heartbeat page needs: monitors, counts, recent history."""
+    try:
+        hours = max(1, min(8760, int(request.args.get("hours") or 24)))
+    except Exception:
+        hours = 24
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatMonitors ORDER BY name")
+    mons = [dict(r) for r in cur.fetchall()]
+    hist = _hb_uptime(cur, hours) if mons else {}
+    bars = {}
+    if mons:
+        # The bar strip is what makes this readable at a glance, so the status
+        # of each recent check comes back too -- a response-time line alone
+        # cannot show a gap, because a failed check has no response time.
+        cur.execute(
+            "SELECT monitor_id, status, response_ms FROM ("
+            "  SELECT monitor_id, status, response_ms, ts, ROW_NUMBER() OVER "
+            "         (PARTITION BY monitor_id ORDER BY ts DESC) rn"
+            "  FROM HeartbeatSamples WHERE monitor_id<>0"
+            ") x WHERE rn <= 40 ORDER BY monitor_id, ts ASC")
+        for r in cur.fetchall():
+            rec = bars.setdefault(r["monitor_id"], {"bars": [], "series": []})
+            rec["bars"].append(r["status"] or "pending")
+            if r["response_ms"] is not None:
+                rec["series"].append(r["response_ms"])
+    cur.execute("SELECT * FROM HeartbeatChannels ORDER BY id")
+    channels = [{"id": r["id"], "name": r["name"], "kind": r["kind"],
+                 "enabled": r["enabled"]} for r in cur.fetchall()]
+    c.close()
+    counts = {"up": 0, "down": 0, "pending": 0, "disabled": 0}
+    for m in mons:
+        for k in ("last_check", "last_change", "next_check"):
+            m[k] = str(m[k]) if m.get(k) else None
+        h = hist.get(m["id"]) or {}
+        b = bars.get(m["id"]) or {}
+        m["uptime"] = h.get("uptime")
+        m["avg_ms"] = h.get("avg_ms")
+        m["samples"] = h.get("checks", 0)
+        m["bars"] = b.get("bars", [])
+        m["series"] = b.get("series", [])
+        key = "disabled" if not m["enabled"] else (m["status"] or "pending")
+        counts[key] = counts.get(key, 0) + 1
+    return jsonify({"monitors": mons, "counts": counts, "channels": channels,
+                    "window_hours": hours, "retain_days": HB_RETAIN_DAYS})
+
+
+# ---- notification channels (admin) ------------------------------------
+def _hb_channel_body(d, existing=None):
+    ex = existing or {}
+    kind = (d.get("kind") or ex.get("kind") or "email").lower()
+    if kind not in HB_CHANNEL_KINDS:
+        return None, f"kind must be one of {', '.join(HB_CHANNEL_KINDS)}"
+    cfg = d.get("config")
+    if not isinstance(cfg, dict):
+        cfg = _hb_channel_cfg(ex)
+    if kind in ("webhook", "slack"):
+        url = (cfg.get("url") or "").strip()
+        if not re.match(r"^https?://", url):
+            return None, "that needs a full https:// URL"
+    if kind == "telegram" and not ((cfg.get("token") or "").strip()
+                                   and (cfg.get("chat_id") or "").strip()):
+        return None, "Telegram needs both a bot token and a chat id"
+    name = (d.get("name", ex.get("name")) or kind).strip()[:120]
+    return {"name": name, "kind": kind, "config": json.dumps(cfg),
+            "enabled": 1 if d.get("enabled", ex.get("enabled", 1)) else 0}, None
+
+
+@app.route("/api/heartbeat/channels", methods=["GET", "POST"])
+@auth_required([ROLE_ADMIN])
+def heartbeat_channels():
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        fields, err = _hb_channel_body(request.get_json(force=True) or {})
+        if err:
+            c.close(); return jsonify({"error": err}), 400
+        cur.execute("INSERT INTO HeartbeatChannels (name, kind, config, enabled) "
+                    "VALUES (%s,%s,%s,%s)",
+                    (fields["name"], fields["kind"], fields["config"], fields["enabled"]))
+        cid = cur.lastrowid
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", fields["name"],
+              f"added {fields['kind']} alert channel")
+        return jsonify({"ok": True, "id": cid})
+    cur.execute("SELECT * FROM HeartbeatChannels ORDER BY id")
+    rows = []
+    for r in cur.fetchall():
+        cfg = _hb_channel_cfg(dict(r))
+        # secrets never round-trip to the browser
+        safe = {k: v for k, v in cfg.items() if k not in ("token",)}
+        if cfg.get("token"):
+            safe["token_set"] = True
+        rows.append({"id": r["id"], "name": r["name"], "kind": r["kind"],
+                     "enabled": r["enabled"], "config": safe})
+    c.close()
+    return jsonify(rows)
+
+
+@app.route("/api/heartbeat/channels/<int:cid>", methods=["PUT", "DELETE"])
+@auth_required([ROLE_ADMIN])
+def heartbeat_channel_one(cid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatChannels WHERE id=%s", [cid])
+    ex = cur.fetchone()
+    if not ex:
+        c.close(); return jsonify({"error": "not found"}), 404
+    ex = dict(ex)
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM HeartbeatChannels WHERE id=%s", [cid])
+        # a monitor pointing only at this channel would go silent, so drop the
+        # reference and let it fall back to the default address
+        cur.execute("UPDATE HeartbeatMonitors SET channels=TRIM(BOTH ',' FROM "
+                    "REPLACE(CONCAT(',', channels, ','), %s, ',')) "
+                    "WHERE FIND_IN_SET(%s, channels)", (f",{cid},", str(cid)))
+        c.commit(); c.close()
+        audit(session.get("user"), "HEARTBEAT", ex["name"], "deleted alert channel")
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    # an omitted token means "keep the stored one"
+    if isinstance(d.get("config"), dict):
+        old = _hb_channel_cfg(ex)
+        for secret in ("token",):
+            if not (d["config"].get(secret) or "").strip() and old.get(secret):
+                d["config"][secret] = old[secret]
+    fields, err = _hb_channel_body(d, ex)
+    if err:
+        c.close(); return jsonify({"error": err}), 400
+    cur.execute("UPDATE HeartbeatChannels SET name=%s, kind=%s, config=%s, enabled=%s "
+                "WHERE id=%s", (fields["name"], fields["kind"], fields["config"],
+                                fields["enabled"], cid))
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/heartbeat/channels/<int:cid>/test", methods=["POST"])
+@auth_required([ROLE_ADMIN])
+def heartbeat_channel_test(cid):
+    """Prove a channel works before an outage is relying on it."""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM HeartbeatChannels WHERE id=%s", [cid])
+    ch = cur.fetchone()
+    c.close()
+    if not ch:
+        return jsonify({"error": "not found"}), 404
+    ch = dict(ch)
+    fn = _HB_SENDERS.get((ch.get("kind") or "").lower())
+    if not fn:
+        return jsonify({"error": "unknown channel type"}), 400
+    subject = "IT-Vault Heartbeat test"
+    body = ("This is a test alert from IT-Vault Heartbeat.\n\n"
+            "If you are reading it, this channel works and real outage "
+            "alerts will arrive the same way.")
+    try:
+        fn(_hb_channel_cfg(ch), subject, body,
+           {"event": "test", "monitor": "test", "subject": subject, "message": body})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)[:300]}), 400
+    return jsonify({"ok": True, "message": f"Sent through {ch['name']}"})
+
 @app.route("/api/unifi/devices")
 @auth_required()
 def unifi_devices():
@@ -2496,39 +4376,59 @@ def unifi_clients():
     return jsonify({"clients": out, "error": _unifi_cache["error"]})
 
 # ---------- settings (admin) ----------
-def _save_letterhead(fileobj):
-    """Normalizes an uploaded letterhead (PDF or image) to a single PNG at
-    BASE/letterhead.png -- a PDF's first page is rasterized (via PyMuPDF) so
-    every print/PDF surface in the app can just <img src=/letterhead.png>
-    or embed the same PNG, regardless of what format was uploaded."""
+def _save_letterhead(fileobj, cur=None):
+    """Normalize an uploaded letterhead (PDF or image) to a single PNG.
+
+    A PDF's first page is rasterized (via PyMuPDF) so every print/PDF surface
+    in the app can just <img src=/letterhead.png> or embed the same PNG, no
+    matter what was uploaded.
+
+    The conversion happens entirely in memory and the result goes to the
+    database. It used to render straight onto DATA_DIR/letterhead.png, so on
+    an install whose data volume the app can't write to, a perfectly good
+    upload came back as "[Errno 13] Permission denied" -- a storage problem
+    reported as a bad file.
+    """
     fname = (fileobj.filename or "").lower()
-    data = fileobj.read()
+    data = fileobj.read(24 * 1024 * 1024 + 1)
     if not data:
         return False, "empty file"
-    dest = os.path.join(BASE, "letterhead.png")
+    if len(data) > 24 * 1024 * 1024:
+        return False, "that file is over 24MB -- please use a smaller one"
     try:
         if fname.endswith(".pdf") or data[:4] == b"%PDF":
             import pymupdf
             doc = pymupdf.open(stream=data, filetype="pdf")
             if doc.page_count < 1:
+                doc.close()
                 return False, "PDF has no pages"
             page = doc.load_page(0)
             pix = page.get_pixmap(matrix=pymupdf.Matrix(2, 2))  # ~144dpi
-            pix.save(dest)
+            png = pix.tobytes("png")
             doc.close()
-        else:
+        elif _sniff_image(data)[0]:
             from PIL import Image as PILImage
-            img = PILImage.open(io.BytesIO(data)).convert("RGB")
-            img.save(dest, format="PNG")
-        return True, None
+            buf = io.BytesIO()
+            PILImage.open(io.BytesIO(data)).convert("RGB").save(buf, format="PNG")
+            png = buf.getvalue()
+        else:
+            return False, "that file isn't a PDF or an image (PNG, JPEG, GIF, WebP)"
     except Exception as e:
-        return False, str(e)
+        return False, f"could not read that file: {e}"
+    # Bounded before it goes anywhere near the database, so the size of what
+    # someone uploaded can't decide whether the save succeeds.
+    png = _fit_png(png)
+    print(f"[itvault] branding: letterhead {fname!r} -> {len(png)}B PNG", flush=True)
+    ok, err = _brand_store("letterhead", LETTERHEAD_PATH, png, cur=cur)
+    if not ok:
+        print(f"[itvault] branding: letterhead NOT saved: {err}", flush=True)
+    return ok, err
 
 @app.route("/letterhead.png")
 def letterhead_file():
-    p = os.path.join(BASE, "letterhead.png")
-    if os.path.exists(p) and os.path.getsize(p) > 0:
-        return send_from_directory(BASE, "letterhead.png")
+    sent = _brand_send("letterhead", LETTERHEAD_PATH, "letterhead.png")
+    if sent is not None:
+        return sent
     from flask import Response as _R
     return _R(b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xcf\xc0\xf0\x1f\x00\x05\x05\x02\x00\x9d\xfd\xa4\x1e\x00\x00\x00\x00IEND\xaeB`\x82",
                     mimetype="image/png")
@@ -2537,7 +4437,7 @@ def letterhead_file():
 @auth_required(module="settings", level="read")
 def settings():
     if request.method != "GET" and not _module_write_allowed("settings"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "PUT":
         # accept JSON or multipart FormData (branding uses FormData)
@@ -2545,6 +4445,14 @@ def settings():
             d = request.form.to_dict()
             logo = request.files.get("logo") if "logo" in request.files else None
             letterhead = request.files.get("letterhead") if "letterhead" in request.files else None
+            # Logged because a branding upload that silently does nothing is
+            # indistinguishable, from the outside, from one the server never
+            # received. An empty files list here means the browser did not
+            # send the file, and no server-side change would ever fix that.
+            print(f"[itvault] branding PUT: form={sorted(d.keys())} "
+                  f"files={sorted(request.files.keys())} "
+                  f"logo={getattr(logo, 'filename', None)!r} "
+                  f"letterhead={getattr(letterhead, 'filename', None)!r}", flush=True)
         else:
             d = request.get_json(force=True) or {}
             logo = None
@@ -2627,30 +4535,41 @@ def settings():
                            d.get("db_name", DB_NAME), d.get("db_user", DB_USER),
                            d.get("db_pass", DB_PASS))
         if logo:
-            try:
-                data = logo.read()
-                cur.execute("UPDATE Settings SET logo=%s WHERE id=1", (data,))
-                with open(os.path.join(BASE, "logo.png"), "wb") as fp:
-                    fp.write(data)
-            except Exception:
-                pass
+            # This used to be wrapped in "except Exception: pass", so a logo
+            # that could not be saved still answered {"ok": true} and left the
+            # admin re-uploading it forever with nothing to go on.
+            data = logo.read()
+            sniffed = _sniff_image(data)[0]
+            print(f"[itvault] branding: logo {logo.filename!r} {len(data)}B sniffed={sniffed}", flush=True)
+            if not sniffed:
+                c.commit(); c.close()
+                return jsonify({"error": f"{logo.filename or 'that file'} isn't a PNG, JPEG, GIF, "
+                                         f"WebP or HEIC image -- convert it and try again"}), 400
+            data = _fit_png(data, LOGO_MAX_EDGE, LOGO_MAX_BYTES)
+            print(f"[itvault] branding: logo stored as {len(data)}B", flush=True)
+            # cur, not a new connection: this request already holds the lock
+            # on Settings id=1 from the UPDATE above.
+            ok, err = _brand_store("logo", LOGO_PATH, data, cur=cur)
+            if not ok:
+                c.commit(); c.close()
+                return jsonify({"error": err or "could not save the logo"}), 500
         elif str(d.get("remove_logo", "")).lower() in ("1", "true"):
             cur.execute("UPDATE Settings SET logo=NULL WHERE id=1")
             try:
-                open(os.path.join(BASE, "logo.png"), "wb").close()
+                open(LOGO_PATH, "wb").close()
             except Exception:
                 pass
         if letterhead:
-            ok, err = _save_letterhead(letterhead)
+            ok, err = _save_letterhead(letterhead, cur=cur)
             if ok:
                 cur.execute("UPDATE Settings SET has_letterhead=1 WHERE id=1")
             else:
                 c.commit(); c.close()
                 return jsonify({"error": err or "could not process letterhead file"}), 400
         elif str(d.get("remove_letterhead", "")).lower() in ("1", "true"):
-            cur.execute("UPDATE Settings SET has_letterhead=0 WHERE id=1")
+            cur.execute("UPDATE Settings SET has_letterhead=0, letterhead=NULL WHERE id=1")
             try:
-                open(os.path.join(BASE, "letterhead.png"), "wb").close()
+                open(LETTERHEAD_PATH, "wb").close()
             except Exception:
                 pass
         c.commit(); c.close()
@@ -2682,7 +4601,7 @@ def settings():
 @auth_required(module="contracts", level="read")
 def contracts_api():
     if request.method != "GET" and not _module_write_allowed("contracts"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 ORDER BY id"); rows = cur.fetchall(); c.close()
@@ -2754,7 +4673,7 @@ def empty_contracts_trash():
     return jsonify({"ok": True, "deleted": len(rows)})
 
 @app.route("/api/locations", methods=["GET","POST","DELETE"])
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("directory.reflists")
 def locations_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
@@ -2871,7 +4790,7 @@ def notify_ticket_resolved(ticket):
         subj = f"{bn}: Ticket {ticket['code']} Resolved"
         body = (f"Your ticket has been resolved.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nStatus: {ticket.get('status','')}\n\nIf you need further assistance, reply to this email or submit a new ticket.")
         msg = EmailMessage(); msg["Subject"] = subj
-        msg["From"] = settings.get("smtp_from") or settings.get("smtp_user")
+        msg["From"] = _mail_from(settings.get("smtp_from") or settings.get("smtp_user"), bn)
         msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
@@ -2901,7 +4820,7 @@ def notify_ticket_replied(ticket, reply_author, reply_body):
         subj = f"{bn}: Reply on Ticket {ticket['code']}"
         body = (f"Your ticket received a reply.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nReply from: {reply_author}\n\n{reply_body[:500]}\n\nLogin to view full thread.")
         msg = EmailMessage(); msg["Subject"] = subj
-        msg["From"] = settings.get("smtp_from") or settings.get("smtp_user")
+        msg["From"] = _mail_from(settings.get("smtp_from") or settings.get("smtp_user"), bn)
         msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
@@ -2926,7 +4845,7 @@ def check_sla_breach(ticket):
 @auth_required(module="tickets", level="read")
 def tickets_api():
     if request.method != "GET" and not _module_write_allowed("tickets"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         q = request.args.get("q","").strip(); st = request.args.get("status","")
@@ -2984,8 +4903,23 @@ def tickets_api():
 
 @app.route("/api/portal/tickets", methods=["POST"])
 def portal_create_ticket():
-    """Public (no auth) ticket/request intake from the portal invite link."""
-    d = request.get_json(force=True) or {}
+    """Public (no auth) ticket/request intake from the portal invite link.
+
+    Accepts JSON, or multipart/form-data when the visitor attached photos.
+    Photos ride along with the ticket they belong to rather than going through
+    an attach-by-code endpoint of their own, so this stays the single public
+    write and nobody can staple a file onto someone else's ticket.
+
+    get_json(force=True) must NOT be reached for a multipart body: it raises
+    a 400 that reads as "the browser sent a request this server could not
+    understand", which is what every photo upload got.
+    """
+    if (request.content_type or "").startswith("multipart/form-data"):
+        d = {k: v for k, v in request.form.items()}
+        photos = request.files.getlist("photos")
+    else:
+        d = request.get_json(force=True) or {}
+        photos = []
     subject = (d.get("subject") or "").strip()
     description = (d.get("description") or "").strip()
     if not subject or not description:
@@ -3002,8 +4936,18 @@ def portal_create_ticket():
                 (subject, requester, description))
     dup = cur.fetchone()
     if dup:
+        # A double-tapped submit button lands here. The ticket already exists,
+        # so attach the photos to it rather than losing them.
+        saved, skipped = 0, []
+        if photos:
+            try:
+                saved, skipped = _store_ticket_photos(cur, dup["id"], photos, "portal")
+                c.commit()
+            except Exception as e:
+                print("portal photo error:", e)
         c.close()
-        return jsonify({"ok": True, "id": dup["id"], "code": dup["code"]})
+        return jsonify({"ok": True, "id": dup["id"], "code": dup["code"],
+                        "photos": saved, "photo_warnings": skipped})
     code = ticket_code()
     priority = (d.get("priority") or "Normal") or "Normal"
     category = d.get("category","") or ""
@@ -3017,12 +4961,23 @@ def portal_create_ticket():
                  requester, (d.get("requester_email") or "").strip(),
                  assignee, due_date, sla_hours, category))
     tid = cur.lastrowid
+    # A photo that fails validation must not cost the visitor their ticket --
+    # the text is the part nobody can reconstruct, so it is committed either
+    # way and the rejected files come back as warnings.
+    saved, skipped = 0, []
+    if photos:
+        try:
+            saved, skipped = _store_ticket_photos(cur, tid, photos, "portal")
+        except Exception as e:
+            print("portal photo error:", e)
+            skipped.append("photos could not be saved")
     c.commit(); c.close()
     ticket = {"id": tid, "code": code, "subject": subject, "priority": priority, "requester": d.get("requester",""), "requester_email": d.get("requester_email",""), "category": category}
     try: notify_ticket_created(ticket)
     except Exception as e: print("notify created error:", e)
     notify_requester_ticket_created(ticket)
-    return jsonify({"ok": True, "code": code, "id": tid})
+    return jsonify({"ok": True, "code": code, "id": tid,
+                    "photos": saved, "photo_warnings": skipped})
 
 @app.route("/portal")
 def portal_page():
@@ -3040,7 +4995,7 @@ def portal_link():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT portal_token, app_name FROM Settings WHERE id=1"); s = cur.fetchone() or {}
     c.close()
-    base = request.host_url.rstrip("/")
+    base = _public_base().rstrip("/")
     url = base + "/portal"
     if s.get("portal_token"):
         url += "?t=" + s["portal_token"]
@@ -3059,20 +5014,40 @@ def portal_status():
     if not t:
         c.close(); return jsonify({"error": "Ticket not found. Check the code."}), 404
     cur.execute("SELECT * FROM TicketReplies WHERE ticket_id=%s ORDER BY created_at", [t["id"]])
-    reps = cur.fetchall(); c.close()
-    return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps]})
+    reps = cur.fetchall()
+    atts = _attachment_rows(cur, t["id"])
+    c.close()
+    return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps], "attachments": atts})
 
 @app.route("/api/tickets/<int:ticket_id>", methods=["GET","PUT","DELETE"])
 @auth_required(module="tickets", level="read")
 def ticket_detail(ticket_id):
     if request.method != "GET" and not _module_write_allowed("tickets"):
-        return jsonify({"error": "forbidden"}), 403
+        return jsonify({"error": "No access"}), 403
+    # Deleting a ticket destroys its replies and its trail, so that is
+    # admin-only outright.
+    if request.method == "DELETE" and not _feature_allowed("tickets.delete"):
+        return jsonify({"error": "No access -- you can't delete a ticket"}), 403
+    # Editing a ticket's content is admin-only, but working the queue is not:
+    # moving status and priority is what anyone with tickets write does every
+    # day (the reply box sends exactly that), so those two stay open and only
+    # the rest of the fields need admin. Both paths are recorded in the trail.
+    if request.method == "PUT":
+        # Assigning is queue work too -- there is a dedicated "Assign to IT"
+        # control for it -- so it sits with status and priority.
+        _queue_only = {"status", "priority", "assignee"}
+        _touched = {k for k in (request.get_json(silent=True) or {}).keys()}
+        if not _touched.issubset(_queue_only) and not _feature_allowed("tickets.edit"):
+            return jsonify({"error": "No access -- you can't change a ticket's details. "
+                                     "You can still reply, and set status and priority."}), 403
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); t = cur.fetchone()
         if not t: c.close(); return jsonify({"error":"not found"}), 404
         cur.execute("SELECT * FROM TicketReplies WHERE ticket_id=%s ORDER BY created_at", [ticket_id]); reps = cur.fetchall()
-        c.close(); return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps]})
+        atts = _attachment_rows(cur, ticket_id)
+        c.close()
+        return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps], "attachments": atts})
     if request.method == "PUT":
         d = request.get_json(force=True)
         # fetch current to detect changes
@@ -3087,6 +5062,20 @@ def ticket_detail(ticket_id):
         if fields:
             params.append(ticket_id)
             cur.execute("UPDATE Tickets SET "+", ".join(fields)+", updated_at=NOW() WHERE id=%s", params)
+        # One row per field that actually changed, so the ticket view can show
+        # the same "who changed what, when" trail an asset has. Compared against
+        # the pre-update snapshot, and only written when the value really moved.
+        who = session.get("user") or "?"
+        for fname in ["subject", "description", "priority", "status", "requester",
+                      "requester_email", "assignee", "asset_id", "due_date",
+                      "sla_hours", "category"]:
+            if fname not in d:
+                continue
+            was = "" if (before or {}).get(fname) is None else str((before or {}).get(fname))
+            now = "" if d[fname] is None else str(d[fname])
+            if was.strip() == now.strip():
+                continue
+            _ticket_hist(cur, ticket_id, who, fname, was, now)
         c.commit(); c.close()
         # notify on assignment change
         new_assignee = d.get("assignee")
@@ -3108,6 +5097,91 @@ def ticket_detail(ticket_id):
     cur.execute("DELETE FROM Tickets WHERE id=%s", [ticket_id])
     cur.execute("DELETE FROM TicketReplies WHERE ticket_id=%s", [ticket_id])
     c.commit(); c.close(); return jsonify({"ok": True})
+
+@app.route("/api/tickets/<int:ticket_id>/history")
+@auth_required(module="tickets", level="read")
+def ticket_history(ticket_id):
+    """Same shape as /api/assets/<id>/history, so the UI renders it the same."""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT ts, user, field, old_val, new_val FROM TicketHistory "
+                "WHERE ticket_id=%s ORDER BY ts DESC", [ticket_id])
+    rows = cur.fetchall(); c.close()
+    return jsonify([{"ts": str(r["ts"]), "user": r["user"], "field": r["field"],
+                     "old_val": r["old_val"], "new_val": r["new_val"]} for r in rows])
+
+@app.route("/api/tickets/<int:ticket_id>/attachments", methods=["GET", "POST"])
+@auth_required(module="tickets", level="read")
+def ticket_attachments(ticket_id):
+    """Metadata for a ticket's photos, and a way for an agent to add more.
+
+    Adding is queue work -- an engineer photographing the repair belongs in
+    the same bucket as replying -- so it needs tickets write, not admin.
+    """
+    if request.method == "POST" and not _feature_allowed("tickets.photos"):
+        return jsonify({"error": "No access -- you can't add photos"}), 403
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        files = request.files.getlist("photos") or request.files.getlist("file")
+        if not files:
+            c.close(); return jsonify({"error": "no file"}), 400
+        saved, skipped = _store_ticket_photos(cur, ticket_id, files,
+                                              session.get("user") or "agent")
+        if saved:
+            _ticket_hist(cur, ticket_id, session.get("user") or "agent",
+                         "attachment", "", f"added {saved} photo(s)")
+        c.commit()
+        rows = _attachment_rows(cur, ticket_id)
+        c.close()
+        return jsonify({"ok": True, "saved": saved, "warnings": skipped, "attachments": rows})
+    rows = _attachment_rows(cur, ticket_id)
+    c.close()
+    return jsonify(rows)
+
+
+@app.route("/api/tickets/<int:ticket_id>/attachments/<int:att_id>", methods=["GET", "DELETE"])
+@auth_required(module="tickets", level="read")
+def ticket_attachment_one(ticket_id, att_id):
+    """Serve or remove one photo. Deleting destroys evidence, so it is
+    admin-only, like deleting the ticket itself."""
+    if request.method == "DELETE" and not _feature_allowed("tickets.delete"):
+        return jsonify({"error": "No access -- you can't delete a photo"}), 403
+    c = conn(); cur = c.cursor()
+    if request.method == "DELETE":
+        cur.execute("SELECT filename FROM TicketAttachments WHERE id=%s AND ticket_id=%s",
+                    (att_id, ticket_id))
+        row = cur.fetchone()
+        if not row:
+            c.close(); return jsonify({"error": "not found"}), 404
+        cur.execute("DELETE FROM TicketAttachments WHERE id=%s AND ticket_id=%s", (att_id, ticket_id))
+        _ticket_hist(cur, ticket_id, session.get("user") or "agent",
+                     "attachment", row.get("filename") or "photo", "deleted")
+        c.commit(); c.close()
+        return jsonify({"ok": True})
+    cur.execute("""SELECT filename, mimetype, data FROM TicketAttachments
+                   WHERE id=%s AND ticket_id=%s""", (att_id, ticket_id))
+    row = cur.fetchone(); c.close()
+    if not row or not row.get("data"):
+        return jsonify({"error": "not found"}), 404
+    return _attachment_response(row)
+
+
+@app.route("/api/portal/attachments/<code>/<int:att_id>")
+def portal_attachment(code, att_id):
+    """Public read of a photo, gated on the ticket code.
+
+    The code is already the only thing standing between a visitor and their
+    ticket in /api/portal/status, so this adds no new exposure -- but the
+    photo is still reachable only through the ticket it was attached to.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("""SELECT a.filename, a.mimetype, a.data
+                   FROM TicketAttachments a JOIN Tickets t ON t.id = a.ticket_id
+                   WHERE t.code=%s AND a.id=%s""", ((code or "").strip().upper(), att_id))
+    row = cur.fetchone(); c.close()
+    if not row or not row.get("data"):
+        return jsonify({"error": "not found"}), 404
+    return _attachment_response(row)
+
 
 @app.route("/api/tickets/<int:ticket_id>/reply", methods=["POST"])
 # read, not write: a role with tickets='none' is correctly shut out, but
@@ -3186,18 +5260,24 @@ def upload_logo():
     f = request.files["file"]
     if not f.filename:
         return jsonify({"error": "no file"}), 400
-    data = f.read()
-    if len(data) > 500 * 1024:
-        return jsonify({"error": "logo too large (max 500KB)"}), 400
-    with open(os.path.join(BASE, "logo.png"), "wb") as fp:
-        fp.write(data)
+    data = f.read(24 * 1024 * 1024 + 1)
+    if len(data) > 24 * 1024 * 1024:
+        return jsonify({"error": "that file is over 24MB -- please use a smaller one"}), 400
+    if not _sniff_image(data)[0]:
+        return jsonify({"error": "that file isn't a PNG, JPEG, GIF, WebP or HEIC image"}), 400
+    data = _fit_png(data, LOGO_MAX_EDGE, LOGO_MAX_BYTES)
+    # Database first: the file is a cache that a container replacement takes
+    # with it, which is how branding used to disappear on update.
+    ok, err = _brand_store("logo", LOGO_PATH, data)
+    if not ok:
+        return jsonify({"error": err or "could not save the logo"}), 500
     return jsonify({"ok": True, "logo": "/logo.png"})
 
 @app.route("/logo.png")
 def logo_file():
-    p = os.path.join(BASE, "logo.png")
-    if os.path.exists(p) and os.path.getsize(p) > 0:
-        return send_from_directory(BASE, "logo.png")
+    sent = _brand_send("logo", LOGO_PATH, "logo.png")
+    if sent is not None:
+        return sent
     # no custom logo uploaded yet (fresh install, or right after a wipe) --
     # show the real IT-Vault shield mark instead of a blank/broken image,
     # until an admin uploads their own.
@@ -3250,7 +5330,8 @@ def _lookup_person_email(identifier):
     r = cur.fetchone(); c.close()
     return (r.get("Email") if r else "") or ""
 
-def notify_person_asset_assigned(employee_id, asset, checked_out=False):
+def notify_person_asset_assigned(employee_id, asset, checked_out=False, reminder=False,
+                                 sign_url=None):
     """Emails the specific person an asset is assigned to (not the general
     staff broadcast) -- only Asset ID + Serial, never MAC, per policy. Includes
     a signature/acknowledgement link so they can sign for it directly from
@@ -3262,22 +5343,39 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False):
     name = (asset.get("Name") or "").strip()
     what = f"{tag} ({name})" if name else tag
     verb = "checked out to you" if checked_out else "assigned to you"
-    lead = f"We have deployed asset {what} to you."
     ask = "Kindly review the details and acknowledge receipt by signing."
+    if reminder:
+        # same asset, same link -- but a mail that reads like a first
+        # notification is confusing when it is the second or third
+        lead = (f"This is a reminder that asset {what} is assigned to you "
+                "and still needs your acknowledgement.")
+        subj = f"Reminder: please acknowledge asset {name or tag}"
+        head = (f"Asset <b>{tag}</b>{(' (' + name + ')') if name else ''} is "
+                f"assigned to you and still needs your acknowledgement.<br>{ask}")
+    else:
+        lead = f"We have deployed asset {what} to you."
+        subj = f"Asset {verb}: {name or tag}"
+        head = (f"We have deployed asset <b>{tag}</b>"
+                f"{(' (' + name + ')') if name else ''} to you.<br>{ask}")
     body = f"{lead}\n"
     html_body = None
     aid = asset.get("_id")
     if aid:
         try:
-            tk = _sign_token({"asset_id": aid, "name": asset.get("Name", "")}, exp_hours=168)
-            sign_url = f"{request.host_url}sign?token={quote(tk)}"
+            # A nonce-bearing link, the same as the one the dialog hands out:
+            # without it an old email stayed valid after a new link was
+            # issued, so resending retired nothing.
+            #
+            # A caller that has already issued one passes it in, so a resend
+            # does not immediately invalidate the link it just mailed.
+            if not sign_url:
+                _tk, sign_url = _issue_sign_link(aid, asset.get("Name", ""))
             body += f"\n{ask}\n{sign_url}\n"
             html_body = _button_email_html(
-                f"We have deployed asset <b>{tag}</b>{(' (' + name + ')') if name else ''} to you.<br>{ask}",
-                "Review &amp; Sign Acknowledgement", sign_url)
+                head, "Review &amp; Sign Acknowledgement", sign_url)
         except Exception as e:
             print("sign link build error:", e)
-    return _send_simple_email(to, f"Asset {verb}: {name or tag}", body, html_body=html_body)
+    return _send_simple_email(to, subj, body, html_body=html_body)
 
 def notify_asset_status_changed(asset, old_status, new_status):
     """Emails the assigned employee, whoever requested it, and every
@@ -3338,7 +5436,7 @@ def send_notification(subject, body):
     try:
         bn = s.get("app_name") or "IT-Vault"
         subj = subject if subject.startswith(bn) else f"{bn}: {subject}" if not subject.startswith("IT Guy") else subject.replace("IT Guy", bn, 1)
-        msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = ", ".join(emails); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
@@ -3376,7 +5474,7 @@ def notify_ticket_assigned(ticket, assignee_user):
                 f"This ticket has been assigned to {assignee_user or 'the IT team'}.\n"
                 f"Login to {s.get('app_name') or 'IT-Vault'} to update status and reply.\n")
         msg = EmailMessage(); msg["Subject"] = subj
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = ", ".join(recipients); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
@@ -3414,7 +5512,7 @@ def test_email():
         bn = (gv("app_name") or "IT-Vault").strip() or "IT-Vault"
         msg = EmailMessage()
         msg["Subject"] = f"{bn} · SMTP check ✅"
-        msg["From"] = frm
+        msg["From"] = _mail_from(frm, bn)
         msg["To"] = to
         msg.set_content(
             f"Yo — this is your SMTP test email from {bn}.\n\n"
@@ -3538,7 +5636,7 @@ def maintenance(a_id):
 
 # ---------- audit log ----------
 @app.route("/api/audit")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("tools.audit")
 def audit_log():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM AuditLog ORDER BY ts DESC LIMIT 100"); rows = cur.fetchall(); c.close()
@@ -3624,16 +5722,85 @@ def asset_qr(a_id):
     asset = row_to_dict(a)
     return jsonify({"asset": asset, "url": f"{lan_base_url()}asset/{a_id}"})
 
+def _employee_label_map():
+    """{EmployeeID: (EmpCode, EmployeeName)} for putting on an asset tag.
+
+    Assets store Employees.EmployeeID, which for anything synced from AD is
+    the AD username -- not an employee number. Printing it raw under a
+    heading of "Employee ID" put a login name on the tag. The real number is
+    EmpCode (EMP-001, assigned when the employee is created), so that is what
+    a field called Employee ID has to show.
+
+    One query for the whole table rather than one per asset: a sheet of fifty
+    labels would otherwise be fifty round trips. Opens its own connection
+    because both label routes have already closed theirs by the time they
+    build their fields, and holds no lock anyone else wants.
+    """
+    out = {}
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT EmployeeID, EmpCode, EmployeeName FROM Employees")
+        for r in cur.fetchall():
+            key = (r.get("EmployeeID") or "").strip()
+            if key:
+                out[key] = ((r.get("EmpCode") or "").strip(),
+                            (r.get("EmployeeName") or "").strip())
+    except Exception as e:
+        print(f"[itvault] could not read employees for the label: {e}", flush=True)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    return out
+
+
+def _employee_for_label(emp_map, assigned):
+    """(id, name) for one asset. Falls back to the stored value, so a tag for
+    an asset assigned to someone since deleted still says something."""
+    assigned = (assigned or "").strip()
+    if not assigned:
+        return "", ""
+    code, name = emp_map.get(assigned, ("", ""))
+    return (code or assigned), (name or assigned)
+
+
+def _public_base():
+    """The base URL a phone should use, with a trailing slash.
+
+    QR codes used to encode http://<lan-ip>:5000/, where the IP came from
+    opening a UDP socket and reading back the local address. In a container
+    that is the bridge address -- 172.18.0.x -- which nothing outside the
+    host can reach, the port was hardcoded to 5000 whatever it was published
+    on, and the scheme was always http. Scanning an asset tag then offered a
+    link that went nowhere.
+
+    The portal and the signature links have always used the address the
+    request actually came in on, which is by definition one that reaches this
+    server. This is that, in one place, so the three cannot drift apart.
+
+    X-Forwarded-Proto is honoured IF it arrives -- but waitress strips
+    X-Forwarded-* by default (clear_untrusted_proxy_headers is on and no
+    trusted_proxy is configured), so behind a TLS-terminating proxy this
+    yields http:// and the phone takes one redirect to get to https. Set
+    ITVAULT_PUBLIC_URL=https://your.host to put the final URL straight in the
+    QR; that also covers a proxy whose Host header cannot be trusted.
+    """
+    override = (os.environ.get("ITVAULT_PUBLIC_URL") or "").strip()
+    if override:
+        return override.rstrip("/") + "/"
+    base = request.host_url
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
+    if proto in ("http", "https") and "://" in base:
+        base = proto + "://" + base.split("://", 1)[1]
+    return base
+
+
 @app.route("/label/<a_id>")
 def label_page(a_id):
-    # Build a LAN-reachable base URL so QR codes scan from any device on the network
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
-    except Exception:
-        lan_ip = "127.0.0.1"
-    base = f"http://{lan_ip}:5000/"
+    # the address this request came in on -- the same one the portal and
+    # the signature links use, and the only one a phone can be sure of
+    base = _public_base()
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone(); c.close()
@@ -3666,24 +5833,40 @@ def label_page(a_id):
     head_mm = 0.0 if compact else 5.5
     name_mm = 2.6 if compact else 4.0
     gap_mm = 0.5 if compact else 1.0
-    reserved_mm = pad_mm * 2 + head_mm + name_mm + gap_mm * (1 if compact else 2)
+    # the DO NOT REMOVE strip is a row of its own: budget for it, or the
+    # bottom field silently clips off the tag
+    # two lines of it: an organisation name plus DO NOT REMOVE does not fit
+    # on one at a readable size, and clipping is not an option when the
+    # clipped half is the instruction
+    norem_mm = 4.2 if compact else 5.2
+    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
+                   + gap_mm * (1 if compact else 2))
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     # QR must fit both the label width and whatever vertical room is left
-    qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
+    # Capped at 44% of the label width. It used to be allowed up to
+    # lw_mm - 7, which on a 50.8mm tag left the fields a ~12mm column --
+    # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
+    # still scans from a phone at arm's length.
+    qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
     qr_px = int(qr_mm * 3.78)
     # embed logo as base64 if present (no extra request, prints reliably)
     logo_uri = _logo_data_uri()
     rows_html = ""
+    # the tag says "Employee ID", so it shows the employee NUMBER -- not the
+    # AD username the asset row actually stores
+    _emp_code, _emp_name = _employee_for_label(_employee_label_map(),
+                                               asset.get("EmployeeID"))
     field_defs = {
         "Name": ("Asset", asset.get("Name")),
-        "AssetID": ("Asset ID", asset["_id"][:12]),
+        "AssetID": ("Asset ID", asset.get("AssetTag") or asset["_id"][:12]),
         "Type": ("Category", asset.get("Type")),
         "Serial": ("Serial", asset.get("Serial")),
         "Status": ("Status", asset.get("Status")),
         "Location": ("Location", asset.get("Location")),
         "ReceivedBy": ("Signed By", asset.get("ReceivedBy")),
         "ReceiverDate": ("Signed Date", asset.get("NotesReceived")),
-        "EmployeeID": ("Employee ID", asset.get("EmployeeID")),
+        "EmployeeID": ("Employee ID", _emp_code),
+        "EmployeeName": ("Employee", _emp_name),
         "Department": ("Department", asset.get("Department")),
         "Warranty": ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"),
         "PurchaseDate": ("Purchase", asset.get("PurchaseDate")),
@@ -3694,11 +5877,17 @@ def label_page(a_id):
     for forced in ["Type", "AssetID"]:
         if forced not in chosen:
             chosen.insert(1 if forced == "Type" else len(chosen), forced)
-    for key in chosen:
-        if key == "Name" or key not in field_defs: continue
+    # what will actually be printed, so the row style can be chosen on fit
+    printable = [k for k in chosen
+                 if k != "Name" and k in field_defs
+                 and field_defs[k][1] not in (None, "")]
+    # a stacked field is a label line plus a value line; a single-line row is
+    # one. Measured against the space left after the header, name and strip.
+    STACKED_MM, LINE_MM = 6.6, 3.05
+    rows_compact = compact or (len(printable) * STACKED_MM > avail_h_mm)
+    for key in printable:
         lbl, val = field_defs[key]
-        if val is None or val == "": continue
-        if compact:
+        if rows_compact:
             rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
         else:
             rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
@@ -3709,7 +5898,7 @@ def label_page(a_id):
                   else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Label {asset['Name']}</title>
 <style>
- body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff}}
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;justify-content:center;padding:20px}}
  .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
@@ -3720,12 +5909,14 @@ def label_page(a_id):
  .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;overflow:hidden}}
  .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
- .k{{color:#555;font-size:1.9mm;line-height:1.05}}
- .v{{font-size:2.4mm;line-height:1.1;margin-bottom:0.5mm;word-break:break-word}}
- .kv{{font-size:1.7mm;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#333}}
- .kv b{{color:#555;font-weight:600}}
- .aid{{font-family:monospace;font-size:2.6mm;font-weight:700}}
+ .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
+ .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
+ .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv b{{color:#333;font-weight:700}}
+ .aid{{font-family:'Consolas','Courier New',monospace;font-size:3.1mm;font-weight:700;letter-spacing:0.08mm}}
  .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
+ .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -3743,6 +5934,7 @@ def label_page(a_id):
    </div>
    <div id=qr class=qr></div>
  </div>
+ <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
 </div></div>
 <div class="no-print" style="text-align:center;margin-top:10px"><button onclick="window.print()">🖨 PRINT LABEL</button></div>
 <script>new QRCode(document.getElementById('qr'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});</script>
@@ -3755,13 +5947,7 @@ def labels_page():
     ids = [i.strip() for i in (request.args.get("ids") or "").split(",") if i.strip()]
     if not ids:
         return "No assets specified", 400
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
-    except Exception:
-        lan_ip = "127.0.0.1"
-    base = f"http://{lan_ip}:5000/"
+    base = _public_base()
     c = conn(); cur = c.cursor()
     placeholders = ",".join(["%s"] * len(ids))
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + f", InvoiceFile FROM Assets WHERE _id IN ({placeholders})", ids)
@@ -3791,9 +5977,20 @@ def labels_page():
     head_mm = 0.0 if compact else 5.5
     name_mm = 2.6 if compact else 4.0
     gap_mm = 0.5 if compact else 1.0
-    reserved_mm = pad_mm * 2 + head_mm + name_mm + gap_mm * (1 if compact else 2)
+    # the DO NOT REMOVE strip is a row of its own: budget for it, or the
+    # bottom field silently clips off the tag
+    # two lines of it: an organisation name plus DO NOT REMOVE does not fit
+    # on one at a readable size, and clipping is not an option when the
+    # clipped half is the instruction
+    norem_mm = 4.2 if compact else 5.2
+    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
+                   + gap_mm * (1 if compact else 2))
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
-    qr_mm = max(8.0, min(float(qr_size)/3.78, lw_mm - 7.0, avail_h_mm))
+    # Capped at 44% of the label width. It used to be allowed up to
+    # lw_mm - 7, which on a 50.8mm tag left the fields a ~12mm column --
+    # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
+    # still scans from a phone at arm's length.
+    qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
     qr_px = int(qr_mm * 3.78)
     logo_uri = _logo_data_uri()
     chosen = [f.strip() for f in (srow.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location").split(",") if f.strip()] if srow else ["Name","AssetID","Type","Serial","Status","Location"]
@@ -3803,28 +6000,36 @@ def labels_page():
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if (show_logo and logo_uri) else ""
     boxes_html = ""
     scripts = ""
+    # read once for the whole sheet, not once per label
+    _emp_map = _employee_label_map()
     for idx, asset in enumerate(ordered):
+        _emp_code, _emp_name = _employee_for_label(_emp_map, asset.get("EmployeeID"))
         field_defs = {
             "Name": ("Asset", asset.get("Name")),
-            "AssetID": ("Asset ID", asset["_id"][:12]),
+            "AssetID": ("Asset ID", asset.get("AssetTag") or asset["_id"][:12]),
             "Type": ("Category", asset.get("Type")),
             "Serial": ("Serial", asset.get("Serial")),
             "Status": ("Status", asset.get("Status")),
             "Location": ("Location", asset.get("Location")),
             "ReceivedBy": ("Signed By", asset.get("ReceivedBy")),
             "ReceiverDate": ("Signed Date", asset.get("NotesReceived")),
-            "EmployeeID": ("Employee ID", asset.get("EmployeeID")),
+            "EmployeeID": ("Employee ID", _emp_code),
+            "EmployeeName": ("Employee", _emp_name),
             "Department": ("Department", asset.get("Department")),
             "Warranty": ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"),
             "PurchaseDate": ("Purchase", asset.get("PurchaseDate")),
             "Note": ("Note", asset.get("Note")),
         }
         rows_html = ""
-        for key in chosen:
-            if key == "Name" or key not in field_defs: continue
+        printable = [k for k in chosen
+                     if k != "Name" and k in field_defs
+                     and field_defs[k][1] not in (None, "")]
+        # the same fit test as the single label, so a printed sheet and a
+        # one-off tag of the same asset come out identical
+        rows_compact = compact or (len(printable) * 6.6 > avail_h_mm)
+        for key in printable:
             lbl, val = field_defs[key]
-            if val is None or val == "": continue
-            if compact:
+            if rows_compact:
                 rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
             else:
                 rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
@@ -3837,11 +6042,12 @@ def labels_page():
    <div class=meta>{rows_html}</div>
    <div id={qr_id} class=qr></div>
  </div>
+ <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
 </div>"""
         scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});"
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
 <style>
- body{{font-family:'Segoe UI',Arial,sans-serif;margin:0;padding:0;background:#fff}}
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;flex-wrap:wrap;gap:3mm;padding:20px}}
  .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
@@ -3851,11 +6057,13 @@ def labels_page():
  .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;overflow:hidden}}
  .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
- .k{{color:#555;font-size:1.9mm;line-height:1.05}}
- .v{{font-size:2.4mm;line-height:1.1;margin-bottom:0.5mm;word-break:break-word}}
- .kv{{font-size:1.7mm;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#333}}
- .kv b{{color:#555;font-weight:600}}
+ .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
+ .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
+ .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv b{{color:#333;font-weight:700}}
  .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
+ .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -3872,14 +6080,8 @@ def labels_page():
 
 @app.route("/asset/<a_id>")
 def asset_public(a_id):
-    # Public asset detail page (opened by scanning the QR from any device on the LAN)
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80)); lan_ip = s.getsockname()[0]; s.close()
-    except Exception:
-        lan_ip = "127.0.0.1"
-    base = f"http://{lan_ip}:5000/"
+    # Public asset detail page, opened by scanning the QR on the tag
+    base = _public_base()
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SignatureData FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone()
@@ -3901,14 +6103,26 @@ def asset_public(a_id):
         except Exception:
             pass
     # org branding + contact
+    # The theme columns come along too. This page used to select the name
+    # and contact only, then link style.css and read var(--accent) from it
+    # -- so a tag scanned on a yellow-themed install opened stock red, and
+    # the one page an employee sees without logging in was the one page
+    # that ignored the branding.
+    THEME_COLS = ("theme_preset", "bg_type", "bg", "comp_bg", "radius",
+                  "accent", "accent2")
+    brand_theme = {}
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT app_name, logo_text, company_phone, company_address FROM Settings WHERE id=1")
+        cols = ", ".join("`%s`" % col for col in THEME_COLS)
+        scur.execute("SELECT app_name, logo_text, company_phone, company_address, "
+                     + cols + " FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
         company_phone = (srow.get("company_phone") or "") if srow else ""
         company_address = (srow.get("company_address") or "") if srow else ""
+        if srow:
+            brand_theme = {k: srow.get(k) for k in THEME_COLS}
     except Exception:
         app_name, logo_text, company_phone, company_address = "IT-Vault", "IT-Vault", "", ""
     # who actually processed this asset (the staff/admin account, as opposed to
@@ -3937,6 +6151,13 @@ def asset_public(a_id):
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if logo_uri else ""
     contact_bits = [c for c in [company_phone, company_address] if c]
     contact_html = " &nbsp;·&nbsp; ".join(contact_bits) if contact_bits else "—"
+    # Rendered into the document rather than fetched on load: a QR is
+    # scanned on a phone on mobile data, and a round trip before the
+    # colours land is a visible flash of the wrong theme. PUBLIC_THEME_JS
+    # is the acknowledgement page's engine, shared so the two cannot drift.
+    theme_script = ("<script>" + PUBLIC_THEME_JS
+                    + "applySignTheme("
+                    + json.dumps(brand_theme, default=str) + ");</script>")
     return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Asset {asset['Name']}</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -3960,12 +6181,12 @@ tr:last-child td{{border-bottom:none}}
 .contact{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);font-size:14px}}
 .contact b{{color:var(--accent)}}
 .foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
-a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:#fff;border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
+a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:var(--btn-text,#04121f);border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
 .sig-block{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
 .sig-block b{{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:8px}}
 .sig-block img{{max-width:220px;max-height:110px;background:#fff;border-radius:6px;padding:6px}}
 @media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} }}
-</style></head><body><div class=wrap><div class=card>
+</style>{theme_script}</head><body><div class=wrap><div class=card>
  <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
  <div class=assetid-badge>{asset.get("AssetTag") or asset["_id"][:12]}</div>
  <div class=title>{asset['Name']}</div>
@@ -4051,172 +6272,126 @@ def _verify_token(tk):
     except Exception:
         return None
 
+def _issue_sign_link(a_id, name=""):
+    """A fresh acknowledgement link, retiring any issued for this asset before.
+
+    Rotating the nonce is what makes resending mean something: the link in
+    the employee's older email stops working, so there is only ever one live
+    link per asset and two signatures cannot race each other.
+
+    Single use, and good for seven DAYS -- this once said exp_hours=7, which
+    is seven hours: a link emailed on a Friday afternoon was dead before
+    anyone read it on Monday.
+    """
+    nonce = secrets.token_hex(8)
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Assets SET SignNonce=%s WHERE _id=%s", (nonce, a_id))
+    c.commit(); c.close()
+    tk = _sign_token({"asset_id": a_id, "name": name or "", "n": nonce},
+                     exp_hours=24 * 7)
+    return tk, f"{_public_base()}sign?token={quote(tk)}"
+
+
+def _sign_recipient(identifier):
+    """(name, email) for whoever an asset is assigned to.
+
+    The assignee can be a system user or an employee record -- checkout lets
+    you pick from either -- so both tables are tried, in that order.
+    """
+    identifier = (identifier or "").strip()
+    if not identifier:
+        return "", ""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT display, email FROM Users WHERE username=%s", [identifier])
+    r = cur.fetchone()
+    if r and (r.get("email") or "").strip():
+        c.close(); return ((r.get("display") or identifier), r["email"].strip())
+    cur.execute("SELECT EmployeeName, Email FROM Employees WHERE EmployeeID=%s",
+                [identifier])
+    r = cur.fetchone(); c.close()
+    if not r:
+        return identifier, ""
+    return ((r.get("EmployeeName") or identifier), (r.get("Email") or "").strip())
+
+
+def _smtp_ready():
+    """Whether mail is set up at all. Worth asking before offering to send:
+    otherwise the only feedback is a send that quietly reports failure."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT smtp_host FROM Settings WHERE id=1")
+        r = cur.fetchone(); c.close()
+        return bool(((r or {}).get("smtp_host") or "").strip())
+    except Exception:
+        return False
+
+
 @app.route("/api/assets/<a_id>/sign/link")
 @auth_required(module="assets", level="write")
 def get_sign_link(a_id):
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
+    cur.execute("SELECT _id, Name, EmployeeID FROM Assets WHERE _id=%s", [a_id])
+    a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
-    tk = _sign_token({"asset_id":a_id, "name":a["Name"]}, exp_hours=7)
     c.close()
-    return jsonify({"ok": True, "token": tk, "url": f"{request.host_url}sign?token={quote(tk)}"})
+    tk, url = _issue_sign_link(a_id, a["Name"])
+    # Who the link can be emailed to, so the dialog can offer it rather than
+    # leaving copy-and-paste as the only way to get it to the employee.
+    who, to = _sign_recipient(a.get("EmployeeID"))
+    mail_ok = _smtp_ready()
+    return jsonify({"ok": True, "token": tk, "url": url,
+                    "assignee": who, "assignee_email": to,
+                    "can_email": bool(to) and mail_ok,
+                    "smtp_ready": mail_ok})
 
-SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
-<title>IT-Vault // Asset Acknowledgement</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css">
-<style>
-*{box-sizing:border-box}
-html{overflow-y:auto}
-body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);transition:background .25s,color .25s;overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}
-.sign-card{max-width:620px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px 26px 22px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
-.brand{font-family:'Orbitron';font-weight:900;font-size:26px;text-align:center;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;margin:0 0 2px}
-.sub{text-align:center;color:var(--muted);font-size:12px;letter-spacing:3px;margin-bottom:18px}
-.assetid-badge{text-align:center;font-family:'Share Tech Mono',var(--mono);font-size:15px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:6px 16px;margin:0 auto 18px;display:table}
-.assetid-badge:empty{display:none}
-.asset-table{width:100%;table-layout:fixed;border-collapse:collapse;margin:10px 0 18px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
-.asset-table td{padding:9px 14px;border-bottom:1px solid var(--line);font-size:14px}
-.asset-table tr:last-child td{border-bottom:none}
-.asset-table td:first-child{color:var(--muted);width:150px;font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;vertical-align:top}
-.asset-table td:last-child{color:var(--txt);font-weight:600;word-break:break-word;overflow-wrap:anywhere;white-space:pre-line}
-.sig-label{color:var(--muted);font-size:13px;margin-bottom:6px;display:block}
-#sigCanvas{width:100%;max-width:480px;height:160px;border-radius:var(--radius);background:var(--surface2);border:2px solid var(--line);cursor:crosshair;display:none;touch-action:none}
-#sigPlaceholder{width:100%;max-width:480px;height:160px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:14px;border:2px dashed var(--line);border-radius:var(--radius);background:var(--surface2);cursor:pointer}
-#sigPlaceholder.hidden{display:none}
-.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
-.btnrow .btn{flex:1;min-width:140px;min-height:44px}
-#result{margin-top:16px;font-size:14px;min-height:24px}
-.ok{color:var(--grn)}.err{color:var(--red);white-space:pre-wrap}
-.center{text-align:center;margin-top:40px;color:var(--muted)}
-@media (max-width:480px){
-  body{padding:16px 10px}
-  .sign-card{padding:18px 16px 16px;border-radius:calc(var(--radius) - 2px)}
-  .brand{font-size:22px}
-  .asset-table{display:block}
-  .asset-table tr{display:flex;flex-direction:column;padding:8px 12px}
-  .asset-table td{display:block;padding:2px 0;border-bottom:none;width:auto!important}
-  .asset-table td:first-child{padding-top:6px}
-  .asset-table tr:not(:last-child){border-bottom:1px solid var(--line)}
-  .btnrow .btn{min-width:100%}
-}
-</style></head><body>
-<div class="sign-card">
-  <div class="brand" id="brand">IT-Vault</div>
-  <div class="sub" id="sub">// ASSET ACKNOWLEDGEMENT</div>
-  <div class="assetid-badge" id="assetIdBadge"></div>
-  <div id="assetCard"></div>
-  <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
-  <div class="sig-wrap">
-    <span class="sig-label">Signature</span>
-    <div id="sigPlaceholder">✏️ Click here to sign</div>
-    <canvas id="sigCanvas"></canvas>
-  </div>
-  <div class="btnrow">
-    <button class="btn ghost" id="clearSign" style="display:none">🗑 CLEAR</button>
-    <button class="btn ghost" id="viewSign" style="display:none">🖼 VIEW SIGNATURE</button>
-    <button class="btn" id="saveSign">✅ SUBMIT ACKNOWLEDGEMENT</button>
-  </div>
-  <div id="result"></div>
-</div>
-<script>
-const token = new URLSearchParams(window.location.search).get('token');
-if(!token){document.body.innerHTML='<div class=sign-card><h3>❌ No token</h3><p>Invalid or missing signature link.</p></div>';throw 0;}
-const placeholder=document.getElementById('sigPlaceholder');
-const canvas=document.getElementById('sigCanvas');
-let ctx=null, isDrawing=false, hasSig=false;
-function accentColor(){try{return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim()||'#ff3b30';}catch(e){return '#ff3b30';}}
-function initCanvas(){
-  if(ctx) return;
-  // Must run AFTER the canvas is actually visible -- offsetWidth/Height read
-  // 0 on a display:none element, which used to lock the drawing buffer to the
-  // 480x160 fallback regardless of the phone's real (narrower) screen width,
-  // making touches land in the wrong spot on mobile. Also scales the buffer
-  // by devicePixelRatio so the line doesn't look blurry on retina/high-DPI
-  // phone screens.
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.offsetWidth||480, h = canvas.offsetHeight||160;
-  canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr);
-  ctx = canvas.getContext('2d');
-  ctx.scale(dpr, dpr);
-  ctx.lineWidth = 2; ctx.lineCap='round'; ctx.lineJoin='round';
-  ctx.strokeStyle = accentColor();
-  // No fillRect here on purpose -- the canvas's own CSS background (dark,
-  // matching the page) shows through while signing, but the drawing buffer
-  // itself stays transparent, so the exported PNG (toDataURL) is just the
-  // stroke with a transparent background. A baked-in dark fill here used to
-  // ship as an opaque black box wherever the signature got embedded later
-  // (the emailed PDF, the QR scan page), regardless of that page's own
-  // background color.
-}
-function getPos(e){
-  const rect=canvas.getBoundingClientRect();
-  const x=(e.touches?e.touches[0].clientX:e.clientX)-rect.left;
-  const y=(e.touches?e.touches[0].clientY:e.clientY)-rect.top;
-  return {x,y};
-}
-function startDraw(e){
-  if(!ctx) initCanvas();
-  isDrawing=true; e.preventDefault&&e.preventDefault();
-  const p=getPos(e); ctx.beginPath(); ctx.moveTo(p.x,p.y);
-}
-function draw(e){
-  if(!isDrawing||!ctx) return;
-  e.preventDefault();
-  const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; updateClearBtn();
-}
-function stopDraw(){ if(!isDrawing) return; isDrawing=false; ctx.beginPath(); updateClearBtn(); }
-function showCanvas(){ placeholder.classList.add('hidden'); canvas.style.display='block'; initCanvas(); canvas.focus(); }
-placeholder.addEventListener('click',()=>{showCanvas();});
-canvas.addEventListener('mousedown',startDraw);
-canvas.addEventListener('mousemove',draw);
-canvas.addEventListener('mouseup',stopDraw);
-canvas.addEventListener('mouseleave',stopDraw);
-canvas.addEventListener('touchstart',startDraw,{passive:false});
-canvas.addEventListener('touchmove',draw,{passive:false});
-canvas.addEventListener('touchend',stopDraw,{passive:false});
-function clearSig(){ if(!ctx) return; ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,canvas.width,canvas.height); ctx.restore(); hasSig=false; const c=document.getElementById('clearSign'); if(c)c.style.display='none'; }
-function updateClearBtn(){ const c=document.getElementById('clearSign'); if(!c) return; c.style.display = hasSig?'block':'none'; }
-function getSigData(){return canvas.toDataURL('image/png');}
-function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
-async function load(){
-  const r=await fetch('/api/assets/sign/verify?token='+encodeURIComponent(token));
-  const j=await r.json();
-  if(!j.ok){document.getElementById('assetCard').innerHTML='<p class=err>❌ '+j.error+'</p>';throw 0;}
-  const a=j.asset;
-  const receivedBy = a.ReceivedBy || a.received_by || '';
-  const notesReceived = a.NotesReceived || a.notes_received || '';
-  const viewBtn=document.getElementById('viewSign');
-  if(viewBtn){ if(a.SignatureData){ viewBtn.style.display='block'; viewBtn.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+a.SignatureData+'" style="max-width:100%"/>');}; } else { viewBtn.style.display='none'; } }
-  document.getElementById('assetIdBadge').textContent = a.AssetTag||a.asset_tag||'';
-  document.getElementById('assetCard').innerHTML=
-    '<table class=asset-table>'+
-    '<tr><td>Asset ID</td><td>'+esc(a.AssetTag||a.asset_tag||'—')+'</td></tr>'+
-    '<tr><td>Name</td><td>'+esc(a.Name)+'</td></tr>'+
-    '<tr><td>Type</td><td>'+esc(a.Type)+'</td></tr>'+
-    '<tr><td>Serial</td><td>'+esc(a.Serial)+'</td></tr>'+
-    '<tr><td>Status</td><td>'+esc(a.Status)+'</td></tr>'+
-    '<tr><td>Location</td><td>'+esc(a.Location)+'</td></tr>'+
-    (a.Department?'<tr><td>Department</td><td>'+esc(a.Department)+'</td></tr>':'')+
-    (a.Designation?'<tr><td>Designation</td><td>'+esc(a.Designation)+'</td></tr>':'')+
-    '<tr><td>Notes</td><td>'+esc(a.Notes||'—')+'</td></tr>'+
-    '<tr><td>Received By</td><td>'+esc(receivedBy||'Not yet received')+'</td></tr>'+
-    '<tr><td>Received Details</td><td>'+esc(notesReceived||'Not yet received')+'</td></tr>'+
-    '</table>';
-}
-document.getElementById('clearSign').addEventListener('click',()=>{clearSig();});
-document.getElementById('viewSign').addEventListener('click',()=>{const sig=(document.querySelector('meta[data-sig]')||{}).content||''; if(!sig){alert('No signature');return;} const w=window.open('','_blank'); w.document.write('<img src="'+sig+'" style="max-width:100%"/>'); });
-document.getElementById('saveSign').addEventListener('click',async()=>{
-  const name=document.getElementById('signer').value.trim();
-  const res=document.getElementById('result');
-  if(!name){res.className='err';res.textContent='⚠ Please enter your name.';return;}
-  if(!hasSig||!ctx||ctx.getImageData(0,0,canvas.width,canvas.height).data.filter(c=>c>0).length<100){ res.className='err';res.textContent='⚠ Please sign above.';return; }
-  const data=getSigData();
-  res.textContent='Submitting…';
-  const r=await fetch('/api/assets/sign/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name,data})});
-  const j=await r.json();
-  if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<img src="'+data+'" style="max-width:100%"/>');};}}
-  else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
-});
+
+@app.route("/api/assets/<a_id>/sign/send", methods=["POST"])
+@auth_required(module="assets", level="write")
+def send_sign_link(a_id):
+    """Email the acknowledgement link to whoever the asset is assigned to.
+
+    The link goes out with the asset when it is assigned, but that email
+    gets buried, deleted, or arrives while someone is on leave -- and the
+    only way to chase it was to copy the link out of the dialog and paste
+    it into a mail client by hand. Each send issues a new link, so the
+    employee cannot be looking at a stale one.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag, Name, Serial, Status, EmployeeID "
+                "FROM Assets WHERE _id=%s", [a_id])
+    a = cur.fetchone(); c.close()
+    if not a:
+        return jsonify({"error": "asset not found"}), 404
+    emp = (a.get("EmployeeID") or "").strip()
+    if not emp:
+        return jsonify({"error": "This asset is not assigned to anyone yet, so there is nobody to send it to. Assign it first, or copy the link."}), 400
+    who, to = _sign_recipient(emp)
+    if not to:
+        return jsonify({"error": f"{who} has no email address on file. Add one on the Employees page, or copy the link instead."}), 400
+    if not _smtp_ready():
+        return jsonify({"error": "Email is not set up yet -- add an SMTP server under Settings before sending. You can copy the link in the meantime."}), 400
+    # Issued here and passed down, so the link that goes in the mail is the
+    # same one handed back to the dialog. Letting the notifier mint its own
+    # would rotate the nonce a second time and kill the mail we just sent.
+    _tk, url = _issue_sign_link(a_id, a.get("Name") or "")
+    ok = notify_person_asset_assigned(
+        emp, dict(a), checked_out=(a.get("Status") == "Checked-Out"),
+        reminder=True, sign_url=url)
+    if not ok:
+        return jsonify({"error": f"Could not send to {to}. Check the SMTP settings and the server log."}), 502
+    audit(session.get("user"), "SIGN_LINK_SENT", a_id, f"acknowledgement link emailed to {to}")
+    return jsonify({"ok": True, "sent_to": to, "assignee": who, "url": url})
+
+# The colour maths behind every publicly-shared page: the acknowledgement
+# page and the page a scanned QR opens. Both are seen by people who never
+# log in, and both have to come out in the colours the install is actually
+# themed in -- the scan page used to link style.css and inherit its stock
+# red, so a tag scanned on a yellow-themed install opened a red page.
+#
+# Kept as one string rather than copied into each template: the contrast
+# safeguards in here (ensureAccentVisible, onBg, muteFor) are the whole
+# point, and two copies would drift.
+PUBLIC_THEME_JS = r'''
 /* ---- branding + theme (same color math as the main app / login page, so
    this publicly-shared page always gets correct, readable colors instead of
    just a few vars copied straight through) ---- */
@@ -4233,6 +6408,11 @@ function isLightHex(h){ const c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.
 function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
 function muteFor(bgHex,k){ const light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
 function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*bl;}; const la=L(a),lb=L(b); const hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
+// Button labels sit on top of --accent. A fixed dark ink disappears on a
+// near-black accent and a fixed white one disappears on a bright yellow,
+// so pick whichever of the two the accent actually contrasts with -- the
+// logged-in app has always done this; the public pages never did.
+function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
 function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
 function applySignTheme(b){
   try{
@@ -4264,10 +6444,262 @@ function applySignTheme(b){
     r.setProperty('--accent', accent);
     r.setProperty('--accent2', accent2);
     r.setProperty('--accent-soft', rgba(accent,0.14));
+    r.setProperty('--btn-text', bestTextOn(accent));
+    r.setProperty('--btn-mag-text', bestTextOn(accent2));
     r.setProperty('--radius', radius+'px');
-    document.body.classList.toggle('light', light);
+    // The scan page applies this from <head> so the page never paints in
+    // the wrong colours first; <body> does not exist that early, and an
+    // unguarded reference here threw and swallowed the class.
+    const mark=()=>document.body&&document.body.classList.toggle('light', light);
+    if(document.body) mark();
+    else document.addEventListener('DOMContentLoaded', mark);
   }catch(e){}
 }
+'''
+
+
+SIGNATURE_HTML = """<!doctype html><html lang="en"><head><meta charset=utf-8><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<title>IT-Vault // Asset Acknowledgement</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+*{box-sizing:border-box}
+html{overflow-y:auto}
+body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);transition:background .25s,color .25s;overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.sign-card{max-width:620px;margin:0 auto;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:26px 26px 22px;box-shadow:0 10px 40px rgba(0,0,0,.35)}
+.brand{font-family:'Orbitron';font-weight:900;font-size:26px;text-align:center;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;margin:0 0 2px}
+.sub{text-align:center;color:var(--muted);font-size:12px;letter-spacing:3px;margin-bottom:18px}
+.assetid-badge{text-align:center;font-family:'Share Tech Mono',var(--mono);font-size:15px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:6px 16px;margin:0 auto 18px;display:table}
+.assetid-badge:empty{display:none}
+.asset-table{width:100%;table-layout:fixed;border-collapse:collapse;margin:10px 0 18px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.asset-table td{padding:9px 14px;border-bottom:1px solid var(--line);font-size:14px}
+.asset-table tr:last-child td{border-bottom:none}
+.asset-table td:first-child{color:var(--muted);width:150px;font-size:12px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;vertical-align:top}
+.asset-table td:last-child{color:var(--txt);font-weight:600;word-break:break-word;overflow-wrap:anywhere;white-space:pre-line}
+.sig-label{color:var(--muted);font-size:13px;margin-bottom:6px;display:block}
+/* A refused link is the whole message, not a footnote under a form
+   nobody can submit. */
+.link-notice{text-align:center;padding:26px 18px;border-radius:var(--radius);
+   background:var(--surface2);border:1px solid var(--line)}
+.link-notice .ln-ico{font-size:34px;line-height:1;margin-bottom:10px}
+.link-notice .ln-head{font-size:17px;font-weight:700;margin-bottom:8px;color:var(--txt)}
+.link-notice .ln-body{font-size:14px;color:var(--muted);line-height:1.5;
+   max-width:34em;margin:0 auto}
+/* White pad, because the ink is black. The drawing buffer itself stays
+   transparent -- see initCanvas() -- so the exported PNG is the stroke
+   alone and drops onto the PDF without a box around it. */
+#sigCanvas{width:100%;max-width:480px;height:160px;border-radius:var(--radius);background:#ffffff;border:2px solid var(--line);cursor:crosshair;display:none;touch-action:none}
+#sigPlaceholder{width:100%;max-width:480px;height:160px;display:flex;align-items:center;justify-content:center;color:#5d6b82;font-size:14px;border:2px dashed var(--line);border-radius:var(--radius);background:#ffffff;cursor:pointer}
+#sigPlaceholder.hidden{display:none}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+.btnrow .btn{flex:1;min-width:140px;min-height:44px}
+#result{margin-top:16px;font-size:14px;min-height:24px}
+.ok{color:var(--grn)}.err{color:var(--red);white-space:pre-wrap}
+.center{text-align:center;margin-top:40px;color:var(--muted)}
+@media (max-width:480px){
+  body{padding:16px 10px}
+  .sign-card{padding:18px 16px 16px;border-radius:calc(var(--radius) - 2px)}
+  .brand{font-size:22px}
+  .asset-table{display:block}
+  .asset-table tr{display:flex;flex-direction:column;padding:8px 12px}
+  .asset-table td{display:block;padding:2px 0;border-bottom:none;width:auto!important}
+  .asset-table td:first-child{padding-top:6px}
+  .asset-table tr:not(:last-child){border-bottom:1px solid var(--line)}
+  .btnrow .btn{min-width:100%}
+}
+</style></head><body>
+<div class="sign-card">
+  <div class="brand" id="brand">IT-Vault</div>
+  <div class="sub" id="sub">// ASSET ACKNOWLEDGEMENT</div>
+  <div class="assetid-badge" id="assetIdBadge"></div>
+  <div id="linkNotice" class="link-notice" style="display:none"></div>
+  <div id="assetCard"></div>
+  <div id="signForm">
+    <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
+    <div class="sig-wrap">
+      <span class="sig-label">Signature</span>
+      <div id="sigPlaceholder">✏️ Click here to sign</div>
+      <canvas id="sigCanvas"></canvas>
+    </div>
+    <div class="btnrow">
+      <button class="btn ghost" id="clearSign" style="display:none">🗑 CLEAR</button>
+      <button class="btn ghost" id="viewSign" style="display:none">🖼 VIEW SIGNATURE</button>
+      <button class="btn" id="saveSign">✅ SUBMIT ACKNOWLEDGEMENT</button>
+    </div>
+  </div>
+  <div id="result"></div>
+</div>
+<script>
+const token = new URLSearchParams(window.location.search).get('token');
+if(!token){document.body.innerHTML='<div class=sign-card><h3>❌ No token</h3><p>Invalid or missing signature link.</p></div>';throw 0;}
+const placeholder=document.getElementById('sigPlaceholder');
+const canvas=document.getElementById('sigCanvas');
+let ctx=null, isDrawing=false, hasSig=false;
+// Signatures are always black. They used to take the theme accent, so a
+// red or blue mark ended up on the acknowledgement PDF and on the record --
+// a signature is not a themed element, and ink is black.
+const SIG_INK='#000000';
+function padSize(){
+  // The size the drawing buffer should be. Every source of truth here can
+  // read 0 (or just the border width) in the frame the canvas stops being
+  // display:none, so each is checked before it is trusted and there is a
+  // fixed fallback at the end. 40px is the floor: anything smaller is not a
+  // pad, it is a measurement that has not happened yet.
+  const cs = getComputedStyle(canvas);
+  const bx = (parseFloat(cs.borderLeftWidth)||0) + (parseFloat(cs.borderRightWidth)||0);
+  const by = (parseFloat(cs.borderTopWidth)||0) + (parseFloat(cs.borderBottomWidth)||0);
+  let w = canvas.clientWidth;
+  if(!(w > 40)) w = canvas.offsetWidth - bx;
+  if(!(w > 40) && canvas.parentElement) w = canvas.parentElement.clientWidth - bx;
+  if(!(w > 40)) w = 480;
+  let h = canvas.clientHeight;
+  if(!(h > 40)) h = canvas.offsetHeight - by;
+  if(!(h > 40)) h = 160;
+  return { w: Math.min(Math.round(w), 480), h: Math.round(h) };
+}
+function initCanvas(){
+  // Must run AFTER the canvas is actually visible -- offsetWidth/Height read
+  // 0 on a display:none element, which used to lock the drawing buffer to the
+  // 480x160 fallback regardless of the phone's real (narrower) screen width,
+  // making touches land in the wrong spot on mobile. Also scales the buffer
+  // by devicePixelRatio so the line doesn't look blurry on retina/high-DPI
+  // phone screens.
+  //
+  // Measuring in the same frame the canvas is un-hidden is not reliable
+  // either: the layout had not settled, offsetWidth came back as just the 4px
+  // of borders, and the buffer was locked to 4px wide -- a pad nobody could
+  // sign on. So the size is sanity-checked, and this can re-run to correct
+  // itself (it refuses to once there is a signature, because resizing a
+  // canvas clears it).
+  const {w, h} = padSize();
+  const dpr = window.devicePixelRatio || 1;
+  const bw = Math.round(w * dpr), bh = Math.round(h * dpr);
+  if(ctx && canvas.width === bw && canvas.height === bh) return;
+  if(ctx && hasSig) return;
+  canvas.width = bw; canvas.height = bh;
+  ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  ctx.lineWidth = 2; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.strokeStyle = SIG_INK;
+  // Nothing is painted into the buffer on purpose. The canvas's own CSS
+  // background (white, so black ink is visible while signing) shows through
+  // in the browser, but the drawing buffer itself stays transparent -- so the
+  // exported PNG (toDataURL) is the stroke alone. Filling it here would ship
+  // an opaque rectangle wherever the signature is embedded later (the emailed
+  // PDF, the QR scan page), whatever that page's own background is.
+}
+function getPos(e){
+  const rect=canvas.getBoundingClientRect();
+  const x=(e.touches?e.touches[0].clientX:e.clientX)-rect.left;
+  const y=(e.touches?e.touches[0].clientY:e.clientY)-rect.top;
+  return {x,y};
+}
+function startDraw(e){
+  if(!ctx) initCanvas();
+  isDrawing=true; e.preventDefault&&e.preventDefault();
+  const p=getPos(e); ctx.beginPath(); ctx.moveTo(p.x,p.y);
+}
+function draw(e){
+  if(!isDrawing||!ctx) return;
+  e.preventDefault();
+  const p=getPos(e); ctx.lineTo(p.x,p.y); ctx.stroke(); hasSig=true; updateClearBtn();
+}
+function stopDraw(){ if(!isDrawing) return; isDrawing=false; ctx.beginPath(); updateClearBtn(); }
+function showCanvas(){
+  placeholder.classList.add('hidden');
+  canvas.style.display='block';
+  // initCanvas() right here measured a canvas the browser had not laid out
+  // yet. It still runs immediately so a pointer already on its way down
+  // has a context to draw into, then again on the next frame to correct
+  // the size once the real width is known.
+  initCanvas();
+  requestAnimationFrame(initCanvas);
+  canvas.focus();
+}
+// A rotated phone changes the pad's width. Re-sizing wipes a canvas, so
+// this only ever corrects an empty one -- initCanvas() refuses once there
+// is a signature on it.
+window.addEventListener('resize', () => { if(!hasSig) initCanvas(); });
+
+placeholder.addEventListener('click',()=>{showCanvas();});
+canvas.addEventListener('mousedown',startDraw);
+canvas.addEventListener('mousemove',draw);
+canvas.addEventListener('mouseup',stopDraw);
+canvas.addEventListener('mouseleave',stopDraw);
+canvas.addEventListener('touchstart',startDraw,{passive:false});
+canvas.addEventListener('touchmove',draw,{passive:false});
+canvas.addEventListener('touchend',stopDraw,{passive:false});
+function clearSig(){ if(!ctx) return; ctx.save(); ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,canvas.width,canvas.height); ctx.restore(); hasSig=false; const c=document.getElementById('clearSign'); if(c)c.style.display='none'; }
+function updateClearBtn(){ const c=document.getElementById('clearSign'); if(!c) return; c.style.display = hasSig?'block':'none'; }
+function getSigData(){return canvas.toDataURL('image/png');}
+function esc(s){const d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+// A link that cannot be used should say so and stop. It used to print the
+// reason above a full signature form -- name box, pad and SUBMIT -- which
+// invited people to sign into a request the server was always going to
+// refuse.
+function deadLink(msg){
+  const form=document.getElementById('signForm');
+  if(form) form.style.display='none';
+  const card=document.getElementById('assetCard');
+  if(card) card.innerHTML='';
+  const badge=document.getElementById('assetIdBadge');
+  if(badge) badge.textContent='';
+  const res=document.getElementById('result');
+  if(res) res.innerHTML='';
+  const n=document.getElementById('linkNotice');
+  if(!n) return;
+  const text=String(msg||'This link can no longer be used.');
+  // 'expired' covers the genuinely timed-out case; the rest are links that
+  // were used or replaced, which is the same thing to whoever is holding it
+  const head=/expired/i.test(text) ? 'This link has expired'
+           : /already been used|already been signed/i.test(text) ? 'This link has already been used'
+           : /newer one/i.test(text) ? 'This link has been replaced'
+           : 'This link is no longer valid';
+  n.innerHTML='<div class=ln-ico>🔒</div><div class=ln-head>'+esc(head)+'</div>'+
+              '<div class=ln-body>'+esc(text)+'</div>';
+  n.style.display='block';
+}
+async function load(){
+  const r=await fetch('/api/assets/sign/verify?token='+encodeURIComponent(token));
+  const j=await r.json().catch(()=>({ok:false,error:'Could not reach the server.'}));
+  if(!j.ok){ deadLink(j.error); throw 0; }
+  const a=j.asset;
+  const receivedBy = a.ReceivedBy || a.received_by || '';
+  const notesReceived = a.NotesReceived || a.notes_received || '';
+  const viewBtn=document.getElementById('viewSign');
+  if(viewBtn){ if(a.SignatureData){ viewBtn.style.display='block'; viewBtn.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+a.SignatureData+'">'); w.document.close();}; } else { viewBtn.style.display='none'; } }
+  document.getElementById('assetIdBadge').textContent = a.AssetTag||a.asset_tag||'';
+  document.getElementById('assetCard').innerHTML=
+    '<table class=asset-table>'+
+    '<tr><td>Asset ID</td><td>'+esc(a.AssetTag||a.asset_tag||'—')+'</td></tr>'+
+    '<tr><td>Name</td><td>'+esc(a.Name)+'</td></tr>'+
+    '<tr><td>Type</td><td>'+esc(a.Type)+'</td></tr>'+
+    '<tr><td>Serial</td><td>'+esc(a.Serial)+'</td></tr>'+
+    '<tr><td>Status</td><td>'+esc(a.Status)+'</td></tr>'+
+    '<tr><td>Location</td><td>'+esc(a.Location)+'</td></tr>'+
+    (a.Department?'<tr><td>Department</td><td>'+esc(a.Department)+'</td></tr>':'')+
+    (a.Designation?'<tr><td>Designation</td><td>'+esc(a.Designation)+'</td></tr>':'')+
+    '<tr><td>Notes</td><td>'+esc(a.Notes||'—')+'</td></tr>'+
+    '<tr><td>Received By</td><td>'+esc(receivedBy||'Not yet received')+'</td></tr>'+
+    '<tr><td>Received Details</td><td>'+esc(notesReceived||'Not yet received')+'</td></tr>'+
+    '</table>';
+}
+document.getElementById('clearSign').addEventListener('click',()=>{clearSig();});
+document.getElementById('viewSign').addEventListener('click',()=>{const sig=(document.querySelector('meta[data-sig]')||{}).content||''; if(!sig){alert('No signature');return;} const w=window.open('','_blank'); w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+sig+'">'); w.document.close(); });
+document.getElementById('saveSign').addEventListener('click',async()=>{
+  const name=document.getElementById('signer').value.trim();
+  const res=document.getElementById('result');
+  if(!name){res.className='err';res.textContent='⚠ Please enter your name.';return;}
+  if(!hasSig||!ctx||ctx.getImageData(0,0,canvas.width,canvas.height).data.filter(c=>c>0).length<100){ res.className='err';res.textContent='⚠ Please sign above.';return; }
+  const data=getSigData();
+  res.textContent='Submitting…';
+  const r=await fetch('/api/assets/sign/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name,data})});
+  const j=await r.json();
+  if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+data+'">'); w.document.close();};}}
+  else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
+});
+/*__PUBLIC_THEME_JS__*/
 (async()=>{ try{
   const b=await (await fetch('/api/branding')).json();
   const name=b.app_name||'IT-Vault';
@@ -4279,17 +6711,59 @@ function applySignTheme(b){
 load();
 </script></body></html>"""
 
+# the shared theme code is spliced in at import, so the template above stays
+# readable and there is only ever one copy of it
+SIGNATURE_HTML = SIGNATURE_HTML.replace("/*__PUBLIC_THEME_JS__*/", PUBLIC_THEME_JS)
+
 @app.route("/sign")
 def sign_page():
     return SIGNATURE_HTML
 
+def _sign_link_asset(cur, tk):
+    """Resolve a sign link to an asset id. Returns (asset_id, error).
+
+    A link is single use: signing clears the asset's nonce, so opening it
+    again -- or submitting twice -- is refused rather than silently
+    overwriting the signature that is already on record. Issuing a new link
+    replaces the nonce, which retires any link sent earlier.
+
+    Links issued before this existed carry no nonce. Those are honoured until
+    the asset is signed, so anything already in someone's inbox still works,
+    and they age out on their own.
+    """
+    data = _verify_token(tk)
+    if not isinstance(data, dict) or not data.get("asset_id"):
+        return None, ("This signature link has expired. Ask IT to send you a "
+                      "new one.")
+    aid = data["asset_id"]
+    cur.execute("SELECT SignNonce, SignatureData FROM Assets WHERE _id=%s", [aid])
+    row = cur.fetchone()
+    if not row:
+        return None, "That asset no longer exists."
+    sent = (data.get("n") or "").strip()
+    held = (row.get("SignNonce") or "").strip()
+    if sent:
+        if not held:
+            return None, ("This link has already been used -- the acknowledgement "
+                          "is on record. Ask IT if you need to sign again.")
+        if sent != held:
+            return None, ("This link is no longer valid because a newer one was "
+                          "issued. Please use the most recent email.")
+    elif (row.get("SignatureData") or "").strip():
+        return None, ("This asset has already been signed for. Ask IT if you "
+                      "need to sign again.")
+    return aid, None
+
+
 @app.route("/api/assets/sign/verify")
 def verify_sign():
-    tk = request.args.get("token","");
-    d = _verify_token(tk)
-    if not d: return jsonify({"ok": False, "error": "invalid or expired token"}), 400
+    tk = request.args.get("token","")
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id AS id, AssetTag, Name, Type, Serial, Status, Location, Notes, ReceivedBy, NotesReceived, SignatureData, EmployeeID FROM Assets WHERE _id=%s", [d["asset_id"]]); a = cur.fetchone()
+    aid, err = _sign_link_asset(cur, tk)
+    if err:
+        c.close()
+        return jsonify({"ok": False, "error": err}), 400
+    cur.execute("SELECT _id AS id, AssetTag, Name, Type, Serial, Status, Location, Notes, ReceivedBy, NotesReceived, SignatureData, EmployeeID FROM Assets WHERE _id=%s", [aid]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"ok": False, "error": "asset not found"}), 404
     if a.get("EmployeeID"):
         cur.execute("SELECT Department, Designation FROM Employees WHERE EmployeeID=%s", [a["EmployeeID"]])
@@ -4317,8 +6791,13 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     # Stacking it inline was the earlier "not aligned" bug: at the story's
     # ~178mm content width, a full A4-shaped image renders ~252mm tall on its
     # own, swallowing almost the entire page before any real content starts.
-    letterhead_path = os.path.join(BASE, "letterhead.png")
-    used_letterhead = os.path.exists(letterhead_path) and os.path.getsize(letterhead_path) > 0
+    # the database is the source of truth: a missing cache must not
+    # quietly cost this document its letterhead
+    _brand_tmps = []
+    letterhead_path, _lh_tmp = _brand_render_file("letterhead", LETTERHEAD_PATH)
+    if _lh_tmp:
+        _brand_tmps.append(letterhead_path)
+    used_letterhead = bool(letterhead_path)
 
     buf = io.BytesIO()
     top_margin = 42 * mm if used_letterhead else 16 * mm
@@ -4330,8 +6809,10 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
 
     bn = brand_name()
     if not used_letterhead:
-        logo_path = os.path.join(BASE, "logo.png")
-        if os.path.exists(logo_path) and os.path.getsize(logo_path) > 0:
+        logo_path, _lg_tmp = _brand_render_file("logo", LOGO_PATH)
+        if _lg_tmp:
+            _brand_tmps.append(logo_path)
+        if logo_path:
             try:
                 from PIL import Image as PILImage
                 pil_logo = PILImage.open(logo_path).convert("RGBA")
@@ -4415,7 +6896,13 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                            preserveAspectRatio=False, mask="auto")
             cnv.restoreState()
 
-    doc.build(story, onFirstPage=_draw_letterhead_bg, onLaterPages=_draw_letterhead_bg)
+    try:
+        doc.build(story, onFirstPage=_draw_letterhead_bg, onLaterPages=_draw_letterhead_bg)
+    finally:
+        # branding materialized out of the database for this render only
+        for _t in _brand_tmps:
+            try: os.remove(_t)
+            except Exception: pass
     return buf.getvalue()
 
 def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attachment_name):
@@ -4429,7 +6916,7 @@ def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attac
     try:
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
-        msg["From"] = s.get("smtp_from") or s.get("smtp_user")
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
         msg.add_attachment(attachment_bytes, maintype="application", subtype="pdf", filename=attachment_name)
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
@@ -4477,17 +6964,21 @@ def approve_asset():
     d = request.get_json(force=True) or {}
     tk = d.get("token",""); name = d.get("name","").strip()
     if not name: return jsonify({"error": "approver name required"}), 400
-    data = _verify_token(tk)
-    if not data: return jsonify({"error": "invalid or expired token"}), 400
-    aid = data["asset_id"]
     c = conn(); cur = c.cursor()
+    aid, err = _sign_link_asset(cur, tk)
+    if err:
+        c.close()
+        return jsonify({"error": err}), 400
     cur.execute("SELECT Name FROM Assets WHERE _id=%s", [aid]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     receivedBy = name
     notesReceived = datetime.now().strftime("%Y-%m-%d")
     sigData = (d.get("data") or "").strip()
-    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s WHERE _id=%s",
+    # SignNonce is cleared in the same statement that records the signature,
+    # so the link dies exactly when the acknowledgement lands -- not a moment
+    # before, and never twice.
+    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s, SignNonce='' WHERE _id=%s",
                 (receivedBy, name, notesReceived, sigData, aid))
     c.commit(); c.close()
     audit(session.get("user"), "ACKNOWLEDGE", aid, f"{name} acknowledged")
@@ -4568,7 +7059,10 @@ def _is_real_host(ip, mac):
     224-239) and broadcast entries. Those are not devices and must never show
     up as something you can add as an asset.
     """
-    if mac.lower() in ("ff-ff-ff-ff-ff-ff", "00-00-00-00-00-00"):
+    # Compare on hex digits only, so this holds whichever separator the
+    # platform's neighbour table used (dashes on Windows, colons elsewhere).
+    bare = re.sub(r"[^0-9A-Fa-f]", "", mac or "").lower()
+    if bare in ("ffffffffffff", "000000000000"):
         return False
     parts = ip.split(".")
     if len(parts) != 4:
@@ -4590,23 +7084,169 @@ def _is_real_host(ip, mac):
     return True
 
 
+_IS_WINDOWS = os.name == "nt"
+
+
+def _norm_mac(mac):
+    """One canonical MAC form (aa:bb:cc:dd:ee:ff).
+
+    Windows `arp -a` prints dashes; Linux/macOS and `ip neigh` print colons.
+    Normalising here keeps the broadcast filter and the OUI vendor lookup
+    working identically on every platform. macOS also drops leading zeros --
+    "90:9:d0:2f:bd:da" for what Linux prints as "90:09:d0:2f:bd:da" -- so
+    each octet is padded rather than the whole string being counted, which
+    used to throw away any macOS address with a single-digit octet.
+    """
+    raw = (mac or "").strip()
+    parts = re.split(r"[:\-]", raw)
+    if len(parts) == 6 and all(re.fullmatch(r"[0-9A-Fa-f]{1,2}", p) for p in parts):
+        return ":".join(p.rjust(2, "0").lower() for p in parts)
+    hexes = re.sub(r"[^0-9A-Fa-f]", "", mac or "").lower()
+    if len(hexes) != 12:
+        return ""
+    return ":".join(hexes[i:i + 2] for i in range(0, 12, 2))
+
+
 def _arp_devices():
-    out = subprocess.run(["arp", "-a"], capture_output=True, text=True).stdout
+    """The neighbour table, on whichever platform we are running.
+
+    The formats differ too much for one regex:
+      Windows  `arp -a`    ->  192.168.0.7    aa-bb-cc-dd-ee-ff   dynamic
+      Linux    `ip neigh`  ->  192.168.0.7 dev eth0 lladdr aa:bb:... REACHABLE
+      Linux    `arp -an`   ->  ? (192.168.0.7) at aa:bb:... [ether] on eth0
+      macOS    `arp -an`   ->  ? (192.168.0.7) at aa:bb:... on en0 ifscope
+    """
     devs = {}
-    for m in re.finditer(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f-]{17})\s+(\w+)", out, re.I):
-        ip, mac, typ = m.group(1), m.group(2), m.group(3)
+
+    def _add(ip, mac, typ):
+        mac = _norm_mac(mac)
         if _is_real_host(ip, mac):
             devs[ip] = {"ip": ip, "mac": mac, "type": typ}
+
+    def _run(cmd):
+        try:
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout or ""
+        except Exception:
+            return ""
+
+    if _IS_WINDOWS:
+        out = _run(["arp", "-a"])
+        for m in re.finditer(r"(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F]{1,2}(?:-[0-9a-fA-F]{1,2}){5})\s+(\w+)", out):
+            _add(m.group(1), m.group(2), m.group(3))
+        return devs
+
+    # Linux first: `ip` covers modern distros where net-tools (which provides
+    # `arp`) is absent. Neither is in python:3.12-slim, which is why the
+    # image installs iproute2 and net-tools explicitly -- without them this
+    # returned nothing and looked like an empty network.
+    if not (_have_tool("ip") or _have_tool("arp")):
+        print("[itvault] scan: neither 'ip' nor 'arp' is installed -- "
+              "cannot read the neighbour table", flush=True)
+        return devs
+    out = _run(["ip", "neigh", "show"])
+    for m in re.finditer(
+            r"(\d+\.\d+\.\d+\.\d+)\s+.*?lladdr\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})(?:\s+(\w+))?", out):
+        _add(m.group(1), m.group(2), (m.group(3) or "neighbour").lower())
+    if devs:
+        return devs
+
+    # BSD/macOS/net-tools style fallback.
+    _arp = _tool_path("arp") or "arp"
+    out = _run([_arp, "-an"]) or _run([_arp, "-a"])
+    for m in re.finditer(r"\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F]{1,2}(?::[0-9a-fA-F]{1,2}){5})", out):
+        _add(m.group(1), m.group(2), "neighbour")
     return devs
 
+_TOOL_CACHE = {}
+
+
+def _have_tool(name):
+    """Is this command actually present? Cached -- it cannot appear later.
+
+    Worth asking explicitly because the answer used to be invisible: with no
+    ping binary in the image every Heartbeat check reported "no ICMP reply"
+    and every scan came back empty, which reads as "your network is down"
+    rather than "this container cannot look".
+    """
+    return _tool_path(name) is not None
+
+
+def _tool_path(name):
+    """Absolute path to a command, or None.
+
+    PATH is not enough: Debian installs arp and friends in /usr/sbin, which
+    is deliberately absent from a non-root user's PATH -- and this container
+    runs as uid 1000. shutil.which alone therefore reported 'arp missing' on
+    an image that had it, so the sbin directories are checked by hand.
+    """
+    if name not in _TOOL_CACHE:
+        import shutil
+        found = shutil.which(name)
+        if not found:
+            for d in ("/usr/local/sbin", "/usr/sbin", "/sbin"):
+                cand = os.path.join(d, name)
+                if os.path.exists(cand) and os.access(cand, os.X_OK):
+                    found = cand
+                    break
+        _TOOL_CACHE[name] = found
+    return _TOOL_CACHE[name]
+
+
+def _net_capabilities():
+    """What this install can and cannot discover, and why."""
+    have_ping = _have_tool("ping")
+    have_ip = _have_tool("ip")
+    have_arp = _have_tool("arp")
+    in_docker = bool(os.environ.get("ITVAULT_DOCKER"))
+    # A container on a bridge network has its own network namespace: its
+    # neighbour table holds the docker gateway and nothing else, so an ARP
+    # scan cannot see the LAN however many tools are installed. Host
+    # networking is the only way to read the real neighbour table.
+    bridged = False
+    if in_docker and have_ip:
+        try:
+            out = subprocess.run(["ip", "-o", "addr", "show"], capture_output=True,
+                                 text=True, timeout=5).stdout or ""
+            bridged = (" eth0 " in out) and ("docker0" not in out)
+        except Exception:
+            bridged = True
+    hints = []
+    if not have_ping:
+        hints.append("The ping command is missing, so ICMP checks and deep scans "
+                     "cannot run. Pull the latest image and recreate the container.")
+    if not (have_ip or have_arp):
+        hints.append("Neither 'ip' nor 'arp' is available, so the neighbour table "
+                     "cannot be read. Pull the latest image and recreate the container.")
+    elif bridged:
+        hints.append("This container has its own network namespace, so its "
+                     "neighbour table only holds the Docker gateway -- a quick scan "
+                     "cannot see your LAN. Use Deep scan with your subnet (it pings "
+                     "out and works), or run the container with --network host to "
+                     "discover MAC addresses and vendors too.")
+    return {"ping": have_ping, "ip": have_ip, "arp": have_arp,
+            "docker": in_docker, "isolated_network": bridged,
+            "hint": " ".join(h if isinstance(h, str) else "".join(h) for h in hints)}
+
+
 def _ping_one(ip):
+    """One ping, cross-platform.
+
+    The flags are not portable: Windows wants `-n <count> -w <ms>`, Linux and
+    macOS want `-c <count> -W <seconds>`. Handing the Windows form to Linux
+    ping means "-n" (numeric output) with no count at all, so it pings forever
+    and the subprocess timeout kills every probe -- which is exactly why a
+    deep scan silently found nothing on Linux.
+    """
+    cmd = (["ping", "-n", "1", "-w", "700", ip] if _IS_WINDOWS
+           else ["ping", "-c", "1", "-W", "1", ip])
     try:
-        r = subprocess.run(["ping", "-n", "1", "-w", "200", ip],
-                           capture_output=True, text=True, timeout=2)
-        # "Reply from" is localised on non-English Windows; TTL= is not, and a
-        # 0 exit code alone is not reliable ("Destination host unreachable").
-        out = r.stdout or ""
-        alive = ("TTL=" in out.upper()) or ("Reply from" in out)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        out = (r.stdout or "").upper()
+        # A zero exit code alone is not reliable on Windows ("Destination host
+        # unreachable" still exits 0), so look for a real echo reply. Every
+        # platform's ping prints a TTL ("TTL=" on Windows, "ttl=" elsewhere).
+        alive = ("TTL=" in out) or ("REPLY FROM" in out) or (
+            r.returncode == 0 and "BYTES FROM" in out)
         return ip if alive else None
     except Exception:
         return None
@@ -4619,8 +7259,19 @@ def _resolve_host(ip):
     except Exception:
         return ip, ""
 
+@app.route("/api/scan/capabilities")
+@feature_required("tools.scan")
+def scan_capabilities():
+    """Why a scan found nothing, in the cases where it cannot possibly work.
+
+    Kept separate from /api/scan so the response shape of the scan itself does
+    not change -- the phone app decodes that as a plain list.
+    """
+    return jsonify(_net_capabilities())
+
+
 @app.route("/api/scan")
-@auth_required([ROLE_ADMIN, ROLE_EDIT])
+@feature_required("tools.scan")
 def network_scan():
     prefix = (request.args.get("prefix") or "").strip()
     deep = request.args.get("deep", "0") == "1"
@@ -4759,8 +7410,16 @@ def _run_backup(scope="all"):
         fname = f"itvault_backup_{scope}_{stamp}.zip"
         with zipfile.ZipFile(os.path.join(BACKUP_DIR, fname), "w", zipfile.ZIP_DEFLATED) as zf:
             zf.writestr("dump.sql", sql_text)
-            for bf in BACKUP_BRANDING_FILES:
-                p = os.path.join(BASE, bf)
+            # Straight from the database, which is the live copy. This read
+            # BASE before, while branding actually lives in DATA_DIR, so on
+            # any install with a mounted data volume every archive bundled
+            # either nothing or a stale leftover.
+            for bf, _col in (("logo.png", "logo"), ("letterhead.png", "letterhead")):
+                blob = _brand_blob(_col)
+                if blob:
+                    zf.writestr(bf, bytes(blob))
+                    continue
+                p = os.path.join(DATA_DIR, bf)
                 try:
                     if os.path.getsize(p) > 0:
                         zf.write(p, bf)
@@ -4828,6 +7487,10 @@ def version_info():
         "version": APP_VERSION,
         "is_docker": IS_DOCKER,
         "repo": update_repo(),
+        # False when DATA_DIR isn't a mounted volume: the saved database
+        # pointer and session key would be lost the moment this container is
+        # replaced, which is exactly how an update works.
+        "data_persistent": _data_dir_persistent(),
     })
 
 @app.route("/api/check-update", methods=["POST"])
@@ -4986,7 +7649,7 @@ def update_apply():
                              "replace the files."}), 400
 
 @app.route("/api/backup")
-@auth_required([ROLE_ADMIN])
+@feature_required("tools.backup")
 def backup():
     scope = (request.args.get("scope") or "all").lower()
     if scope not in ("config", "assets", "all"):
@@ -4999,7 +7662,7 @@ def backup():
                                 download_name=fname)
 
 @app.route("/api/backups")
-@auth_required([ROLE_ADMIN])
+@feature_required("tools.backup")
 def list_backups():
     # newest-first by actual file time, not filename string -- sorting by name
     # put every "config" backup ahead of a same-day "all" one since "c" > "a".
@@ -5088,16 +7751,73 @@ def _apply_restore_sql(content):
     c.commit(); c.close()
     return applied, None
 
+def _brand_keep_after_restore(before, bundled=None):
+    """Put branding back when the restore did not bring any of its own.
+
+    A restore runs DELETE + REPLACE on Settings. A dump taken before
+    branding moved into the database has no logo/letterhead column at all,
+    so restoring one wiped both -- and the disk cache went on serving them
+    until the container was next replaced, at which point the logo was gone
+    with no obvious cause. Whatever the backup does carry still wins; this
+    only fills a hole the backup left.
+
+    The cache is then rewritten from the database either way, so it can
+    never sit there serving an image the database no longer has.
+    """
+    bundled = bundled or {}
+    c = None
+    try:
+        c = conn(); cur = c.cursor()
+        for col, fname in (("logo", "logo.png"), ("letterhead", "letterhead.png")):
+            if _brand_blob(col):
+                continue                      # the backup carried it
+            data = bundled.get(fname) or before.get(col)
+            if not data:
+                continue
+            cur.execute("UPDATE Settings SET `%s`=%%s WHERE id=1" % col, (bytes(data),))
+            if col == "letterhead":
+                cur.execute("UPDATE Settings SET has_letterhead=1 WHERE id=1")
+        # has_letterhead is only a flag, and it comes out of the dump on its
+        # own. Left saying "yes" with no image behind it, the UI offers a
+        # letterhead that prints as a blank page -- so make it match reality.
+        if not _brand_blob("letterhead"):
+            cur.execute("UPDATE Settings SET has_letterhead=0 WHERE id=1")
+            print(f"[itvault] restore: kept the existing {col} -- the backup "
+                  f"had none of its own", flush=True)
+        c.commit()
+    except Exception as e:
+        print(f"[itvault] restore: could not preserve branding: {e}", flush=True)
+    finally:
+        if c is not None:
+            try: c.close()
+            except Exception: pass
+    for col, path in (("logo", LOGO_PATH), ("letterhead", LETTERHEAD_PATH)):
+        try:
+            blob = _brand_blob(col)
+            if blob:
+                with open(path, "wb") as fp:
+                    fp.write(bytes(blob))
+            elif os.path.exists(path):
+                open(path, "wb").close()
+        except Exception:
+            pass                              # the cache is only ever a cache
+
+
 def _apply_restore_bytes(data, filename=""):
-    """Accepts either a legacy plain-SQL backup or the newer .zip bundle (a
-    dump.sql plus logo.png/letterhead.png -- those never lived in the
-    database, so a "whole" backup has to carry the actual files) and applies
-    whichever it is. Branding files are written to disk before the SQL runs,
-    so a restore that fails partway through the SQL still leaves them in a
-    consistent, already-swapped state rather than a half-updated one."""
+    """Accepts either a plain-SQL backup or the .zip bundle (dump.sql plus
+    logo.png/letterhead.png) and applies whichever it is.
+
+    Branding is snapshotted first and reinstated afterwards if the backup
+    turns out not to contain any -- see _brand_keep_after_restore.
+    """
     is_zip = filename.lower().endswith(".zip") or data[:2] == b"PK"
+    before = {"logo": _brand_blob("logo"), "letterhead": _brand_blob("letterhead")}
     if not is_zip:
-        return _apply_restore_sql(data.decode("utf-8", "replace"))
+        applied, err = _apply_restore_sql(data.decode("utf-8", "replace"))
+        if err:
+            return None, err
+        _brand_keep_after_restore(before)
+        return applied, None
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = zf.namelist()
@@ -5110,12 +7830,10 @@ def _apply_restore_bytes(data, filename=""):
     applied, err = _apply_restore_sql(sql_text)
     if err:
         return None, err
-    for bf, data_bytes in branding.items():
-        try:
-            with open(os.path.join(BASE, bf), "wb") as fp:
-                fp.write(data_bytes)
-        except Exception:
-            pass
+    # the bundled files are only a fallback for a dump that carried no blob;
+    # they are never written straight over the cache, which used to put them
+    # in BASE where nothing serves them from anyway
+    _brand_keep_after_restore(before, branding)
     return applied, None
 
 @app.route("/api/restore", methods=["POST"])
@@ -5296,7 +8014,7 @@ def setup_test_db():
         c.close()
         return jsonify({"ok": True, "msg": f"Connected to {d.get('db_host')}:{d.get('db_port')}/{d.get('db_name')}"})
     except Exception as e:
-        return jsonify({"ok": False, "msg": str(e)}), 400
+        return jsonify({"ok": False, "msg": _db_error_help(e, d.get("db_host", ""))}), 400
 
 @app.route("/api/setup/complete", methods=["POST"])
 def setup_complete():

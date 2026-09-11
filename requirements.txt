@@ -8,3 +8,5 @@ pyotp
 qrcode
 reportlab
 pymupdf
+requests
+urllib3
