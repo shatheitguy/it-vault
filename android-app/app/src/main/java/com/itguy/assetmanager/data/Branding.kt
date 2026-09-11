@@ -58,6 +58,10 @@ object Branding {
                 val name = (body["app_name"] as? String)?.trim()
                     ?: (body["logo_text"] as? String)?.trim()
                 if (!name.isNullOrBlank()) Prefs.brandName = name
+                // The same response carries the deployment's colours. They
+                // were being thrown away, which is why the app stayed red
+                // whatever the server was themed in.
+                Palette.store(body)
             }
         }
 
@@ -89,6 +93,7 @@ object Branding {
     /** Clears cached branding — called when the user switches server / logs out. */
     fun clear(ctx: Context) {
         Prefs.brandName = ""
+        Palette.clear()
         runCatching { logoFile(ctx).delete() }
     }
 }

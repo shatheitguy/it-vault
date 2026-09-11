@@ -404,7 +404,11 @@ tbody tr.group-head:hover td{background:var(--bg1)}
   #sideName{display:none}
   .userbox{justify-content:center;padding:6px}
   .userbox > div:not(.avatar){display:none}
-  .logout{font-size:0;padding:8px 0}
+  /* font-size:0 was meant to drop the word LOGOUT on the narrow rail, but
+     it collapses the power glyph with it -- so the only way out of the
+     app became an invisible sliver. Hide the label, keep the icon. */
+  .logout{font-size:0;padding:10px 0;min-height:40px}
+  .logout::before{content:"⏻";font-size:18px;line-height:1}
   .side-foot{gap:6px}
   /* nav labels are bare text nodes — collapse them, keep the .ni glyph */
   .nav a{justify-content:center;padding:10px 0;font-size:0;gap:0}

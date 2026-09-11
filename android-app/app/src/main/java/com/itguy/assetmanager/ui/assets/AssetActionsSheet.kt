@@ -42,6 +42,7 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
 
     /** Set by the host fragment so an action can refresh the list / navigate. */
     var onEdit: (() -> Unit)? = null
+    var onAssign: (() -> Unit)? = null
     var onChanged: (() -> Unit)? = null
 
     private val assetId get() = arguments?.getString(ARG_ID).orEmpty()
@@ -83,6 +84,11 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
         }
 
         row("✏️  Edit asset") { dismiss(); onEdit?.invoke() }
+        // Assigning is the thing people do most from a list, and it was only
+        // reachable by opening the asset and finding a button inside it.
+        if (!assetStatus.equals("Checked-Out", ignoreCase = true)) {
+            row("👤  Assign to employee") { dismiss(); onAssign?.invoke() }
+        }
         row("✍️  Sign / acknowledge") { shareSignLink() }
         row("🖨️  Print label") { openLabel(printNow = true) }
         row("🔳  QR label") { openLabel(printNow = false) }
@@ -163,9 +169,15 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
 }
 
 /** Convenience so any fragment can pop the sheet in one line. */
-fun Fragment.showAssetActions(asset: Asset, onEdit: () -> Unit, onChanged: () -> Unit) {
+fun Fragment.showAssetActions(
+    asset: Asset,
+    onEdit: () -> Unit,
+    onChanged: () -> Unit,
+    onAssign: (() -> Unit)? = null,
+) {
     val sheet = AssetActionsSheet.newInstance(asset)
     sheet.onEdit = onEdit
     sheet.onChanged = onChanged
+    sheet.onAssign = onAssign ?: onEdit
     sheet.show(childFragmentManager, "asset_actions")
 }

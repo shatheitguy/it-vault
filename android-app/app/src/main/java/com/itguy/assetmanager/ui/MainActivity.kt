@@ -43,6 +43,39 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             header.findViewById(com.itguy.assetmanager.R.id.navHeaderBrand),
             header.findViewById(com.itguy.assetmanager.R.id.navHeaderLogo)
         )
+        // The colours as well as the name. Applied to the whole window, so the
+        // toolbar, drawer and bottom bar follow the deployment's accent instead
+        // of the bundled red.
+        com.itguy.assetmanager.data.Palette.apply(b.root)
+        com.itguy.assetmanager.data.Palette.apply(header)
+        com.itguy.assetmanager.data.Palette.apply(
+            supportFragmentManager
+                .findFragmentById(com.itguy.assetmanager.R.id.fragmentContainer)?.view
+        )
+    }
+
+    /**
+     * Themes every screen from one place.
+     *
+     * A hook per fragment would mean editing all fourteen of them and
+     * remembering to edit the fifteenth. Registering recursively means a
+     * screen written later is themed without being told theming exists, and
+     * dialogs and bottom sheets are fragments too, so they are covered.
+     */
+    private fun themeEveryScreen() {
+        supportFragmentManager.registerFragmentLifecycleCallbacks(
+            object : androidx.fragment.app.FragmentManager.FragmentLifecycleCallbacks() {
+                override fun onFragmentViewCreated(
+                    fm: androidx.fragment.app.FragmentManager,
+                    f: androidx.fragment.app.Fragment,
+                    v: android.view.View,
+                    savedInstanceState: android.os.Bundle?
+                ) {
+                    com.itguy.assetmanager.data.Palette.apply(v)
+                }
+            },
+            true
+        )
     }
 
     /** Mirrors the current destination into the bottom bar when it has a matching item. */
@@ -90,6 +123,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         // Wear the server's own branding rather than the bundled defaults: paint
         // whatever is cached right away, then refresh from the server in the background.
+        themeEveryScreen()
         applyBranding()
         lifecycleScope.launch {
             runCatching { com.itguy.assetmanager.data.Branding.refresh(applicationContext) }
