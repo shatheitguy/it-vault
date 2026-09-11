@@ -754,13 +754,15 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   border-radius:6px;padding:4px 6px}
 /* Hidden widgets vanish in normal use, and show ghosted while editing so they
    can be dragged and brought back. */
+/* Removed is removed -- it returns through + ADD WIDGET, not by hunting for a
+   greyed-out panel that is still taking up the grid. */
 #dashWidgets .widget.w-hidden{display:none}
-body.show-hidden #dashWidgets .widget.w-hidden{display:block;opacity:.38;filter:grayscale(1)}
-body.show-hidden #dashWidgets .widget.w-hidden::after{content:"HIDDEN";position:absolute;
-  left:10px;top:8px;font-size:10px;letter-spacing:.12em;color:var(--accent);font-weight:800}
-.wkill{position:absolute;top:6px;right:34px;z-index:3;width:22px;height:22px;line-height:1;
-  border:1px solid var(--line);background:var(--surface2);color:var(--muted);
-  border-radius:6px;cursor:pointer;font-size:12px;padding:0}
+.wtools{position:absolute;top:6px;right:32px;z-index:3;display:flex;gap:4px}
+.wtool{width:24px;height:24px;line-height:1;border:1px solid var(--line);
+  background:var(--surface2);color:var(--muted);border-radius:7px;cursor:pointer;
+  font-size:12px;padding:0;display:flex;align-items:center;justify-content:center;
+  transition:background .12s,color .12s,border-color .12s}
+.wtool:hover{color:var(--btn-text,#04121f);background:var(--accent);border-color:var(--accent)}
 .wkill:hover{color:#fff;background:var(--red,#e03b3b);border-color:var(--red,#e03b3b)}
 /* A link tile: the whole body is the target, so it is a big easy hit. */
 .wlink-body{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;
@@ -776,7 +778,43 @@ body.show-hidden #dashWidgets .widget.w-hidden::after{content:"HIDDEN";position:
 .wmicon{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .wmicon img{width:32px;height:32px;object-fit:contain;border:1px solid var(--line);
   border-radius:6px;background:var(--surface2);padding:2px}
-@media(max-width:820px){ #dashWidgets{grid-template-columns:1fr!important} }
+/* Edit mode reads as a mode: a faint board behind the grid, so it is obvious
+   that panels are movable and that the chrome on them is temporary. */
+body.edit-layout #dashWidgets{padding:10px;border-radius:12px;
+  background:
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0/100% 28px,
+    var(--surface2);
+  background-blend-mode:soft-light;outline:1px dashed var(--line)}
+body.edit-layout #dashWidgets .widget{transition:transform .12s,box-shadow .12s}
+body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(0,0,0,.28)}
+/* Panels in a row should end level. Tables inside them already scroll, so a
+   uniform height reads as a grid rather than a ragged staircase. */
+#dashWidgets .widget{display:flex;flex-direction:column}
+#dashWidgets .widget > .tablewrap{flex:1;min-height:0}
+
+/* A link tile is a target, not a document: it gets the whole panel and a
+   little lift, so it looks pressable next to the data panels. */
+#dashWidgets .widget.wlink{padding-bottom:12px}
+.wlink-body{border-radius:10px;transition:background .12s}
+.wlink-body:hover{background:var(--surface2)}
+
+@media(max-width:820px){
+  /* One column is right on a phone, but not a column of full-height panels:
+     cap the tall ones so the page can be thumbed through instead of scrolled
+     past, and let the link tiles pair up two-across since they are short. */
+  #dashWidgets{grid-template-columns:1fr!important;gap:12px}
+  #dashWidgets .widget > .tablewrap{max-height:240px!important}
+  #dashWidgets .widget[data-wkey="feed"] .feed{max-height:260px;overflow:auto}
+  .dash-tools{flex-wrap:wrap;gap:8px}
+  .wtools{right:8px}
+}
+@media(max-width:560px){
+  #dashWidgets{gap:10px}
+  #dashWidgets .widget{padding:12px 12px 14px}
+  .wlink-ico{width:34px;height:34px}
+  .wlink-host{font-size:13.5px}
+}
 
 .dashfilter{background:var(--surface2);color:var(--txt);border:1px solid var(--line);
   border-radius:8px;padding:6px 10px;font-size:13px;min-width:150px;max-width:230px}
@@ -786,3 +824,10 @@ body.show-hidden #dashWidgets .widget.w-hidden::after{content:"HIDDEN";position:
 #dashWidgets .widget.w-nomatch{display:none}
 .wlink-sub{font-size:11.5px;color:var(--muted2,var(--muted));margin-top:1px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* The base .dashfilter rule is defined further down this file than the mobile
+   block above, so an override there could never win. On a phone the filter
+   takes its own full-width row under the buttons. */
+@media(max-width:820px){
+  .dashfilter{flex:1 1 100%;max-width:none;order:99}
+}

@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260911b">
+<link rel="stylesheet" href="/style.css?v=20260911c">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/logo.png">
@@ -1289,8 +1289,10 @@
 <div class="modal" id="widgetModal"><div class="modal-box" style="width:min(620px,95vw)">
   <h3>ADD WIDGET</h3>
   <div class="modal-scroll">
-    <div class="secthead">HIDDEN WIDGETS</div>
-    <div id="wmHidden" class="wmlist"></div>
+    <div id="wmHiddenWrap">
+      <div class="secthead">HIDDEN WIDGETS</div>
+      <div id="wmHidden" class="wmlist"></div>
+    </div>
     <div class="secthead" style="margin-top:16px">LINK TILE</div>
     <p class="sec-hint">A tile that opens an address — a controller, a NAS, a switch.
       Bind it to a Heartbeat monitor and it shows up/down and response time too.</p>
@@ -1324,6 +1326,6 @@
   </div>
 </div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260911b"></script>
+<script src="/app.js?nocache=20260911c"></script>
 </body>
 </html>

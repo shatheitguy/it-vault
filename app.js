@@ -920,9 +920,6 @@ function setEditLayout(on){
   document.getElementById('dashLayoutMsg').textContent=on
     ? 'Drag to reorder, ✕ to remove, + ADD WIDGET to bring one back — then SAVE'
     : '';
-  // In edit mode a hidden widget is shown ghosted rather than gone, so it can
-  // be dragged and unhidden; outside edit mode it is simply absent.
-  document.body.classList.toggle('show-hidden', on);
   decorateWidgets(on);
   if(on) initDashDrag();
   else { const cont=dashCont(); if(cont) cont.querySelectorAll('.widget').forEach(w=>w.draggable=false); }
@@ -937,29 +934,46 @@ function decorateWidgets(on){
   if(!on) return;
   cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
     const key=w.getAttribute('data-wkey');
-    const btn=document.createElement('button');
-    btn.type='button'; btn.className='wkill';
     const isLink=key.startsWith('link:');
-    btn.title=isLink?'Delete this tile':'Hide this widget';
+    const bar=document.createElement('div');
+    bar.className='wtools';
+    // A tile you invented is a thing you got wrong the first time -- editing
+    // it beats deleting it and retyping the address and re-fetching the icon.
+    if(isLink){
+      const pen=document.createElement('button');
+      pen.type='button'; pen.className='wtool'; pen.title='Edit this tile';
+      pen.textContent='✎';
+      pen.onclick=(e)=>{ e.stopPropagation(); e.preventDefault(); openWidgetPicker(key); };
+      bar.appendChild(pen);
+    }
+    const btn=document.createElement('button');
+    btn.type='button'; btn.className='wtool wkill';
+    btn.title=isLink?'Delete this tile':'Remove this widget';
     btn.textContent='✕';
     btn.onclick=(e)=>{
       e.stopPropagation(); e.preventDefault();
+      const L=getDashLayout();
       if(isLink){
-        const L=getDashLayout();
         L.links=(L.links||[]).filter(t=>t.key!==key);
         L.order=(L.order||[]).filter(k=>k!==key);
-        putDashLayout(L); applyDashLayout(); decorateWidgets(true); initDashDrag();
       }else{
-        w.classList.add('w-hidden');
+        // Removed means gone from the page, not greyed out in place. It comes
+        // back through + ADD WIDGET, which is where someone looks for it.
+        L.hidden=Array.from(new Set((L.hidden||[]).concat([key])));
       }
+      putDashLayout(L); applyDashLayout(); decorateWidgets(true); initDashDrag();
     };
-    w.appendChild(btn);
+    bar.appendChild(btn);
+    w.appendChild(bar);
   });
 }
 
 /* ---------- widget picker ---------- */
-function openWidgetPicker(){
+let wmEditKey=null;
+function openWidgetPicker(editKey){
   const L=getDashLayout();
+  wmEditKey=editKey||null;
+  const existing=wmEditKey?(L.links||[]).find(t=>t.key===wmEditKey):null;
   const hidden=new Set(L.hidden||[]);
   const list=document.getElementById('wmHidden');
   const items=builtinWidgets().filter(w=>hidden.has(w.key));
@@ -989,12 +1003,24 @@ function openWidgetPicker(){
       });
     });
   }
-  wmIcon=''; renderWmIcon();
-  document.getElementById('wmTitle').value='';
-  document.getElementById('wmUrl').value='';
-  document.getElementById('wmDesc').value='';
-  document.getElementById('wmTarget').value='_blank';
+  wmIcon=existing?(existing.icon||''):''; renderWmIcon();
+  document.getElementById('wmTitle').value=existing?(existing.title||''):'';
+  document.getElementById('wmUrl').value=existing?(existing.url||''):'';
+  document.getElementById('wmDesc').value=existing?(existing.desc||''):'';
+  document.getElementById('wmTarget').value=(existing&&existing.target==='_self')?'_self':'_blank';
   document.getElementById('wmIconMsg').textContent='';
+  // one dialog, two jobs -- say which one it is doing
+  document.querySelector('#widgetModal h3').textContent=existing?'EDIT TILE':'ADD WIDGET';
+  document.getElementById('wmAdd').textContent=existing?'💾 SAVE TILE':'+ ADD TILE';
+  const hw=document.getElementById('wmHiddenWrap');
+  if(hw) hw.style.display=existing?'none':'';
+  // the monitor list is filled in asynchronously above; re-select once it is
+  if(existing&&existing.monitor){
+    const want=String(existing.monitor);
+    const pick=()=>{ const m=document.getElementById('wmMonitor');
+      if(!m) return; if([...m.options].some(o=>o.value===want)) m.value=want; else setTimeout(pick,150); };
+    setTimeout(pick,150);
+  }
   document.getElementById('widgetModal').classList.add('show');
 }
 
@@ -3942,18 +3968,25 @@ document.getElementById('wmAdd').onclick=()=>{
   let safe=url; if(!/^https?:\/\//i.test(safe)) safe='http://'+safe;
   try{ new URL(safe); }catch(e){ msg.textContent='That address is not valid'; return; }
   const L=getDashLayout();
-  const key='link:'+Math.random().toString(36).slice(2,10);
   const desc=document.getElementById('wmDesc').value.trim();
   const target=document.getElementById('wmTarget').value==='_self'?'_self':'_blank';
-  L.links=(L.links||[]).concat([{key, title, url:safe, icon:wmIcon||'',
-                                 monitor:mon?Number(mon):null, desc, target}]);
-  L.order=(L.order||[]).concat([key]);
+  const key=wmEditKey||('link:'+Math.random().toString(36).slice(2,10));
+  const tile={key, title, url:safe, icon:wmIcon||'',
+              monitor:mon?Number(mon):null, desc, target};
+  if(wmEditKey){
+    // replaced in place, so an edited tile keeps its spot on the grid
+    L.links=(L.links||[]).map(t=>t.key===wmEditKey?tile:t);
+  }else{
+    L.links=(L.links||[]).concat([tile]);
+    L.order=(L.order||[]).concat([key]);
+  }
   putDashLayout(L);
   applyDashLayout();
   decorateWidgets(document.body.classList.contains('edit-layout'));
   initDashDrag();
   document.getElementById('widgetModal').classList.remove('show');
-  toast('✓ TILE ADDED');
+  toast(wmEditKey?'✓ TILE UPDATED':'✓ TILE ADDED');
+  wmEditKey=null;
 };
 document.getElementById('navAssets').onclick=()=>showPage('page-assets');
 
