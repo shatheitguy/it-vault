@@ -2017,7 +2017,13 @@ async function applyBranding(){
   const nm=me.app_name||me.display||'IT-Vault';
   window.APP_NAME=nm;
   window.HAS_LETTERHEAD=!!me.has_letterhead;
-  document.getElementById('sideName').textContent=nm;
+  // The sidebar shows Logo Text, which is a separate setting from the
+  // organisation name -- that is the whole point of having both, and the
+  // field is even labelled "Logo Text (sidebar)". It was being ignored,
+  // so the sidebar always read the company name.
+  const sideText=(me.logo_text||'').trim()||nm;
+  window.SIDE_TEXT=sideText;
+  document.getElementById('sideName').textContent=sideText;
   document.title=nm+' // Assets Manager';
   const sideLogo=document.getElementById('sideLogo');
   if(sideLogo){
@@ -2029,7 +2035,7 @@ async function applyBranding(){
   if(loginLogo){ loginLogo.src='/logo.png?t='+Date.now(); loginLogo.style.display=''; }
   const logoPrev=document.getElementById('b_logoPrev');
   if(logoPrev){ logoPrev.src='/logo.png?t='+Date.now(); }
-  const st=document.getElementById('sideName'); if(st) st.textContent=nm;
+  const st=document.getElementById('sideName'); if(st) st.textContent=sideText;
   // rebrand any static "IT GUY / ..." crumb text
   const crumbPrefix='IT GUY';
   document.querySelectorAll('.crumb').forEach(el=>{
