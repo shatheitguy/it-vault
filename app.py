@@ -3794,7 +3794,20 @@ def _hb_channels_for(mon, all_channels):
 
 
 def _hb_send_email(cfg, subject, body):
-    return send_notification(subject, body)
+    """An email channel can name its own address.
+
+    There was nowhere to type one: every email channel fell through to the
+    profile addresses, so "send this to the network team" was not expressible.
+    Left blank it still falls back, which is what existing channels do.
+    """
+    to = (cfg.get("to") or "").strip()
+    if not to:
+        return _email_profile_addresses(subject, body)
+    ok = False
+    for addr in [a.strip() for a in re.split(r"[,;\s]+", to) if a.strip()]:
+        if _send_simple_email(addr, subject, body):
+            ok = True
+    return ok
 
 
 def _hb_send_webhook(cfg, subject, body, payload):
@@ -5601,19 +5614,29 @@ def _email_footer(app_name):
     OTP codes, alerts) -- keeps the sender's own brand name in the subject/body
     while still crediting the tool, unobtrusively, on its own short line."""
     return f"\n\n—\n{app_name} · Powered by Sha The IT Guy"
-def send_notification(subject, body):
+def _email_profile_addresses(subject, body):
+    """Mail everyone who has an address on their profile.
+
+    The oldest delivery route in the app, and still the sensible default: with
+    no channels configured at all, a notification should reach the people who
+    already told IT-Vault how to reach them.
+    """
     import smtplib
     from email.message import EmailMessage
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Settings WHERE id=1"); s = cur.fetchone() or {}
-    cur.execute("SELECT email FROM Users WHERE email<>'' "); emails = [r["email"] for r in cur.fetchall()]
+    cur.execute("SELECT email FROM Users WHERE email<>''")
+    emails = [r["email"] for r in cur.fetchall()]
     c.close()
     if not s.get("smtp_host") or not emails:
         return False
     try:
         bn = s.get("app_name") or "IT-Vault"
-        subj = subject if subject.startswith(bn) else f"{bn}: {subject}" if not subject.startswith("IT Guy") else subject.replace("IT Guy", bn, 1)
-        msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
+        subj = subject if subject.startswith(bn) else (
+            f"{bn}: {subject}" if not subject.startswith("IT Guy")
+            else subject.replace("IT Guy", bn, 1))
+        msg = EmailMessage(); msg["Subject"] = subj
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = ", ".join(emails); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
@@ -5621,6 +5644,48 @@ def send_notification(subject, body):
         return True
     except Exception as e:
         print("notify error:", e); return False
+
+
+def send_notification(subject, body):
+    """Every system notification, down the channels configured in Settings.
+
+    Channels used to be a Heartbeat-only idea, which meant two places to set
+    up notifications and a Telegram bot that could tell you a monitor was down
+    but not that a backup had failed. They are now the one mechanism: whatever
+    is listed under Settings > Notifications receives everything -- asset
+    events, tickets, SLA breaches, backups and outage alerts alike.
+
+    With no channels at all it falls back to the profile addresses, so an
+    install that never opens the page keeps working exactly as before. A dead
+    channel never stops the others: each send is guarded on its own, because
+    the whole point of several channels is that one of them still arrives.
+    """
+    payload = {"event": "notification", "subject": subject, "message": body}
+    try:
+        channels = [ch for ch in _hb_all_channels() if int(ch.get("enabled") or 0)]
+    except Exception:
+        channels = []
+    if not channels:
+        return _email_profile_addresses(subject, body)
+    sent = False
+    for ch in channels:
+        kind = (ch.get("kind") or "email").lower()
+        fn = _HB_SENDERS.get(kind)
+        if not fn:
+            continue
+        cfg = ch.get("config") or {}
+        if isinstance(cfg, str):
+            try:
+                cfg = json.loads(cfg)
+            except Exception:
+                cfg = {}
+        try:
+            ok = fn(cfg, subject, body) if kind == "email" else fn(cfg, subject, body, payload)
+            sent = sent or bool(ok)
+        except Exception as e:
+            print(f"[itvault] notification via {ch.get('name') or kind} failed: {e}",
+                  flush=True)
+    return sent
 
 def notify_ticket_assigned(ticket, assignee_user):
     """Email the assignee + requester when a ticket is assigned. Returns True if sent."""
@@ -7607,15 +7672,72 @@ def _dump_section(cur, table):
     upserting rows on top of whatever is there now, then the REPLACE INTOs."""
     return [f"-- == {table} ==", f"DELETE FROM `{table}`;", *_dump_table(cur, table)]
 
-# Every business table, so an "all"/"assets" backup is a complete,
-# restorable snapshot. A factory wipe drops whatever the schema actually
-# holds (read from information_schema), so there's no parallel list to
-# keep in sync with this one.
+# A preferred order for the tables we know about -- parents before children,
+# so a restore that does hit a foreign key does so in the right sequence.
+# This is an ORDERING, not the list of what gets backed up: that is read from
+# the schema, below.
 ASSET_SCOPE_TABLES = [
     "Assets", "Checkouts", "Maintenance", "Contracts", "Employees",
-    "Tickets", "TicketReplies", "Manufacturers", "Models", "Categories",
-    "ContractTypes", "Departments", "Designations", "Locations", "Roles", "History",
+    "Tickets", "TicketReplies", "TicketHistory", "TicketAttachments",
+    "Manufacturers", "Models", "Categories",
+    "ContractTypes", "Departments", "Designations", "Locations", "History",
+    "HeartbeatEvents", "HeartbeatHourly",
 ]
+
+# What you configure, as opposed to what you accumulate.
+BACKUP_CONFIG_TABLES = ["Settings", "Users", "Roles",
+                        "HeartbeatChannels", "HeartbeatMonitors"]
+
+# Raw per-check telemetry. It is written every few seconds per monitor and
+# never pruned, so including it would grow every nightly archive without
+# bound -- and it rolls up into HeartbeatHourly, which IS backed up, so the
+# uptime history survives even though the individual pings do not.
+BACKUP_SKIP_TABLES = ["HeartbeatSamples"]
+
+
+def _schema_tables(cur):
+    """Every base table in this database, as the schema actually spells it."""
+    try:
+        cur.execute("SELECT TABLE_NAME AS t FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'")
+        return [r["t"] for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
+def _backup_tables(cur, scope):
+    """The tables a backup of [scope] should contain.
+
+    Read from the schema rather than a list kept by hand. The hand-kept list
+    had silently drifted by seven tables -- notification channels, every
+    Heartbeat monitor, ticket history and attachments among them -- because
+    nothing fails when a feature adds a table and forgets to add it here. A
+    backup missing a table is not discovered until a restore, which is the
+    worst moment to discover anything.
+
+    Anything new is therefore included automatically, and leaving it out has
+    to be a deliberate entry in BACKUP_SKIP_TABLES.
+    """
+    have = _schema_tables(cur)
+    by_lower = {t.lower(): t for t in have}
+    skip = {t.lower() for t in BACKUP_SKIP_TABLES}
+    cfg_l = {t.lower() for t in BACKUP_CONFIG_TABLES}
+
+    def real(names):
+        return [by_lower[n.lower()] for n in names if n.lower() in by_lower]
+
+    if scope == "config":
+        return real(BACKUP_CONFIG_TABLES)
+
+    known = cfg_l | skip | {"auditlog"}
+    ordered = [t for t in real(ASSET_SCOPE_TABLES) if t.lower() not in known]
+    seen = {t.lower() for t in ordered} | known
+    # whatever the schema has that nobody thought to order: alphabetical, and
+    # present, which is the part that matters
+    extra = sorted(by_lower[k] for k in by_lower if k not in seen)
+    if scope == "assets":
+        return ordered + extra
+    return real(BACKUP_CONFIG_TABLES) + ordered + extra
 
 BACKUP_BRANDING_FILES = ("logo.png", "letterhead.png")
 
@@ -7628,12 +7750,8 @@ def _run_backup(scope="all"):
     # An assets backup carries invoice files now, so it can no longer be a
     # plain .sql either -- anything with files alongside the dump is a zip.
     include_files = include_branding or scope == "assets"
-    if scope in ("config", "all"):
-        lines += _dump_section(cur, "Settings")
-        lines += _dump_section(cur, "Users")
-    if scope in ("assets", "all"):
-        for t in ASSET_SCOPE_TABLES:
-            lines += _dump_section(cur, t)
+    for t in _backup_tables(cur, scope):
+        lines += _dump_section(cur, t)
     if scope == "all":
         lines += _dump_section(cur, "AuditLog")
     c.close()

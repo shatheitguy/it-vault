@@ -50,6 +50,11 @@ AID = "BK-" + uuid.uuid4().hex[:6]
 PDF = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n"
 
 c = A.conn(); cur = c.cursor()
+# section 5 switches the schedule off to prove a deliberate "off" sticks, so
+# remember what it was: a test that leaves the install's automatic backups
+# disabled is a test that does real harm
+cur.execute("SELECT backup_schedule FROM Settings WHERE id=1")
+SCHED_BEFORE = (cur.fetchone() or {}).get("backup_schedule") or "daily"
 cur.execute("INSERT INTO Assets (_id, AssetTag, Name, Type, Status) VALUES (%s,%s,%s,%s,%s)",
             (AID, "BK-1", "Backup test laptop", "Laptop", "Available"))
 c.commit(); c.close()
@@ -153,6 +158,7 @@ try:
 finally:
     c = A.conn(); cur = c.cursor()
     cur.execute("DELETE FROM Assets WHERE _id=%s", (AID,))
+    cur.execute("UPDATE Settings SET backup_schedule=%s WHERE id=1", (SCHED_BEFORE,))
     c.commit(); c.close()
     for f in made:
         try:
@@ -165,6 +171,42 @@ finally:
         pass
     print()
     print("(test asset, its attachment and the test backups removed)")
+
+print()
+print("8. Every table in the schema is in an 'all' backup")
+# The list used to be maintained by hand and had drifted by seven tables --
+# notification channels, every Heartbeat monitor, ticket history and
+# attachments among them. Nothing fails when a feature adds a table and
+# forgets the backup; the cost shows up at restore time, which is the worst
+# possible moment to find out.
+c = A.conn(); cur = c.cursor()
+cur.execute("SELECT TABLE_NAME AS t FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'")
+in_schema = {r["t"].lower() for r in cur.fetchall()}
+in_backup = {t.lower() for t in A._backup_tables(cur, "all")} | {"auditlog"}
+c.close()
+skipped = {t.lower() for t in A.BACKUP_SKIP_TABLES}
+missing = sorted(in_schema - in_backup - skipped)
+check("no table is left out by accident", not missing, missing)
+check("anything left out is left out on purpose",
+      not (in_schema - in_backup) or (in_schema - in_backup) <= skipped,
+      sorted(in_schema - in_backup))
+# the one exclusion, and why it is safe
+check("raw per-check telemetry is the only exclusion",
+      [t.lower() for t in A.BACKUP_SKIP_TABLES] == ["heartbeatsamples"],
+      A.BACKUP_SKIP_TABLES)
+check("but the rolled-up history it feeds IS backed up",
+      "heartbeathourly" in in_backup)
+
+print()
+print("9. The things added recently all travel with a backup")
+for table, why in (("settings", "colours, label config, QR fields"),
+                   ("users", "dashboard layouts live on Users.dash_layout"),
+                   ("heartbeatchannels", "notification channels"),
+                   ("heartbeatmonitors", "what is monitored"),
+                   ("tickethistory", "ticket history"),
+                   ("ticketattachments", "ticket attachments")):
+    check("%-20s (%s)" % (table, why), table in in_backup)
 
 print()
 if fails:
