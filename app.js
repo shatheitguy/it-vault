@@ -2359,7 +2359,7 @@ const HB_KIND_HINT={
   dns:'Resolves the name and fails if it stops resolving. Worth having on anything whose DNS you depend on but do not control.'
 };
 const HB_CHAN_HINT={
-  email:'Email uses the SMTP server and notification address already configured in Settings.',
+  email:'Uses the SMTP server configured above. Leave Send to empty and it goes to every user with an email on their profile.',
   webhook:'Every alert is POSTed as JSON: event, monitor, target, status, error and the message text. Point it at whatever you already run.',
   slack:'Create an incoming webhook in Slack (Apps ▸ Incoming Webhooks) and paste the URL here.',
   telegram:'Talk to @BotFather to create a bot and get its token, then add the bot to the chat and use that chat id.'
@@ -2449,8 +2449,6 @@ async function loadHeartbeat(){
   const j=await r.json().catch(()=>null);
   if(!j){ st.textContent='✕ could not read monitor status'; return; }
   HB=j; st.textContent='';
-  const cb=document.getElementById('hbChanBtn');
-  if(cb) cb.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
   renderHeartbeat();
   if(hbDetailId) loadHbDetail(hbDetailId, true);
 }
@@ -2579,9 +2577,12 @@ function hbChanChecklist(selected){
   const chans=(HB.channels||[]);
   if(!chans.length){
     box.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+    // channels are configured in one place now, so point at it rather than
+    // opening a second copy of the same form from here
     list.innerHTML='<p class="muted" style="margin:0">No channels set up yet. '
-      +'<a class="mlink" onclick="openHbChannels()">Add one ↗</a> or leave this alone and '
-      +'alerts go to the notification address in Settings.</p>';
+      +'<a class="mlink" onclick="goToNotificationSettings()">'
+      +'Set them up in Settings ▸ Notifications ↗</a>, or leave this alone and '
+      +'alerts go to everyone with an email on their profile.</p>';
     return;
   }
   box.style.display='';
@@ -2776,8 +2777,22 @@ function hbSparkChart(series){
 }
 
 // ---- alert channels ---------------------------------------------------
+// One hop from wherever notifications are mentioned to the page that owns
+// them, so nothing has to reproduce the navigation inline.
+window.goToNotificationSettings=()=>{
+  showPage('page-usettings');
+  // click the real nav item rather than toggling display directly, so the
+  // sidebar highlight follows too
+  const item=document.querySelector('.cfgitem[data-sec="notif"]');
+  if(item) item.click();
+  const sec=document.querySelector('.cfg-sec[data-sec="notif"]');
+  if(sec) sec.scrollIntoView({behavior:'smooth', block:'start'});
+};
+
+// The channel list lives in Settings > Notifications now rather than behind a
+// button on the Heartbeat page: one page that owns every notification, instead
+// of alerts being configured somewhere separate from everything else.
 window.openHbChannels=async()=>{
-  document.getElementById('hbChanModal').classList.add('show');
   hbcReset();
   await loadHbChannels();
 };
@@ -2809,6 +2824,7 @@ async function loadHbChannels(){
 function hbcKindUI(){
   const k=document.getElementById('hbc_kind').value;
   const show=(id,on)=>{document.getElementById(id).style.display=on?'':'none';};
+  show('hbc_toWrap', k==='email');
   show('hbc_urlWrap', k==='webhook'||k==='slack');
   show('hbc_tokenWrap', k==='telegram');
   show('hbc_chatWrap', k==='telegram');
@@ -2818,7 +2834,7 @@ function hbcKindUI(){
 function hbcReset(){
   hbChanEditId=null;
   document.getElementById('hbChanFormTitle').textContent='ADD A CHANNEL';
-  ['hbc_name','hbc_url','hbc_token','hbc_chat'].forEach(id=>document.getElementById(id).value='');
+  ['hbc_name','hbc_to','hbc_url','hbc_token','hbc_chat'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('hbc_kind').value='email';
   document.getElementById('hbc_enabled').checked=true;
   document.getElementById('hbcReset').style.display='none';
@@ -2832,6 +2848,7 @@ window.hbcEdit=(id)=>{
   document.getElementById('hbChanFormTitle').textContent='EDIT CHANNEL';
   document.getElementById('hbc_name').value=c.name||'';
   document.getElementById('hbc_kind').value=c.kind||'email';
+  document.getElementById('hbc_to').value=cfg.to||'';
   document.getElementById('hbc_url').value=cfg.url||'';
   document.getElementById('hbc_chat').value=cfg.chat_id||'';
   document.getElementById('hbc_token').value='';
@@ -2845,6 +2862,9 @@ async function saveHbChannel(){
   const g=(id)=>document.getElementById(id);
   const kind=g('hbc_kind').value;
   const cfg={};
+  // blank means "everyone with an email on their profile", which is what an
+  // email channel did before there was anywhere to type an address
+  if(kind==='email') cfg.to=g('hbc_to').value.trim();
   if(kind==='webhook'||kind==='slack') cfg.url=g('hbc_url').value.trim();
   if(kind==='telegram'){ cfg.token=g('hbc_token').value.trim(); cfg.chat_id=g('hbc_chat').value.trim(); }
   const body={name:g('hbc_name').value.trim()||kind, kind, config:cfg, enabled:g('hbc_enabled').checked};
@@ -2923,7 +2943,8 @@ async function loadDashHeartbeat(){
 document.getElementById('navHeartbeat').onclick=()=>showPage('page-heartbeat');
 document.getElementById('hbAddBtn').onclick=()=>openHbModal(null);
 document.getElementById('hbCheckBtn').onclick=hbCheckNow;
-document.getElementById('hbChanBtn').onclick=()=>openHbChannels();
+// loaded with the Settings page it now lives on
+if(document.getElementById('hbChanBody')) openHbChannels();
 document.getElementById('hbSearch').oninput=renderHeartbeat;
 document.getElementById('hbFilter').onchange=renderHeartbeat;
 document.getElementById('hbWindow').onchange=loadHeartbeat;
@@ -2964,7 +2985,7 @@ document.getElementById('hbdEdit').onclick=()=>{
   openHbModal(id);
 };
 document.getElementById('hbChanClose').onclick=()=>{
-  document.getElementById('hbChanModal').classList.remove('show');
+  // nothing to close -- the list is part of the page
   loadHeartbeat();
 };
 document.getElementById('hbc_kind').onchange=hbcKindUI;

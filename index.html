@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260911c">
+<link rel="stylesheet" href="/style.css?v=20260912a">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/logo.png">
@@ -496,6 +496,43 @@
               <label class="toggle"><input type="checkbox" id="notify_on_reply"><span>Reply added (email requester)</span></label>
               <p class="muted" style="margin:12px 0 0">All emails sent from the SMTP above. Recipients = users with emails set in their profile.</p>
             </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">NOTIFICATION CHANNELS</div>
+<p class="sec-hint">Where every notification is delivered &mdash; asset events, tickets, SLA breaches, backups and Heartbeat outage alerts. With none set up they go to users who have an email on their profile. Test a channel before something has to rely on it.</p>
+    <div class="tablewrap">
+      <table class="dtable"><thead><tr><th>NAME</th><th>TYPE</th><th>WHERE</th><th>ACTIVE</th><th></th></tr></thead>
+      <tbody id="hbChanBody"></tbody></table>
+    </div>
+    <div class="empty" id="hbChanEmpty" style="display:none">NO CHANNELS YET &mdash; NOTIFICATIONS GO TO USERS WITH AN EMAIL ON THEIR PROFILE</div>
+    <div class="invbox" style="margin-top:14px">
+      <label id="hbChanFormTitle">ADD A CHANNEL</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="hbc_name" placeholder="e.g. IT team email, Ops Slack"></div>
+        <div class="field2" id="hbc_toWrap" style="grid-column:1/-1"><label>Send to</label><input id="hbc_to" class="mono" placeholder="netops@example.com, oncall@example.com"></div>
+        <div class="field2"><label>Type</label>
+          <select id="hbc_kind">
+            <option value="email">Email (uses your SMTP settings)</option>
+            <option value="webhook">Webhook (JSON POST)</option>
+            <option value="slack">Slack incoming webhook</option>
+            <option value="telegram">Telegram bot</option>
+          </select>
+        </div>
+        <div class="field2" id="hbc_urlWrap" style="display:none;grid-column:1/-1"><label id="hbc_urlLabel">Webhook URL</label><input id="hbc_url" class="mono" placeholder="https://hooks.example.com/..."></div>
+        <div class="field2" id="hbc_tokenWrap" style="display:none"><label>Bot token</label><input id="hbc_token" type="password" placeholder="123456:ABC-DEF..."></div>
+        <div class="field2" id="hbc_chatWrap" style="display:none"><label>Chat ID</label><input id="hbc_chat" class="mono" placeholder="-1001234567890"></div>
+      </div>
+      <div class="scanrow" style="margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hbc_enabled" checked><span>Channel active</span></label>
+      </div>
+      <p class="muted scan-hint" id="hbc_hint">Email uses the SMTP server and notification address already configured in Settings.</p>
+      <div class="m-actions" style="justify-content:flex-start">
+        <button class="btn" id="hbcSave" type="button">SAVE CHANNEL</button>
+        <button class="btn ghost" id="hbcReset" type="button" style="display:none">CANCEL EDIT</button>
+      </div>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="hbChanClose" type="button">CLOSE</button></div>
+</div>
+            </div>
             <div class="m-actions"><button class="btn mag" id="saveNotifBtn">✓ SAVE NOTIFICATIONS</button></div>
           </section>
           <!-- SLA & AUTOMATION -->
@@ -747,7 +784,6 @@
           <option value="8760">Last year</option>
         </select>
         <label class="toggle" style="margin:0"><input type="checkbox" id="hbAuto" checked><span>Auto&#8209;refresh</span></label>
-        <button class="btn ghost" id="hbChanBtn" style="display:none">&#128276; ALERTS</button>
         <button class="btn ghost" id="hbCheckBtn">&#9889; CHECK NOW</button>
         <button class="btn" id="hbAddBtn">+ ADD MONITOR</button>
       </div>
@@ -1142,45 +1178,7 @@
 </div></div>
 
 <!-- Heartbeat alert channels -->
-<div class="modal" id="hbChanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
-  <h3>ALERT CHANNELS</h3>
-  <div class="modal-scroll">
-    <p class="sec-hint">Where outage alerts are delivered. A monitor can use any combination of these; with none set up,
-    alerts fall back to the notification address in Settings &#9656; Notifications. Test a channel before an outage has
-    to rely on it.</p>
-    <div class="tablewrap">
-      <table class="dtable"><thead><tr><th>NAME</th><th>TYPE</th><th>WHERE</th><th>ACTIVE</th><th></th></tr></thead>
-      <tbody id="hbChanBody"></tbody></table>
-    </div>
-    <div class="empty" id="hbChanEmpty" style="display:none">NO CHANNELS YET &mdash; ALERTS GO TO THE NOTIFICATION ADDRESS</div>
-    <div class="invbox" style="margin-top:14px">
-      <label id="hbChanFormTitle">ADD A CHANNEL</label>
-      <div class="grid2">
-        <div class="field2"><label>Name</label><input id="hbc_name" placeholder="e.g. IT team email, Ops Slack"></div>
-        <div class="field2"><label>Type</label>
-          <select id="hbc_kind">
-            <option value="email">Email (uses your SMTP settings)</option>
-            <option value="webhook">Webhook (JSON POST)</option>
-            <option value="slack">Slack incoming webhook</option>
-            <option value="telegram">Telegram bot</option>
-          </select>
-        </div>
-        <div class="field2" id="hbc_urlWrap" style="display:none;grid-column:1/-1"><label id="hbc_urlLabel">Webhook URL</label><input id="hbc_url" class="mono" placeholder="https://hooks.example.com/..."></div>
-        <div class="field2" id="hbc_tokenWrap" style="display:none"><label>Bot token</label><input id="hbc_token" type="password" placeholder="123456:ABC-DEF..."></div>
-        <div class="field2" id="hbc_chatWrap" style="display:none"><label>Chat ID</label><input id="hbc_chat" class="mono" placeholder="-1001234567890"></div>
-      </div>
-      <div class="scanrow" style="margin-top:10px">
-        <label class="toggle"><input type="checkbox" id="hbc_enabled" checked><span>Channel active</span></label>
-      </div>
-      <p class="muted scan-hint" id="hbc_hint">Email uses the SMTP server and notification address already configured in Settings.</p>
-      <div class="m-actions" style="justify-content:flex-start">
-        <button class="btn" id="hbcSave" type="button">SAVE CHANNEL</button>
-        <button class="btn ghost" id="hbcReset" type="button" style="display:none">CANCEL EDIT</button>
-      </div>
-    </div>
-  </div>
-  <div class="m-actions"><button class="btn ghost" id="hbChanClose" type="button">CLOSE</button></div>
-</div></div>
+
 
 <!-- Network scan modal -->
 <div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
@@ -1326,6 +1324,6 @@
   </div>
 </div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260911c"></script>
+<script src="/app.js?nocache=20260912a"></script>
 </body>
 </html>
