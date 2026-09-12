@@ -8,6 +8,8 @@ import com.itguy.assetmanager.data.model.Asset
 import com.itguy.assetmanager.data.model.Contract
 import com.itguy.assetmanager.data.model.Employee
 import com.itguy.assetmanager.data.model.DashboardStats
+import com.itguy.assetmanager.data.model.HbState
+import com.itguy.assetmanager.data.model.Ticket
 
 /**
  * Read-only offline cache: the last successful fetch of each main list is
@@ -37,6 +39,25 @@ object OfflineCache {
 
     fun saveDashboard(stats: DashboardStats) = save("dashboard", stats)
     fun loadDashboard(): DashboardStats? = load("dashboard", DashboardStats::class.java)
+
+    fun saveTickets(list: List<Ticket>) = save("tickets", list)
+    fun loadTickets(): List<Ticket>? = load("tickets", object : TypeToken<List<Ticket>>() {}.type)
+
+    fun saveHeartbeat(state: HbState) = save("heartbeat", state)
+    fun loadHeartbeat(): HbState? = load("heartbeat", HbState::class.java)
+
+    /**
+     * The reference-style lists (Product Catalog, Trash, Audit Log) share one
+     * screen, so they share one cache keyed by which list it is -- and the
+     * Catalog's tabs are separate lists in their own right, hence the suffix.
+     * Keyed rather than lumped together: a stale Trash must never be shown as
+     * the Catalog.
+     */
+    fun saveRows(kind: String, rows: List<String>) = save("rows_$kind", rows)
+    fun loadRows(kind: String): List<String>? =
+        load("rows_$kind", object : TypeToken<List<String>>() {}.type)
+
+    fun rowsUpdated(kind: String): Long = lastUpdated("rows_$kind")
 
     /** Millis since epoch when [key]'s cache was last written, or 0 if never. */
     fun lastUpdated(key: String): Long = prefs.getLong("${key}_ts", 0L)

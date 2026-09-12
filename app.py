@@ -1864,6 +1864,18 @@ def migrate_schema():
             cur.execute("ALTER TABLE Users ADD COLUMN avatar MEDIUMTEXT")
         except Exception:
             pass
+    # Each user arranges their own dashboard, and it is kept here rather than
+    # in the browser so it survives a new machine, a cleared cache, and --
+    # the reason it moved -- so it is in the backup. Users is dumped in the
+    # config and all scopes, and _dump_table reads SHOW COLUMNS, so this rides
+    # along with no change to the backup code.
+    try:
+        cur.execute("SELECT dash_layout FROM Users LIMIT 1")
+    except Exception:
+        try:
+            cur.execute("ALTER TABLE Users ADD COLUMN dash_layout MEDIUMTEXT")
+        except Exception:
+            pass
     # Offline (Android) sync needs a last-modified timestamp on every
     # syncable record so the newest edit wins. Only Tickets had one; add
     # it to Assets/Contracts/Employees and backfill existing rows so a
@@ -5237,6 +5249,150 @@ def ldap_test():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:300]}), 400
 
+@app.route("/api/widget/icon")
+@auth_required(module="settings", level="write")
+def widget_icon():
+    """Fetch a site's icon so a dashboard tile can wear it.
+
+    The browser cannot do this itself: the target is another origin (and
+    often plain http on the LAN), so the fetch is blocked by CORS and by
+    mixed-content rules. The server can, and returns a small data URI the
+    layout can store inline -- no second request when the dashboard loads,
+    and no broken image when the target is only reachable from the server.
+
+    It will happily fetch a private address, which is the point: the tiles
+    people want are the UniFi controller, the NAS, the switch. That does
+    mean an admin can aim this at anything the server can reach, so it is
+    gated on settings:write -- the same permission as changing branding --
+    and it returns only a re-encoded image, never the response body.
+    """
+    import urllib.request
+    import urllib.parse
+    import re as _re
+
+    raw = (request.args.get("url") or "").strip()
+    if not raw:
+        return jsonify({"error": "no url"}), 400
+    # Bare "10.0.0.1:8443" is how people actually type an address, so a missing
+    # scheme is filled in -- but only when one is genuinely absent. Prefixing
+    # blind turned "javascript:alert(1)" into "http://javascript:alert(1)",
+    # which passed the scheme check and failed later as a connection error
+    # instead of being refused outright.
+    if not _re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:", raw):
+        raw = "http://" + raw
+    parts = urllib.parse.urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return jsonify({"error": "only http:// and https:// addresses"}), 400
+
+    MAX_BYTES = 512 * 1024
+
+    def grab(url):
+        req = urllib.request.Request(url, headers={"User-Agent": f"IT-Vault/{APP_VERSION}"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return r.read(MAX_BYTES + 1), (r.headers.get("Content-Type") or "")
+
+    origin = f"{parts.scheme}://{parts.netloc}"
+    candidates = []
+    # If the address IS an image, that is the answer -- someone pasting a
+    # direct PNG should not be told there is no icon at it.
+    direct = None
+    # What the page itself declares, first -- /favicon.ico is the fallback,
+    # not the answer, and plenty of sites no longer serve one.
+    try:
+        html, ctype = grab(origin + (parts.path or "/") +
+                           (("?" + parts.query) if parts.query else ""))
+        low = ctype.lower()
+        if low.startswith("image/") or _sniff_image(html)[0]:
+            direct = html
+        elif "html" in low:
+            text = html[:200000].decode("utf-8", "replace")
+            for m in _re.finditer(
+                    r'<link[^>]+rel=["\']?[^"\'>]*icon[^"\'>]*["\']?[^>]*>',
+                    text, _re.I):
+                href = _re.search(r'href=["\']([^"\']+)["\']', m.group(0), _re.I)
+                if href:
+                    candidates.append(urllib.parse.urljoin(
+                        origin + (parts.path or "/"), href.group(1)))
+    except Exception:
+        pass
+    candidates.append(origin + "/favicon.ico")
+
+    for url in ([None] if direct else []) + candidates[:6]:
+        try:
+            data, ctype = (direct, "") if url is None else grab(url)
+        except Exception:
+            continue
+        if not data or len(data) > MAX_BYTES:
+            continue
+        kind = _sniff_image(data)[0]
+        if not kind:
+            # an .ico is not something _sniff_image knows, and it is still
+            # the most common favicon there is
+            if not data.startswith(b"\x00\x00\x01\x00"):
+                continue
+        try:
+            png = _fit_png(data, 64, 24 * 1024)
+        except Exception:
+            continue
+        b64 = base64.b64encode(png).decode()
+        return jsonify({"ok": True, "icon": "data:image/png;base64," + b64,
+                        "source": url or raw})
+    return jsonify({"error": "No icon found at that address"}), 404
+
+@app.route("/api/dash/layout", methods=["GET", "PUT"])
+@auth_required()
+def dash_layout():
+    """The signed-in user's dashboard arrangement.
+
+    It used to live in localStorage, which meant it was one browser's
+    opinion: gone on a new machine, gone with a cleared cache, and -- the
+    reason it moved here -- absent from every backup. Stored per user
+    rather than globally because arranging a dashboard is a personal act;
+    two admins should not fight over the column count.
+
+    Kept as opaque JSON on purpose. The server has no opinion about what a
+    widget is, so a layout written by a newer front-end round-trips
+    through an older server untouched. The only checks are the ones that
+    protect the server: it must be a JSON object, and it must be small.
+    """
+    user = session.get("user")
+    if not user:
+        # an API-key caller has no per-user dashboard to speak of
+        row = _resolve_session_from_api_key()
+        user = row and row.get("username")
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    if request.method == "GET":
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT dash_layout FROM Users WHERE username=%s", [user])
+        r = cur.fetchone(); c.close()
+        raw = (r or {}).get("dash_layout") or ""
+        if not raw:
+            return jsonify({"ok": True, "layout": None})
+        try:
+            return jsonify({"ok": True, "layout": json.loads(raw)})
+        except Exception:
+            # a corrupt row should not lock someone out of their dashboard
+            return jsonify({"ok": True, "layout": None})
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "expected a layout object"}), 400
+    payload = body.get("layout", body)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "expected a layout object"}), 400
+    text = json.dumps(payload, separators=(",", ":"))
+    # Icons are stored inline as data URIs, so a layout is bigger than it
+    # looks -- but MEDIUMTEXT is 16MB and a dashboard has no business
+    # approaching it.
+    if len(text) > 512 * 1024:
+        return jsonify({"error": "That layout is too large -- use smaller icons"}), 413
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET dash_layout=%s WHERE username=%s", (text, user))
+    c.commit(); c.close()
+    return jsonify({"ok": True, "bytes": len(text)})
+
 @app.route("/api/branding")
 def branding():
     c = conn(); cur = c.cursor()
@@ -5830,17 +5986,31 @@ def label_page(a_id):
     # silently growing taller than requested.
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
-    head_mm = 0.0 if compact else 5.5
+    # A compact tag used to have no header at all -- the brand line is now
+    # always drawn, so budgeting it at zero clipped the bottom field off.
+    # Measured in the browser, not estimated: the header row renders 4.04mm
+    # on a compact tag once its border and margin are counted. It was
+    # budgeted at zero back when a compact tag had no header at all.
+    head_mm = 4.2 if compact else 5.8
     name_mm = 2.6 if compact else 4.0
+    # The ID and the name now sit inside the column beside the QR rather
+    # than on their own lines above it, so the row has to be tall enough
+    # for them before any chosen field gets a look in.
+    aid_mm = 3.1 if compact else 4.4
+    nm_mm = 2.8 if compact else 5.0
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
     # two lines of it: an organisation name plus DO NOT REMOVE does not fit
     # on one at a readable size, and clipping is not an option when the
     # clipped half is the instruction
-    norem_mm = 4.2 if compact else 5.2
-    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
-                   + gap_mm * (1 if compact else 2))
+    norem_mm = 2.8 if compact else 5.2
+    # Three children in the column now (header, QR row, notice), so TWO
+    # flex gaps in both modes -- compact used to have one. Plus the box
+    # border, which sits outside the padding and was never counted.
+    # Between them that was ~1.5mm of overrun, and the bottom field paid.
+    BORDER_MM = 0.55
+    reserved_mm = pad_mm * 2 + head_mm + norem_mm + gap_mm * 2 + BORDER_MM
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     # QR must fit both the label width and whatever vertical room is left
     # Capped at 44% of the label width. It used to be allowed up to
@@ -5878,13 +6048,27 @@ def label_page(a_id):
         if forced not in chosen:
             chosen.insert(1 if forced == "Type" else len(chosen), forced)
     # what will actually be printed, so the row style can be chosen on fit
+    # Name and Asset ID are rendered explicitly at the top of the column,
+    # so they must not also come through as generic rows.
+    # The name is one of the chosen fields, not furniture: unticking it in
+    # Settings has to actually drop it. Decided here rather than at render
+    # time because the height budget below spends its space.
+    show_name = "Name" in chosen
     printable = [k for k in chosen
-                 if k != "Name" and k in field_defs
+                 if k not in ("Name", "AssetID") and k in field_defs
                  and field_defs[k][1] not in (None, "")]
-    # a stacked field is a label line plus a value line; a single-line row is
-    # one. Measured against the space left after the header, name and strip.
+    # a stacked field is a label line plus a value line; a single-line row
+    # is one -- measured against what is left of the row once the ID and
+    # the name have taken their share.
     STACKED_MM, LINE_MM = 6.6, 3.05
-    rows_compact = compact or (len(printable) * STACKED_MM > avail_h_mm)
+    rows_mm = max(2.0, avail_h_mm - aid_mm
+                  - (nm_mm if show_name else 0.0))
+    rows_compact = compact or (len(printable) * STACKED_MM > rows_mm)
+    # Each row gets an equal share of what is actually left, rather than a
+    # fixed height that may not fit. Type shrinks with it, down to a floor:
+    # a slightly smaller serial still reads, a clipped one does not.
+    kv_mm = max(1.75, min(2.62, rows_mm / max(1, len(printable))))
+    kv_font_mm = round(min(2.05, kv_mm * 0.74), 2)
     for key in printable:
         lbl, val = field_defs[key]
         if rows_compact:
@@ -5894,27 +6078,35 @@ def label_page(a_id):
     logo_html = ""
     if show_logo and logo_uri:
         logo_html = f'<img class=logo src="{logo_uri}" alt="">'
-    head_block = (f'<div class=name>{logo_html}{asset["Name"]}</div>' if compact
-                  else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
+    # Brand first, logo after it -- the mark reads as a sign-off on the
+    # name rather than a bullet in front of it.
+    head_block = f'<div class=head><span class=brand>{app_name}</span>{logo_html}</div>'
+    # The two things someone reads off a tag before anything else, in that
+    # order, at the top of the column the QR sits beside.
+    aid_val = asset.get("AssetTag") or asset["_id"][:12]
+    meta_head = (f'<div class=aid>{aid_val}</div>'
+                 + (f'<div class=name>{asset["Name"]}</div>'
+                    if show_name else ''))
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Label {asset['Name']}</title>
 <style>
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;justify-content:center;padding:20px}}
  .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
- .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
+ .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
  .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
- .brand{{font-weight:800;font-size:3mm;letter-spacing:0.3mm;text-transform:uppercase}}
+ .brand{{font-weight:800;font-size:{'2.5mm' if compact else '3mm'};letter-spacing:0.3mm;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
  .cat{{font-size:2.4mm;color:#333;margin:0.3mm 0}}
  .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
- .meta{{flex:1;min-width:0;overflow:hidden}}
- .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
+ .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
+ .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
  .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
  .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
- .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv{{font-size:{kv_font_mm}mm;line-height:1.16;flex:1 1 auto;min-height:0;max-height:{kv_mm}mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
  .kv b{{color:#333;font-weight:700}}
- .aid{{font-family:'Consolas','Courier New',monospace;font-size:3.1mm;font-weight:700;letter-spacing:0.08mm}}
- .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.7mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px;max-width:100%;max-height:100%;overflow:hidden}}
+ .qr canvas,.qr img{{width:100%!important;height:100%!important;object-fit:contain}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
  .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
@@ -5930,6 +6122,7 @@ def label_page(a_id):
  {head_block}
  <div class=top>
    <div class=meta>
+     {meta_head}
      {rows_html}
    </div>
    <div id=qr class=qr></div>
@@ -5974,17 +6167,31 @@ def labels_page():
         lw_mm, lh_mm = 50.8, 50.8
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
-    head_mm = 0.0 if compact else 5.5
+    # A compact tag used to have no header at all -- the brand line is now
+    # always drawn, so budgeting it at zero clipped the bottom field off.
+    # Measured in the browser, not estimated: the header row renders 4.04mm
+    # on a compact tag once its border and margin are counted. It was
+    # budgeted at zero back when a compact tag had no header at all.
+    head_mm = 4.2 if compact else 5.8
     name_mm = 2.6 if compact else 4.0
+    # The ID and the name now sit inside the column beside the QR rather
+    # than on their own lines above it, so the row has to be tall enough
+    # for them before any chosen field gets a look in.
+    aid_mm = 3.1 if compact else 4.4
+    nm_mm = 2.8 if compact else 5.0
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
     # two lines of it: an organisation name plus DO NOT REMOVE does not fit
     # on one at a readable size, and clipping is not an option when the
     # clipped half is the instruction
-    norem_mm = 4.2 if compact else 5.2
-    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
-                   + gap_mm * (1 if compact else 2))
+    norem_mm = 2.8 if compact else 5.2
+    # Three children in the column now (header, QR row, notice), so TWO
+    # flex gaps in both modes -- compact used to have one. Plus the box
+    # border, which sits outside the padding and was never counted.
+    # Between them that was ~1.5mm of overrun, and the bottom field paid.
+    BORDER_MM = 0.55
+    reserved_mm = pad_mm * 2 + head_mm + norem_mm + gap_mm * 2 + BORDER_MM
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     # Capped at 44% of the label width. It used to be allowed up to
     # lw_mm - 7, which on a 50.8mm tag left the fields a ~12mm column --
@@ -5998,6 +6205,14 @@ def labels_page():
         if forced not in chosen:
             chosen.insert(1 if forced == "Type" else len(chosen), forced)
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if (show_logo and logo_uri) else ""
+    # One stylesheet serves the whole sheet, so the row size comes from the
+    # chosen fields -- the upper bound -- and every tag on it fits.
+    show_name = "Name" in chosen
+    _n_rows = max(1, len([k for k in chosen if k not in ("Name", "AssetID")]))
+    rows_mm = max(2.0, avail_h_mm - aid_mm
+                  - (nm_mm if show_name else 0.0))
+    kv_mm = max(1.75, min(2.62, rows_mm / _n_rows))
+    kv_font_mm = round(min(2.05, kv_mm * 0.74), 2)
     boxes_html = ""
     scripts = ""
     # read once for the whole sheet, not once per label
@@ -6022,24 +6237,27 @@ def labels_page():
         }
         rows_html = ""
         printable = [k for k in chosen
-                     if k != "Name" and k in field_defs
+                     if k not in ("Name", "AssetID") and k in field_defs
                      and field_defs[k][1] not in (None, "")]
         # the same fit test as the single label, so a printed sheet and a
         # one-off tag of the same asset come out identical
-        rows_compact = compact or (len(printable) * 6.6 > avail_h_mm)
+        rows_compact = compact or (len(printable) * 6.6 > rows_mm)
         for key in printable:
             lbl, val = field_defs[key]
             if rows_compact:
                 rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
             else:
                 rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
-        head_block = (f'<div class=name>{logo_html}{asset["Name"]}</div>' if compact
-                      else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
+        head_block = f'<div class=head><span class=brand>{app_name}</span>{logo_html}</div>'
+        aid_val = asset.get("AssetTag") or asset["_id"][:12]
+        meta_head = (f'<div class=aid>{aid_val}</div>'
+                     + (f'<div class=name>{asset["Name"]}</div>'
+                        if show_name else ''))
         qr_id = f"qr{idx}"
         boxes_html += f"""<div class=box>
  {head_block}
  <div class=top>
-   <div class=meta>{rows_html}</div>
+   <div class=meta>{meta_head}{rows_html}</div>
    <div id={qr_id} class=qr></div>
  </div>
  <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
@@ -6050,18 +6268,20 @@ def labels_page():
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;flex-wrap:wrap;gap:3mm;padding:20px}}
  .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
- .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
+ .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
  .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
- .brand{{font-weight:800;font-size:3mm;letter-spacing:0.3mm;text-transform:uppercase}}
+ .brand{{font-weight:800;font-size:{'2.5mm' if compact else '3mm'};letter-spacing:0.3mm;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
  .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
- .meta{{flex:1;min-width:0;overflow:hidden}}
- .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
+ .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
+ .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
  .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
  .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
- .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv{{font-size:{kv_font_mm}mm;line-height:1.16;flex:1 1 auto;min-height:0;max-height:{kv_mm}mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
  .kv b{{color:#333;font-weight:700}}
- .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.7mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px;max-width:100%;max-height:100%;overflow:hidden}}
+ .qr canvas,.qr img{{width:100%!important;height:100%!important;object-fit:contain}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
  .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
@@ -7547,14 +7767,27 @@ def check_update():
     cmd = ""
     method = _update_method()
     if newer and IS_DOCKER:
-        cmd = "docker compose pull && docker compose up -d"
-        how = ("You're running the container image. Pull the new image and "
-               "recreate the container:\n\n"
+        # The installer, not raw compose commands. It pulls the image and
+        # recreates the container carrying over the database credentials,
+        # published port and network the running one already has -- which is
+        # the part that got done wrong by hand. HEAD rather than a branch
+        # name, so the link cannot rot when the default branch is renamed.
+        cmd = ("curl -fsSL https://raw.githubusercontent.com/shatheitguy/"
+               "it-vault/HEAD/install.sh | sh")
+        how = ("You're running the container image. Run the installer again "
+               "-- it pulls the new image and recreates the container with "
+               "the database credentials, port and network it already has, "
+               "so there is nothing to re-enter:\n\n"
                f"    {cmd}\n\n"
+               "On Windows, run the PowerShell one instead:\n\n"
+               "    irm https://raw.githubusercontent.com/shatheitguy/"
+               "it-vault/HEAD/install.ps1 | iex\n\n"
                "Your database, invoices and backups live in named volumes, "
-               "so they survive the swap. To have this happen automatically "
-               "whenever a release lands, run Watchtower alongside IT-Vault "
-               "-- the README has the one-liner.")
+               "so they survive the swap. Note that `docker restart` on its "
+               "own updates nothing -- a container keeps the image it was "
+               "created from, so it has to be recreated. To have this happen "
+               "automatically whenever a release lands, run Watchtower "
+               "alongside IT-Vault -- the README has the one-liner.")
     elif newer:
         cmd = "git pull && pip install -r requirements.txt"
         how = ("You're running from source. Fetch the new release, install "

@@ -71,9 +71,15 @@ class AssetEditFragment : Fragment() {
     }
 
     companion object {
-        fun newInstance(assetId: String?): AssetEditFragment {
+        /** [assignNow] opens the Assign dialog as soon as the asset has
+         * loaded, so the action can be reached in one tap from the list
+         * instead of only from inside this screen. */
+        fun newInstance(assetId: String?, assignNow: Boolean = false): AssetEditFragment {
             val f = AssetEditFragment()
-            f.arguments = Bundle().apply { putString("assetId", assetId) }
+            f.arguments = Bundle().apply {
+                putString("assetId", assetId)
+                putBoolean("assignNow", assignNow)
+            }
             return f
         }
 
@@ -192,6 +198,13 @@ class AssetEditFragment : Fragment() {
         val isExisting = assetId != null
         b.checkOutBtn.visibility = if (isExisting && current.Status != "Checked-Out") View.VISIBLE else View.GONE
         b.checkInBtn.visibility = if (isExisting && current.Status == "Checked-Out") View.VISIBLE else View.GONE
+
+        // Opened from the list's Assign action: show the dialog straight away,
+        // and only once, so returning to this screen does not reopen it.
+        if (arguments?.getBoolean("assignNow") == true && b.checkOutBtn.visibility == View.VISIBLE) {
+            arguments?.putBoolean("assignNow", false)
+            b.checkOutBtn.post { if (isAdded) openCheckoutDialog() }
+        }
     }
 
     /** Assign to an employee -- same "Signed Date defaults to today, only
@@ -324,33 +337,93 @@ class AssetEditFragment : Fragment() {
         }
     }
 
+    /**
+     * Downloads the attachment and hands it to whatever can open it.
+     *
+     * Three things made this a dead end. The HTTP status was never checked, so
+     * a 401 or a 404 produced the same "Could not open invoice" as a genuine
+     * failure -- with nothing to say which. ACTION_VIEW on its own needs a
+     * *default* handler to be registered, and on a phone with no default PDF
+     * viewer it throws rather than asking; a chooser asks. And when nothing on
+     * the device can view the type at all, there is still usually something
+     * that can receive it, so the last resort is Share rather than a shrug.
+     */
     private fun viewInvoice() {
-        val file = current.InvoiceFile ?: return
+        // the server stores a bare filename; File(..).name keeps it that way
+        // rather than trusting whatever arrives into a path
+        val file = current.InvoiceFile?.let { File(it).name }
+        if (file.isNullOrBlank()) return
         lifecycleScope.launch {
             try {
                 val resp = ApiClient.api().downloadInvoice(file)
+                if (!resp.isSuccessful) {
+                    val why = when (resp.code()) {
+                        401, 403 -> "not signed in any more -- sign in again"
+                        404 -> "the file is no longer on the server"
+                        else -> "server returned HTTP ${resp.code()}"
+                    }
+                    toastIfAlive("Could not open invoice: $why")
+                    return@launch
+                }
                 val body = resp.body() ?: run {
-                    Toast.makeText(requireContext(), "Could not open invoice", Toast.LENGTH_LONG).show()
+                    toastIfAlive("Could not open invoice: the server sent nothing")
                     return@launch
                 }
                 val dir = File(requireContext().cacheDir, "downloads").apply { mkdirs() }
                 val outFile = File(dir, file)
                 withContext(Dispatchers.IO) {
-                    body.byteStream().use { input -> outFile.outputStream().use { output -> input.copyTo(output) } }
+                    body.byteStream().use { input ->
+                        outFile.outputStream().use { output -> input.copyTo(output) }
+                    }
                 }
-                val uri = FileProvider.getUriForFile(requireContext(), "${requireContext().packageName}.fileprovider", outFile)
-                val mime = requireContext().contentResolver.getType(uri)
-                    ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.substringAfterLast('.', "")) ?: "*/*"
-                val intent = Intent(Intent.ACTION_VIEW).apply {
+                if (outFile.length() == 0L) {
+                    toastIfAlive("Could not open invoice: the file came back empty")
+                    return@launch
+                }
+                if (_b == null) return@launch
+
+                val ctx = requireContext()
+                val uri = FileProvider.getUriForFile(
+                    ctx, "${ctx.packageName}.fileprovider", outFile
+                )
+                val mime = ctx.contentResolver.getType(uri)
+                    ?: android.webkit.MimeTypeMap.getSingleton()
+                        .getMimeTypeFromExtension(file.substringAfterLast('.', "").lowercase())
+                    ?: "*/*"
+
+                val view = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, mime)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                try { startActivity(intent) }
-                catch (e: Exception) { Toast.makeText(requireContext(), "No app found to open this file", Toast.LENGTH_LONG).show() }
+                // A chooser does not need a default handler to be set, which is
+                // the usual reason ACTION_VIEW silently fails on a fresh phone.
+                val chooser = Intent.createChooser(view, "Open invoice").apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                try {
+                    startActivity(chooser)
+                } catch (e: android.content.ActivityNotFoundException) {
+                    // nothing can view it; something can almost certainly take it
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    try {
+                        startActivity(Intent.createChooser(send, "Send invoice to…"))
+                    } catch (e2: Exception) {
+                        toastIfAlive("No app on this phone can open a $mime file")
+                    }
+                }
             } catch (e: Exception) {
-                if (_b != null) Toast.makeText(requireContext(), "Could not open invoice: ${e.message}", Toast.LENGTH_LONG).show()
+                toastIfAlive("Could not open invoice: ${e.message}")
             }
+        }
+    }
+
+    private fun toastIfAlive(msg: String) {
+        if (_b != null && isAdded) {
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
         }
     }
 

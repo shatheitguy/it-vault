@@ -12,6 +12,7 @@ copied link is dead on arrival.
 The SMTP conversation is faked; nothing here sends mail.
 """
 import os
+import re
 import smtplib
 import sys
 import uuid
@@ -230,8 +231,17 @@ try:
     check("a disabled button reads as disabled",
           ".btn:disabled,.btn[disabled]{" in css)
     check("and does not brighten on hover", ".btn:disabled:hover" in css)
-    # the browser caches these aggressively; a UI change nobody sees is no change
-    check("the asset cache token was bumped", "nocache=20260910d" in idx)
+    # The browser caches these aggressively; a UI change nobody sees is no
+    # change. Asserting the intent -- both assets carry the same token, so
+    # they are bumped together -- rather than pinning today's literal value,
+    # which made this fail on the next bump for no good reason.
+    m_js = re.search(r"app\.js\?nocache=([A-Za-z0-9]+)", idx)
+    m_css = re.search(r"style\.css\?v=([A-Za-z0-9]+)", idx)
+    check("app.js is cache-busted", bool(m_js), m_js.group(1) if m_js else "none")
+    check("style.css is cache-busted", bool(m_css), m_css.group(1) if m_css else "none")
+    check("both carry the same token, so a change ships as one",
+          bool(m_js) and bool(m_css) and m_js.group(1) == m_css.group(1),
+          "%s vs %s" % (m_js.group(1) if m_js else "?", m_css.group(1) if m_css else "?"))
 finally:
     smtplib.SMTP = real_smtp
     c = A.conn(); cur = c.cursor()
