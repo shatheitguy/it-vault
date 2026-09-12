@@ -1778,7 +1778,13 @@ def migrate_schema():
             pass
     # Scheduled backups: frequency, scope, and how many old backups to retain
     backup_cols = {
-        "backup_schedule": "VARCHAR(20) DEFAULT 'off'",
+        # Daily, not off. A backup nobody switched on is the one they wanted
+        # the day something goes wrong, and the cost of the default being
+        # wrong is a file in a volume that backup_retain prunes anyway.
+        "backup_schedule": "VARCHAR(20) DEFAULT 'daily'",
+        # Set once, when the default above is applied to an install that
+        # predates it, so a later deliberate "off" is never overridden again.
+        "backup_defaulted": "TINYINT DEFAULT 0",
         "backup_scope": "VARCHAR(20) DEFAULT 'all'",
         "backup_retain": "INT DEFAULT 7",
         "backup_last_run": "VARCHAR(40) DEFAULT ''",
@@ -1864,6 +1870,21 @@ def migrate_schema():
             cur.execute("ALTER TABLE Users ADD COLUMN avatar MEDIUMTEXT")
         except Exception:
             pass
+    # An install that predates the daily default has backups switched off and
+    # almost certainly never chose that -- "off" was simply what it shipped
+    # with. Turn it on once, and record that we did, so a later deliberate
+    # "off" is left alone forever after.
+    try:
+        cur.execute("SELECT backup_schedule, backup_defaulted FROM Settings WHERE id=1")
+        _bk = cur.fetchone() or {}
+        if not int(_bk.get("backup_defaulted") or 0):
+            if (_bk.get("backup_schedule") or "off").lower() == "off":
+                cur.execute("UPDATE Settings SET backup_schedule='daily' WHERE id=1")
+                print("[itvault] automatic daily backups switched on "
+                      "(Settings > Backup to change)", flush=True)
+            cur.execute("UPDATE Settings SET backup_defaulted=1 WHERE id=1")
+    except Exception:
+        pass
     # Each user arranges their own dashboard, and it is kept here rather than
     # in the browser so it survives a new machine, a cleared cache, and --
     # the reason it moved -- so it is in the backup. Users is dumped in the
@@ -7604,6 +7625,9 @@ def _run_backup(scope="all"):
     c = conn(); cur = c.cursor()
     lines = [f"-- IT-Vault backup | scope={scope} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
     include_branding = scope in ("config", "all")
+    # An assets backup carries invoice files now, so it can no longer be a
+    # plain .sql either -- anything with files alongside the dump is a zip.
+    include_files = include_branding or scope == "assets"
     if scope in ("config", "all"):
         lines += _dump_section(cur, "Settings")
         lines += _dump_section(cur, "Users")
@@ -7615,9 +7639,8 @@ def _run_backup(scope="all"):
     c.close()
     sql_text = "\n".join(lines) + "\n"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if not include_branding:
-        # assets-only scope never touches Settings, so there's no branding to
-        # bundle -- keep it a plain .sql, same as before.
+    if not include_files:
+        # nothing but rows in this scope -- keep it a plain .sql, same as before.
         fname = f"itvault_backup_{scope}_{stamp}.sql"
         with open(os.path.join(BACKUP_DIR, fname), "w", encoding="utf-8") as f:
             f.write(sql_text)
@@ -7645,6 +7668,19 @@ def _run_backup(scope="all"):
                         zf.write(p, bf)
                 except Exception:
                     pass
+            # Invoice attachments. The dump records the FILENAME on each asset
+            # row; the file itself lives in its own volume, so a restore onto a
+            # new host used to bring back rows pointing at attachments that
+            # were never in the archive. Under invoices/ so restore can tell
+            # them apart from the branding files.
+            if scope in ("assets", "all"):
+                try:
+                    for fn in sorted(os.listdir(INVOICE_DIR)):
+                        fp = os.path.join(INVOICE_DIR, fn)
+                        if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+                            zf.write(fp, "invoices/" + fn)
+                except Exception as e:
+                    print(f"[itvault] backup: could not bundle invoices: {e}", flush=True)
     _prune_old_backups()
     return fname
 
@@ -8058,6 +8094,8 @@ def _apply_restore_bytes(data, filename=""):
                 return None, "invalid backup: missing dump.sql in archive"
             sql_text = zf.read("dump.sql").decode("utf-8", "replace")
             branding = {bf: zf.read(bf) for bf in BACKUP_BRANDING_FILES if bf in names}
+            invoices = [n for n in names
+                        if n.startswith("invoices/") and not n.endswith("/")]
     except zipfile.BadZipFile:
         return None, "invalid backup: not a valid .zip archive"
     applied, err = _apply_restore_sql(sql_text)
@@ -8067,7 +8105,40 @@ def _apply_restore_bytes(data, filename=""):
     # they are never written straight over the cache, which used to put them
     # in BASE where nothing serves them from anyway
     _brand_keep_after_restore(before, branding)
+    _restore_invoices(zipfile.ZipFile(io.BytesIO(data)), invoices)
     return applied, None
+
+def _restore_invoices(zf, names):
+    """Put the bundled attachments back beside the rows that name them.
+
+    Written with the basename only: an archive is untrusted input, and a path
+    like ../../etc in a zip entry is the oldest trick there is. Existing files
+    are left alone -- a restore should not destroy an attachment that is
+    already present and not mentioned in the archive.
+    """
+    if not names:
+        return
+    written = 0
+    try:
+        with zf:
+            for n in names:
+                base = os.path.basename(n)
+                if not base or base in (".", ".."):
+                    continue
+                dest = os.path.join(INVOICE_DIR, base)
+                if os.path.exists(dest):
+                    continue
+                try:
+                    with zf.open(n) as src, open(dest, "wb") as out:
+                        out.write(src.read())
+                    written += 1
+                except Exception as e:
+                    print(f"[itvault] restore: could not write {base}: {e}", flush=True)
+    except Exception as e:
+        print(f"[itvault] restore: could not read invoices: {e}", flush=True)
+    if written:
+        print(f"[itvault] restore: {written} invoice file(s) restored", flush=True)
+
 
 @app.route("/api/restore", methods=["POST"])
 @auth_required([ROLE_ADMIN])
@@ -8490,9 +8561,55 @@ def start_contract_expiry_scheduler():
     t = threading.Thread(target=_contract_expiry_loop, daemon=True)
     t.start()
 
+def warn_if_invoices_missing():
+    """Say so when the invoice files are not where the database expects them.
+
+    An asset row names its attachment by filename; the file itself lives in
+    INVOICE_DIR, a separate volume. Mount the wrong one -- which is what
+    happens when `docker compose` prefixes a volume name with its project
+    directory and a later run mounts the unprefixed twin -- and every invoice
+    silently 404s. The rows look fine, the files are simply somewhere else,
+    and nothing anywhere says why.
+
+    It costs one query at startup to turn that into a sentence.
+    """
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM Assets "
+                    "WHERE InvoiceFile IS NOT NULL AND InvoiceFile<>''")
+        expected = int((cur.fetchone() or {}).get("n") or 0)
+        c.close()
+    except Exception:
+        return
+    if not expected:
+        return
+    try:
+        on_disk = len([f for f in os.listdir(INVOICE_DIR)
+                       if os.path.isfile(os.path.join(INVOICE_DIR, f))])
+    except Exception:
+        on_disk = 0
+    if on_disk:
+        return
+    bar = "=" * 72
+    print(bar, flush=True)
+    print(f"[itvault] WARNING: {expected} asset(s) have an invoice attached, but "
+          f"{INVOICE_DIR} is empty.", flush=True)
+    print("[itvault] The files are almost certainly in another volume -- Docker "
+          "Compose", flush=True)
+    print("[itvault] prefixes volume names with its project directory, so "
+          "invoices_data", flush=True)
+    print("[itvault] and <project>_invoices_data can both exist. Check with:",
+          flush=True)
+    print("[itvault]   docker volume ls", flush=True)
+    print("[itvault] and re-run the installer, which adopts the one holding the "
+          "data.", flush=True)
+    print(bar, flush=True)
+
+
 if __name__ == "__main__":
     init_db()
     migrate_schema()
+    warn_if_invoices_missing()
     start_ldap_scheduler()
     start_backup_scheduler()
     start_contract_expiry_scheduler()
