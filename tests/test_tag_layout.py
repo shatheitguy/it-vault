@@ -91,35 +91,44 @@ try:
               "aid@%d name@%d" % (aid_i, name_i))
         check("  the chosen fields follow the name", rows_i > name_i,
               "name@%d rows@%d" % (name_i, rows_i))
-        check("  the QR sits after them, in the same row", qr_i > rows_i)
-        check("  DO NOT REMOVE is last", norem_i > qr_i)
+        # The code is its own column now, so it is a sibling of the text
+        # rather than something the notice follows. What still has to hold is
+        # that the notice is the last thing in the text column.
+        check("  the QR is a column beside the text", qr_i > rows_i)
+        stack = html[html.index("class=stack"):html.index("class=qr")]
+        check("  DO NOT REMOVE is last in the text column",
+              stack.rindex("class=norem") > stack.rindex("class=meta"))
 
         # ---- the two identity lines appear exactly once -------------------
-        check("  the ID is printed once, not also as a field",
-              html.count(TAGNO) == 1, "%d occurrences" % html.count(TAGNO))
-        # the name appears in <title> too, so twice in the document
+        # Counted in the markup only. The tag number also appears inside the
+        # QR's target URL now (/a/<tag>), which is encoded into the image and
+        # never printed as text.
         body = html[html.index("<body"):]
+        # strip every script block, not just a trailing one: the QR library
+        # tag sits before the markup, so slicing at the first <script> would
+        # throw the whole tag away
+        printed = re.sub(r"<script.*?</script>", "", body, flags=re.S)
+        check("  the ID is printed once, not also as a field",
+              printed.count(TAGNO) == 1, "%d occurrences" % printed.count(TAGNO))
         check("  the name is printed once on the tag",
-              body.count(NAME) == 1, "%d occurrences" % body.count(NAME))
+              printed.count(NAME) == 1, "%d occurrences" % printed.count(NAME))
         check("  the notice still names the organisation and the instruction",
               "Do Not Remove" in html and "Property of" in html)
 
-        # ---- the budget adds up ------------------------------------------
-        lh = float(size.split("x")[1])
-        pads = [float(x) for x in re.findall(r"padding:([\d.]+)mm", html)]
-        pad = pads[0] if pads else 0.0
-        gap = float(re.search(r"gap:([\d.]+)mm", html).group(1))
-        qr_px = int(re.search(r"width:(\d+)px;height:\1px", html).group(1))
-        qr_mm = qr_px / 3.78
-        # header + notice + QR row + padding + two gaps + border must fit
-        head_mm = 4.2 if lh < 35.0 else 5.8
-        norem_mm = 2.8 if lh < 35.0 else 5.2
-        total = pad * 2 + head_mm + norem_mm + gap * 2 + 0.55 + qr_mm
-        check("  the QR and everything around it fit the tag height",
-              total <= lh + 0.1, "needs %.2fmm of %.1fmm" % (total, lh))
-        check("  the QR is not wider than its column",
-              qr_mm <= float(size.split("x")[0]) * 0.45,
-              "%.1fmm on a %smm tag" % (qr_mm, size.split("x")[0]))
+        # ---- the code is sized by the layout, not by arithmetic ----------
+        # This used to reconstruct the millimetre budget and check it added
+        # up. It no longer applies: the QR is its own full-height column, so
+        # the browser derives its size from the tag rather than Python
+        # estimating it -- which is the point, because every estimate here
+        # was half a millimetre out and the bottom field paid for it.
+        check("  the code is a column of its own",
+              re.search(r"\.box\{[^}]*flex-direction:row", html) is not None)
+        check("  and takes the height of the tag",
+              re.search(r"\.qr\{[^}]*align-self:stretch", html) is not None)
+        check("  capped so the text keeps its share of the width",
+              re.search(r"\.qr\{[^}]*max-width:\d+%", html) is not None)
+        check("  with a quiet zone around it",
+              re.search(r"\.qr\{[^}]*padding:[\d.]+mm", html) is not None)
 
         # ---- the row style adapts rather than overflowing -----------------
         check("  rows are sized from the space left, not a fixed guess",

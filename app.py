@@ -6078,12 +6078,12 @@ def label_page(a_id):
     # on a compact tag once its border and margin are counted. It was
     # budgeted at zero back when a compact tag had no header at all.
     head_mm = 4.2 if compact else 5.8
-    name_mm = 2.6 if compact else 4.0
+    name_mm = 2.3 if compact else 4.0
     # The ID and the name now sit inside the column beside the QR rather
     # than on their own lines above it, so the row has to be tall enough
     # for them before any chosen field gets a look in.
-    aid_mm = 3.1 if compact else 4.4
-    nm_mm = 2.8 if compact else 5.0
+    aid_mm = 2.7 if compact else 4.4
+    nm_mm = 2.5 if compact else 5.0
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
@@ -6104,7 +6104,17 @@ def label_page(a_id):
     # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
     # still scans from a phone at arm's length.
     qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
-    qr_px = int(qr_mm * 3.78)
+    # A quiet zone is not decoration: the decoder finds the symbol by its
+    # finder patterns against clear space, and qrcodejs draws none at all.
+    # Four modules is the spec; a tenth of the symbol is close to that at the
+    # versions these labels produce, and it comes out of the QR rather than
+    # growing the tag.
+    quiet_mm = max(0.7, qr_mm * 0.10)
+    # Rendered at roughly 8x the printed size. qrcodejs rasterises at exactly
+    # the pixel size it is handed, and a 41px bitmap stretched onto a 203dpi
+    # label prints soft edges -- which a scanner reads as a smudged module.
+    # Oversampling costs nothing; the browser scales it down cleanly.
+    qr_px = int(min(640, max(160, (qr_mm - quiet_mm * 2) * 3.78 * 8)))
     # embed logo as base64 if present (no extra request, prints reliably)
     logo_uri = _logo_data_uri()
     rows_html = ""
@@ -6153,8 +6163,8 @@ def label_page(a_id):
     # Each row gets an equal share of what is actually left, rather than a
     # fixed height that may not fit. Type shrinks with it, down to a floor:
     # a slightly smaller serial still reads, a clipped one does not.
-    kv_mm = max(1.75, min(2.62, rows_mm / max(1, len(printable))))
-    kv_font_mm = round(min(2.05, kv_mm * 0.74), 2)
+    kv_mm = max(1.55, min(2.62, rows_mm / max(1, len(printable))))
+    kv_font_mm = round(max(1.25, min(2.05, kv_mm * 0.80)), 2)
     for key in printable:
         lbl, val = field_defs[key]
         if rows_compact:
@@ -6170,6 +6180,10 @@ def label_page(a_id):
     # The two things someone reads off a tag before anything else, in that
     # order, at the top of the column the QR sits beside.
     aid_val = asset.get("AssetTag") or asset["_id"][:12]
+    # The QR points at the short path when the asset has a tag, because the
+    # length of what is encoded decides how big the squares can be.
+    _tag = (asset.get("AssetTag") or "").strip()
+    qr_target = f"{base}a/{quote(_tag)}" if _tag else f"{base}asset/{asset['_id']}"
     meta_head = (f'<div class=aid>{aid_val}</div>'
                  + (f'<div class=name>{asset["Name"]}</div>'
                     if show_name else ''))
@@ -6177,24 +6191,26 @@ def label_page(a_id):
 <style>
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;justify-content:center;padding:20px}}
- .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
+ .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:row;align-items:stretch;gap:{gap_mm}mm;overflow:hidden}}
+ /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
+ .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
  .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
  .brand{{font-weight:800;font-size:{'2.5mm' if compact else '3mm'};letter-spacing:0.3mm;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
  .cat{{font-size:2.4mm;color:#333;margin:0.3mm 0}}
- .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
+ .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
  .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
  .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
  .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
  .kv{{font-size:{kv_font_mm}mm;line-height:1.16;flex:1 1 auto;min-height:0;max-height:{kv_mm}mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
  .kv b{{color:#333;font-weight:700}}
- .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.7mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
- .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px;max-width:100%;max-height:100%;overflow:hidden}}
- .qr canvas,.qr img{{width:100%!important;height:100%!important;object-fit:contain}}
+ .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.4mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .qr{{flex:0 0 auto;align-self:stretch;max-width:46%;overflow:hidden;background:#fff;padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .qr canvas,.qr img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
- .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
+ .norem{{flex:0 0 auto;margin-top:0.3mm;padding-top:0.4mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.5mm' if compact else '2.0mm'};letter-spacing:0.05mm;line-height:1.15;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -6205,18 +6221,20 @@ def label_page(a_id):
 </style></head><body>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <div class=sheet><div class=box>
- {head_block}
- <div class=top>
-   <div class=meta>
-     {meta_head}
-     {rows_html}
-   </div>
-   <div id=qr class=qr></div>
+ <div class=stack>
+  {head_block}
+  <div class=top>
+    <div class=meta>
+      {meta_head}
+      {rows_html}
+    </div>
+  </div>
+  <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
  </div>
- <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
+ <div id=qr class=qr></div>
 </div></div>
 <div class="no-print" style="text-align:center;margin-top:10px"><button onclick="window.print()">🖨 PRINT LABEL</button></div>
-<script>new QRCode(document.getElementById('qr'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});</script>
+<script>new QRCode(document.getElementById('qr'), {{text:'{qr_target}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});</script>
 </body></html>"""
 
 @app.route("/labels")
@@ -6259,12 +6277,12 @@ def labels_page():
     # on a compact tag once its border and margin are counted. It was
     # budgeted at zero back when a compact tag had no header at all.
     head_mm = 4.2 if compact else 5.8
-    name_mm = 2.6 if compact else 4.0
+    name_mm = 2.3 if compact else 4.0
     # The ID and the name now sit inside the column beside the QR rather
     # than on their own lines above it, so the row has to be tall enough
     # for them before any chosen field gets a look in.
-    aid_mm = 3.1 if compact else 4.4
-    nm_mm = 2.8 if compact else 5.0
+    aid_mm = 2.7 if compact else 4.4
+    nm_mm = 2.5 if compact else 5.0
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
@@ -6284,7 +6302,17 @@ def labels_page():
     # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
     # still scans from a phone at arm's length.
     qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
-    qr_px = int(qr_mm * 3.78)
+    # A quiet zone is not decoration: the decoder finds the symbol by its
+    # finder patterns against clear space, and qrcodejs draws none at all.
+    # Four modules is the spec; a tenth of the symbol is close to that at the
+    # versions these labels produce, and it comes out of the QR rather than
+    # growing the tag.
+    quiet_mm = max(0.7, qr_mm * 0.10)
+    # Rendered at roughly 8x the printed size. qrcodejs rasterises at exactly
+    # the pixel size it is handed, and a 41px bitmap stretched onto a 203dpi
+    # label prints soft edges -- which a scanner reads as a smudged module.
+    # Oversampling costs nothing; the browser scales it down cleanly.
+    qr_px = int(min(640, max(160, (qr_mm - quiet_mm * 2) * 3.78 * 8)))
     logo_uri = _logo_data_uri()
     chosen = [f.strip() for f in (srow.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location").split(",") if f.strip()] if srow else ["Name","AssetID","Type","Serial","Status","Location"]
     for forced in ["Type", "AssetID"]:
@@ -6297,8 +6325,8 @@ def labels_page():
     _n_rows = max(1, len([k for k in chosen if k not in ("Name", "AssetID")]))
     rows_mm = max(2.0, avail_h_mm - aid_mm
                   - (nm_mm if show_name else 0.0))
-    kv_mm = max(1.75, min(2.62, rows_mm / _n_rows))
-    kv_font_mm = round(min(2.05, kv_mm * 0.74), 2)
+    kv_mm = max(1.55, min(2.62, rows_mm / _n_rows))
+    kv_font_mm = round(max(1.25, min(2.05, kv_mm * 0.80)), 2)
     boxes_html = ""
     scripts = ""
     # read once for the whole sheet, not once per label
@@ -6341,35 +6369,39 @@ def labels_page():
                         if show_name else ''))
         qr_id = f"qr{idx}"
         boxes_html += f"""<div class=box>
- {head_block}
- <div class=top>
-   <div class=meta>{meta_head}{rows_html}</div>
-   <div id={qr_id} class=qr></div>
+ <div class=stack>
+  {head_block}
+  <div class=top><div class=meta>{meta_head}{rows_html}</div></div>
+  <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
  </div>
- <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
+ <div id={qr_id} class=qr></div>
 </div>"""
-        scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});"
+        _tag = (asset.get("AssetTag") or "").strip()
+        _target = f"{base}a/{quote(_tag)}" if _tag else f"{base}asset/{asset['_id']}"
+        scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{_target}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});"
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
 <style>
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;flex-wrap:wrap;gap:3mm;padding:20px}}
- .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
+ .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:row;align-items:stretch;gap:{gap_mm}mm;overflow:hidden}}
+ /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
+ .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
  .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
  .brand{{font-weight:800;font-size:{'2.5mm' if compact else '3mm'};letter-spacing:0.3mm;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
- .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
+ .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
  .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
  .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
  .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
  .kv{{font-size:{kv_font_mm}mm;line-height:1.16;flex:1 1 auto;min-height:0;max-height:{kv_mm}mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
  .kv b{{color:#333;font-weight:700}}
- .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.7mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
- .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px;max-width:100%;max-height:100%;overflow:hidden}}
- .qr canvas,.qr img{{width:100%!important;height:100%!important;object-fit:contain}}
+ .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.4mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .qr{{flex:0 0 auto;align-self:stretch;max-width:46%;overflow:hidden;background:#fff;padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .qr canvas,.qr img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
- .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
+ .norem{{flex:0 0 auto;margin-top:0.3mm;padding-top:0.4mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.5mm' if compact else '2.0mm'};letter-spacing:0.05mm;line-height:1.15;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -6383,6 +6415,35 @@ def labels_page():
 <div class=sheet>{boxes_html}</div>
 <script>{scripts}</script>
 </body></html>"""
+
+@app.route("/a/<code>")
+def asset_public_short(code):
+    """The short address an asset tag's QR encodes.
+
+    Length is the whole point. /asset/<32-hex-id> is 60 characters on a LAN
+    address, which needs a version-4 symbol: 33x33 modules. On a 50.8x25.4mm
+    label the QR gets under 14mm, so those modules land at 0.34mm -- under
+    three dots on a 203dpi label printer, and below what a phone camera
+    reliably resolves. Hence the hunting around to get a scan.
+
+    /a/IT-1009 is 31 characters and fits a version-2 symbol: 25x25 modules,
+    0.42mm each in the same space. Same page, a quarter less data, noticeably
+    larger squares.
+
+    Resolved by asset tag, which is what people read off the label anyway,
+    falling back to the id so a code printed before this still works.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id FROM Assets WHERE AssetTag=%s LIMIT 1", [code])
+    row = cur.fetchone()
+    if not row:
+        cur.execute("SELECT _id FROM Assets WHERE _id=%s LIMIT 1", [code])
+        row = cur.fetchone()
+    c.close()
+    if not row:
+        return "Asset not found", 404
+    return asset_public(row["_id"])
+
 
 @app.route("/asset/<a_id>")
 def asset_public(a_id):
