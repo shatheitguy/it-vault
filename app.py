@@ -6389,10 +6389,18 @@ def asset_public(a_id):
     # Public asset detail page, opened by scanning the QR on the tag
     base = _public_base()
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SignatureData FROM Assets WHERE _id=%s", [a_id])
+    # SignatureData is deliberately NOT selected. Anyone holding the tag can
+    # open this page -- a courier, a visitor, whoever finds the laptop -- and a
+    # handwritten signature is a reusable thing to hand them. Whether it has
+    # been signed is the useful fact; the image is not, and the cheapest way
+    # to avoid leaking it is never to load it.
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
+                + ", InvoiceFile, (SignatureData IS NOT NULL AND SignatureData<>'') "
+                  "AS has_signature FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone()
     if not a:
         c.close(); return "Asset not found", 404
+    has_signature = bool(a.get("has_signature"))
     asset = row_to_dict(a)
     # assigned employee (from Employees by EmployeeID)
     emp_name = asset.get("EmployeeName") or ""
@@ -6449,6 +6457,7 @@ def asset_public(a_id):
             ("Status", asset.get("Status")), ("Location", asset.get("Location")),
             ("Assigned To", emp_name or "—"), ("Department", asset.get("Department") or "—"),
             ("Designation", asset.get("Designation") or "—"), ("Email", asset.get("Email") or "—"),
+            ("Signature", "✓ Signed" if has_signature else "Not signed"),
             ("Signed By", asset.get("ReceivedBy") or "—"), ("Signed Date", asset.get("NotesReceived") or "—"),
             ("Given By (Staff)", processed_by or "—"),
             ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"), ("Purchase", asset.get("PurchaseDate") or "—"),
@@ -6488,16 +6497,12 @@ tr:last-child td{{border-bottom:none}}
 .contact b{{color:var(--accent)}}
 .foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
 a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:var(--btn-text,#04121f);border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
-.sig-block{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
-.sig-block b{{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:8px}}
-.sig-block img{{max-width:220px;max-height:110px;background:#fff;border-radius:6px;padding:6px}}
 @media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} }}
 </style>{theme_script}</head><body><div class=wrap><div class=card>
  <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
  <div class=assetid-badge>{asset.get("AssetTag") or asset["_id"][:12]}</div>
  <div class=title>{asset['Name']}</div>
  <table>{rows_html}</table>
- {f'<div class=sig-block><b>Signature</b><img src="{asset.get("SignatureData")}"></div>' if asset.get("SignatureData") else ''}
  <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
  <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
  <div class=foot>Scanned from {app_name} • {base}</div>
