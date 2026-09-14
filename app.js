@@ -2984,12 +2984,14 @@ document.getElementById('hbdEdit').onclick=()=>{
   const id=hbDetailId; hbDetailId=null;
   openHbModal(id);
 };
-document.getElementById('hbChanClose').onclick=()=>{
-  // nothing to close -- the list is part of the page
-  loadHeartbeat();
-};
-document.getElementById('hbc_kind').onchange=hbcKindUI;
-document.getElementById('hbcSave').onclick=saveHbChannel;
+// The channel list is part of the Settings page now, so there is no CLOSE
+// button to bind. These elements only exist on that page, hence the guards:
+// an unguarded getElementById(...).onclick on a page that does not have the
+// element throws, and everything after it in this file never runs.
+const _hbKind=document.getElementById('hbc_kind');
+if(_hbKind) _hbKind.onchange=hbcKindUI;
+const _hbSave=document.getElementById('hbcSave');
+if(_hbSave) _hbSave.onclick=saveHbChannel;
 document.getElementById('hbcReset').onclick=hbcReset;
 window.loadHeartbeat=loadHeartbeat;
 window.loadDashHeartbeat=loadDashHeartbeat;
