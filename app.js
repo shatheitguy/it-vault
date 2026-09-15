@@ -344,6 +344,31 @@ function printGroup(safeKey){
   </style></head><body>${printHeaderHtml('Asset Group: '+esc(LABELS[groupBy]||groupBy)+' — '+esc(k))}<div class="sub">${rows.length} asset${rows.length>1?'s':''} • generated ${new Date().toLocaleString()}</div><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table><button onclick="window.print()">🖨 PRINT</button>${printReadyScript()}</body></html>`);
   win.document.close();
 }
+// 18 -> "1 year 6 months". Spelled out because a plain month count is the
+// thing nobody can read at a glance.
+function monthsInWords(m){
+  const y=Math.floor(m/12), r=m%12, parts=[];
+  if(y)parts.push(y+' year'+(y>1?'s':''));
+  if(r)parts.push(r+' month'+(r>1?'s':''));
+  return parts.join(' ');
+}
+// The line under the Warranty box: what the number means, what blank does,
+// and -- once there is a purchase date -- the day cover actually ends.
+function warrantyHint(){
+  const el=document.getElementById('warrHint'); if(!el)return;
+  const inp=document.getElementById('f_WarrantyMonths');
+  const raw=inp?String(inp.value).trim():'';
+  if(raw===''){ el.textContent='Counted in months — blank means the default, 12 months (1 year).'; return; }
+  const m=parseInt(raw,10);
+  if(isNaN(m)||m<0){ el.textContent='Enter a whole number of months.'; return; }
+  if(m===0){ el.textContent='0 — no warranty.'; return; }
+  let txt=m+' month'+(m===1?'':'s');
+  if(m>=12)txt+=' = '+monthsInWords(m);
+  const pd=document.getElementById('f_PurchaseDate');
+  const w=warrantyEnd({PurchaseDate:pd?String(pd.value).trim():'',WarrantyMonths:m});
+  if(w)txt+=' • covered until '+w.end;
+  el.textContent=txt;
+}
 function warrantyEnd(a){
   if(!a.PurchaseDate)return null;
   const pd=new Date(a.PurchaseDate); if(isNaN(pd))return null;
@@ -1050,6 +1075,15 @@ async function openModal(id,prefill){
     if(c==='NotesReceived')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(set automatically at Check Out)</span></label><input id="f_${c}" type="date" value="${esc(val)}" readonly disabled></div>`;
     if(c==='ReceivedBy')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(set automatically at Check Out)</span></label><input id="f_${c}" value="${esc(val)}" readonly disabled></div>`;
     if(c==='Price')return`<div class="field2"><label>${LABELS[c]||c} (${CURRENCY})</label><input id="f_${c}" type="number" step="0.01" min="0" value="${esc(val)}"></div>`;
+    // "24" in a box says nothing -- months or years? The column is
+    // WarrantyMonths and every readout ("24 mo", the expiry KPI, the tag)
+    // is months, so the form has to say so and show what it works out to.
+    if(c==='WarrantyMonths')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(in months)</span></label><input id="f_${c}" type="number" min="0" max="600" step="1" value="${esc(val)}" placeholder="12" oninput="warrantyHint()"><div class="fhint" id="warrHint"></div></div>`;
+    // a picker, so the value is always the ISO date the warranty maths and
+    // the "expiring in 30 days" count both parse. Typed text stays text --
+    // an existing "15/09/2026" would vanish from a date input and a save
+    // would then wipe it.
+    if(c==='PurchaseDate')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" ${(!val||/^\d{4}-\d{2}-\d{2}$/.test(val))?'type="date" ':''}value="${esc(val)}" oninput="warrantyHint()"></div>`;
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
   };
   const groups=[
@@ -1087,6 +1121,7 @@ async function openModal(id,prefill){
         ${inv?`<a class="btn sm ghost" href="/invoice/${esc(inv)}" target="_blank">VIEW</a><button class="btn sm danger" type="button" onclick="delInvoice('${editingId}')">REMOVE</button>`:'<span class="muted">none yet</span>'}
       </div>
     </div>`;
+  warrantyHint();
   const histWrap=document.getElementById('histWrap');
   if(histWrap)histWrap.style.display=id?'':'none';
   document.getElementById('maintWrap').style.display=id?'':'none';
@@ -1527,6 +1562,7 @@ async function printAsset(id){
   const fields=[...visCols(),'Price','WarrantyMonths','NotesReceived','Notes','ReceivedBy'].filter(f=>f!=='EmployeeID');
   const seen=new Set(); const rowsHtml=fields.filter(f=>!seen.has(f)&&seen.add(f)).map(f=>{
     let v=a[f]; if(f==='Price')v=fmtMoney(a.Price||0,CURRENCY); if(v==null||v==='')v='—';
+    if(f==='WarrantyMonths'&&v!=='—'){ const w=warrantyEnd(a); v=v+' months'+(w?' — covered until '+w.end:''); }
     return `<tr><td class="k">${esc(LABELS[f]||f)}</td><td class="v">${esc(v)}</td></tr>`;
   }).join('') + (a.EmployeeID ? `
     <tr><td class="k">Employee Name</td><td class="v">${esc((emp&&emp.EmployeeName)||a.EmployeeID)}</td></tr>

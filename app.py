@@ -7219,7 +7219,7 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
         ["Location", asset.get("Location") or "—"],
         ["Status", asset.get("Status") or "—"],
         ["Price", price_str],
-        ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0)],
+        ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0) + " months"],
         ["Signed Date", asset.get("NotesReceived") or "—"],
         ["Notes", asset.get("Notes") or "—"],
         ["Signed By", signer_name or "—"],

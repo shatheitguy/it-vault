@@ -389,6 +389,9 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .sesslist .sl-v{font-family:var(--mono);font-size:12px;color:var(--txt);
   text-align:right;word-break:break-all}
 
+/* the explanation line under a field: unit, default, computed preview */
+.field2 .fhint{font-size:11px;color:var(--muted);line-height:1.4;min-height:15px;margin-top:-1px}
+
 /* range + color inputs inside .field2 */
 /* Fixed, theme-independent border -- var(--line) can be near-white on the
    Clean Light preset, which made a white/near-white swatch value (e.g. the
