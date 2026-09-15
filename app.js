@@ -860,6 +860,12 @@ function renderLinkWidgets(L){
   const cont=dashCont(); if(!cont) return;
   cont.querySelectorAll('.widget[data-wkey^="link:"]').forEach(w=>w.remove());
   (L.links||[]).forEach(t=>{
+    // The add form used to be the only thing checking the scheme. It is gone,
+    // so the check moved to the point of use, which is where it belonged: a
+    // layout is stored data, and stored data gets validated when it is read,
+    // not only when it was written. Anything that is not http(s) -- an old
+    // javascript: tile, a file:, a data: -- simply does not render.
+    if(!/^https?:\/\//i.test(String(t.url||''))) return;
     const el=document.createElement('div');
     el.className='panel widget wlink';
     el.setAttribute('data-wkey', t.key);
@@ -941,122 +947,78 @@ function setEditLayout(on){
   document.body.classList.toggle('edit-layout', on);
   const show=(id,v)=>{ const el=document.getElementById(id); if(el) el.style.display=v?'':'none'; };
   show('dashSaveLayout', on); show('dashResetLayout', on);
-  show('dashAddWidget', on); show('dashColsWrap', on);
+  show('dashColsWrap', on);
   show('dashEditLayout', !on);
   document.getElementById('dashLayoutMsg').textContent=on
-    ? 'Drag to reorder, ✕ to remove, + ADD WIDGET to bring one back — then SAVE'
+    ? 'Drag to reorder, ✕ to hide — anything hidden is listed below to bring back — then SAVE'
     : '';
   decorateWidgets(on);
+  renderHiddenChips(on);
   if(on) initDashDrag();
   else { const cont=dashCont(); if(cont) cont.querySelectorAll('.widget').forEach(w=>w.draggable=false); }
 }
 
 /* One ✕ per widget, added only while editing so the chrome never shows in
-   normal use. Removing a built-in hides it; removing a user tile deletes it,
-   because nothing else refers to it. */
+   normal use.
+
+   It hides, it does not delete. Nothing on this dashboard can be created any
+   more, so nothing on it should be destroyable either -- a widget put away by
+   mistake has to be one click from coming back, and the row of chips under
+   the tools is where it waits. */
 function decorateWidgets(on){
   const cont=dashCont(); if(!cont) return;
-  cont.querySelectorAll('.wkill').forEach(b=>b.remove());
+  cont.querySelectorAll('.wtools').forEach(b=>b.remove());
   if(!on) return;
   cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
     const key=w.getAttribute('data-wkey');
-    const isLink=key.startsWith('link:');
     const bar=document.createElement('div');
     bar.className='wtools';
-    // A tile you invented is a thing you got wrong the first time -- editing
-    // it beats deleting it and retyping the address and re-fetching the icon.
-    if(isLink){
-      const pen=document.createElement('button');
-      pen.type='button'; pen.className='wtool'; pen.title='Edit this tile';
-      pen.textContent='✎';
-      pen.onclick=(e)=>{ e.stopPropagation(); e.preventDefault(); openWidgetPicker(key); };
-      bar.appendChild(pen);
-    }
     const btn=document.createElement('button');
     btn.type='button'; btn.className='wtool wkill';
-    btn.title=isLink?'Delete this tile':'Remove this widget';
+    btn.title='Hide this widget';
     btn.textContent='✕';
     btn.onclick=(e)=>{
       e.stopPropagation(); e.preventDefault();
       const L=getDashLayout();
-      if(isLink){
-        L.links=(L.links||[]).filter(t=>t.key!==key);
-        L.order=(L.order||[]).filter(k=>k!==key);
-      }else{
-        // Removed means gone from the page, not greyed out in place. It comes
-        // back through + ADD WIDGET, which is where someone looks for it.
-        L.hidden=Array.from(new Set((L.hidden||[]).concat([key])));
-      }
-      putDashLayout(L); applyDashLayout(); decorateWidgets(true); initDashDrag();
+      L.hidden=Array.from(new Set((L.hidden||[]).concat([key])));
+      putDashLayout(L); applyDashLayout(); decorateWidgets(true);
+      renderHiddenChips(true); initDashDrag();
     };
     bar.appendChild(btn);
     w.appendChild(bar);
   });
 }
 
-/* ---------- widget picker ---------- */
-let wmEditKey=null;
-function openWidgetPicker(editKey){
+/* What a hidden widget is called, so the chip offering it back is readable:
+   a link tile's own title first, otherwise the heading it renders with. */
+function widgetLabel(key){
   const L=getDashLayout();
-  wmEditKey=editKey||null;
-  const existing=wmEditKey?(L.links||[]).find(t=>t.key===wmEditKey):null;
-  const hidden=new Set(L.hidden||[]);
-  const list=document.getElementById('wmHidden');
-  const items=builtinWidgets().filter(w=>hidden.has(w.key));
-  list.innerHTML=items.length
-    ? items.map(w=>`<button class="btn ghost sm wmadd" data-k="${esc(w.key)}">+ ${esc(w.title)}</button>`).join('')
-    : '<span class="muted">Nothing is hidden — every built-in widget is already on the dashboard.</span>';
-  list.querySelectorAll('.wmadd').forEach(b=>{
-    b.onclick=()=>{
-      const cont=dashCont();
-      const el=cont?.querySelector('.widget[data-wkey="'+CSS.escape(b.getAttribute('data-k'))+'"]');
-      if(el) el.classList.remove('w-hidden');
-      openWidgetPicker();   // reflect that it is no longer hidden
-      decorateWidgets(true); initDashDrag();
-    };
-  });
-  // monitors to bind a tile to, if the user can see them at all
-  const sel=document.getElementById('wmMonitor');
-  sel.innerHTML='<option value="">— none —</option>';
-  if(canDo('tools.heartbeat')){
-    api('/api/heartbeat/state?hours=1').then(async r=>{
-      if(!r||!r.ok) return;
-      const j=await r.json().catch(()=>null);
-      (j&&j.monitors||[]).forEach(m=>{
-        const o=document.createElement('option');
-        o.value=String(m.id); o.textContent=m.name||('monitor '+m.id);
-        sel.appendChild(o);
-      });
-    });
-  }
-  wmIcon=existing?(existing.icon||''):''; renderWmIcon();
-  document.getElementById('wmTitle').value=existing?(existing.title||''):'';
-  document.getElementById('wmUrl').value=existing?(existing.url||''):'';
-  document.getElementById('wmDesc').value=existing?(existing.desc||''):'';
-  document.getElementById('wmTarget').value=(existing&&existing.target==='_self')?'_self':'_blank';
-  document.getElementById('wmIconMsg').textContent='';
-  // one dialog, two jobs -- say which one it is doing
-  document.querySelector('#widgetModal h3').textContent=existing?'EDIT TILE':'ADD WIDGET';
-  document.getElementById('wmAdd').textContent=existing?'💾 SAVE TILE':'+ ADD TILE';
-  const hw=document.getElementById('wmHiddenWrap');
-  if(hw) hw.style.display=existing?'none':'';
-  // the monitor list is filled in asynchronously above; re-select once it is
-  if(existing&&existing.monitor){
-    const want=String(existing.monitor);
-    const pick=()=>{ const m=document.getElementById('wmMonitor');
-      if(!m) return; if([...m.options].some(o=>o.value===want)) m.value=want; else setTimeout(pick,150); };
-    setTimeout(pick,150);
-  }
-  document.getElementById('widgetModal').classList.add('show');
+  const tile=(L.links||[]).find(t=>t.key===key);
+  if(tile) return tile.title||tile.url||key;
+  const w=document.querySelector('.widget[data-wkey="'+key+'"]');
+  const el=w?w.querySelector('.wtitle, h3, .secthead'):null;
+  const t=el?el.textContent.trim():'';
+  return t||key.replace(/^link:/,'');
 }
 
-let wmIcon='';
-function renderWmIcon(){
-  const img=document.getElementById('wmIconPrev');
-  const clr=document.getElementById('wmClearIcon');
-  if(!img) return;
-  if(wmIcon){ img.src=wmIcon; img.style.display=''; if(clr) clr.style.display=''; }
-  else { img.removeAttribute('src'); img.style.display='none'; if(clr) clr.style.display='none'; }
+/* The hidden ones, listed while editing. This is the only way back, so it
+   only appears when there is something to bring back. */
+function renderHiddenChips(on){
+  const box=document.getElementById('dashHidden'); if(!box) return;
+  const hidden=(getDashLayout().hidden||[]);
+  if(!on||!hidden.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='';
+  box.innerHTML='<span class="dh-label">Hidden</span>'+hidden.map(k=>
+    '<button type="button" class="dh-chip" data-k="'+esc(k)+'" title="Show this widget again">'+
+    '<span class="dh-eye">+</span>'+esc(widgetLabel(k))+'</button>').join('');
+  box.querySelectorAll('.dh-chip').forEach(b=>{
+    b.onclick=()=>{
+      const L=getDashLayout();
+      L.hidden=(L.hidden||[]).filter(k=>k!==b.dataset.k);
+      putDashLayout(L); applyDashLayout(); decorateWidgets(true);
+      renderHiddenChips(true); initDashDrag();
+    };
+  });
 }
 
 /* ---------- modal / crud ---------- */
@@ -1598,11 +1560,9 @@ async function printAsset(id){
    rather than a label, because reading a list is not the job. */
 let LF_ROWS=[];
 const LF_STATUS={
-  open:    {label:'OPEN',     cls:'lf-open'},
   lost:    {label:'LOST',     cls:'lf-lost'},
   found:   {label:'FOUND',    cls:'lf-found'},
-  returned:{label:'RETURNED', cls:'lf-returned'},
-  closed:  {label:'CLOSED',   cls:'lf-closed'}
+  returned:{label:'RETURNED', cls:'lf-returned'}
 };
 async function loadLostFound(){
   const r=await api('/api/lostfound');
@@ -1612,18 +1572,18 @@ async function loadLostFound(){
 function renderLostFound(){
   const body=document.getElementById('lfBody'); if(!body)return;
   const want=(document.getElementById('lfFilter')||{value:''}).value;
-  const rows=LF_ROWS.filter(r=>!want||(r.status||'open')===want);
+  const rows=LF_ROWS.filter(r=>!want||(r.status||'found')===want);
   const empty=document.getElementById('lfEmpty');
   if(empty)empty.style.display=rows.length?'none':'block';
   body.innerHTML=rows.map(r=>{
-    const st=LF_STATUS[r.status||'open']||LF_STATUS.open;
+    const st=LF_STATUS[r.status||'found']||LF_STATUS.found;
     const who=r.finder_name
       ? `<div class="lf-who">${esc(r.finder_name)}</div>`+
         `<a class="lf-tel" href="tel:${esc((r.finder_mobile||'').replace(/[^\d+]/g,''))}">${esc(r.finder_mobile||'')}</a>`+
         (r.finder_note?`<div class="lf-note">${esc(r.finder_note)}</div>`:'')
       : '<span class="muted">reported by staff</span>';
     const opts=Object.keys(LF_STATUS).map(k=>
-      `<option value="${k}" ${((r.status||'open')===k)?'selected':''}>${LF_STATUS[k].label}</option>`).join('');
+      `<option value="${k}" ${((r.status||'found')===k)?'selected':''}>${LF_STATUS[k].label}</option>`).join('');
     return `<tr>
       <td class="mono">${esc(r.ref||('LF-'+r.id))}</td>
       <td><div class="lf-asset">${esc(r.asset_name||'(deleted asset)')}</div>
@@ -1657,15 +1617,49 @@ function bindLostFound(){
   const f=document.getElementById('lfFilter'); if(f)f.onchange=renderLostFound;
   const rf=document.getElementById('lfRefreshBtn'); if(rf)rf.onclick=loadLostFound;
   const lb=document.getElementById('lfLostBtn');
-  if(lb)lb.onclick=async()=>{
-    const ref=prompt('Asset ID or tag to report as lost (e.g. IT-1009):');
-    if(!ref)return;
-    const note=prompt('Anything worth recording? (optional)')||'';
-    const r=await api('/api/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({asset:ref.trim(),note:note})});
-    if(r&&r.ok){ toast('✓ LOGGED AS LOST'); loadLostFound(); }
-    else { const j=r?await r.json().catch(()=>({})):{}; toast('✕ '+(j.error||'could not log that')); }
-  };
+  if(lb)lb.onclick=openLostModal;
+  const lc=document.getElementById('lmCancel');
+  if(lc)lc.onclick=()=>document.getElementById('lostModal').classList.remove('show');
+  const ls=document.getElementById('lmSave');
+  if(ls)ls.onclick=saveLostReport;
+}
+/* Typing an asset tag into a prompt() box meant knowing the tag by heart and
+   getting no second chance at a typo. Same modal shape as an asset or a
+   contract, and the asset is picked from a list. */
+async function openLostModal(){
+  const sel=document.getElementById('lm_asset');
+  const note=document.getElementById('lm_note');
+  if(!sel)return;
+  note.value='';
+  sel.innerHTML='<option value="">-- select asset --</option>';
+  const r=await api('/api/assets');
+  const list=r&&r.ok?await r.json():[];
+  (list.items||list).filter(a=>a.Status!=='Lost/Stolen')
+    .sort((a,b)=>(a.AssetTag||'').localeCompare(b.AssetTag||''))
+    .forEach(a=>{
+      const o=document.createElement('option');
+      o.value=a.AssetTag||a._id;
+      o.textContent=(a.AssetTag?a.AssetTag+' — ':'')+(a.Name||'(no name)')
+        +(a.EmployeeID?'  ·  '+a.EmployeeID:'');
+      sel.appendChild(o);
+    });
+  document.getElementById('lostModal').classList.add('show');
+}
+async function saveLostReport(){
+  const sel=document.getElementById('lm_asset');
+  const ref=sel.value.trim();
+  if(!ref){ toast('✕ PICK AN ASSET FIRST'); sel.focus(); return; }
+  const btn=document.getElementById('lmSave'); btn.disabled=true;
+  const r=await api('/api/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({asset:ref,note:document.getElementById('lm_note').value.trim()})});
+  btn.disabled=false;
+  if(r&&r.ok){
+    document.getElementById('lostModal').classList.remove('show');
+    toast('✓ LOGGED AS LOST'); loadLostFound();
+  } else {
+    const j=r?await r.json().catch(()=>({})):{};
+    toast('✕ '+(j.error||'could not log that'));
+  }
 }
 bindLostFound();
 
@@ -4072,7 +4066,6 @@ document.getElementById('dashResetLayout').onclick=()=>{
   document.getElementById('dashLayoutMsg').textContent='↺ Reset to default';
   location.reload();
 };
-document.getElementById('dashAddWidget').onclick=openWidgetPicker;
 
 /* Type-to-find, matching a widget's heading and a tile's title/address.
    Purely visual -- it never touches the saved layout. */
@@ -4095,57 +4088,6 @@ if(dashFilterEl) dashFilterEl.oninput=()=>{
 document.getElementById('dashCols').onchange=(e)=>{
   const n=Math.max(1, Math.min(4, parseInt(e.target.value,10)||2));
   dashCont()?.style.setProperty('--dashcols', String(n));
-};
-document.getElementById('wmFetchIcon').onclick=async()=>{
-  const url=document.getElementById('wmUrl').value.trim();
-  const msg=document.getElementById('wmIconMsg');
-  if(!url){ msg.textContent='Enter the address first'; return; }
-  msg.textContent='Looking…';
-  const r=await api('/api/widget/icon?url='+encodeURIComponent(url));
-  const j=r?await r.json().catch(()=>({})):{};
-  if(j&&j.icon){ wmIcon=j.icon; renderWmIcon(); msg.textContent='Found it'; }
-  else { msg.textContent=(j&&j.error)||'No icon found at that address'; }
-};
-document.getElementById('wmIconFile').onchange=(e)=>{
-  const f=e.target.files&&e.target.files[0]; if(!f) return;
-  const msg=document.getElementById('wmIconMsg');
-  // the tile is stored in localStorage, so the icon has to stay small
-  if(f.size > 512*1024){ msg.textContent='That image is over 512KB — use a smaller one'; return; }
-  const fr=new FileReader();
-  fr.onload=()=>{ wmIcon=String(fr.result||''); renderWmIcon(); msg.textContent='Uploaded'; };
-  fr.onerror=()=>{ msg.textContent='Could not read that file'; };
-  fr.readAsDataURL(f);
-};
-document.getElementById('wmClearIcon').onclick=()=>{ wmIcon=''; renderWmIcon(); };
-document.getElementById('wmAdd').onclick=()=>{
-  const title=document.getElementById('wmTitle').value.trim();
-  const url=document.getElementById('wmUrl').value.trim();
-  const mon=document.getElementById('wmMonitor').value;
-  const msg=document.getElementById('wmIconMsg');
-  if(!title||!url){ msg.textContent='A title and an address are both needed'; return; }
-  // only ever a link the browser will actually open
-  let safe=url; if(!/^https?:\/\//i.test(safe)) safe='http://'+safe;
-  try{ new URL(safe); }catch(e){ msg.textContent='That address is not valid'; return; }
-  const L=getDashLayout();
-  const desc=document.getElementById('wmDesc').value.trim();
-  const target=document.getElementById('wmTarget').value==='_self'?'_self':'_blank';
-  const key=wmEditKey||('link:'+Math.random().toString(36).slice(2,10));
-  const tile={key, title, url:safe, icon:wmIcon||'',
-              monitor:mon?Number(mon):null, desc, target};
-  if(wmEditKey){
-    // replaced in place, so an edited tile keeps its spot on the grid
-    L.links=(L.links||[]).map(t=>t.key===wmEditKey?tile:t);
-  }else{
-    L.links=(L.links||[]).concat([tile]);
-    L.order=(L.order||[]).concat([key]);
-  }
-  putDashLayout(L);
-  applyDashLayout();
-  decorateWidgets(document.body.classList.contains('edit-layout'));
-  initDashDrag();
-  document.getElementById('widgetModal').classList.remove('show');
-  toast(wmEditKey?'✓ TILE UPDATED':'✓ TILE ADDED');
-  wmEditKey=null;
 };
 document.getElementById('navAssets').onclick=()=>showPage('page-assets');
 

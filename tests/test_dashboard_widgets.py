@@ -107,7 +107,10 @@ check("a local wipe preserves the layout",
       "'itvault_dash_layout_v2'" in appjs.split("const KEEP=new Set([")[1][:200])
 check("tiles open safely whichever target is chosen",
       'rel="noopener noreferrer"' in appjs)
-check("only http(s) tiles can be added", "/^https?:" in appjs)
+# the add form was the only thing checking this and it is gone, so the
+# check has to happen where the tile is used
+check("a tile that is not http(s) does not render",
+      "if(!/^https?:\\/\\//i.test(String(t.url||''))) return;" in appjs)
 check("columns are bounded 1-4", "Math.max(1, Math.min(4," in appjs)
 
 print()
@@ -124,8 +127,7 @@ check("a non-matching widget is hidden, not dimmed",
       "#dashWidgets .widget.w-nomatch{display:none}" in css)
 check("the filter searches the address too",
       ".wlink-body')?.getAttribute('href')" in appjs)
-check("a tile can carry a subtitle", 'id="wmDesc"' in idx and "wlink-sub" in appjs)
-check("a tile can open in this tab", 'id="wmTarget"' in idx)
+check("a tile still shows its subtitle", "wlink-sub" in appjs)
 # _self is offered, but a page opened from here must never get a handle on
 # this one, so noopener is not negotiable
 check("noopener survives either target",
@@ -172,18 +174,27 @@ check("a backup carries the dash_layout column", "dash_layout" in text)
 check("and the tiles inside it", "10.0.0.9" in text)
 
 print()
-print("10. A tile you added can be edited, and removing means removed")
-check("user tiles get a pencil", "pen.title='Edit this tile'" in appjs)
-check("built-ins do not", "if(isLink){" in appjs and "openWidgetPicker(key)" in appjs)
-check("the picker doubles as the editor", "function openWidgetPicker(editKey)" in appjs)
-check("the form pre-fills", "existing?(existing.title||''):''" in appjs)
-check("an edit replaces in place", "t.key===wmEditKey?tile:t" in appjs)
-check("it does not append a duplicate", "wmEditKey||('link:'" in appjs)
-check("the dialog says which job it is doing", "'EDIT TILE':'ADD WIDGET'" in appjs)
-# a removed widget used to linger, greyed out, still taking up the grid
-check("removing records it as hidden immediately",
+print("10. Widgets are hidden and brought back, never added or deleted")
+# Adding tiles is gone at the user's request: the dashboard is the set of
+# widgets it ships with, and the only choice is which of them to look at.
+check("no add button", 'id="dashAddWidget"' not in idx)
+check("no picker dialog", 'id="widgetModal"' not in idx and "openWidgetPicker" not in appjs)
+check("and nothing still binds to its controls",
+      "wmAdd" not in appjs and "wmFetchIcon" not in appjs and "wmEditKey" not in appjs)
+# hiding has to be reversible, because it is now the only thing you can do
+check("the cross hides rather than deletes", "btn.title='Hide this widget'" in appjs)
+check("recorded immediately",
       "L.hidden=Array.from(new Set((L.hidden||[]).concat([key])))" in appjs)
-check("nothing ghosts it back into view",
+check("nothing deletes a tile any more", "L.links=(L.links||[]).filter(" not in appjs)
+check("hidden ones are listed while editing", "function renderHiddenChips(" in appjs
+      and 'id="dashHidden"' in idx)
+check("each is a button that puts it back",
+      "L.hidden=(L.hidden||[]).filter(k=>k!==b.dataset.k)" in appjs)
+check("named so it can be recognised", "function widgetLabel(" in appjs)
+check("the row only appears when something is hidden",
+      "if(!on||!hidden.length){ box.style.display='none'" in appjs)
+check("it has a style", ".dh-chip{" in css)
+check("nothing ghosts a hidden widget back into view",
       "show-hidden" not in appjs and "show-hidden" not in css)
 check("hidden really is display:none",
       "#dashWidgets .widget.w-hidden{display:none}" in css)

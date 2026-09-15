@@ -1372,7 +1372,7 @@ def init_db():
         asset_id VARCHAR(64),
         asset_tag VARCHAR(64),
         kind VARCHAR(12) DEFAULT 'found',
-        status VARCHAR(16) DEFAULT 'open',
+        status VARCHAR(16) DEFAULT 'found',
         finder_name VARCHAR(120),
         finder_mobile VARCHAR(40),
         finder_note TEXT,
@@ -1823,6 +1823,14 @@ def migrate_schema():
     # panels of checkboxes, two of which were never read by anything.
     try:
         cur.execute("ALTER TABLE Settings ADD COLUMN notify_types TEXT")
+    except Exception:
+        pass
+    # Lost & Found used to have five statuses. Reports filed under the two
+    # that went away still have to mean something: an open report is one
+    # somebody has, a closed one is one that came back.
+    try:
+        cur.execute("UPDATE LostFound SET status='found' WHERE status='open'")
+        cur.execute("UPDATE LostFound SET status='returned' WHERE status='closed'")
     except Exception:
         pass
     # Employees: real editable staff/HR ID, separate from EmployeeID (which
@@ -6612,7 +6620,7 @@ def asset_public(a_id):
     # the one page an employee sees without logging in was the one page
     # that ignored the branding.
     THEME_COLS = ("theme_preset", "bg_type", "bg", "comp_bg", "radius",
-                  "accent", "accent2")
+                  "accent", "accent2", "font")
     brand_theme = {}
     try:
         sc = conn(); scur = sc.cursor()
@@ -6668,8 +6676,10 @@ def asset_public(a_id):
     from html import escape as _esc
     tag_txt = asset.get("AssetTag") or asset["_id"][:12]
     staff_view = bool(session.get("user"))
+    card_cls = "" if staff_view else "pubcard"
     if staff_view:
         page_title = f"Asset {asset['Name']}"
+        head_html = f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div>'
         main_html = f"""
  <div class=assetid-badge>{tag_txt}</div>
  <div class=title>{asset['Name']}</div>
@@ -6681,18 +6691,24 @@ def asset_public(a_id):
     else:
         # the tab title is part of what leaks: it lands in browser history
         page_title = f"{app_name} — Property tag"
+        head_html = (f'<div class=phead><img class=plogo src="{logo_uri}" alt=""></div>'
+                     if logo_uri else "")
         phone = (company_phone or "").strip()
         dial = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+        # One thing on this page is an action, and it is the phone number, so
+        # it is the only thing wearing the accent colour.
         if phone:
-            contact_inner = ("<span class=clabel>Contact number</span>"
-                             f'<a class=phone href="tel:{_esc(dial)}">{_esc(phone)}</a>')
+            call = ('<div class=peyebrow>If found, please call</div>'
+                    f'<a class=pphone href="tel:{_esc(dial)}">{_esc(phone)}</a>')
         else:
-            contact_inner = ("<span class=clabel>Contact</span>"
-                             "<b>Use the form below and we will call you</b>")
+            call = ('<div class=peyebrow>If found</div>'
+                    '<div class=pnophone>Use the form below and we will '
+                    'contact you.</div>')
         if (company_address or "").strip():
-            contact_inner += f"<div class=addr>{_esc(company_address.strip())}</div>"
+            call += f"<div class=paddr>{_esc(company_address.strip())}</div>"
         main_html = LOSTFOUND_PUBLIC_HTML.format(
-            owner=_esc(app_name), tag=_esc(tag_txt), contact=contact_inner)
+            owner=_esc(app_name), tag=_esc(tag_txt),
+            contact=f"<div class=pcall>{call}</div>")
         lf_script = ("<script>var ASSET_REF=" + json.dumps(tag_txt)
                      + ",OWNER=" + json.dumps(app_name) + ";"
                      + LOSTFOUND_PUBLIC_JS + "</script>")
@@ -6705,18 +6721,19 @@ def asset_public(a_id):
                     + json.dumps(brand_theme, default=str) + ");</script>")
     return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{page_title}</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <style>
+:root{{--font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif}}
 *{{box-sizing:border-box}}
 html{{overflow-y:auto}}
-body{{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}}
+body{{font-family:var(--font);margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}}
 .wrap{{max-width:560px;margin:0 auto}}
 .card{{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.35)}}
 .head{{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px}}
 .logo{{height:32px;width:auto;max-width:120px;object-fit:contain}}
-.brand{{font-family:'Orbitron';font-weight:800;font-size:16px;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;text-transform:uppercase}}
-.assetid-badge{{font-family:'Share Tech Mono',var(--mono);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:5px 14px;display:inline-block;margin-bottom:10px}}
+.brand{{font-family:var(--font);font-weight:800;font-size:16px;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;text-transform:uppercase}}
+.assetid-badge{{font-family:var(--mono);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:5px 14px;display:inline-block;margin-bottom:10px}}
 .title{{font-size:22px;font-weight:700;margin:0 0 14px}}
 table{{width:100%;border-collapse:collapse}}
 td{{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}}
@@ -6727,30 +6744,52 @@ tr:last-child td{{border-bottom:none}}
 .contact b{{color:var(--accent)}}
 .foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
 a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:var(--btn-text,#04121f);border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
-.owner{{text-align:center;padding:20px 14px;margin:2px 0 16px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius)}}
-.ownerlead{{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted)}}
-.ownername{{font-family:'Orbitron';font-weight:900;font-size:21px;line-height:1.3;margin-top:8px;color:var(--accent);word-break:break-word}}
-.clabel{{display:block;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}}
-.phone{{display:inline-block;font-family:'Share Tech Mono',var(--mono);font-size:21px;font-weight:700;letter-spacing:1px;color:var(--txt);text-decoration:none;margin-top:5px}}
-.addr{{font-size:13px;color:var(--muted);margin-top:6px}}
-.lfbtn{{display:block;width:100%;margin-top:16px;padding:14px 16px;background:var(--accent);color:var(--btn-text,#04121f);border:none;border-radius:var(--radius);font-family:'Rajdhani',sans-serif;font-weight:700;font-size:15px;letter-spacing:.4px;cursor:pointer}}
+/* The public card: a lost-property notice. One headline, one number to
+   call, one button. Centred, generously spaced, and only the number and the
+   button carry the accent -- everything else is quiet on purpose. */
+.pubcard{{padding:30px 24px 26px;text-align:center}}
+.phead{{margin-bottom:22px}}
+.plogo{{display:block;margin:0 auto;max-height:54px;max-width:170px;width:auto;object-fit:contain}}
+.peyebrow{{font-size:10.5px;font-weight:700;letter-spacing:1.7px;text-transform:uppercase;color:var(--muted)}}
+.powner{{font-family:var(--font);font-weight:800;font-size:24px;
+  line-height:1.28;margin:9px 0 0;color:var(--txt);word-break:break-word}}
+.prule{{height:1px;background:var(--line);margin:20px 0 18px}}
+.pmeta{{display:flex;align-items:baseline;justify-content:center;gap:10px;flex-wrap:wrap}}
+.pmetak{{font-size:10.5px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}}
+.pmetav{{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:1.2px;color:var(--txt)}}
+.pcall{{margin-top:20px;padding:17px 16px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
+.pphone{{display:inline-block;margin-top:7px;font-family:var(--mono);
+  font-size:23px;font-weight:700;letter-spacing:.6px;color:var(--accent);text-decoration:none}}
+.pnophone{{margin-top:6px;font-size:14.5px;font-weight:600;line-height:1.45}}
+.paddr{{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5}}
+.popt{{margin-left:6px;font-size:10px;letter-spacing:.8px;color:var(--muted);opacity:.85;text-transform:uppercase}}
+.lfbtn{{display:block;width:100%;margin-top:18px;padding:14px 16px;background:var(--accent);color:var(--btn-text,#04121f);border:none;border-radius:var(--radius);font-family:var(--font);font-weight:700;font-size:14.5px;letter-spacing:1px;text-transform:uppercase;cursor:pointer}}
 .lfbtn:disabled{{opacity:.6;cursor:default}}
-.lff{{margin-top:14px;display:grid;gap:11px}}
-.lff label{{display:block;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}}
-.lff input,.lff textarea{{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:var(--radius);padding:11px 12px;font-family:'Rajdhani',sans-serif;font-size:16px}}
+.lff{{margin-top:16px;display:grid;gap:12px;text-align:left}}
+.lff label{{display:block;font-size:10.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}}
+.lff input,.lff textarea{{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:var(--radius);padding:11px 12px;font-family:var(--font);font-size:16px}}
 .lff input:focus,.lff textarea:focus{{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}}
 .lfmsg{{font-size:13px;font-weight:600}}
 .err{{color:#ff5a5f}}
 .lfok{{margin-top:16px;padding:18px;text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);font-size:15px;line-height:1.5}}
-.ref{{font-family:'Share Tech Mono',var(--mono);font-size:13px;color:var(--muted);margin-top:8px}}
-@media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} .ownername{{font-size:18px}} }}
-</style>{theme_script}</head><body><div class=wrap><div class=card>
- <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
+.ref{{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:8px}}
+@media(max-width:480px){{
+  body{{padding:16px 12px}}
+  .card{{padding:16px}}
+  .pubcard{{padding:24px 18px 22px}}
+  .powner{{font-size:20px}}
+  .pphone{{font-size:21px}}
+}}
+</style>{theme_script}</head><body><div class=wrap><div class="card {card_cls}">
+{head_html}
 {main_html}
 </div></div>{lf_script}</body></html>"""
 
 # ---------- Lost & Found ---------------------------------------------------
-LOSTFOUND_STATUSES = ["open", "lost", "found", "returned", "closed"]
+# Three, because there are only three things that are true of an asset here:
+# it is missing, somebody has it, or it is back. "Open" and "closed" said
+# nothing a date did not already say.
+LOSTFOUND_STATUSES = ["lost", "found", "returned"]
 
 # The card a stranger gets when they scan a tag. Whoever is holding the asset
 # needs exactly two things: who it belongs to, and how to hand it back. They
@@ -6758,22 +6797,20 @@ LOSTFOUND_STATUSES = ["open", "lost", "found", "returned", "closed"]
 # department, designation and email address, or what the thing cost -- all of
 # which this page used to print to anyone who scanned it.
 LOSTFOUND_PUBLIC_HTML = """
- <div class=owner>
-  <div class=ownerlead>This property belongs to</div>
-  <div class=ownername>{owner}</div>
- </div>
- <div class=assetid-badge>{tag}</div>
- <div class=contact>{contact}</div>
- <button class=lfbtn id=lfOpen type=button>&#128269; I FOUND THIS &mdash; REPORT TO LOST &amp; FOUND</button>
+ <div class=peyebrow>Property of</div>
+ <h1 class=powner>{owner}</h1>
+ <div class=prule></div>
+ <div class=pmeta><span class=pmetak>Asset tag</span><span class=pmetav>{tag}</span></div>
+ {contact}
+ <button class=lfbtn id=lfOpen type=button>REPORT TO LOST &amp; FOUND</button>
  <form class=lff id=lfForm style="display:none">
-  <div><label for=lfName>Your name</label><input id=lfName maxlength=120 autocomplete=name></div>
-  <div><label for=lfPhone>Your mobile number</label><input id=lfPhone maxlength=40 inputmode=tel autocomplete=tel></div>
-  <div><label for=lfNote>Where did you find it? (optional)</label><textarea id=lfNote rows=2 maxlength=500></textarea></div>
-  <button class=lfbtn type=submit id=lfSend>SUBMIT REPORT</button>
+  <div><label for=lfName>Your name</label><input id=lfName maxlength=120 autocomplete=name placeholder="Full name"></div>
+  <div><label for=lfPhone>Your mobile number</label><input id=lfPhone maxlength=40 inputmode=tel autocomplete=tel placeholder="So we can call you back"></div>
+  <div><label for=lfNote>Where did you find it?<span class=popt>optional</span></label><textarea id=lfNote rows=2 maxlength=500 placeholder="e.g. left on the 8am bus"></textarea></div>
+  <button class=lfbtn type=submit id=lfSend>SUBMIT</button>
   <div class=lfmsg id=lfMsg></div>
  </form>
  <div class=lfok id=lfDone style="display:none"></div>
- <div class=foot>Reported details go only to {owner}. Nothing about this item is shown here.</div>
 """
 
 # Plain string, not an f-string: it is javascript, and every brace in it is
@@ -6918,7 +6955,7 @@ def public_lostfound_report():
         return jsonify({"error": "That tag was not recognised."}), 404
     cur.execute("INSERT INTO LostFound (asset_id, asset_tag, kind, status, finder_name, "
                 "finder_mobile, finder_note, reported_at, updated_at, reporter_ip) "
-                "VALUES (%s,%s,'found','open',%s,%s,%s,NOW(),NOW(),%s)",
+                "VALUES (%s,%s,'found','found',%s,%s,%s,NOW(),NOW(),%s)",
                 (a["_id"], a.get("AssetTag") or "", name, mobile, note, ip))
     c.commit()
     rid = cur.lastrowid
@@ -6990,7 +7027,7 @@ def lostfound_update(rid):
         audit(session.get("user"), "LOSTFOUND_DELETE", rec.get("asset_id") or "", f"LF-{rid}")
         return jsonify({"ok": True})
     d = request.get_json(force=True, silent=True) or {}
-    status = (d.get("status") or rec.get("status") or "open").strip().lower()
+    status = (d.get("status") or rec.get("status") or "found").strip().lower()
     if status not in LOSTFOUND_STATUSES:
         return jsonify({"error": "unknown status"}), 400
     note = d.get("admin_note")
@@ -7275,6 +7312,16 @@ function applySignTheme(b){
     r.setProperty('--btn-text', bestTextOn(accent));
     r.setProperty('--btn-mag-text', bestTextOn(accent2));
     r.setProperty('--radius', radius+'px');
+    // The typeface is part of the theme too. Without this the public pages
+    // kept their own hardcoded display font, so a tag scanned off an asset
+    // looked like a different product from the app that printed it.
+    const FONT_STACKS={
+      'Inter':"'Inter','Segoe UI',system-ui,-apple-system,sans-serif",
+      'Segoe UI':"'Segoe UI',system-ui,-apple-system,sans-serif",
+      'System':"system-ui,-apple-system,'Segoe UI',sans-serif"
+    };
+    const emoji=",'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji'";
+    r.setProperty('--font',(FONT_STACKS[b.font]||FONT_STACKS['Inter'])+emoji);
     // The scan page applies this from <head> so the page never paints in
     // the wrong colours first; <body> does not exist that early, and an
     // unguarded reference here threw and swallowed the class.

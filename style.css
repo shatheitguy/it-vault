@@ -851,11 +851,9 @@ body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
 .lf-note{font-size:12px;color:var(--muted);margin-top:3px;max-width:34ch}
 .lf-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.7px;
   padding:3px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
-.lf-open{color:var(--amber,#f0a020)}
 .lf-lost{color:var(--red,#ff5a5f)}
-.lf-found{color:var(--cyan,#35c9e8)}
+.lf-found{color:var(--amber,#f0a020)}
 .lf-returned{color:var(--grn,#3fbf6f)}
-.lf-closed{color:var(--muted)}
 .lf-set{display:block;margin-top:6px;background:var(--surface2);color:var(--txt);
   border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;
   font-family:var(--font);min-height:30px;max-width:140px}
@@ -889,4 +887,20 @@ body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
   .lftools{width:100%}
   .lfsel{flex:1 1 auto}
   #page-lostfound .topbar .btn{width:100%}
+}
+
+/* Hidden widgets wait here while the layout is being edited, one click from
+   coming back. Nothing on this dashboard is created any more, so nothing is
+   destroyed either: the cross means "not on my dashboard for now". */
+.dashhidden{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1 1 100%;
+  margin-top:4px;padding-top:10px;border-top:1px dashed var(--line)}
+.dh-label{font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.dh-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);
+  color:var(--txt);border:1px dashed var(--line2);border-radius:999px;padding:5px 12px;
+  font-family:var(--font);font-size:12.5px;cursor:pointer;max-width:240px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dh-chip:hover{border-color:var(--accent);border-style:solid}
+.dh-eye{color:var(--accent);font-weight:700;font-size:14px;line-height:1}
+@media(max-width:560px){
+  .dh-chip{max-width:100%;font-size:13px;padding:7px 13px}
 }

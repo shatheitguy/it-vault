@@ -84,12 +84,21 @@ try:
     # the tab title lands in browser history, so it leaks too
     title = re.search(r"<title>(.*?)</title>", page).group(1)
     check("  the tab title gives nothing away", NAME not in title and SERIAL not in title, title)
-    check("  it says whose property it is", "This property belongs to" in page)
+    check("  it says whose property it is", "Property of" in page)
     check("  it shows the contact number", "+971 4 555 0000" in page)
-    check("  the number is tap-to-dial", 'href="tel:+97145550000"' in page, )
+    check("  the number is tap-to-dial", 'href="tel:+97145550000"' in page)
     check("  the asset tag is shown (it is printed on the label anyway)", TAG in page)
     check("  there is a way to report it", "lfOpen" in page and "REPORT TO LOST" in page.upper())
     check("  and no link into the app", "Open Printable Tag" not in page)
+    # a card explaining what it is not deliberately withholding reads as
+    # evasive, and nobody holding a found laptop cares
+    check("  it does not narrate its own privacy",
+          "Nothing about this item" not in page and "go only to" not in page)
+    # the owner's name is the headline; a strip above repeating it was noise
+    check("  the owner name is not printed twice",
+          page.count(">" + "IT-Vault" + "<") <= 2, page.count(">IT-Vault<"))
+    check("  and it is laid out as a card, not a form",
+          "pubcard" in page and "class=powner" in page)
 
     print()
     print("2. Signed in, the same address is still the full record")
@@ -165,7 +174,9 @@ try:
     check("  with the finder's name", one["finder_name"] == "Ravi Kumar")
     check("  and number", one["finder_mobile"] == "+971 55 987 6543")
     check("  joined to the asset it belongs to", one["asset_name"] == NAME)
-    check("  it opens as open", one["status"] == "open", one["status"])
+    # a stranger telling you they have it IS the found state; there is
+    # nothing to triage before that is true
+    check("  a finder's report lands as found", one["status"] == "found", one["status"])
     # the address is kept for abuse, and is nobody's business on a web page
     check("  the reporter's IP is not handed to the browser", "reporter_ip" not in one, one.keys())
     check("  signing out closes the list", anon.get("/api/lostfound").status_code in (401, 403),
@@ -197,6 +208,13 @@ try:
     cc.commit(); cc.close()
     check("  an invented status is refused",
           staff.patch("/api/lostfound/%d" % rid, json={"status": "banana"}).status_code == 400)
+    # five statuses said less than three: open and closed carried no fact a
+    # date did not already carry
+    check("  there are exactly three", A.LOSTFOUND_STATUSES == ["lost", "found", "returned"],
+          A.LOSTFOUND_STATUSES)
+    for gone in ("open", "closed"):
+        check("  %-6s is no longer offered" % gone,
+              staff.patch("/api/lostfound/%d" % rid, json={"status": gone}).status_code == 400)
     check("  and a visitor cannot change one",
           anon.patch("/api/lostfound/%d" % rid, json={"status": "closed"}).status_code in (401, 403))
 
@@ -269,6 +287,10 @@ try:
           'id="uNew"' not in html and 'id="notify_on_create"' not in html)
     css = read("style.css")
     # both sides stripped of spaces, or the needle never matches the haystack
+    check("  reporting an asset lost is a form, not a browser prompt",
+          'id="lostModal"' in html and 'id="lm_asset"' in html)
+    check("  with no prompt() left in the flow",
+          "prompt('Asset ID" not in js and "prompt(\"Asset ID" not in js)
     check("  the report table becomes cards on a phone",
           "#lfGridthead{display:none}" in css.replace(" ", ""))
 finally:
