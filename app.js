@@ -4296,12 +4296,39 @@ function contrastRatio(a, b){
   return (hi+0.05)/(lo+0.05);
 }
 /* Ensure an accent is visible on a surface: if contrast < 2.2, mix toward surface */
-function ensureAccentVisible(accent, surface){
-  if (contrastRatio(accent, surface) >= 2.2) return accent;
-  // blend 35% toward surface
-  const a = hexRgb(accent), s = hexRgb(surface);
-  const mix = a.map((v,i)=> Math.round(v*0.65 + s[i]*0.35));
-  return '#' + mix.map(v=>v.toString(16).padStart(2,'0')).join('');
+/* ---- which scheme, light or dark ----
+   The device decides. Settings still decide everything else -- the accent,
+   the radius, the font, the hue of the ground -- but whether the page is
+   light or dark is the phone's business, not an admin's, because the person
+   holding it already answered that question once for every app they own.
+
+   Only two values feed the whole palette: the page ground and the card
+   surface. Swing those to the scheme in use and every derived value -- text,
+   muted text, lines, button ink -- follows exactly as it did before. A
+   background already on the right side of the line is left untouched, so a
+   dark install in dark mode is pixel for pixel what it always was. */
+function prefersLight(){
+  try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
+  catch(e){ return false; }
+}
+function mixHex(a,b,t){
+  const x=hexRgb(a), y=hexRgb(b);
+  return '#'+x.map((v,i)=>Math.max(0,Math.min(255,Math.round(v+(y[i]-v)*t)))
+    .toString(16).padStart(2,'0')).join('');
+}
+function toScheme(h,wantLight,isSurface){
+  if(isLightHex(h)===wantLight) return h;
+  return wantLight ? mixHex(h,'#ffffff',isSurface?0.97:0.91)
+                   : mixHex(h,'#05070b',isSurface?0.86:0.90);
+}
+function ensureAccentVisible(accent,surface){
+  if(contrastRatio(accent,surface)>=2.2) return accent;
+  // Away from the surface, not into it. The hue is kept -- it is still their
+  // colour, darkened or lightened only as far as it takes to be seen.
+  const away=isLightHex(surface)?'#000000':'#ffffff';
+  let out=accent;
+  for(let i=0;i<6 && contrastRatio(out,surface)<2.2;i++) out=mixHex(out,away,0.18);
+  return out;
 }
 
 /* Normalizes any settings-ish object (from /api/me or /api/settings) into theme fields */
@@ -4341,17 +4368,20 @@ function normCustom(s){
 function applyCustomVars(s){
   const c = normCustom(s);
   const st = document.documentElement.style;
+  const wantLight = prefersLight();
+  const gA = toScheme(c.bgA, wantLight, false), gB = toScheme(c.bgB, wantLight, false);
+  const solidBg = toScheme(c.bg, wantLight, false);
   const bgValue = c.bg_type === 'gradient'
-    ? 'linear-gradient(135deg, ' + c.bgA + ', ' + c.bgB + ')'
-    : c.bg;
-  const baseHex = c.bg_type === 'gradient' ? c.bgA : c.bg;
+    ? 'linear-gradient(135deg, ' + gA + ', ' + gB + ')'
+    : solidBg;
+  const baseHex = c.bg_type === 'gradient' ? gA : solidBg;
   const light = isLightHex(baseHex);
 
   // Keep the light/dark class in sync (used only for matrix + scrollbar tweaks now)
   document.body.classList.toggle('light', light);
 
   // Surface / component background
-  const surface = c.comp_bg;
+  const surface = toScheme(c.comp_bg, wantLight, true);
   const surfaceLight = isLightHex(surface);
 
   // Accents guaranteed visible on surface
@@ -4391,6 +4421,15 @@ function applyCustomVars(s){
   return c;
 }
 window.applyCustomVars = applyCustomVars;
+
+/* Someone flipping their phone to light mode mid-session should watch the app
+   follow, not have to reload it. */
+try{
+  const _mq = window.matchMedia('(prefers-color-scheme: light)');
+  const _onScheme = () => { if (window.__customTheme) applyCustomVars(window.__customTheme); };
+  if (_mq.addEventListener) _mq.addEventListener('change', _onScheme);
+  else if (_mq.addListener) _mq.addListener(_onScheme);
+}catch(e){}
 
 /* ---------- CUSTOMIZATION PAGE ---------- */
 function customGradToggle(){

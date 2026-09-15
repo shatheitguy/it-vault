@@ -6724,7 +6724,7 @@ def asset_public(a_id):
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <style>
-:root{{--font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif}}
+:root{{--font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;color-scheme:light dark}}
 *{{box-sizing:border-box}}
 html{{overflow-y:auto}}
 body{{font-family:var(--font);margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}}
@@ -7278,7 +7278,40 @@ function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255
 // so pick whichever of the two the accent actually contrasts with -- the
 // logged-in app has always done this; the public pages never did.
 function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
-function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
+/* ---- which scheme, light or dark ----
+   The device decides. Settings still decide everything else -- the accent,
+   the radius, the font, the hue of the ground -- but whether the page is
+   light or dark is the phone's business, not an admin's, because the person
+   holding it already answered that question once for every app they own.
+
+   Only two values feed the whole palette: the page ground and the card
+   surface. Swing those to the scheme in use and every derived value -- text,
+   muted text, lines, button ink -- follows exactly as it did before. A
+   background already on the right side of the line is left untouched, so a
+   dark install in dark mode is pixel for pixel what it always was. */
+function prefersLight(){
+  try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
+  catch(e){ return false; }
+}
+function mixHex(a,b,t){
+  const x=hexRgb(a), y=hexRgb(b);
+  return '#'+x.map((v,i)=>Math.max(0,Math.min(255,Math.round(v+(y[i]-v)*t)))
+    .toString(16).padStart(2,'0')).join('');
+}
+function toScheme(h,wantLight,isSurface){
+  if(isLightHex(h)===wantLight) return h;
+  return wantLight ? mixHex(h,'#ffffff',isSurface?0.97:0.91)
+                   : mixHex(h,'#05070b',isSurface?0.86:0.90);
+}
+function ensureAccentVisible(accent,surface){
+  if(contrastRatio(accent,surface)>=2.2) return accent;
+  // Away from the surface, not into it. The hue is kept -- it is still their
+  // colour, darkened or lightened only as far as it takes to be seen.
+  const away=isLightHex(surface)?'#000000':'#ffffff';
+  let out=accent;
+  for(let i=0;i<6 && contrastRatio(out,surface)<2.2;i++) out=mixHex(out,away,0.18);
+  return out;
+}
 function applySignTheme(b){
   try{
     const bgType=b.bg_type==='gradient'?'gradient':'solid';
@@ -7288,9 +7321,11 @@ function applySignTheme(b){
       const found=bgRaw.match(/#[0-9a-fA-F]{3,6}/g)||[];
       bgA=hex6(found[0],'#0a0d13'); bgB=hex6(found[1],'#121826');
     }
-    const baseHex=bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13');
+    const wantLight=prefersLight();
+    bgA=toScheme(bgA,wantLight,false); bgB=toScheme(bgB,wantLight,false);
+    const baseHex=toScheme(bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13'),wantLight,false);
     const bgValue=bgType==='gradient'?('linear-gradient(135deg, '+bgA+', '+bgB+')'):baseHex;
-    const surface=hex6(b.comp_bg,'#121826');
+    const surface=toScheme(hex6(b.comp_bg,'#121826'),wantLight,true);
     const light=isLightHex(baseHex);
     const surfaceLight=isLightHex(surface);
     const accent=ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
@@ -7328,6 +7363,16 @@ function applySignTheme(b){
     const mark=()=>document.body&&document.body.classList.toggle('light', light);
     if(document.body) mark();
     else document.addEventListener('DOMContentLoaded', mark);
+    // a tag scanned on a phone that switches scheme while it is open
+    if(!applySignTheme._bound){
+      applySignTheme._bound=true;
+      try{
+        const mq=window.matchMedia('(prefers-color-scheme: light)');
+        const again=()=>applySignTheme(b);
+        if(mq.addEventListener) mq.addEventListener('change', again);
+        else if(mq.addListener) mq.addListener(again);
+      }catch(e){}
+    }
   }catch(e){}
 }
 '''

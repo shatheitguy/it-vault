@@ -14,6 +14,22 @@
   --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.28),0 6px 20px rgba(0,0,0,.22);
   --font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
   --mono:ui-monospace,'Cascadia Mono','Consolas',Menlo,monospace;
+  /* native scrollbars, form controls and date pickers follow the device
+     too, now that the rest of the page does */
+  color-scheme:light dark;
+}
+
+/* First paint, before app.js has read the settings. The values above are
+   the dark defaults; on a device set to light these are what stops the
+   page flashing dark for the moment it takes JS to work out the real
+   palette. The engine overwrites both sets inline a tick later. */
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#f4f6fa; --bg1:#eef1f7; --surface:#ffffff; --surface2:#f7f9fc;
+    --line:#dde3ec; --line2:#c8d2e0;
+    --txt:#16202e; --muted:#5d6b82; --muted2:#8595ad;
+    --shadow:0 1px 2px rgba(16,32,64,.05),0 6px 18px rgba(16,32,64,.07);
+  }
 }
 body.light{
   /* applyCustomVars() computes bg/surface/line/txt/muted from the chosen palette --
