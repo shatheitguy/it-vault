@@ -1,6 +1,6 @@
 {
-  "versionCode": 12,
-  "versionName": "1.9.0",
+  "versionCode": 13,
+  "versionName": "1.10.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Heartbeat monitoring, offline editing and sync, Material 3 redesign, in-app updates."
+  "notes": "Lost & Found: a scanned tag now shows only who owns the asset and a number to call, with a form for whoever found it. Notifications are one page with per-event switches. Arabic names print correctly on the signed PDF, and the warranty field states its unit."
 }
