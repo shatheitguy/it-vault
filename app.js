@@ -137,10 +137,11 @@ function applyNavPermissions(){
   show('navExport', canDo('assets.export'));
   show('navCatalog', canDo('assets.catalog'));
   show('navTrash',   canDo('assets.trash'));
+  show('navLostFound', canDo('assets.lostfound'));
 
   // Group headings are noise when everything under them is hidden.
   const groups=[
-    ['Records', ['navDirectory','navCatalog','navTrash','navAudit']],
+    ['Records', ['navDirectory','navCatalog','navLostFound','navTrash','navAudit']],
     ['Tools',   ['navScan','navHeartbeat','navBackup']],
   ];
   document.querySelectorAll('.nav-grp').forEach(g=>{
@@ -1590,6 +1591,104 @@ async function printAsset(id){
 }
 
 
+/* ---------- lost & found ---------- */
+/* A report is a stranger's phone number and nothing else -- the whole value
+   of this page is that somebody rings them back. So the number is the one
+   thing that is a tap-to-call link on a phone, and the status is a control
+   rather than a label, because reading a list is not the job. */
+let LF_ROWS=[];
+const LF_STATUS={
+  open:    {label:'OPEN',     cls:'lf-open'},
+  lost:    {label:'LOST',     cls:'lf-lost'},
+  found:   {label:'FOUND',    cls:'lf-found'},
+  returned:{label:'RETURNED', cls:'lf-returned'},
+  closed:  {label:'CLOSED',   cls:'lf-closed'}
+};
+async function loadLostFound(){
+  const r=await api('/api/lostfound');
+  LF_ROWS=r&&r.ok?await r.json():[];
+  renderLostFound();
+}
+function renderLostFound(){
+  const body=document.getElementById('lfBody'); if(!body)return;
+  const want=(document.getElementById('lfFilter')||{value:''}).value;
+  const rows=LF_ROWS.filter(r=>!want||(r.status||'open')===want);
+  const empty=document.getElementById('lfEmpty');
+  if(empty)empty.style.display=rows.length?'none':'block';
+  body.innerHTML=rows.map(r=>{
+    const st=LF_STATUS[r.status||'open']||LF_STATUS.open;
+    const who=r.finder_name
+      ? `<div class="lf-who">${esc(r.finder_name)}</div>`+
+        `<a class="lf-tel" href="tel:${esc((r.finder_mobile||'').replace(/[^\d+]/g,''))}">${esc(r.finder_mobile||'')}</a>`+
+        (r.finder_note?`<div class="lf-note">${esc(r.finder_note)}</div>`:'')
+      : '<span class="muted">reported by staff</span>';
+    const opts=Object.keys(LF_STATUS).map(k=>
+      `<option value="${k}" ${((r.status||'open')===k)?'selected':''}>${LF_STATUS[k].label}</option>`).join('');
+    return `<tr>
+      <td class="mono">${esc(r.ref||('LF-'+r.id))}</td>
+      <td><div class="lf-asset">${esc(r.asset_name||'(deleted asset)')}</div>
+          <div class="mono muted" style="font-size:11px">${esc(r.asset_tag||'')}</div></td>
+      <td><div>${esc((r.reported_at||'').slice(0,16))}</div>
+          <div class="muted" style="font-size:11px">${r.kind==='lost'?'logged by staff':'scanned the tag'}</div></td>
+      <td>${who}</td>
+      <td><span class="lf-badge ${st.cls}">${st.label}</span>
+          <select class="lf-set" data-id="${r.id}">${opts}</select></td>
+      <td><button class="btn sm danger lf-del" data-id="${r.id}">🗑</button></td>
+    </tr>`;
+  }).join('');
+  body.querySelectorAll('.lf-set').forEach(sel=>{
+    sel.onchange=async()=>{
+      const r=await api('/api/lostfound/'+sel.dataset.id,{method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({status:sel.value})});
+      if(r&&r.ok){ toast('✓ STATUS UPDATED'); loadLostFound(); }
+      else toast('✕ could not update that');
+    };
+  });
+  body.querySelectorAll('.lf-del').forEach(btn=>{
+    btn.onclick=async()=>{
+      if(!confirm('Delete this report? The asset itself is not touched.'))return;
+      const r=await api('/api/lostfound/'+btn.dataset.id,{method:'DELETE'});
+      if(r&&r.ok){ toast('✓ REPORT DELETED'); loadLostFound(); }
+    };
+  });
+}
+function bindLostFound(){
+  const f=document.getElementById('lfFilter'); if(f)f.onchange=renderLostFound;
+  const rf=document.getElementById('lfRefreshBtn'); if(rf)rf.onclick=loadLostFound;
+  const lb=document.getElementById('lfLostBtn');
+  if(lb)lb.onclick=async()=>{
+    const ref=prompt('Asset ID or tag to report as lost (e.g. IT-1009):');
+    if(!ref)return;
+    const note=prompt('Anything worth recording? (optional)')||'';
+    const r=await api('/api/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({asset:ref.trim(),note:note})});
+    if(r&&r.ok){ toast('✓ LOGGED AS LOST'); loadLostFound(); }
+    else { const j=r?await r.json().catch(()=>({})):{}; toast('✕ '+(j.error||'could not log that')); }
+  };
+}
+bindLostFound();
+
+/* ---------- notification types ---------- */
+/* Rendered from what the server says it can send, so adding a notification in
+   python does not need a second edit here to make it switchable. */
+let NOTIF_PREFS={};
+function renderNotifTypes(s){
+  const box=document.getElementById('notifTypes'); if(!box)return;
+  const cat=s.notify_catalog||[]; NOTIF_PREFS=s.notify_types||{};
+  box.innerHTML=cat.map(t=>
+    `<label class="toggle ntype"><input type="checkbox" data-nk="${t.key}" ${
+      (NOTIF_PREFS[t.key]!==false)?'checked':''}><span>${esc(t.label)}</span>
+      <code class="nkey">${esc(t.key)}</code></label>`).join('');
+}
+function collectNotifTypes(){
+  const box=document.getElementById('notifTypes');
+  const out={};
+  if(!box)return NOTIF_PREFS;
+  box.querySelectorAll('input[data-nk]').forEach(i=>{ out[i.dataset.nk]=i.checked; });
+  return out;
+}
+
 /* ---------- audit ---------- */
 let _auditRows=[];
 function renderAuditRows(){
@@ -2192,8 +2291,7 @@ async function loadSettings(){
     document.getElementById('s_from').value=s.smtp_from||'';
     document.getElementById('s_user').value=s.smtp_user||'';
     document.getElementById('s_pass').value=s.smtp_pass||'';
-    document.getElementById('uNew').checked=s.notify_new!==0;
-    document.getElementById('uDel').checked=s.notify_delete!==0;
+    renderNotifTypes(s);
     document.getElementById('b_name').value=s.app_name||'IT-Vault';
     document.getElementById('b_logoText').value=s.logo_text||'IT-Vault';
     document.getElementById('b_phone').value=s.company_phone||'';
@@ -2238,7 +2336,7 @@ function applyTheme(t){
   document.body.classList.toggle('light', t === 'light');
 }
 async function saveSettings(){
-  const body={matrix_on:(document.getElementById('matrixOn')||{checked:false}).checked?1:0,smtp_host:document.getElementById('s_host').value.trim(),smtp_port:parseInt(document.getElementById('s_port').value||'587',10),smtp_from:document.getElementById('s_from').value.trim(),smtp_user:document.getElementById('s_user').value.trim(),smtp_pass:document.getElementById('s_pass').value,notify_new:document.getElementById('uNew').checked?1:0,notify_delete:document.getElementById('uDel').checked?1:0};
+  const body={matrix_on:(document.getElementById('matrixOn')||{checked:false}).checked?1:0,smtp_host:document.getElementById('s_host').value.trim(),smtp_port:parseInt(document.getElementById('s_port').value||'587',10),smtp_from:document.getElementById('s_from').value.trim(),smtp_user:document.getElementById('s_user').value.trim(),smtp_pass:document.getElementById('s_pass').value,notify_types:collectNotifTypes()};
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ SETTINGS SAVED');}
   else if(r){toast('✕ '+await apiError(r));}
@@ -3087,10 +3185,10 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-lostfound','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
-  const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-tickets':'navTickets',
+  const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-lostfound':'navLostFound','page-tickets':'navTickets',
     'page-contracts':'navContracts','page-catalog':'navCatalog',
     'page-usettings':'navSettings','page-scan':'navScan','page-heartbeat':'navHeartbeat',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
@@ -3102,6 +3200,7 @@ function showPage(id){
   else if(id==='page-assets'){ load(); loadStats(); }
   else if(id==='page-employees')loadDirectory();
   else if(id==='page-trash'){loadTrash();loadContractsTrash();}
+  else if(id==='page-lostfound')loadLostFound();
   else if(id==='page-tickets')loadTickets();
   else if(id==='page-contracts')loadContracts();
   else if(id==='page-catalog')loadCatalog();
@@ -3950,6 +4049,7 @@ window.loadContracts=loadContracts;
 
 document.getElementById('navDirectory').onclick=()=>showPage('page-employees');
 document.getElementById('navTrash').onclick=()=>showPage('page-trash');
+document.getElementById('navLostFound').onclick=()=>showPage('page-lostfound');
 document.getElementById('navTickets').onclick=()=>showPage('page-tickets');
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
 document.getElementById('logoutBtn').onclick=async()=>{ try{ await api('/api/logout',{method:'POST'}); }catch(e){} location.href='/'; };
@@ -4649,8 +4749,7 @@ async function loadUserSettings(){
   setSel(g('uLang'), s.language, 'en');
   setSel(g('uCur'), s.currency, 'AED');
   setSel(g('uRegion'), s.region, 'UAE');
-  if (g('uNew')) g('uNew').checked = (s.notify_new != 0);
-  if (g('uDel')) g('uDel').checked = (s.notify_delete != 0);
+  renderNotifTypes(s);
   if (g('uMatrix')) g('uMatrix').checked = (s.matrix_on != 0);
   // DB + LDAP config fields
   if (g('db_host')) g('db_host').value = s.db_host || '127.0.0.1';
@@ -4680,9 +4779,6 @@ async function loadUserSettings(){
   if (g('sla_breach_notify')) g('sla_breach_notify').checked = (s.sla_breach_notify != 0);
   if (g('auto_assign_roundrobin')) g('auto_assign_roundrobin').checked = (s.auto_assign_roundrobin != 0);
   // Notification toggles
-  if (g('notify_on_create')) g('notify_on_create').checked = (s.notify_on_create != 0);
-  if (g('notify_on_resolve')) g('notify_on_resolve').checked = (s.notify_on_resolve != 0);
-  if (g('notify_on_reply')) g('notify_on_reply').checked = (s.notify_on_reply != 0);
 
   const page = document.getElementById('page-usettings');
   if (page.dataset._wired) return;
@@ -4817,11 +4913,7 @@ async function loadUserSettings(){
     smtp_user: g('s_user').value.trim(),
     smtp_pass: g('s_pass').value,
     smtp_from: g('s_from').value.trim(),
-    notify_on_create: g('notify_on_create').checked,
-    notify_on_resolve: g('notify_on_resolve').checked,
-    notify_on_reply: g('notify_on_reply').checked,
-    notify_new: g('uNew').checked ? 1 : 0,
-    notify_delete: g('uDel').checked ? 1 : 0
+    notify_types: collectNotifTypes()
   };
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if (r && r.ok){ toast('✓ NOTIFICATIONS SAVED'); }

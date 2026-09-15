@@ -834,3 +834,59 @@ body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
 @media(max-width:820px){
   .dashfilter{flex:1 1 100%;max-width:none;order:99}
 }
+
+/* ---------- Lost & Found ---------- */
+/* Read on a phone, standing next to whoever is asking about the laptop: the
+   number has to be tappable and the status has to be changeable without
+   hunting for a row. */
+.lftools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lfsel{background:var(--surface2);color:var(--txt);border:1px solid var(--line);
+  border-radius:8px;padding:6px 10px;font-family:var(--font);font-size:13px;min-height:34px}
+.lfsel:focus{outline:none;border-color:var(--accent)}
+.lf-asset{font-weight:600}
+.lf-who{font-weight:600}
+.lf-tel{display:inline-block;font-family:var(--mono);font-size:13.5px;color:var(--accent);
+  text-decoration:none;margin-top:2px}
+.lf-tel:hover{text-decoration:underline}
+.lf-note{font-size:12px;color:var(--muted);margin-top:3px;max-width:34ch}
+.lf-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.7px;
+  padding:3px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.lf-open{color:var(--amber,#f0a020)}
+.lf-lost{color:var(--red,#ff5a5f)}
+.lf-found{color:var(--cyan,#35c9e8)}
+.lf-returned{color:var(--grn,#3fbf6f)}
+.lf-closed{color:var(--muted)}
+.lf-set{display:block;margin-top:6px;background:var(--surface2);color:var(--txt);
+  border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;
+  font-family:var(--font);min-height:30px;max-width:140px}
+.lf-set:focus{outline:none;border-color:var(--accent)}
+
+/* ---------- notification types ---------- */
+/* Two columns of checkboxes on a desktop; one on a phone. The event key is
+   shown because it is what turns up in a webhook payload. */
+.ntypes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 18px}
+.ntype{display:flex;align-items:center;gap:8px;min-width:0}
+.ntype span{flex:1 1 auto;min-width:0}
+.nkey{font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.8;
+  white-space:nowrap}
+
+@media(max-width:820px){
+  .ntypes{grid-template-columns:minmax(0,1fr)}
+  .nkey{display:none}
+}
+@media(max-width:760px){
+  /* The table becomes cards: a phone has no room for six columns, and the
+     horizontal scroll a .tablewrap would otherwise give hides the status
+     control off the right edge -- which is the one thing this page is for. */
+  #lfGrid thead{display:none}
+  #lfGrid, #lfGrid tbody, #lfGrid tr, #lfGrid td{display:block;width:auto}
+  #lfGrid tr{border:1px solid var(--line);border-radius:var(--radius);
+    padding:10px 12px;margin-bottom:10px;background:var(--surface2)}
+  #lfGrid td{border:none;padding:3px 0}
+  #lfGrid td:first-child{font-size:11px;color:var(--muted)}
+  .lf-note{max-width:none}
+  .lf-set{max-width:none;width:100%;min-height:38px;font-size:14px}
+  .lftools{width:100%}
+  .lfsel{flex:1 1 auto}
+  #page-lostfound .topbar .btn{width:100%}
+}

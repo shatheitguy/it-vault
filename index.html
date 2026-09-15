@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260915a">
+<link rel="stylesheet" href="/style.css?v=20260916a">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/logo.png">
@@ -30,6 +30,7 @@
       <div class="nav-grp">Records</div>
       <a id="navDirectory" style="display:none"><span class="ni">👥</span>Directory</a>
       <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
+      <a id="navLostFound" style="display:none" data-i18n="LostFound"><span class="ni">🔎</span>Lost &amp; Found</a>
       <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
       <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Log</a>
 
@@ -90,6 +91,37 @@
           <label>DESIGNATIONS <span id="desCount" class="cat-count"></span></label>
           <div class="catrow"><input id="desInput" placeholder="e.g. Manager, Technician"><button class="btn sm" id="desAdd">＋ ADD</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="desBody"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-lostfound" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / LOST &amp; FOUND</div><h2>Lost &amp; Found</h2></div>
+        <div class="spacer"></div>
+        <button class="btn sm" id="lfLostBtn">＋ REPORT AN ASSET LOST</button>
+      </div>
+
+      <div class="panel">
+        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <span>REPORTS</span>
+          <div class="lftools">
+            <select id="lfFilter" class="lfsel">
+              <option value="">All</option>
+              <option value="open">Open</option>
+              <option value="lost">Lost</option>
+              <option value="found">Found</option>
+              <option value="returned">Returned</option>
+              <option value="closed">Closed</option>
+            </select>
+            <button class="btn sm ghost" id="lfRefreshBtn">⟳ REFRESH</button>
+          </div>
+        </div>
+        <p class="sec-hint">Anyone who scans an asset tag can say they have the item. What they leave &mdash;
+          their name and number &mdash; lands here, and whoever it is assigned to is emailed at the same time.</p>
+        <div class="tablewrap">
+          <table id="lfGrid"><thead><tr><th>REF</th><th>ASSET</th><th>REPORTED</th><th>WHO HAS IT</th><th>STATUS</th><th></th></tr></thead><tbody id="lfBody"></tbody></table>
+          <div class="empty" id="lfEmpty" style="display:none">NOTHING REPORTED LOST OR FOUND</div>
         </div>
       </div>
     </div>
@@ -486,16 +518,6 @@
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="saveSettings">Save notifications</button><button class="btn ghost" id="smtpTestBtn">⚡ TEST EMAIL</button><span id="smtpTestMsg" class="muted" style="margin-left:8px"></span></div>
             </div>
-            <div class="panel" style="margin-top:14px"><div class="secthead">ASSET EVENT NOTIFICATIONS</div>
-              <label class="toggle"><input type="checkbox" id="uNew"><span>Notify on new asset created</span></label>
-              <label class="toggle"><input type="checkbox" id="uDel"><span>Notify on asset deletion</span></label>
-            </div>
-            <div class="panel" style="margin-top:14px"><div class="secthead">TICKET EVENT NOTIFICATIONS</div>
-              <label class="toggle"><input type="checkbox" id="notify_on_create"><span>New ticket created</span></label>
-              <label class="toggle"><input type="checkbox" id="notify_on_resolve"><span>Ticket resolved/closed</span></label>
-              <label class="toggle"><input type="checkbox" id="notify_on_reply"><span>Reply added (email requester)</span></label>
-              <p class="muted" style="margin:12px 0 0">All emails sent from the SMTP above. Recipients = users with emails set in their profile.</p>
-            </div>
             <div class="panel" style="margin-top:14px"><div class="secthead">NOTIFICATION CHANNELS</div>
 <p class="sec-hint">Where every notification is delivered &mdash; asset events, tickets, SLA breaches, backups and Heartbeat outage alerts. With none set up they go to users who have an email on their profile. Test a channel before something has to rely on it.</p>
     <div class="tablewrap">
@@ -530,6 +552,12 @@
       </div>
     </div>
   </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">WHAT TO SEND</div>
+              <p class="sec-hint">Every notification the system can send. Whatever is ticked goes out over
+                the channels above &mdash; and by email to users who have an address on their profile when no
+                channel is set up. Untick something and it stops, everywhere.</p>
+              <div class="ntypes" id="notifTypes"></div>
+            </div>
             <div class="m-actions"><button class="btn mag" id="saveNotifBtn">✓ SAVE NOTIFICATIONS</button></div>
           </section>
           <!-- SLA & AUTOMATION -->
@@ -1321,6 +1349,6 @@
   </div>
 </div></div>
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260915a"></script>
+<script src="/app.js?nocache=20260916a"></script>
 </body>
 </html>

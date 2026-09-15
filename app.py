@@ -909,6 +909,7 @@ FEATURE_GROUPS = [
         ("assets.labels",   "Print QR labels",               "read"),
         ("assets.catalog",  "Product catalog",               "read"),
         ("assets.trash",    "Trash (restore / purge)",       "write"),
+        ("assets.lostfound", "Lost & Found reports",         "read"),
     ]},
     {"key": "contracts", "label": "Contracts", "module": "contracts", "items": [
         ("contracts.view",   "View contracts",               "read"),
@@ -1358,6 +1359,29 @@ def init_db():
         config TEXT, enabled TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )""")
+    # Lost & Found. A report comes from a stranger holding the asset -- they
+    # scanned the tag, so they have the thing in their hands and we have no
+    # account for them. All we keep is how to call them back.
+    #
+    # kind separates the two directions this runs in: 'found' is that
+    # stranger's report, 'lost' is staff logging an asset as missing before
+    # anyone finds it. Both live here so one list answers "what is missing
+    # and what has turned up".
+    cur.execute("""CREATE TABLE IF NOT EXISTS LostFound (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        asset_id VARCHAR(64),
+        asset_tag VARCHAR(64),
+        kind VARCHAR(12) DEFAULT 'found',
+        status VARCHAR(16) DEFAULT 'open',
+        finder_name VARCHAR(120),
+        finder_mobile VARCHAR(40),
+        finder_note TEXT,
+        admin_note TEXT,
+        handled_by VARCHAR(80),
+        reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reporter_ip VARCHAR(45)
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
         password VARCHAR(100),
@@ -1794,6 +1818,13 @@ def migrate_schema():
             cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
         except Exception:
             pass
+    # Which notifications are wanted, as one JSON object of {key: bool}. A
+    # column per event is what produced the scatter this replaces -- three
+    # panels of checkboxes, two of which were never read by anything.
+    try:
+        cur.execute("ALTER TABLE Settings ADD COLUMN notify_types TEXT")
+    except Exception:
+        pass
     # Employees: real editable staff/HR ID, separate from EmployeeID (which
     # holds the AD/login username for LDAP-synced staff)
     try:
@@ -2543,7 +2574,7 @@ def create_asset():
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
     cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
-    send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.")
+    send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.", kind="asset.created")
     if (data.get("EmployeeID") or "").strip():
         notify_person_asset_assigned(data["EmployeeID"], {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
     return jsonify({"ok": True, "_id": a_id})
@@ -2624,7 +2655,7 @@ def delete_asset(a_id):
     # GLPI-style soft delete: keep the row, just flag it
     cur.execute("UPDATE Assets SET is_deleted=1 WHERE _id=%s", [a_id])
     c.commit(); c.close()
-    send_notification("IT Guy: Asset removed", f"Asset '{r.get('Name','?')}' (S/N {r.get('Serial','?')}) was removed by {session.get('user')}.")
+    send_notification("IT Guy: Asset removed", f"Asset '{r.get('Name','?')}' (S/N {r.get('Serial','?')}) was removed by {session.get('user')}.", kind="asset.deleted")
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/history")
@@ -3912,7 +3943,7 @@ def _hb_notify(mon, transition, err, all_channels=None):
     if not channels:
         # nothing configured: fall back to the notification address in Settings
         try:
-            send_notification(subject, body)
+            send_notification(subject, body, kind="heartbeat.down")
         except Exception as e:
             print(f"[itvault] heartbeat alert not sent for {mon.get('name')}: {e}", flush=True)
         return
@@ -4575,6 +4606,27 @@ def settings():
                 retain = 7
             cur.execute("UPDATE Settings SET backup_schedule=%s, backup_scope=%s, backup_retain=%s WHERE id=1",
                         (sched, bscope, retain))
+        # Which notifications are wanted. Stored as one JSON object, and
+        # mirrored into the columns that predate it so the ticket code -- which
+        # reads notify_on_create and friends directly -- keeps agreeing with
+        # what the page shows.
+        if "notify_types" in d:
+            raw = d.get("notify_types")
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {}
+            prefs = {k: bool(v) for k, v in (raw or {}).items() if k in NOTIFY_KEYS}
+            cur.execute("UPDATE Settings SET notify_types=%s WHERE id=1",
+                        [json.dumps(prefs)])
+            for key, _label, legacy in NOTIFY_TYPES:
+                if legacy and key in prefs:
+                    try:
+                        cur.execute(f"UPDATE Settings SET `{legacy}`=%s WHERE id=1",
+                                    [1 if prefs[key] else 0])
+                    except Exception:
+                        pass
         # persist DB connection config (points the app at a different MariaDB)
         if any(k in d for k in ("db_host", "db_port", "db_name", "db_user", "db_pass")):
             save_db_config(d.get("db_host", DB_HOST), d.get("db_port", DB_PORT),
@@ -4637,6 +4689,10 @@ def settings():
                                           "unifi_is_os","unifi_verify_ssl",
                                           "backup_schedule","backup_scope","backup_retain","backup_last_run",
                                           "company_phone","company_address","has_letterhead"]} | {
+                "notify_types": _notify_prefs(s),
+                # the page renders the list from this, so a type added in
+                # python needs no second edit in the html
+                "notify_catalog": [{"key": k, "label": lbl} for k, lbl, _c in NOTIFY_TYPES],
                 "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME, "db_user": DB_USER,
                 "ldap_bind_pass_set": bool(s.get("ldap_bind_pass")),
                 "unifi_pass_set": bool(s.get("unifi_pass")),
@@ -5646,7 +5702,74 @@ def _email_profile_addresses(subject, body):
         print("notify error:", e); return False
 
 
-def send_notification(subject, body):
+# Every notification the system can send, in the order they are shown in
+# Settings. The fourth field is the column that used to hold this toggle, if
+# there was one: it seeds the default so an install that had already turned
+# something off does not get it switched back on by an upgrade.
+#
+# The two asset toggles are in here because they were in the UI and did
+# nothing at all -- the create and delete notifications fired regardless of
+# them, which is its own small answer to "why do I get mail I turned off".
+NOTIFY_TYPES = [
+    ("asset.created",     "Asset added",                      "notify_new"),
+    ("asset.deleted",     "Asset deleted",                    "notify_delete"),
+    ("asset.checkout",    "Asset checked out or returned",    None),
+    ("asset.assigned",    "Asset assigned to someone",        None),
+    ("asset.status",      "Asset status changed",              None),
+    ("lostfound.found",   "Someone reports they found an asset", None),
+    ("lostfound.status",  "A Lost & Found report changes status", None),
+    ("ticket.created",    "Ticket raised",                     "notify_on_create"),
+    ("ticket.assigned",   "Ticket assigned",                   None),
+    ("ticket.replied",    "Ticket reply added",                "notify_on_reply"),
+    ("ticket.resolved",   "Ticket resolved or closed",         "notify_on_resolve"),
+    ("sla.breach",        "SLA breached",                      "sla_breach_notify"),
+    ("heartbeat.down",    "Monitor down or recovered",         None),
+    ("contract.expiring", "Contract or warranty expiring",     None),
+    ("backup.failed",     "Scheduled backup failed",           None),
+]
+NOTIFY_KEYS = [k for k, _l, _c in NOTIFY_TYPES]
+
+
+def _notify_prefs(srow=None):
+    """The {key: bool} map, filled in from the legacy columns where unset.
+
+    Unknown or missing keys default to on: a new notification type should
+    arrive, not be silently withheld until someone finds the checkbox.
+    """
+    s = srow
+    if s is None:
+        try:
+            c = conn(); cur = c.cursor()
+            cur.execute("SELECT * FROM Settings WHERE id=1")
+            s = cur.fetchone() or {}
+            c.close()
+        except Exception:
+            s = {}
+    saved = {}
+    raw = (s or {}).get("notify_types")
+    if raw:
+        try:
+            saved = json.loads(raw) or {}
+        except Exception:
+            saved = {}
+    out = {}
+    for key, _label, legacy in NOTIFY_TYPES:
+        if key in saved:
+            out[key] = bool(saved[key])
+        elif legacy is not None and legacy in (s or {}):
+            out[key] = bool((s or {}).get(legacy, 1))
+        else:
+            out[key] = True
+    return out
+
+
+def _notify_enabled(kind, srow=None):
+    if not kind:
+        return True
+    return bool(_notify_prefs(srow).get(kind, True))
+
+
+def send_notification(subject, body, kind=None):
     """Every system notification, down the channels configured in Settings.
 
     Channels used to be a Heartbeat-only idea, which meant two places to set
@@ -5660,7 +5783,12 @@ def send_notification(subject, body):
     channel never stops the others: each send is guarded on its own, because
     the whole point of several channels is that one of them still arrives.
     """
-    payload = {"event": "notification", "subject": subject, "message": body}
+    # A type switched off in Settings stops here, before any channel is
+    # touched, so one decision covers email and every channel alike.
+    if kind and not _notify_enabled(kind):
+        return False
+    payload = {"event": "notification", "subject": subject, "message": body,
+               "kind": kind or "notification"}
     try:
         channels = [ch for ch in _hb_all_channels() if int(ch.get("enabled") or 0)]
     except Exception:
@@ -5805,7 +5933,7 @@ def checkout_asset(a_id):
                 (a_id, user, nowstr(), expected, note))
     c.commit(); c.close()
     audit(session.get("user"), "CHECKOUT", a_id, f"{a['Name']} -> {user}" + (f" (due {expected})" if expected else ""))
-    send_notification("IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.")
+    send_notification("IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.", kind="asset.checkout")
     try:
         cc = conn(); ccur = cc.cursor()
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); full_asset = ccur.fetchone(); cc.close()
@@ -6527,6 +6655,47 @@ def asset_public(a_id):
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if logo_uri else ""
     contact_bits = [c for c in [company_phone, company_address] if c]
     contact_html = " &nbsp;·&nbsp; ".join(contact_bits) if contact_bits else "—"
+
+    # Who is looking decides what this page is.
+    #
+    # Anyone holding the tag can open it -- that is the point of a QR on an
+    # asset -- so for a stranger it is a lost-property card: who owns the
+    # thing, the number to call, and a way to say "I have it". It prints no
+    # serial, no assignee, no department, no email, no price.
+    #
+    # Signed in, it stays the full record, because scanning a tag to see
+    # what the asset actually is remains the reason IT scans tags.
+    from html import escape as _esc
+    tag_txt = asset.get("AssetTag") or asset["_id"][:12]
+    staff_view = bool(session.get("user"))
+    if staff_view:
+        page_title = f"Asset {asset['Name']}"
+        main_html = f"""
+ <div class=assetid-badge>{tag_txt}</div>
+ <div class=title>{asset['Name']}</div>
+ <table>{rows_html}</table>
+ <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
+ <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
+ <div class=foot>Scanned from {app_name} • {base}</div>"""
+        lf_script = ""
+    else:
+        # the tab title is part of what leaks: it lands in browser history
+        page_title = f"{app_name} — Property tag"
+        phone = (company_phone or "").strip()
+        dial = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+        if phone:
+            contact_inner = ("<span class=clabel>Contact number</span>"
+                             f'<a class=phone href="tel:{_esc(dial)}">{_esc(phone)}</a>')
+        else:
+            contact_inner = ("<span class=clabel>Contact</span>"
+                             "<b>Use the form below and we will call you</b>")
+        if (company_address or "").strip():
+            contact_inner += f"<div class=addr>{_esc(company_address.strip())}</div>"
+        main_html = LOSTFOUND_PUBLIC_HTML.format(
+            owner=_esc(app_name), tag=_esc(tag_txt), contact=contact_inner)
+        lf_script = ("<script>var ASSET_REF=" + json.dumps(tag_txt)
+                     + ",OWNER=" + json.dumps(app_name) + ";"
+                     + LOSTFOUND_PUBLIC_JS + "</script>")
     # Rendered into the document rather than fetched on load: a QR is
     # scanned on a phone on mobile data, and a round trip before the
     # colours land is a visible flash of the wrong theme. PUBLIC_THEME_JS
@@ -6535,7 +6704,7 @@ def asset_public(a_id):
                     + "applySignTheme("
                     + json.dumps(brand_theme, default=str) + ");</script>")
     return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Asset {asset['Name']}</title>
+<title>{page_title}</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <style>
@@ -6558,16 +6727,303 @@ tr:last-child td{{border-bottom:none}}
 .contact b{{color:var(--accent)}}
 .foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
 a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:var(--btn-text,#04121f);border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
-@media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} }}
+.owner{{text-align:center;padding:20px 14px;margin:2px 0 16px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--radius)}}
+.ownerlead{{font-size:11px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:var(--muted)}}
+.ownername{{font-family:'Orbitron';font-weight:900;font-size:21px;line-height:1.3;margin-top:8px;color:var(--accent);word-break:break-word}}
+.clabel{{display:block;font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}}
+.phone{{display:inline-block;font-family:'Share Tech Mono',var(--mono);font-size:21px;font-weight:700;letter-spacing:1px;color:var(--txt);text-decoration:none;margin-top:5px}}
+.addr{{font-size:13px;color:var(--muted);margin-top:6px}}
+.lfbtn{{display:block;width:100%;margin-top:16px;padding:14px 16px;background:var(--accent);color:var(--btn-text,#04121f);border:none;border-radius:var(--radius);font-family:'Rajdhani',sans-serif;font-weight:700;font-size:15px;letter-spacing:.4px;cursor:pointer}}
+.lfbtn:disabled{{opacity:.6;cursor:default}}
+.lff{{margin-top:14px;display:grid;gap:11px}}
+.lff label{{display:block;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:5px}}
+.lff input,.lff textarea{{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:var(--radius);padding:11px 12px;font-family:'Rajdhani',sans-serif;font-size:16px}}
+.lff input:focus,.lff textarea:focus{{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}}
+.lfmsg{{font-size:13px;font-weight:600}}
+.err{{color:#ff5a5f}}
+.lfok{{margin-top:16px;padding:18px;text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);font-size:15px;line-height:1.5}}
+.ref{{font-family:'Share Tech Mono',var(--mono);font-size:13px;color:var(--muted);margin-top:8px}}
+@media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} .ownername{{font-size:18px}} }}
 </style>{theme_script}</head><body><div class=wrap><div class=card>
  <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
- <div class=assetid-badge>{asset.get("AssetTag") or asset["_id"][:12]}</div>
- <div class=title>{asset['Name']}</div>
- <table>{rows_html}</table>
- <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
- <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
- <div class=foot>Scanned from {app_name} • {base}</div>
-</div></div></body></html>"""
+{main_html}
+</div></div>{lf_script}</body></html>"""
+
+# ---------- Lost & Found ---------------------------------------------------
+LOSTFOUND_STATUSES = ["open", "lost", "found", "returned", "closed"]
+
+# The card a stranger gets when they scan a tag. Whoever is holding the asset
+# needs exactly two things: who it belongs to, and how to hand it back. They
+# do not need the serial number, who it is assigned to, that person's
+# department, designation and email address, or what the thing cost -- all of
+# which this page used to print to anyone who scanned it.
+LOSTFOUND_PUBLIC_HTML = """
+ <div class=owner>
+  <div class=ownerlead>This property belongs to</div>
+  <div class=ownername>{owner}</div>
+ </div>
+ <div class=assetid-badge>{tag}</div>
+ <div class=contact>{contact}</div>
+ <button class=lfbtn id=lfOpen type=button>&#128269; I FOUND THIS &mdash; REPORT TO LOST &amp; FOUND</button>
+ <form class=lff id=lfForm style="display:none">
+  <div><label for=lfName>Your name</label><input id=lfName maxlength=120 autocomplete=name></div>
+  <div><label for=lfPhone>Your mobile number</label><input id=lfPhone maxlength=40 inputmode=tel autocomplete=tel></div>
+  <div><label for=lfNote>Where did you find it? (optional)</label><textarea id=lfNote rows=2 maxlength=500></textarea></div>
+  <button class=lfbtn type=submit id=lfSend>SUBMIT REPORT</button>
+  <div class=lfmsg id=lfMsg></div>
+ </form>
+ <div class=lfok id=lfDone style="display:none"></div>
+ <div class=foot>Reported details go only to {owner}. Nothing about this item is shown here.</div>
+"""
+
+# Plain string, not an f-string: it is javascript, and every brace in it is
+# javascript's. ASSET_REF/OWNER are appended as JSON by the caller.
+LOSTFOUND_PUBLIC_JS = """
+(function(){
+  var open=document.getElementById('lfOpen'), form=document.getElementById('lfForm'),
+      done=document.getElementById('lfDone'), msg=document.getElementById('lfMsg'),
+      send=document.getElementById('lfSend');
+  if(!open||!form) return;
+  open.addEventListener('click',function(){
+    open.style.display='none'; form.style.display='grid';
+    document.getElementById('lfName').focus();
+  });
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var n=document.getElementById('lfName').value.trim(),
+        p=document.getElementById('lfPhone').value.trim(),
+        note=document.getElementById('lfNote').value.trim();
+    if(!n||!p){ msg.className='lfmsg err';
+      msg.textContent='Please give your name and a mobile number so we can reach you.'; return; }
+    send.disabled=true; send.textContent='SENDING...'; msg.className='lfmsg'; msg.textContent='';
+    fetch('/api/public/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({asset:ASSET_REF,name:n,mobile:p,note:note})})
+    .then(function(r){ return r.json().catch(function(){return {};})
+      .then(function(j){ return {ok:r.ok&&j&&j.ok, error:(j&&j.error)||'Could not send that just now.', ref:j&&j.ref}; }); })
+    .then(function(res){
+      if(!res.ok) throw new Error(res.error);
+      form.style.display='none';
+      // textContent throughout: whatever was typed is never parsed as markup
+      var h=document.createElement('b'); h.textContent='Thank you.';
+      var t=document.createElement('div');
+      t.textContent=OWNER+' has been notified and will contact you on '+p+'.';
+      done.textContent=''; done.appendChild(h); done.appendChild(t);
+      if(res.ref){ var r2=document.createElement('div'); r2.className='ref';
+        r2.textContent='Reference '+res.ref; done.appendChild(r2); }
+      done.style.display='block';
+    })
+    .catch(function(err){
+      send.disabled=false; send.textContent='SUBMIT REPORT';
+      msg.className='lfmsg err'; msg.textContent=err.message;
+    });
+  });
+})();
+"""
+
+# A public endpoint has no account behind it, so the limit is the address it
+# came from. Five an hour is far more than a genuine finder needs and far
+# less than is worth anyone's while.
+_PUBLIC_HITS = {}
+
+
+def _client_ip():
+    fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return (fwd or request.remote_addr or "?")[:45]
+
+
+def _public_throttle(key, limit=5, window=3600):
+    """False when this caller has used up its allowance for the window."""
+    now = time.time()
+    hits = [t for t in _PUBLIC_HITS.get(key, []) if now - t < window]
+    if len(hits) >= limit:
+        _PUBLIC_HITS[key] = hits
+        return False
+    hits.append(now)
+    _PUBLIC_HITS[key] = hits
+    if len(_PUBLIC_HITS) > 2000:      # never let a public route grow a leak
+        for k in [k for k, v in list(_PUBLIC_HITS.items())
+                  if not [t for t in v if now - t < window]]:
+            _PUBLIC_HITS.pop(k, None)
+    return True
+
+
+def _notify_lostfound(asset, rec, event="found"):
+    """Tell the admins, and the person it is assigned to, that it turned up.
+
+    The finder's name and number are the whole point of the message: someone
+    has to ring them back, and the report is useless if it only lands in a
+    list nobody is watching.
+    """
+    tag = asset.get("AssetTag") or asset.get("_id", "")
+    an = (asset.get("Name") or "").strip()
+    what = f"{tag} ({an})" if an else tag
+    if event == "found":
+        subject = f"Found: {what} - someone has it"
+        lines = [f"Someone scanned the tag on {what} and reported that they have it.", ""]
+        lines += [f"Name:   {rec.get('finder_name') or '-'}",
+                  f"Mobile: {rec.get('finder_mobile') or '-'}"]
+        if rec.get("finder_note"):
+            lines.append(f"Where:  {rec['finder_note']}")
+        lines += ["", f"Reference: LF-{rec.get('id')}",
+                  "Open Lost & Found in IT-Vault to call them back and record the outcome."]
+        kind = "lostfound.found"
+    else:
+        subject = f"Lost & Found: {what} is now {rec.get('status', '?')}"
+        lines = [f"Report LF-{rec.get('id')} for {what} was set to "
+                 f"{(rec.get('status') or '?').upper()}"
+                 f" by {rec.get('handled_by') or 'someone'}."]
+        if rec.get("admin_note"):
+            lines += ["", f"Note: {rec['admin_note']}"]
+        kind = "lostfound.status"
+    body = "\n".join(lines)
+    sent = send_notification(subject, body, kind=kind)
+    if (asset.get("EmployeeID") or "").strip() and _notify_enabled(kind):
+        try:
+            to = _lookup_person_email(asset["EmployeeID"])
+            if to:
+                _send_simple_email(to, subject, body)
+                sent = True
+        except Exception as e:
+            print("lost&found employee mail error:", e)
+    return sent
+
+
+@app.route("/api/public/lostfound", methods=["POST"])
+def public_lostfound_report():
+    """A stranger holding the asset tells us they have it.
+
+    Unauthenticated of necessity: whoever picks up a laptop in a taxi has no
+    account here. So every field is length-capped, the address is throttled,
+    a report can only be filed against an asset that already exists, and the
+    response says nothing about the asset -- not even its name. An invalid
+    tag and a valid one differ only in the status code.
+    """
+    d = request.get_json(silent=True) or {}
+    ref = (d.get("asset") or "").strip()[:64]
+    name = (d.get("name") or "").strip()[:120]
+    mobile = (d.get("mobile") or "").strip()[:40]
+    note = (d.get("note") or "").strip()[:500]
+    if not name or not mobile:
+        return jsonify({"error": "Please give your name and a mobile number."}), 400
+    ip = _client_ip()
+    if not _public_throttle("lf:" + ip):
+        return jsonify({"error": "Too many reports from here just now. "
+                                 "Please call the number shown above."}), 429
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets "
+                "WHERE (_id=%s OR AssetTag=%s) AND is_deleted=0 LIMIT 1", (ref, ref))
+    a = cur.fetchone()
+    if not a:
+        c.close()
+        return jsonify({"error": "That tag was not recognised."}), 404
+    cur.execute("INSERT INTO LostFound (asset_id, asset_tag, kind, status, finder_name, "
+                "finder_mobile, finder_note, reported_at, updated_at, reporter_ip) "
+                "VALUES (%s,%s,'found','open',%s,%s,%s,NOW(),NOW(),%s)",
+                (a["_id"], a.get("AssetTag") or "", name, mobile, note, ip))
+    c.commit()
+    rid = cur.lastrowid
+    c.close()
+    audit("public", "LOSTFOUND_REPORT", a["_id"], f"{name} / {mobile}")
+    try:
+        _notify_lostfound(a, {"id": rid, "finder_name": name, "finder_mobile": mobile,
+                              "finder_note": note}, event="found")
+    except Exception as e:
+        print("lost&found notify error:", e)
+    return jsonify({"ok": True, "ref": f"LF-{rid}"})
+
+
+@app.route("/api/lostfound")
+@auth_required(module="assets", level="read")
+def lostfound_list():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT lf.*, a.Name AS asset_name, a.Status AS asset_status, "
+                "a.EmployeeID AS employee_id FROM LostFound lf "
+                "LEFT JOIN Assets a ON a._id=lf.asset_id ORDER BY lf.id DESC")
+    rows = [dict(r) for r in cur.fetchall()]
+    c.close()
+    for r in rows:
+        r["ref"] = f"LF-{r['id']}"
+        for k in ("reported_at", "updated_at"):
+            if r.get(k) is not None:
+                r[k] = str(r[k])
+        r.pop("reporter_ip", None)     # kept for abuse, not for display
+    return jsonify(rows)
+
+
+@app.route("/api/lostfound", methods=["POST"])
+@auth_required(module="assets", level="write")
+def lostfound_create():
+    """Staff logging an asset as missing, before anyone has found it."""
+    d = request.get_json(force=True, silent=True) or {}
+    ref = (d.get("asset") or "").strip()
+    if not ref:
+        return jsonify({"error": "asset required"}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets "
+                "WHERE (_id=%s OR AssetTag=%s) AND is_deleted=0 LIMIT 1", (ref, ref))
+    a = cur.fetchone()
+    if not a:
+        c.close(); return jsonify({"error": "asset not found"}), 404
+    cur.execute("INSERT INTO LostFound (asset_id, asset_tag, kind, status, admin_note, "
+                "handled_by, reported_at, updated_at) "
+                "VALUES (%s,%s,'lost','lost',%s,%s,NOW(),NOW())",
+                (a["_id"], a.get("AssetTag") or "", (d.get("note") or "").strip()[:500],
+                 session.get("user")))
+    c.commit(); rid = cur.lastrowid
+    cur.execute("UPDATE Assets SET Status='Lost/Stolen' WHERE _id=%s", [a["_id"]])
+    c.commit(); c.close()
+    audit(session.get("user"), "LOSTFOUND_LOST", a["_id"], f"reported lost (LF-{rid})")
+    return jsonify({"ok": True, "id": rid, "ref": f"LF-{rid}"})
+
+
+@app.route("/api/lostfound/<int:rid>", methods=["PATCH", "DELETE"])
+@auth_required(module="assets", level="write")
+def lostfound_update(rid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM LostFound WHERE id=%s", [rid])
+    rec = cur.fetchone()
+    if not rec:
+        c.close(); return jsonify({"error": "not found"}), 404
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM LostFound WHERE id=%s", [rid])
+        c.commit(); c.close()
+        audit(session.get("user"), "LOSTFOUND_DELETE", rec.get("asset_id") or "", f"LF-{rid}")
+        return jsonify({"ok": True})
+    d = request.get_json(force=True, silent=True) or {}
+    status = (d.get("status") or rec.get("status") or "open").strip().lower()
+    if status not in LOSTFOUND_STATUSES:
+        return jsonify({"error": "unknown status"}), 400
+    note = d.get("admin_note")
+    note = rec.get("admin_note") if note is None else str(note).strip()[:500]
+    cur.execute("UPDATE LostFound SET status=%s, admin_note=%s, handled_by=%s, "
+                "updated_at=NOW() WHERE id=%s",
+                (status, note, session.get("user"), rid))
+    c.commit()
+    # The asset's own status follows the report, which is the whole reason to
+    # record one: 'lost' marks it Lost/Stolen, and getting it back puts it
+    # back in the pool -- but only from Lost/Stolen, so this can never
+    # overwrite a Checked-Out or Under-Maintenance that someone else set.
+    cur.execute("SELECT _id, AssetTag, Name, Status, EmployeeID FROM Assets WHERE _id=%s",
+                [rec.get("asset_id")])
+    a = cur.fetchone()
+    if a:
+        if status == "lost" and a.get("Status") != "Lost/Stolen":
+            cur.execute("UPDATE Assets SET Status='Lost/Stolen' WHERE _id=%s", [a["_id"]])
+            c.commit()
+        elif status == "returned" and a.get("Status") == "Lost/Stolen":
+            cur.execute("UPDATE Assets SET Status='Available' WHERE _id=%s", [a["_id"]])
+            c.commit()
+    c.close()
+    audit(session.get("user"), "LOSTFOUND_STATUS", rec.get("asset_id") or "",
+          f"LF-{rid} -> {status}")
+    if a:
+        try:
+            _notify_lostfound(a, {"id": rid, "status": status, "admin_note": note,
+                                  "handled_by": session.get("user")}, event="status")
+        except Exception as e:
+            print("lost&found status notify error:", e)
+    return jsonify({"ok": True, "status": status})
+
 
 # ---------- invoice attachment ----------
 ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"}
