@@ -114,6 +114,13 @@ services:
     image: mariadb:${MARIADB_TAG:-latest}
     container_name: itvault-db
     restart: unless-stopped
+    # MariaDB's own default is still latin1, and MARIADB_DATABASE below
+    # creates the database with the server default. On a latin1 server an
+    # Arabic name is stored as a row of question marks -- destroyed on the
+    # way in, before anything that renders it gets a say. Only a database
+    # being created for the first time is affected; an existing volume
+    # keeps whatever it already has.
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     environment:
       MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-}
       MARIADB_DATABASE: ${DB_NAME:-itvault}

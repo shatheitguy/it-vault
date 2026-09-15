@@ -728,6 +728,12 @@ provision_db() {
     step "Creating volume itvault_db"
     run volume create itvault_db
 
+    # The two --character-set-server flags at the end are passed to the
+    # server, not to docker: MariaDB still defaults to latin1, and
+    # MARIADB_DATABASE creates the database with the server default. On a
+    # latin1 server an Arabic asset or signer name is stored as a row of
+    # question marks -- lost on the way in, before anything that displays it
+    # is involved. Only a first-time initialisation is affected.
     step "Starting MariaDB as '$DB_CONTAINER' (not published to the network)"
     run run -d \
         --name "$DB_CONTAINER" \
@@ -740,7 +746,8 @@ provision_db() {
         -v itvault_db:/var/lib/mysql \
         --health-cmd "healthcheck.sh --connect --innodb_initialized" \
         --health-interval 5s --health-timeout 5s --health-retries 20 \
-        "$DB_IMAGE"
+        "$DB_IMAGE" \
+        --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 
     [ -n "$DRY" ] && return 0
 

@@ -7146,6 +7146,90 @@ def verify_sign():
     c.close()
     return jsonify({"ok": True, "asset": a})
 
+# --------------------------------------------------------------------------
+# Non-Latin text in a generated PDF -- an Arabic name, in practice
+#
+# Someone signed for an asset and typed their name in Arabic, and the PDF
+# came back as a row of boxes. There are two separate causes, and fixing
+# either one on its own still leaves the name wrong:
+#
+#   1. The font. reportlab's built-in Helvetica is a Latin-1 font with no
+#      Arabic glyphs at all, and a glyph a font does not have is drawn as
+#      .notdef -- the box. So the document has to use a font that has them.
+#      DejaVu Sans (fonts/, Bitstream Vera licence) covers Latin, Arabic,
+#      the contextual presentation forms and the lam-alef ligatures.
+#
+#   2. The layout. A PDF has no text engine: it stores glyphs at
+#      coordinates, in the order they were written, and no reader will
+#      rearrange them. Arabic letters change shape according to their
+#      neighbours and run right to left, so the string has to be shaped and
+#      reordered here, before it goes onto the page.
+#
+# Both steps are no-ops on Latin text, so nothing that worked before moves.
+FONT_DIR = os.path.join(BASE, "fonts")
+PDF_FONT, PDF_FONT_BOLD = "Helvetica", "Helvetica-Bold"
+_pdf_fonts_done = False
+
+def _register_pdf_fonts():
+    """Register the bundled Unicode font once; keep Helvetica if it is absent.
+
+    A missing font file must never stop an acknowledgement being issued --
+    a Latin name in Helvetica beats an exception and no PDF at all.
+    """
+    global _pdf_fonts_done, PDF_FONT, PDF_FONT_BOLD
+    if _pdf_fonts_done:
+        return
+    _pdf_fonts_done = True
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.fonts import addMapping
+        reg = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+        bold = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+        if not (os.path.exists(reg) and os.path.exists(bold)):
+            print("PDF: %s is missing the DejaVu fonts -- non-Latin names will not render" % FONT_DIR)
+            return
+        pdfmetrics.registerFont(TTFont("DejaVuSans", reg))
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold))
+        # <b>...</b> inside a Paragraph resolves the bold face through these
+        pdfmetrics.registerFontFamily("DejaVuSans", normal="DejaVuSans", bold="DejaVuSans-Bold",
+                                      italic="DejaVuSans", boldItalic="DejaVuSans-Bold")
+        addMapping("DejaVuSans", 0, 0, "DejaVuSans")
+        addMapping("DejaVuSans", 1, 0, "DejaVuSans-Bold")
+        PDF_FONT, PDF_FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
+    except Exception as e:
+        print("PDF font registration failed, falling back to Helvetica:", e)
+
+# Hebrew, Arabic, Syriac, Thaana and N'Ko, plus the presentation-form blocks
+# a reshaper emits.
+_RTL_RANGES = ((0x0590, 0x08FF), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFF))
+
+def _has_rtl(s):
+    return any(lo <= ord(ch) <= hi for ch in s for lo, hi in _RTL_RANGES)
+
+def _pdf_text(value):
+    """Shape and reorder a string so a PDF reader shows it as it was typed.
+
+    Latin text is returned untouched, so this is safe to wrap around every
+    value that goes into the document rather than having to guess which
+    ones need it. If the shaping libraries are missing the text is returned
+    as typed: the letters are then at least all present and readable one by
+    one, which is a much smaller failure than a row of boxes.
+    """
+    s = "" if value is None else str(value)
+    if not s or not _has_rtl(s):
+        return s
+    try:
+        import arabic_reshaper
+        try:
+            from bidi.algorithm import get_display   # python-bidi 0.4.x
+        except ImportError:
+            from bidi import get_display             # 0.6.x moved it up
+        return get_display(arabic_reshaper.reshape(s))
+    except Exception as e:
+        print("PDF: cannot shape right-to-left text (%s); printing it unshaped" % e)
+        return s
+
 def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     """One-page A4 PDF of the signed acknowledgement -- Asset ID front and
     center, full details, and the captured signature -- emailed to both the
@@ -7156,6 +7240,11 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER
+    from xml.sax.saxutils import escape
+
+    # every glyph on this page comes out of the bundled font, so an Arabic
+    # name is not a special case anyone has to spot first
+    _register_pdf_fonts()
 
     # A letterhead is a whole printed page, so it has to be a full-page
     # background behind the flowed content (drawn via onFirstPage/onLaterPages
@@ -7177,6 +7266,9 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=top_margin, bottomMargin=bottom_margin,
                              leftMargin=16 * mm, rightMargin=16 * mm)
     styles = getSampleStyleSheet()
+    # the stock styles are Helvetica; anything using them plainly would sit
+    # in a different face from the rest of the page
+    body_style = ParagraphStyle("body", parent=styles["Normal"], fontName=PDF_FONT)
     story = []
 
     bn = brand_name()
@@ -7196,13 +7288,15 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                 pass
 
     title_style = ParagraphStyle("title", parent=styles["Title"], alignment=TA_CENTER,
-                                  textColor=colors.HexColor("#101622"))
-    story.append(Paragraph(f"{bn} — Asset Acknowledgement", title_style))
+                                  fontName=PDF_FONT_BOLD, textColor=colors.HexColor("#101622"))
+    # escape(): a Paragraph parses its text as markup, so an organisation
+    # name containing & or < would otherwise raise and cost the whole PDF
+    story.append(Paragraph(escape(_pdf_text(f"{bn} — Asset Acknowledgement")), title_style))
 
     tag_style = ParagraphStyle("tag", parent=styles["Normal"], alignment=TA_CENTER, fontSize=20,
-                                fontName="Helvetica-Bold", textColor=colors.HexColor("#ff3b30"),
+                                fontName=PDF_FONT_BOLD, textColor=colors.HexColor("#ff3b30"),
                                 spaceBefore=6, spaceAfter=14)
-    story.append(Paragraph(asset.get("AssetTag") or "—", tag_style))
+    story.append(Paragraph(escape(_pdf_text(asset.get("AssetTag") or "—")), tag_style))
 
     # Same field set/order/labels as the web "print asset" page, so the
     # emailed PDF and a manual print of the same asset read the same way.
@@ -7231,9 +7325,13 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
             ["Designation", asset.get("Designation") or "—"],
             ["Email", asset.get("Email") or "—"],
         ]
+    # the label column is ours and always English; the value column is
+    # whatever was typed into the asset, which is where Arabic turns up
+    rows = [[lbl, _pdf_text(val)] for lbl, val in rows]
     t = Table(rows, colWidths=[45 * mm, 115 * mm])
     t.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, -1), PDF_FONT),
+        ("FONTNAME", (0, 0), (0, -1), PDF_FONT_BOLD),
         ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#555555")),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
@@ -7245,7 +7343,7 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     story.append(Spacer(1, 18))
 
     story.append(Paragraph("Signature", ParagraphStyle(
-        "sig-label", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold", spaceAfter=6)))
+        "sig-label", parent=styles["Normal"], fontSize=11, fontName=PDF_FONT_BOLD, spaceAfter=6)))
     if sig_data_url and sig_data_url.startswith("data:image"):
         try:
             b64 = sig_data_url.split(",", 1)[1]
@@ -7257,9 +7355,9 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
             scale = min(max_w / iw, max_h / ih) if iw and ih else 1
             story.append(RLImage(io.BytesIO(sig_bytes), width=iw * scale, height=ih * scale))
         except Exception:
-            story.append(Paragraph("(signature image unavailable)", styles["Normal"]))
+            story.append(Paragraph("(signature image unavailable)", body_style))
     else:
-        story.append(Paragraph("(no signature captured)", styles["Normal"]))
+        story.append(Paragraph("(no signature captured)", body_style))
 
     def _draw_letterhead_bg(cnv, _doc):
         if used_letterhead:
