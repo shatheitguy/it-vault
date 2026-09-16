@@ -54,7 +54,7 @@ NAME = "Boardroom projector"
 SERIAL = "SN-TM-1"
 
 c = A.conn(); cur = c.cursor()
-cur.execute("SELECT label_model, label_caption, label_size FROM Settings WHERE id=1")
+cur.execute("SELECT label_model, label_caption, label_size, label_color FROM Settings WHERE id=1")
 before = cur.fetchone() or {}
 cur.execute("INSERT INTO Assets (_id, AssetTag, Name, Type, Serial, Status, Location) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -63,8 +63,10 @@ c.commit(); c.close()
 CODE = A._asset_public_code(AID)
 
 
-def label(model=None, caption=None, size=None):
+def label(model=None, caption=None, size=None, color=None):
     body = {}
+    if color is not None:
+        body["label_color"] = color
     if model is not None:
         body["label_model"] = model
     if caption is not None:
@@ -81,7 +83,8 @@ try:
     print("1. The model is a setting, and it defaults to what was there before")
     s = cl.get("/api/settings").get_json()
     check("the page is told the model", "label_model" in s and "label_caption" in s)
-    check("only two models exist", A.LABEL_MODELS == ("detail", "plate"), A.LABEL_MODELS)
+    check("five models exist",
+          A.LABEL_MODELS == ("detail", "plate", "banner", "sidebar", "edge"), A.LABEL_MODELS)
     check("the four captions are offered",
           set(A.LABEL_CAPTION_PRESETS) ==
           {"Asset No.", "Council Asset", "Product ID Code", "Tracked Asset"},
@@ -98,12 +101,12 @@ try:
     check("  the chosen fields print", "class=kv" in html)
     check("  the notice strip is there", "class=norem" in html and "Do Not Remove" in html)
     check("  and it is a bordered box", "class=box" in html and "border:1px solid" in html)
-    check("  no plate markup leaked in", "class=plate" not in html)
+    check("  no plate markup leaked in", 'class="tag plate"' not in html)
 
     print()
     print("3. Plate prints a plate")
     html = label("plate", "Asset No.")
-    check("  the plate layout is used", "class=plate" in html)
+    check("  the plate layout is used", 'class="tag plate"' in html)
     check("  the code is a square column", re.search(r"\.pqr\{[^}]*width:[\d.]+mm", html) is not None)
     check("  the caption prints", ">Asset No.<" in html)
     check("  the asset number is the headline", re.search(r"class=pid[^>]*>%s<" % TAG, html) is not None)
@@ -144,15 +147,16 @@ try:
     print()
     print("6. A sheet of plates is the same tag, many times")
     sheet = cl.get("/labels?ids=" + AID).get_data(as_text=True)
-    check("  the sheet uses the model too", "class=plate" in sheet)
-    check("  one plate per asset", sheet.count("class=plate") == 1, sheet.count("class=plate"))
+    check("  the sheet uses the model too", 'class="tag plate"' in sheet)
+    check("  one plate per asset", sheet.count('class="tag plate"') == 1,
+          sheet.count('class="tag plate"'))
     check("  and the same code", ("/p/" + CODE) in sheet)
 
     print()
     print("7. It fits the stock, both sizes")
     for size, want_w, want_h in (("50.8x25.4", 50.8, 25.4), ("50.8x50.8", 50.8, 50.8)):
         html = label("plate", "Asset No.", size=size)
-        m = re.search(r"\.plate\{width:([\d.]+)mm;height:([\d.]+)mm", html)
+        m = re.search(r"\.tag\{width:([\d.]+)mm;height:([\d.]+)mm", html)
         check("  %s renders at its stock size" % size,
               bool(m) and float(m.group(1)) == want_w and float(m.group(2)) == want_h,
               (m.group(1) + "x" + m.group(2)) if m else "no rule")
@@ -175,15 +179,70 @@ try:
     c2.commit(); c2.close()
 
     print()
+    print("7b. The other three models are different tags, not skins")
+    # The complaint that produced them: four plate captions all felt like the
+    # same tag, because they were. These put the code, the name, the number
+    # and the instruction in different places.
+    shapes = {}
+    for model in ("plate", "banner", "sidebar", "edge"):
+        html = label(model, "Return To Equipment Room", size="50.8x25.4", color="#1b4fd8")
+        shapes[model] = html
+        check("  %-8s renders as itself" % model, 'class="tag %s"' % model in html)
+    check("  no two of them share a layout",
+          len({re.search(r'class="tag (\w+)"', h).group(1) for h in shapes.values()}) == 4)
+
+    # banner: a colour band with the owner's name, SCAN ME under the code, and
+    # the instruction in the largest type on the tag
+    b = shapes["banner"]
+    check("  banner has a colour band", re.search(r"\.bhead\{[^}]*background:#1b4fd8", b) is not None)
+    check("  with the organisation in it", ">" + A.brand_name() + "<" in b)
+    check("  SCAN ME under the code", "SCAN ME" in b)
+    check("  and the instruction spelled out", "PLEASE DO NOT REMOVE TAG" in b)
+    check("  no number on it -- it is a message tag", "class=pid" not in b)
+
+    # sidebar: owner block on a colour panel, code and number on white, and a
+    # colour tab at the far edge so the tag reads end-on in a drawer
+    s = shapes["sidebar"]
+    check("  panel is the colour", re.search(r"\.sleft\{[^}]*background:#1b4fd8", s) is not None)
+    check("  it carries the contact details", "+971" in s or A.brand_name() in s)
+    check("  and there is an edge tab", "class=stab" in s
+          and re.search(r"\.stab\{[^}]*background:#1b4fd8", s) is not None)
+
+    # edge: text and number turned on their side, for something narrow
+    e = shapes["edge"]
+    check("  spine text is rotated", "writing-mode:vertical-rl" in e)
+    check("  so is the number", e.count("writing-mode:vertical-rl") >= 2)
+    check("  and the border is the colour",
+          re.search(r"\.tag\{[^}]*solid #1b4fd8", e) is not None)
+
+    print()
+    print("7c. Text on the colour flips so it can be read")
+    # a white band with white text on it is a blank tag
+    check("  white ink on a dark band",
+          'color:#ffffff' in label("banner", "x", color="#000080"))
+    check("  black ink on a light one",
+          'color:#111111' in label("banner", "x", color="#ffe600"))
+    check("  a junk colour falls back to black",
+          re.search(r"\.bhead\{[^}]*background:#000000",
+                    label("banner", "x", color="not-a-colour")) is not None)
+    check("  and the stored value is the sanitised one",
+          cl.get("/api/settings").get_json()["label_color"] == "#000000")
+
+    print()
     print("8. The picker is wired to it")
     html_idx = read("index.html")
     js = read("app.js")
     css = read("style.css")
     check("there is a model grid", 'id="tagModelGrid"' in html_idx)
-    for cap in A.LABEL_CAPTION_PRESETS:
-        check("  %-16s is offered as a card" % cap, 'data-caption="%s"' % cap in html_idx)
-    check("the detailed model is offered too", 'data-model="detail"' in html_idx)
-    check("each card shows a drawing of its tag", ".tm-prev{" in css and "tm-qr" in html_idx)
+    for model in A.LABEL_MODELS:
+        check("  %-8s is offered as a card" % model, 'data-model="%s"' % model in html_idx)
+    check("each card carries the text that model is usually printed with",
+          'data-caption="Return To Equipment Room"' in html_idx)
+    check("the colour is a colour input", 'type="color" id="label_color"' in html_idx)
+    check("and it is only shown for the models that use it",
+          "TAG_COLOURED" in js and "labelColorWrap" in js)
+    check("each card shows a drawing of its tag",
+          ".tm-prev{" in css and 'class="tm-q"' in html_idx)
     check("the caption is editable", 'id="label_caption"' in html_idx)
     check("the save sends both", "label_model: TAG_MODEL" in js and "label_caption:" in js)
     # field checkboxes do nothing on a plate, so they are put away rather
@@ -193,10 +252,12 @@ try:
 finally:
     c = A.conn(); cur = c.cursor()
     cur.execute("DELETE FROM Assets WHERE _id=%s", [AID])
-    cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s, label_size=%s WHERE id=1",
+    cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s, label_size=%s, "
+                "label_color=%s WHERE id=1",
                 (before.get("label_model") or "detail",
                  before.get("label_caption") or "Asset No.",
-                 before.get("label_size") or "50.8x25.4"))
+                 before.get("label_size") or "50.8x25.4",
+                 before.get("label_color") or "#000000"))
     c.commit(); c.close()
     print()
     print("(test asset removed, label settings restored)")

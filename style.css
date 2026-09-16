@@ -922,19 +922,37 @@ body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
 }
 
 /* ---------- tag model picker ---------- */
-/* Each card is a little drawing of the tag it prints, because "Plate" and
-   "Detailed" mean nothing until you have seen one come out of the printer. */
-.tm-prev{display:flex;align-items:center;gap:5px;width:100%;height:38px;padding:4px 5px;
-  border-radius:8px;border:1px solid var(--line);background:var(--bg1);box-sizing:border-box}
-.tm-qr{flex:0 0 auto;width:28px;height:28px;border-radius:2px;
-  background:repeating-conic-gradient(var(--txt) 0 25%,transparent 0 50%) 0 0/7px 7px}
-.tm-side{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:2px;overflow:hidden}
-.tm-side b{font-size:7px;font-weight:700;letter-spacing:.2px;color:var(--txt);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.tm-side i{font-size:10px;font-weight:800;font-style:normal;color:var(--txt);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-.tm-lines{flex:1 1 auto;height:22px;border-radius:2px;
-  background:repeating-linear-gradient(var(--muted) 0 2px,transparent 2px 6px)}
-.tm-detail{flex-direction:row-reverse}
-@media(max-width:560px){ .tm-prev{height:34px} }
+/* Each card is a small drawing of the tag it prints. "Banner" and "Spine"
+   mean nothing until you have seen one come off a printer, and a name in a
+   dropdown is not a preview. */
+.tm-prev{position:relative;display:flex;align-items:center;gap:4px;width:100%;height:40px;
+  padding:4px;border-radius:8px;border:1px solid var(--line);background:#fff;box-sizing:border-box;
+  overflow:hidden}
+.tm-prev i.tm-q{flex:0 0 auto;width:26px;height:26px;border-radius:1px;
+  background:repeating-conic-gradient(#111 0 25%,#fff 0 50%) 0 0/6px 6px}
+.tm-prev b{font-size:6.5px;font-weight:800;line-height:1.15;color:#111;text-align:left;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.tm-prev u{font-size:9px;font-weight:800;text-decoration:none;color:#111}
+.tm-prev i.tm-rows{flex:1 1 auto;height:20px;border-radius:1px;
+  background:repeating-linear-gradient(#9aa4b2 0 2px,transparent 2px 5px)}
+/* the coloured part of each model: a band, a panel, a spine */
+.tm-prev em{background:var(--accent)}
+.tm-p-detail{flex-direction:row-reverse}
+.tm-p-plate{flex-direction:column;justify-content:center;gap:1px}
+.tm-p-plate i.tm-q{position:absolute;left:5px;top:50%;transform:translateY(-50%)}
+.tm-p-plate b,.tm-p-plate u{margin-left:30px}
+.tm-p-banner{flex-direction:column;align-items:stretch;gap:2px;padding:0 0 3px}
+.tm-p-banner em{display:block;height:10px;border-radius:7px 7px 0 0}
+.tm-p-banner i.tm-q{position:absolute;left:5px;bottom:4px;width:20px;height:20px}
+.tm-p-banner b{margin-left:28px;padding-right:4px}
+.tm-p-side{padding:0}
+.tm-p-side em{display:block;width:46%;height:100%;border-radius:7px 0 0 7px}
+.tm-p-side i.tm-q{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px}
+.tm-p-side s{position:absolute;right:0;top:0;bottom:0;width:6px;background:var(--accent);
+  text-decoration:none;border-radius:0 7px 7px 0}
+.tm-p-edge{padding:0}
+.tm-p-edge em{display:block;width:9px;height:100%;border-radius:7px 0 0 7px}
+.tm-p-edge i.tm-q{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:22px;height:22px}
+.tm-p-edge s{position:absolute;right:4px;top:8px;bottom:8px;width:5px;
+  background:repeating-linear-gradient(#111 0 3px,transparent 3px 6px);text-decoration:none}
+@media(max-width:560px){ .tm-prev{height:36px} }

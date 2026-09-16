@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260916c">
+<link rel="stylesheet" href="/style.css?v=20260916d">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/logo.png">
@@ -745,35 +745,44 @@
                 on the right. Nothing else. The caption is free text &mdash; the four offered are just the common ones.</p>
               <div class="preset-grid" id="tagModelGrid">
                 <button type="button" class="preset-card" data-model="detail" data-caption="">
-                  <span class="tm-prev tm-detail"><span class="tm-lines"></span><span class="tm-qr"></span></span>
+                  <span class="tm-prev tm-p-detail"><i class="tm-q"></i><i class="tm-rows"></i></span>
                   <span class="pc-name">Detailed</span>
                   <span class="pc-sub">Fields + notice</span>
                 </button>
                 <button type="button" class="preset-card" data-model="plate" data-caption="Asset No.">
-                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Asset No.</b><i>45464544</i></span></span>
-                  <span class="pc-name">Asset No.</span>
-                  <span class="pc-sub">Plate</span>
+                  <span class="tm-prev tm-p-plate"><i class="tm-q"></i><b>Asset No.</b><u>45464544</u></span>
+                  <span class="pc-name">Plate</span>
+                  <span class="pc-sub">Code + big number</span>
                 </button>
-                <button type="button" class="preset-card" data-model="plate" data-caption="Council Asset">
-                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Council Asset</b><i>11356151</i></span></span>
-                  <span class="pc-name">Council Asset</span>
-                  <span class="pc-sub">Plate</span>
+                <button type="button" class="preset-card" data-model="banner" data-caption="Return To Equipment Room">
+                  <span class="tm-prev tm-p-banner"><em></em><i class="tm-q"></i><b>Return To Equipment Room</b></span>
+                  <span class="pc-name">Banner</span>
+                  <span class="pc-sub">Colour band + message</span>
                 </button>
-                <button type="button" class="preset-card" data-model="plate" data-caption="Product ID Code">
-                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Product ID Code</b><i>72916574</i></span></span>
-                  <span class="pc-name">Product ID Code</span>
-                  <span class="pc-sub">Plate</span>
+                <button type="button" class="preset-card" data-model="sidebar" data-caption="Asset Tag">
+                  <span class="tm-prev tm-p-side"><em></em><i class="tm-q"></i><s></s></span>
+                  <span class="pc-name">Panel</span>
+                  <span class="pc-sub">Colour panel + edge tab</span>
                 </button>
-                <button type="button" class="preset-card" data-model="plate" data-caption="Tracked Asset">
-                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Tracked Asset</b><i>GCCC5007</i></span></span>
-                  <span class="pc-name">Tracked Asset</span>
-                  <span class="pc-sub">Plate</span>
+                <button type="button" class="preset-card" data-model="edge" data-caption="Asset Tag">
+                  <span class="tm-prev tm-p-edge"><em></em><i class="tm-q"></i><s></s></span>
+                  <span class="pc-name">Spine</span>
+                  <span class="pc-sub">Sideways text + number</span>
                 </button>
               </div>
-              <div class="field2" id="labelCaptionWrap" style="margin-top:12px;max-width:360px">
-                <label>Caption on the plate</label>
-                <input id="label_caption" maxlength="40" placeholder="Asset No.">
-                <div class="fhint">The line above the number. Ignored by the Detailed model.</div>
+              <div class="grid2" style="margin-top:12px">
+                <div class="field2" id="labelCaptionWrap">
+                  <label>Text on the tag</label>
+                  <input id="label_caption" maxlength="40" placeholder="Asset No.">
+                  <div class="fhint">The caption on a Plate, the message on a Banner, the sideways
+                    line on a Panel or Spine. Ignored by the Detailed model.</div>
+                </div>
+                <div class="field2" id="labelColorWrap">
+                  <label>Tag colour</label>
+                  <input type="color" id="label_color" value="#000000">
+                  <div class="fhint">The band, the panel, the spine. Text on it flips to black or
+                    white on its own, whichever can be read.</div>
+                </div>
               </div>
             </div>
             <div class="panel" style="margin-top:14px">
@@ -1373,6 +1382,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260916c"></script>
+<script src="/app.js?nocache=20260916d"></script>
 </body>
 </html>

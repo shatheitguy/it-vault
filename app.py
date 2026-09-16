@@ -1840,6 +1840,9 @@ def migrate_schema():
         # the organisation calls it.
         "label_model": "VARCHAR(20) DEFAULT 'detail'",
         "label_caption": "VARCHAR(40) DEFAULT 'Asset No.'",
+        # The band, panel and edge models are printed in a colour. The four
+        # in circulation are black, blue, red and green; this is free.
+        "label_color": "VARCHAR(20) DEFAULT '#000000'",
     }
     for col, typ in backup_cols.items():
         try:
@@ -4634,13 +4637,14 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
-        if any(k in d for k in ("label_model", "label_caption")):
+        if any(k in d for k in ("label_model", "label_caption", "label_color")):
             model = (d.get("label_model") or cur0.get("label_model") or "detail").strip().lower()
             if model not in LABEL_MODELS:
                 model = "detail"
             cap = (d.get("label_caption", cur0.get("label_caption") or "Asset No.") or "")[:40]
-            cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s WHERE id=1",
-                        (model, cap.strip()))
+            col = _hex_or(d.get("label_color", cur0.get("label_color")), "#000000")
+            cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s, "
+                        "label_color=%s WHERE id=1", (model, cap.strip(), col))
         if any(k in d for k in ("company_phone", "company_address")):
             cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
             br0 = cur.fetchone() or {}
@@ -4737,7 +4741,7 @@ def settings():
                                           "notify_new","notify_delete","app_name","logo_text","matrix_on",
                                           "ldap_server","ldap_domain","ldap_bind_user","ldap_base_dn",
                                           "qr_size","qr_fields","label_size","label_logo",
-                                          "label_model","label_caption",
+                                          "label_model","label_caption","label_color",
                                           "theme_preset","bg_type","bg","comp_bg","radius","font","accent","accent2",
                                           "language","currency","region","portal_token",
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
@@ -6237,7 +6241,8 @@ def label_page(a_id):
     try:
         sc = conn(); scur = sc.cursor()
         scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
-                     "logo_text, label_model, label_caption FROM Settings WHERE id=1")
+                     "logo_text, label_model, label_caption, label_color, "
+                     "company_phone FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
@@ -6246,9 +6251,12 @@ def label_page(a_id):
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
         label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
         label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
+        label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
+        label_contact = ((srow.get("company_phone") or "") if srow else "")
     except Exception:
         qr_size, label_size, show_logo, app_name, logo_text = 160, "50.8x50.8", True, "IT-Vault", "IT-Vault"
         label_model, label_caption = "detail", "Asset No."
+        label_color, label_contact = "#000000", ""
     if label_model not in LABEL_MODELS:
         label_model = "detail"
     # parse label physical size "WxH" mm (default 50.8x50.8)
@@ -6266,14 +6274,15 @@ def label_page(a_id):
     # printed rule around the edge only makes the alignment look wrong. It is
     # rendered on its own rather than threaded through a layout built for the
     # detailed tag.
-    if label_model == "plate":
+    if label_model != "detail":
         _logo = _logo_data_uri() if show_logo else ""
         _pcode = _asset_public_code(asset["_id"])
-        return _plate_page(
+        return _model_page(
+            label_model,
             [("qr0", asset.get("AssetTag") or asset["_id"][:12],
               f"{base}p/{_pcode}" if _pcode else f"{base}asset/{asset['_id']}")],
-            lw_mm, lh_mm, label_caption,
-            f'<img class=plogo src="{_logo}" alt="">' if _logo else "",
+            lw_mm, lh_mm, label_caption, brand_name(),
+            _model_logo(label_model, _logo), label_color, label_contact,
             f"Label {asset['Name']}")
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
@@ -6477,7 +6486,8 @@ def labels_page():
     try:
         sc = conn(); scur = sc.cursor()
         scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
-                     "logo_text, label_model, label_caption FROM Settings WHERE id=1")
+                     "logo_text, label_model, label_caption, label_color, "
+                     "company_phone FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
@@ -6485,9 +6495,12 @@ def labels_page():
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
         label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
+        label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
+        label_contact = ((srow.get("company_phone") or "") if srow else "")
     except Exception:
         qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "IT-Vault"
         label_model, label_caption = "detail", "Asset No."
+        label_color, label_contact = "#000000", ""
     if label_model not in LABEL_MODELS:
         label_model = "detail"
     try:
@@ -6497,15 +6510,16 @@ def labels_page():
         lw_mm, lh_mm = 50.8, 50.8
     # Same model, many plates. Shared renderer, so a sheet and a one-off tag
     # of the same asset come off the printer identical.
-    if label_model == "plate":
+    if label_model != "detail":
         _logo = _logo_data_uri() if show_logo else ""
         _items = []
         for _i, _a in enumerate(ordered):
             _pc = _asset_public_code(_a["_id"])
             _items.append((f"qr{_i}", _a.get("AssetTag") or _a["_id"][:12],
                            f"{base}p/{_pc}" if _pc else f"{base}asset/{_a['_id']}"))
-        return _plate_page(_items, lw_mm, lh_mm, label_caption,
-                           f'<img class=plogo src="{_logo}" alt="">' if _logo else "",
+        return _model_page(label_model, _items, lw_mm, lh_mm, label_caption,
+                           brand_name(), _model_logo(label_model, _logo),
+                           label_color, label_contact,
                            f"Print {len(ordered)} Labels", sheet=True)
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
@@ -6941,7 +6955,7 @@ a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--a
 # uses -- the code on the left, and the owner's mark, one caption and one big
 # number on the right. Nothing else. It is for identifying a thing across a
 # room, and for surviving being read at arm's length on a machine.
-LABEL_MODELS = ("detail", "plate")
+LABEL_MODELS = ("detail", "plate", "banner", "sidebar", "edge")
 # What the four plates in circulation actually say. Offered as presets in
 # Settings; the caption is free text, because the fifth organisation will
 # call it something else again.
@@ -6961,59 +6975,221 @@ def _fit_one_line(text, avail_mm, max_mm, min_mm=1.1):
     return round(max(size, min_mm), 2)
 
 
-def _plate_page(items, lw_mm, lh_mm, caption, logo_html, title, sheet=False):
-    """Render one or many plate-model tags.
+def _ink_on(hex_color):
+    """Black or white, whichever can be read on that colour."""
+    h = (hex_color or "#000000").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except (ValueError, IndexError):
+        return "#ffffff"
+    return "#111111" if (r * 0.299 + g * 0.587 + b * 0.114) > 150 else "#ffffff"
+
+
+def _hex_or(value, fallback="#000000"):
+    v = (value or "").strip()
+    if len(v) == 4 and v[0] == "#":
+        v = "#" + "".join(ch * 2 for ch in v[1:])
+    if len(v) == 7 and v[0] == "#":
+        try:
+            int(v[1:], 16)
+            return v.lower()
+        except ValueError:
+            pass
+    return fallback
+
+
+def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
+                contact, title, sheet=False):
+    """Render one or many tags in whichever model was chosen.
 
     items: [(qr_id, id_value, qr_target)]. Shared by the single label and the
-    print sheet so a sheet and a one-off tag of the same asset are identical.
+    print sheet, so a sheet and a one-off tag of the same asset come off the
+    printer identical.
+
+    Each model is a different tag, not a different skin. They put the code,
+    the owner's name, the number and the instruction in different places
+    because they are read in different situations -- across a workshop, off a
+    shelf, on the back of a monitor -- and a tag that suits one suits none of
+    the others.
     """
+    color = _hex_or(color)
+    ink = _ink_on(color)
     pad_mm = 1.2
-    inner_h = lh_mm - pad_mm * 2
-    # The code is a square of the plate's height -- that is the whole idea of
-    # this layout, and it is what makes the modules big enough to scan.
-    qr_side = max(8.0, min(inner_h, lw_mm * 0.46))
-    quiet_mm = max(0.7, qr_side * 0.10)
-    qr_px = int(min(640, max(160, (qr_side - quiet_mm * 2) * 3.78 * 8)))
-    right_mm = lw_mm - pad_mm * 2 - qr_side - 1.6
-    logo_mm = min(4.2, inner_h * 0.34) if logo_html else 0.0
-    cap_mm = _fit_one_line(caption, right_mm, 2.6 if lh_mm < 35 else 3.4)
-    boxes = []
-    scripts = []
-    for qr_id, id_val, target in items:
-        id_mm = _fit_one_line(id_val, right_mm, 4.6 if lh_mm < 35 else 6.4, min_mm=1.6)
-        boxes.append(
-            f'<div class=plate><div id={qr_id} class=pqr></div>'
-            f'<div class=pright>{logo_html}'
-            f'<div class=pcap>{caption}</div>'
-            f'<div class=pid style="font-size:{id_mm}mm">{id_val}</div>'
-            f'</div></div>')
-        scripts.append(
-            f"new QRCode(document.getElementById('{qr_id}'), {{text:'{target}',"
-            f"width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});")
+    gap_mm = 1.4
     sheet_css = ("display:flex;flex-wrap:wrap;gap:3mm;padding:20px" if sheet
                  else "display:flex;justify-content:center;padding:20px")
-    btn = ('<button onclick="window.print()" style="display:block;margin:10px auto 0;'
+    btn = ('<button onclick="window.print()" style="display:block;margin:14px auto 0;'
            'padding:8px 16px;font-size:14px;cursor:pointer">&#128424; PRINT'
            f'{" LABELS" if sheet else " LABEL"}</button>')
-    return f"""<!doctype html><html><head><meta charset=utf-8><title>{title}</title>
-<style>
- body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
- .sheet{{{sheet_css}}}
- /* No border: a plate is a plate, and the ones this copies are cut metal.
-    A printed rule around the edge only makes the alignment look wrong. */
- .plate{{width:{lw_mm}mm;height:{lh_mm}mm;padding:{pad_mm}mm;box-sizing:border-box;
+    notice = "PLEASE DO NOT REMOVE TAG"
+    boxes, scripts = [], []
+
+    # ---------------------------------------------------------------- plate
+    if model == "plate":
+        inner_h = lh_mm - pad_mm * 2
+        qr_side = max(8.0, min(inner_h, lw_mm * 0.46))
+        quiet_mm = max(0.7, qr_side * 0.10)
+        right_mm = lw_mm - pad_mm * 2 - qr_side - 1.6
+        logo_mm = min(4.2, inner_h * 0.34) if logo_html else 0.0
+        cap_mm = _fit_one_line(caption, right_mm, 2.6 if lh_mm < 35 else 3.4)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;padding:{pad_mm}mm;box-sizing:border-box;
    display:flex;flex-direction:row;align-items:center;gap:1.6mm;overflow:hidden;background:#fff}}
  .pqr{{flex:0 0 {qr_side}mm;width:{qr_side}mm;height:{qr_side}mm;background:#fff;
    padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
- .pqr canvas,.pqr img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
  .pright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
    justify-content:center;gap:0.4mm;text-align:center;overflow:hidden}}
  .plogo{{height:{logo_mm}mm;width:auto;max-width:100%;object-fit:contain;margin-bottom:0.3mm}}
  .pcap{{font-size:{cap_mm}mm;font-weight:700;line-height:1.1;white-space:nowrap;
    overflow:hidden;text-overflow:ellipsis;max-width:100%}}
- /* The number is the tag. Everything else on the plate is context for it. */
  .pid{{font-weight:800;line-height:1.05;letter-spacing:0.04mm;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%}}"""
+        for qr_id, id_val, target in items:
+            id_mm = _fit_one_line(id_val, right_mm, 4.6 if lh_mm < 35 else 6.4, min_mm=1.6)
+            boxes.append(
+                f'<div class="tag plate"><div id={qr_id} class=pqr></div>'
+                f'<div class=pright>{logo_html}'
+                f'<div class=pcap>{caption}</div>'
+                f'<div class=pid style="font-size:{id_mm}mm">{id_val}</div>'
+                f'</div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    # --------------------------------------------------------------- banner
+    # A coloured band across the top with the owner's name in it, then the
+    # code with SCAN ME under it and the instruction beside it in the largest
+    # type on the tag. This is the one you can read from the doorway, which is
+    # the point of "Return To Equipment Room" -- it has to work on somebody
+    # who is walking past, not somebody inspecting the label.
+    elif model == "banner":
+        head_h = max(3.6, lh_mm * 0.21)
+        body_h = lh_mm - head_h - pad_mm * 2
+        qr_side = max(7.0, min(body_h - 2.2, lw_mm * 0.40))
+        quiet_mm = max(0.6, qr_side * 0.08)
+        right_mm = lw_mm - pad_mm * 2 - qr_side - gap_mm
+        brand_mm = _fit_one_line(brand, lw_mm - 3.0, head_h * 0.62, min_mm=1.6)
+        msg_mm = _brand_fit(caption, right_mm, min(4.6, body_h * 0.30), min_mm=1.5)[0]
+        note_mm = _fit_one_line("PLEASE DO NOT", right_mm, min(2.9, body_h * 0.20), min_mm=1.2)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
+   background:#fff;display:flex;flex-direction:column;border-radius:1.2mm}}
+ .bhead{{flex:0 0 {head_h}mm;height:{head_h}mm;background:{color};color:{ink};
+   display:flex;align-items:center;justify-content:center;padding:0 1mm;box-sizing:border-box}}
+ .bhead span{{font-size:{brand_mm}mm;font-weight:800;line-height:1;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;letter-spacing:0.05mm}}
+ .bbody{{flex:1 1 auto;min-height:0;display:flex;flex-direction:row;align-items:center;
+   gap:{gap_mm}mm;padding:{pad_mm}mm;box-sizing:border-box}}
+ .bqrwrap{{flex:0 0 {qr_side}mm;display:flex;flex-direction:column;align-items:center;gap:0.3mm}}
+ .bqr{{width:{qr_side}mm;height:{qr_side}mm;background:#fff;padding:{quiet_mm}mm;
+   box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .bscan{{font-size:{max(1.3, min(2.4, qr_side * 0.16))}mm;font-weight:800;letter-spacing:0.12mm;line-height:1}}
+ .bright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:0.5mm}}
+ .bmsg{{font-size:{msg_mm}mm;font-weight:800;line-height:1.1;word-break:break-word;
+   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}}
+ .bnote{{font-size:{note_mm}mm;font-weight:800;line-height:1.1;color:{color};letter-spacing:0.02mm}}"""
+        for qr_id, _id_val, target in items:
+            boxes.append(
+                f'<div class="tag banner"><div class=bhead><span>{brand}</span></div>'
+                f'<div class=bbody>'
+                f'<div class=bqrwrap><div id={qr_id} class=bqr></div><div class=bscan>SCAN ME</div></div>'
+                f'<div class=bright><div class=bmsg>{caption}</div>'
+                f'<div class=bnote>{notice}</div></div>'
+                f'</div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    # -------------------------------------------------------------- sidebar
+    # The owner's block on a coloured panel down one side, the code and the
+    # number on white next to it, and a coloured tab at the far edge so the
+    # tag is identifiable end-on -- in a drawer, or stacked in a rack, where
+    # all you can see is the edge.
+    elif model == "sidebar":
+        tab_mm = max(1.6, lw_mm * 0.045)
+        left_mm = (lw_mm - tab_mm) * 0.54
+        right_mm = lw_mm - tab_mm - left_mm
+        qr_side = max(7.0, min(right_mm - 2.0, lh_mm * 0.60))
+        quiet_mm = max(0.6, qr_side * 0.08)
+        cap_mm = _brand_fit(caption, left_mm - 2.0, min(2.8, lh_mm * 0.13), min_mm=1.3)[0]
+        logo_mm = min(5.0, lh_mm * 0.26) if logo_html else 0.0
+        con_mm = _fit_one_line(contact or " ", left_mm - 2.0, min(2.1, lh_mm * 0.10), min_mm=1.1)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
+   background:#fff;display:flex;flex-direction:row;border-radius:1.4mm}}
+ .sleft{{flex:0 0 {left_mm}mm;background:{color};color:{ink};display:flex;flex-direction:column;
+   align-items:center;justify-content:space-between;padding:1mm 0.8mm;box-sizing:border-box;text-align:center}}
+ .scap{{font-size:{cap_mm}mm;font-weight:800;line-height:1.1;word-break:break-word;
+   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%}}
+ .slogo{{height:{logo_mm}mm;width:auto;max-width:96%;object-fit:contain}}
+ .scon{{font-size:{con_mm}mm;font-weight:700;line-height:1.1;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%;opacity:.95}}
+ .sright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
+   justify-content:center;gap:0.3mm;padding:0.8mm 0.5mm;box-sizing:border-box}}
+ .sqr{{width:{qr_side}mm;height:{qr_side}mm;background:#fff;padding:{quiet_mm}mm;
+   box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .sid{{font-weight:800;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ .stab{{flex:0 0 {tab_mm}mm;background:{color}}}"""
+        for qr_id, id_val, target in items:
+            id_mm = _fit_one_line(id_val, right_mm - 1.0, min(4.0, lh_mm * 0.18), min_mm=1.3)
+            boxes.append(
+                f'<div class="tag sidebar">'
+                f'<div class=sleft><div class=scap>{caption}</div>{logo_html}'
+                f'<div class=scon>{contact or brand}</div></div>'
+                f'<div class=sright><div id={qr_id} class=sqr></div>'
+                f'<div class=sid style="font-size:{id_mm}mm">{id_val}</div></div>'
+                f'<div class=stab></div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    # ----------------------------------------------------------------- edge
+    # Text turned on its side down the left, and the number turned on its
+    # side down the right, with the code between them. For something narrow
+    # and deep -- a rack ear, a cable end, the side of a monitor stand --
+    # where a landscape tag has nowhere to go but across the front.
+    else:
+        strip_mm = max(3.0, lw_mm * 0.085)
+        num_mm = max(3.4, lw_mm * 0.095)
+        mid_mm = lw_mm - strip_mm - num_mm - pad_mm * 2
+        qr_side = max(7.0, min(mid_mm - 0.5, lh_mm * 0.52))
+        quiet_mm = max(0.6, qr_side * 0.08)
+        side_mm = _fit_one_line(caption, lh_mm - 2.0, min(2.6, strip_mm * 0.62), min_mm=1.2)
+        id_mm = _fit_one_line(items[0][1] if items else "", lh_mm - 2.0,
+                              min(4.2, num_mm * 0.62), min_mm=1.3)
+        logo_mm = min(4.4, lh_mm * 0.20) if logo_html else 0.0
+        con_mm = _fit_one_line(contact or " ", mid_mm, min(2.0, lh_mm * 0.09), min_mm=1.0)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
+   background:#fff;display:flex;flex-direction:row;border:{max(0.5, lw_mm * 0.014)}mm solid {color};
+   border-radius:1.6mm}}
+ .estrip{{flex:0 0 {strip_mm}mm;background:{color};color:{ink};display:flex;
+   align-items:center;justify-content:center;overflow:hidden}}
+ /* Turned on its side: the only way a long word fits a narrow tag without
+    being cut, and it reads bottom-to-top the way a spine does. */
+ .estrip span{{writing-mode:vertical-rl;transform:rotate(180deg);font-size:{side_mm}mm;
+   font-weight:800;line-height:1;white-space:nowrap;letter-spacing:0.08mm;
+   max-height:{lh_mm - 1.5}mm;overflow:hidden}}
+ .emid{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
+   justify-content:center;gap:0.3mm;padding:{pad_mm}mm 0.6mm;box-sizing:border-box}}
+ .elogo{{height:{logo_mm}mm;width:auto;max-width:98%;object-fit:contain}}
+ .econ{{font-size:{con_mm}mm;font-weight:700;line-height:1.05;color:#222;white-space:nowrap;
    overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ .eqr{{width:{qr_side}mm;height:{qr_side}mm;background:#fff;padding:{quiet_mm}mm;
+   box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .enum{{flex:0 0 {num_mm}mm;display:flex;align-items:center;justify-content:center;overflow:hidden}}
+ .enum span{{writing-mode:vertical-rl;transform:rotate(180deg);font-size:{id_mm}mm;
+   font-weight:800;line-height:1;white-space:nowrap;max-height:{lh_mm - 1.5}mm;overflow:hidden}}"""
+        for qr_id, id_val, target in items:
+            boxes.append(
+                f'<div class="tag edge"><div class=estrip><span>{caption}</span></div>'
+                f'<div class=emid>{logo_html}'
+                + (f'<div class=econ>{contact}</div>' if contact else '')
+                + f'<div id={qr_id} class=eqr></div></div>'
+                f'<div class=enum><span>{id_val}</span></div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    return f"""<!doctype html><html><head><meta charset=utf-8><title>{title}</title>
+<style>
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
+ .sheet{{{sheet_css}}}
+ /* Every model draws its own code box, and every one of them keeps the
+    symbol square and unstretched -- a rectangular QR is unreadable however
+    correct its modules. */
+ .tag canvas,.tag img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
+{css}
  @media print{{ body{{padding:0}} .sheet{{padding:0;gap:0}} button{{display:none}} }}
 </style></head><body>
 <div class=sheet>{''.join(boxes)}</div>
@@ -7021,6 +7197,31 @@ def _plate_page(items, lw_mm, lh_mm, caption, logo_html, title, sheet=False):
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script>{''.join(scripts)}</script>
 </body></html>"""
+
+
+def _model_logo(model, uri):
+    """The logo tag for a model, or nothing if there is no logo to draw.
+
+    Each model sizes its own, so the class has to be the one its CSS knows.
+    """
+    if not uri:
+        return ""
+    cls = {"plate": "plogo", "sidebar": "slogo", "edge": "elogo"}.get(model)
+    if not cls:
+        return ""          # the banner carries the name in its band instead
+    return f'<img class={cls} src="{uri}" alt="">'
+
+
+def _qr_script(qr_id, target, side_mm, quiet_mm):
+    """Rasterise well above print size.
+
+    qrcodejs draws exactly the pixel size it is handed, and a small bitmap
+    stretched onto a 203dpi label prints soft edges -- which a scanner reads
+    as smudged modules.
+    """
+    px = int(min(640, max(160, (side_mm - quiet_mm * 2) * 3.78 * 8)))
+    return (f"new QRCode(document.getElementById('{qr_id}'), {{text:'{target}',"
+            f"width:{px},height:{px},correctLevel:QRCode.CorrectLevel.L}});")
 
 
 # ---------- the address a printed tag carries ------------------------------

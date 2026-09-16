@@ -1557,28 +1557,31 @@ async function printAsset(id){
 /* Which tag gets printed. The plate models have no fields and no notice, so
    the field checkboxes are put away while one is selected rather than left
    sitting there doing nothing. */
+const TAG_MODELS = ['detail','plate','banner','sidebar','edge'];
+/* Only three of the five are printed in a colour, and only four of them use
+   the text field, so the inputs that do nothing for the chosen model are put
+   away rather than left sitting there looking connected. */
+const TAG_COLOURED = ['banner','sidebar','edge'];
 let TAG_MODEL = 'detail';
 function applyTagModel(model, caption){
-  TAG_MODEL = (model === 'plate') ? 'plate' : 'detail';
+  TAG_MODEL = TAG_MODELS.includes(model) ? model : 'detail';
   const cap = document.getElementById('label_caption');
   if (cap && typeof caption === 'string' && !cap.dataset._touched) cap.value = caption;
   document.querySelectorAll('#tagModelGrid .preset-card').forEach(b => {
-    const isPlate = b.dataset.model === 'plate';
-    const match = (TAG_MODEL === 'plate')
-      ? (isPlate && b.dataset.caption === (cap ? cap.value.trim() : ''))
-      : !isPlate;
-    b.classList.toggle('active', match);
+    b.classList.toggle('active', b.dataset.model === TAG_MODEL);
   });
-  const fields = document.getElementById('labelFieldsPanel');
-  if (fields) fields.style.display = (TAG_MODEL === 'plate') ? 'none' : '';
-  const wrap = document.getElementById('labelCaptionWrap');
-  if (wrap) wrap.style.display = (TAG_MODEL === 'plate') ? '' : 'none';
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('labelFieldsPanel', TAG_MODEL === 'detail');
+  show('labelCaptionWrap', TAG_MODEL !== 'detail');
+  show('labelColorWrap', TAG_COLOURED.includes(TAG_MODEL));
 }
 document.addEventListener('click', e => {
   const card = e.target.closest ? e.target.closest('#tagModelGrid .preset-card') : null;
   if (!card) return;
   const cap = document.getElementById('label_caption');
-  if (cap && card.dataset.model === 'plate'){ cap.value = card.dataset.caption; delete cap.dataset._touched; }
+  // picking a model offers the text that model is usually printed with; typing
+  // over it sticks, because the next organisation says something else
+  if (cap && card.dataset.model !== 'detail'){ cap.value = card.dataset.caption; delete cap.dataset._touched; }
   applyTagModel(card.dataset.model, cap ? cap.value : '');
 });
 document.addEventListener('input', e => {
@@ -2330,6 +2333,8 @@ async function loadSettings(){
     if(document.getElementById('qr_size'))document.getElementById('qr_size').value=(s.qr_size||160).toString();
     if(document.getElementById('label_size'))document.getElementById('label_size').value=(s.label_size||'50x19');
     if(document.getElementById('label_logo'))document.getElementById('label_logo').checked=(s.label_logo!=0);
+    const _lc=document.getElementById('label_color');
+    if(_lc) _lc.value = s.label_color || '#000000';
     applyTagModel(s.label_model||'detail', s.label_caption||'Asset No.');
     const chosenFields=(s.qr_fields||'Name,AssetID,Type,Serial,Status,Location').split(',').map(f=>f.trim()).filter(Boolean);
     LABEL_FIELD_KEYS.forEach(k=>{ const cb=document.getElementById('lf_'+k); if(cb && !cb.disabled) cb.checked=chosenFields.includes(k); });
@@ -2446,7 +2451,8 @@ async function saveLabel(){
     label_size: document.getElementById('label_size').value.trim(),
     label_logo: document.getElementById('label_logo').checked ? 1 : 0,
     label_model: TAG_MODEL,
-    label_caption: (document.getElementById('label_caption')||{value:''}).value.trim()
+    label_caption: (document.getElementById('label_caption')||{value:''}).value.trim(),
+    label_color: (document.getElementById('label_color')||{value:'#000000'}).value
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LABEL SETTINGS SAVED');}
