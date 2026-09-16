@@ -36,6 +36,9 @@ data class Asset(
     var Price: String = "0",
     var EmployeeID: String = "",
     val InvoiceFile: String? = null,
+    /** The unguessable code a printed tag's QR encodes. Cached with the
+     * rest of the asset so a scan resolves with no network at all. */
+    var PublicCode: String = "",
     @SerializedName("UpdatedAt") var updatedAt: String = ""
 )
 

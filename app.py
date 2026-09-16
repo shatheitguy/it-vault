@@ -1993,6 +1993,11 @@ def row_to_dict(row):
     return {"_id": row["_id"], "InvoiceFile": row.get("InvoiceFile", "") or "",
             "SignatureData": row.get("SignatureData", "") or "",
             "UpdatedAt": (str(row["UpdatedAt"]) if row.get("UpdatedAt") else ""),
+            # The address a printed tag carries. Passed through so a phone can
+            # match a scanned tag against its own cache with no network -- a
+            # store room is exactly where there is no signal and exactly where
+            # tags get scanned.
+            "PublicCode": row.get("PublicCode", "") or "",
             **{col: row.get(col, "") for col in COLUMNS}}
 
 def lan_base_url():
@@ -2530,7 +2535,11 @@ def ldap_sync_employees():
 def list_assets():
     c = conn(); cur = c.cursor()
     q = request.args.get("q", "").strip(); sf = request.args.get("status", "").strip(); cf = request.args.get("col", "").strip()
-    sql = "SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, UpdatedAt FROM Assets WHERE is_deleted=0"
+    # PublicCode rides along so a phone that scanned a tag can resolve it
+    # from its own cache, with no network at all -- which is the whole point
+    # of scanning a tag in a store room with no signal.
+    sql = ("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
+           + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0")
     where = []; params = []
     if sf: where.append("Status=%s"); params.append(sf)
     if q:
@@ -5610,6 +5619,18 @@ def logo_file():
     # show the real IT-Vault shield mark instead of a blank/broken image,
     # until an admin uploads their own.
     return send_from_directory(BASE, "default_logo.png")
+
+
+@app.route("/icon.png")
+def icon_file():
+    """The square mark.
+
+    The logo is a wordmark with a tagline under it -- fine in a sidebar, a
+    smudge at 16 pixels. Every square slot (favicon, home-screen icon, app
+    tile) gets the shield instead, which is the same brand in the form that
+    survives being small.
+    """
+    return send_from_directory(BASE, "default_icon.png")
 
 def _logo_data_uri():
     """Logo as a data: URI for embedding straight into a print/PDF: the

@@ -37,6 +37,19 @@ class DashboardFragment : Fragment(), Refreshable {
         b.statMaint.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "MAINTENANCE"
         b.statDue.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "CHECKOUTS DUE SOON"
         b.statWarr.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "WARRANTY EXPIRING"
+        // One colour per role, as on the web. Five numbers all painted in the
+        // accent read as one number repeated; the colour is what says which
+        // of them is the one to worry about.
+        listOf(
+            b.statTotal to com.itguy.assetmanager.R.color.accent,
+            b.statOut to com.itguy.assetmanager.R.color.stat_cyan,
+            b.statMaint to com.itguy.assetmanager.R.color.stat_green,
+            b.statDue to com.itguy.assetmanager.R.color.stat_amber,
+            b.statWarr to com.itguy.assetmanager.R.color.stat_red,
+        ).forEach { (card, colour) ->
+            card.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue)
+                .setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), colour))
+        }
         refresh()
     }
 

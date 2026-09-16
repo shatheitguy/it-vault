@@ -3,6 +3,7 @@ package com.itguy.assetmanager.ui
 import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.ActionBarDrawerToggle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
@@ -14,6 +15,7 @@ import com.itguy.assetmanager.data.SyncStore
 import kotlinx.coroutines.launch
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
+import com.itguy.assetmanager.ui.assets.ScanActivity
 import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
 import com.itguy.assetmanager.ui.contracts.ContractsListFragment
 import com.itguy.assetmanager.ui.dashboard.DashboardFragment
@@ -27,6 +29,10 @@ import com.itguy.assetmanager.ui.scan.NetworkScanFragment
 import com.itguy.assetmanager.ui.settings.SettingsFragment
 import com.itguy.assetmanager.ui.tickets.TicketsListFragment
 
+import android.widget.Toast
+
+import com.itguy.assetmanager.R
+
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
 
     private lateinit var b: ActivityMainBinding
@@ -34,6 +40,47 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     /** Guards against the bottom bar re-firing while we mirror the drawer's selection into it. */
     private var syncingNav = false
+
+    /**
+     * The bottom bar's QR button.
+     *
+     * Scanning a tag is a thing you do standing in front of the thing, so it
+     * belongs on the bar rather than buried in a form. What comes back is put
+     * into the Assets search, which already falls back to the cached list
+     * when there is no network -- and a store room is exactly where there is
+     * no network.
+     */
+    private val scanLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val raw = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)
+            ?: result.data?.getStringExtra(ScanActivity.EXTRA_TEXT_RESULT)
+        val query = assetQueryFrom(raw)
+        if (query.isNullOrBlank()) {
+            if (raw != null) Toast.makeText(this, "Nothing recognisable in that code",
+                                            Toast.LENGTH_SHORT).show()
+        } else {
+            showFragment(AssetsListFragment.forQuery(query), "Assets")
+            syncBottomNav(R.id.nav_assets)
+        }
+    }
+
+    /**
+     * What to search for, given whatever the camera read.
+     *
+     * A tag printed today carries /p/<code>; ones printed before that carry
+     * /a/<asset tag> or /asset/<id>. All three are addresses on this server,
+     * and what matters here is the last part -- the asset list can match any
+     * of them, the code included, against its cache.
+     */
+    private fun assetQueryFrom(raw: String?): String? {
+        val s = raw?.trim().orEmpty()
+        if (s.isEmpty()) return null
+        Regex("/(?:p|a|asset)/([^/?#\\s]+)").find(s)?.let { return it.groupValues[1] }
+        // not one of our links: hand the text over as typed, which is right
+        // for a bare asset tag or a serial number read off a sticker
+        return s.take(80)
+    }
 
     /** Paints the server's cached name + logo into the drawer header and toolbar. */
     private fun applyBranding() {
@@ -93,6 +140,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         Prefs.applyThemeMode()
         super.onCreate(savedInstanceState)
         OfflineCache.init(applicationContext)
+        // Says what it is doing while it connects, and warms every cache
+        // behind itself so no screen opens empty afterwards.
+        BootOverlay.show(this, lifecycleScope)
         SyncStore.init(applicationContext)
         if (!Prefs.isLoggedIn) {
             startActivity(Intent(this, LoginActivity::class.java)); finish(); return
@@ -226,6 +276,10 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_scan -> showFragment(NetworkScanFragment(), "Network Scan")
             com.itguy.assetmanager.R.id.nav_heartbeat -> showFragment(HeartbeatFragment(), "Heartbeat")
             com.itguy.assetmanager.R.id.nav_backup -> showFragment(BackupRestoreFragment(), "Backup / Restore")
+            com.itguy.assetmanager.R.id.nav_qr -> {
+                scanLauncher.launch(Intent(this, ScanActivity::class.java))
+                return true      // the bar keeps whatever tab it was on
+            }
             com.itguy.assetmanager.R.id.nav_settings -> showFragment(SettingsFragment(), "Settings")
         }
         item.isChecked = true

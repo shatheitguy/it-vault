@@ -38,6 +38,11 @@
             android:screenOrientation="portrait" />
 
         <activity
+            android:name=".ui.assets.RecordViewActivity"
+            android:exported="false"
+            android:label="Asset record" />
+
+        <activity
             android:name=".ui.assets.LabelViewActivity"
             android:exported="false"
             android:label="Asset label"

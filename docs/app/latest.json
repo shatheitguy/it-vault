@@ -1,6 +1,6 @@
 {
-  "versionCode": 14,
-  "versionName": "1.11.0",
+  "versionCode": 15,
+  "versionName": "2.0.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Lost & Found on the phone, a launcher icon that fills the tile, and light or dark now follows the device with your accent kept. Web: five tag models, unguessable tag links, and details you choose per tag."
+  "notes": "New IT-Vault mark throughout. QR scan moves to the bottom bar and resolves from the phone's own cache, so it works with no signal. A connect screen warms every list on open, so nothing is empty offline. Asset rows print the record sheet as well as the QR label. Overview numbers are colour-coded like the web."
 }

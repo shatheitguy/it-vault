@@ -113,7 +113,6 @@ class AssetEditFragment : Fragment() {
         // freely edited here -- matches the web form's lock.
         b.fNotesReceived.isEnabled = false
 
-        b.scanBtn.setOnClickListener { scanLauncher.launch(Intent(requireContext(), ScanActivity::class.java)) }
         b.saveBtn.setOnClickListener { save() }
         b.deleteBtn.setOnClickListener { confirmDelete() }
         b.invoicePickBtn.setOnClickListener { pickInvoiceLauncher.launch("*/*") }

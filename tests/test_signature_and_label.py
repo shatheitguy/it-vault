@@ -88,7 +88,12 @@ cur.execute("INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Depa
             "VALUES (%s,%s,%s,%s,%s,%s)",
             (uuid.uuid4().hex[:12], emp_id, "EMP-777", "John Smith", "IT", "test"))
 cur.execute("UPDATE Assets SET EmployeeID=%s WHERE _id=%s", (emp_id, aid))
-cur.execute("UPDATE Settings SET qr_fields=%s WHERE id=1",
+# This file measures the detailed tag and the fields it prints. An install
+# with a plate model selected has no field rows at all, so every assertion
+# below would fail for a reason that has nothing to do with employees.
+cur.execute("SELECT label_model FROM Settings WHERE id=1")
+_model_before = (cur.fetchone() or {}).get("label_model") or "detail"
+cur.execute("UPDATE Settings SET qr_fields=%s, label_model='detail' WHERE id=1",
             ["Name,AssetID,Type,Serial,EmployeeID,EmployeeName"])
 c.commit(); c.close()
 
@@ -178,8 +183,8 @@ check("the app still offers to view it", "a.SignatureData" in
 
 c = A.conn(); cur = c.cursor()
 cur.execute("DELETE FROM Assets WHERE _id=%s", [aid])
-cur.execute("UPDATE Settings SET qr_fields=%s WHERE id=1",
-            ["Name,AssetID,Type,Serial,Status,Location"])
+cur.execute("UPDATE Settings SET qr_fields=%s, label_model=%s WHERE id=1",
+            ["Name,AssetID,Type,Serial,Status,Location", _model_before])
 c.commit(); c.close()
 print("\n(test asset and employee removed, label fields restored)")
 print("\n" + ("ALL PASSED" if not fails else f"{len(fails)} FAILED: " + "; ".join(fails)))

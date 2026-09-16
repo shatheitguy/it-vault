@@ -17,6 +17,18 @@ import com.itguy.assetmanager.ui.Refreshable
 import kotlinx.coroutines.launch
 
 class AssetsListFragment : Fragment(), Refreshable {
+
+    companion object {
+        private const val ARG_QUERY = "query"
+
+        /** Open the list already searching for something -- what a scanned
+         * tag turns into. The search runs through the same path as typing
+         * it, so it falls back to the cache when there is no network, which
+         * is the state a store room is usually in. */
+        fun forQuery(query: String) = AssetsListFragment().apply {
+            arguments = Bundle().apply { putString(ARG_QUERY, query) }
+        }
+    }
     private var _b: FragmentAssetsListBinding? = null
     private val b get() = _b!!
     private lateinit var adapter: AssetAdapter
@@ -58,6 +70,9 @@ class AssetsListFragment : Fragment(), Refreshable {
             (activity as? MainActivity)?.showFragment(AssetEditFragment.newInstance(null), "Add Asset", addToBackStack = true)
         }
 
+        arguments?.getString(ARG_QUERY)?.takeIf { it.isNotBlank() }?.let {
+            b.searchInput.setText(it)
+        }
         b.searchInput.addTextChangedListener {
             searchJob?.cancel()
             searchJob = lifecycleScope.launch {
@@ -104,7 +119,10 @@ class AssetsListFragment : Fragment(), Refreshable {
             val filtered = if (query.isBlank()) cached else cached.filter {
                 it.Name.contains(query, true) || it.Type.contains(query, true) ||
                 it.Serial.contains(query, true) || it.Location.contains(query, true) ||
-                it.AssetTag.contains(query, true)
+                it.AssetTag.contains(query, true) ||
+                // the code a printed tag's QR carries, so a scan resolves
+                // from the cache with no network
+                (it.PublicCode.isNotBlank() && it.PublicCode.equals(query, true))
             }
             adapter.submit(filtered)
             val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("assets"))
