@@ -53,8 +53,11 @@ AID = "QR-TEST-0001"
 TAG = "QR-1"
 
 c = A.conn(); cur = c.cursor()
-cur.execute("SELECT label_size, qr_fields FROM Settings WHERE id=1")
+cur.execute("SELECT label_size, qr_fields, label_model FROM Settings WHERE id=1")
 before = cur.fetchone() or {}
+# This file measures the detailed tag. An install with a plate model selected
+# would otherwise fail every assertion here for the wrong reason.
+cur.execute("UPDATE Settings SET label_model='detail' WHERE id=1")
 cur.execute("DELETE FROM Assets WHERE _id=%s", [AID])
 cur.execute("INSERT INTO Assets (_id, AssetTag, Name, Type, Serial, Status, Location) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -209,9 +212,10 @@ try:
 finally:
     c = A.conn(); cur = c.cursor()
     cur.execute("DELETE FROM Assets WHERE _id=%s", [AID])
-    cur.execute("UPDATE Settings SET label_size=%s, qr_fields=%s WHERE id=1",
+    cur.execute("UPDATE Settings SET label_size=%s, qr_fields=%s, label_model=%s WHERE id=1",
                 (before.get("label_size") or "50.8x25.4",
-                 before.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location"))
+                 before.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location",
+                 before.get("label_model") or "detail"))
     c.commit(); c.close()
     print()
     print("(test asset removed, label settings restored)")

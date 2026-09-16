@@ -54,7 +54,8 @@ NAME = "Boardroom projector"
 SERIAL = "SN-TM-1"
 
 c = A.conn(); cur = c.cursor()
-cur.execute("SELECT label_model, label_caption, label_size, label_color FROM Settings WHERE id=1")
+cur.execute("SELECT label_model, label_caption, label_size, label_color, label_logo_size, "
+            "label_show_name, label_show_contact, label_show_asset FROM Settings WHERE id=1")
 before = cur.fetchone() or {}
 cur.execute("INSERT INTO Assets (_id, AssetTag, Name, Type, Serial, Status, Location) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -105,6 +106,9 @@ try:
 
     print()
     print("3. Plate prints a plate")
+    # with the optional lines off, so this measures the model and not them
+    cl.put("/api/settings", json={"label_show_name": 0, "label_show_contact": 0,
+                                  "label_show_asset": 0, "label_logo_size": "md"})
     html = label("plate", "Asset No.")
     check("  the plate layout is used", 'class="tag plate"' in html)
     check("  the code is a square column", re.search(r"\.pqr\{[^}]*width:[\d.]+mm", html) is not None)
@@ -184,6 +188,9 @@ try:
     # same tag, because they were. These put the code, the name, the number
     # and the instruction in different places.
     shapes = {}
+    # the owner's name and the contact are opt-in now, and this section is
+    # about where each model puts them when they are asked for
+    cl.put("/api/settings", json={"label_show_name": 1, "label_show_contact": 1})
     for model in ("plate", "banner", "sidebar", "edge"):
         html = label(model, "Return To Equipment Room", size="50.8x25.4", color="#1b4fd8")
         shapes[model] = html
@@ -195,7 +202,8 @@ try:
     # the instruction in the largest type on the tag
     b = shapes["banner"]
     check("  banner has a colour band", re.search(r"\.bhead\{[^}]*background:#1b4fd8", b) is not None)
-    check("  with the organisation in it", ">" + A.brand_name() + "<" in b)
+    check("  with the organisation in it, when asked for",
+          ">" + A.brand_name() + "<" in b)
     check("  SCAN ME under the code", "SCAN ME" in b)
     check("  and the instruction spelled out", "PLEASE DO NOT REMOVE TAG" in b)
     check("  no number on it -- it is a message tag", "class=pid" not in b)
@@ -204,7 +212,7 @@ try:
     # colour tab at the far edge so the tag reads end-on in a drawer
     s = shapes["sidebar"]
     check("  panel is the colour", re.search(r"\.sleft\{[^}]*background:#1b4fd8", s) is not None)
-    check("  it carries the contact details", "+971" in s or A.brand_name() in s)
+    check("  it carries the contact details", A.brand_name() in s)
     check("  and there is an edge tab", "class=stab" in s
           and re.search(r"\.stab\{[^}]*background:#1b4fd8", s) is not None)
 
@@ -229,6 +237,91 @@ try:
           cl.get("/api/settings").get_json()["label_color"] == "#000000")
 
     print()
+    print("7d. The optional lines, on every model")
+    # Asked for as "add some details like company name" -- so they are the
+    # same three switches whichever model is printing, rather than a different
+    # set of options per tag.
+    # The schema's own defaults, not this install's current values: what
+    # matters is that a fresh install prints the tag it printed yesterday.
+    c0 = A.conn(); cur0 = c0.cursor()
+    cur0.execute("SHOW COLUMNS FROM Settings")
+    defaults = {r["Field"]: r["Default"] for r in cur0.fetchall()}
+    c0.close()
+    for k in ("label_show_name", "label_show_contact", "label_show_asset"):
+        check("  %s defaults to off" % k, str(defaults.get(k) or "0") in ("0", "None"),
+              defaults.get(k))
+    check("  and the logo size defaults to md", (defaults.get("label_logo_size") or "md") == "md",
+          defaults.get("label_logo_size"))
+
+    c3 = A.conn(); cur3 = c3.cursor()
+    cur3.execute("SELECT company_phone FROM Settings WHERE id=1")
+    _phone_before = (cur3.fetchone() or {}).get("company_phone") or ""
+    cur3.execute("UPDATE Settings SET company_phone=%s WHERE id=1", ["+971 4 555 0000"])
+    c3.commit(); c3.close()
+    try:
+        BRAND = A.brand_name()
+        for model in A.LABEL_MODELS:
+            cl.put("/api/settings", json={"label_model": model, "label_show_name": 1,
+                                          "label_show_contact": 1, "label_show_asset": 1})
+            body = cl.get("/label/" + AID).get_data(as_text=True)
+            body = body[body.index("<body"):]
+            check("  %-8s prints the company name" % model, BRAND in body)
+            check("  %-8s prints the contact number" % model, "+971 4 555 0000" in body)
+            check("  %-8s prints the asset name" % model, NAME in body)
+        # and off means off, on every one of them
+        for model in A.LABEL_MODELS:
+            cl.put("/api/settings", json={"label_model": model, "label_show_name": 0,
+                                          "label_show_contact": 0, "label_show_asset": 0})
+            body = cl.get("/label/" + AID).get_data(as_text=True)
+            body = body[body.index("<body"):]
+            check("  %-8s drops the contact when unticked" % model,
+                  "+971 4 555 0000" not in body)
+
+        print()
+        print("7e. Logo size, four steps, capped by the tag")
+        for model, rule in (("detail", r"\.logo\{height:([\d.]+)mm"),
+                            ("plate", r"\.plogo\{height:([\d.]+)mm"),
+                            ("sidebar", r"\.slogo\{height:([\d.]+)mm"),
+                            ("edge", r"\.elogo\{height:([\d.]+)mm")):
+            sizes = []
+            for step in ("sm", "md", "lg", "xl"):
+                cl.put("/api/settings", json={"label_model": model, "label_logo_size": step})
+                m = re.search(rule, cl.get("/label/" + AID).get_data(as_text=True))
+                sizes.append(float(m.group(1)) if m else -1.0)
+            check("  %-8s grows with the setting" % model,
+                  sizes == sorted(sizes) and sizes[0] > 0 and sizes[-1] > sizes[0], sizes)
+            check("  %-8s stays inside the tag" % model, max(sizes) <= 25.4 * 0.45, max(sizes))
+        check("an unknown step falls back to the default",
+              cl.put("/api/settings", json={"label_logo_size": "enormous"}).status_code == 200
+              and cl.get("/api/settings").get_json()["label_logo_size"] == "md")
+
+        print()
+        print("7f. A partial save does not wipe them")
+        # This one bit: every column the save writes has to be in the row it
+        # reads first, or a branding-only save stores the default over it.
+        cl.put("/api/settings", json={"label_model": "plate", "label_show_name": 1,
+                                      "label_show_contact": 1, "label_show_asset": 1,
+                                      "label_logo_size": "lg"})
+        cl.put("/api/settings", json={"label_caption": "Asset No."})
+        after = cl.get("/api/settings").get_json()
+        for k, want in (("label_show_name", 1), ("label_show_contact", 1),
+                        ("label_show_asset", 1), ("label_logo_size", "lg")):
+            check("  %s survived a caption-only save" % k,
+                  (int(after[k]) if k != "label_logo_size" else after[k]) == want, after[k])
+    finally:
+        c3 = A.conn(); cur3 = c3.cursor()
+        cur3.execute("UPDATE Settings SET company_phone=%s WHERE id=1", [_phone_before])
+        c3.commit(); c3.close()
+
+    print()
+    print("7g. The code box rule does not reach the logo")
+    # As ".tag img" it did, overriding the logo's height with auto -- so a
+    # logo printed at whatever size the uploaded file happened to be.
+    html = label("plate", "Asset No.")
+    check("  the rule is scoped to the code boxes",
+          ".pqr canvas,.pqr img" in html and ".tag canvas,.tag img" not in html)
+
+    print()
     print("8. The picker is wired to it")
     html_idx = read("index.html")
     js = read("app.js")
@@ -239,6 +332,10 @@ try:
     check("each card carries the text that model is usually printed with",
           'data-caption="Return To Equipment Room"' in html_idx)
     check("the colour is a colour input", 'type="color" id="label_color"' in html_idx)
+    check("the logo size reads like the QR size", 'id="label_logo_size"' in html_idx
+          and html_idx.index('id="qr_size"') < html_idx.index('id="label_logo_size"'))
+    for tid in ("label_show_name", "label_show_contact", "label_show_asset"):
+        check("  %s has a switch" % tid, 'id="%s"' % tid in html_idx and tid in js)
     check("and it is only shown for the models that use it",
           "TAG_COLOURED" in js and "labelColorWrap" in js)
     check("each card shows a drawing of its tag",
@@ -253,11 +350,16 @@ finally:
     c = A.conn(); cur = c.cursor()
     cur.execute("DELETE FROM Assets WHERE _id=%s", [AID])
     cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s, label_size=%s, "
-                "label_color=%s WHERE id=1",
+                "label_color=%s, label_logo_size=%s, label_show_name=%s, "
+                "label_show_contact=%s, label_show_asset=%s WHERE id=1",
                 (before.get("label_model") or "detail",
                  before.get("label_caption") or "Asset No.",
                  before.get("label_size") or "50.8x25.4",
-                 before.get("label_color") or "#000000"))
+                 before.get("label_color") or "#000000",
+                 before.get("label_logo_size") or "md",
+                 int(before.get("label_show_name") or 0),
+                 int(before.get("label_show_contact") or 0),
+                 int(before.get("label_show_asset") or 0)))
     c.commit(); c.close()
     print()
     print("(test asset removed, label settings restored)")

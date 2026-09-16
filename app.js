@@ -2335,6 +2335,13 @@ async function loadSettings(){
     if(document.getElementById('label_logo'))document.getElementById('label_logo').checked=(s.label_logo!=0);
     const _lc=document.getElementById('label_color');
     if(_lc) _lc.value = s.label_color || '#000000';
+    const _ls=document.getElementById('label_logo_size');
+    if(_ls) _ls.value = s.label_logo_size || 'md';
+    [['label_show_name', s.label_show_name], ['label_show_contact', s.label_show_contact],
+     ['label_show_asset', s.label_show_asset]].forEach(([id, v]) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = !!Number(v);
+    });
     applyTagModel(s.label_model||'detail', s.label_caption||'Asset No.');
     const chosenFields=(s.qr_fields||'Name,AssetID,Type,Serial,Status,Location').split(',').map(f=>f.trim()).filter(Boolean);
     LABEL_FIELD_KEYS.forEach(k=>{ const cb=document.getElementById('lf_'+k); if(cb && !cb.disabled) cb.checked=chosenFields.includes(k); });
@@ -2452,7 +2459,11 @@ async function saveLabel(){
     label_logo: document.getElementById('label_logo').checked ? 1 : 0,
     label_model: TAG_MODEL,
     label_caption: (document.getElementById('label_caption')||{value:''}).value.trim(),
-    label_color: (document.getElementById('label_color')||{value:'#000000'}).value
+    label_color: (document.getElementById('label_color')||{value:'#000000'}).value,
+    label_logo_size: (document.getElementById('label_logo_size')||{value:'md'}).value,
+    label_show_name: (document.getElementById('label_show_name')||{}).checked ? 1 : 0,
+    label_show_contact: (document.getElementById('label_show_contact')||{}).checked ? 1 : 0,
+    label_show_asset: (document.getElementById('label_show_asset')||{}).checked ? 1 : 0
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LABEL SETTINGS SAVED');}

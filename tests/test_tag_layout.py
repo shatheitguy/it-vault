@@ -51,8 +51,10 @@ TAGNO = "TL-1"
 NAME = "Tag layout laptop"
 
 c = A.conn(); cur = c.cursor()
-cur.execute("SELECT label_size, qr_fields FROM Settings WHERE id=1")
+cur.execute("SELECT label_size, qr_fields, label_model FROM Settings WHERE id=1")
 before = cur.fetchone() or {}
+# the detailed tag is what this file measures
+cur.execute("UPDATE Settings SET label_model='detail' WHERE id=1")
 cur.execute("INSERT INTO Assets (_id, AssetTag, Name, Type, Serial, Status, Location) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s)",
             (AID, TAGNO, NAME, "Laptop", "SN-TAG-1", "Available", "Office"))
@@ -228,8 +230,9 @@ try:
 finally:
     c = A.conn(); cur = c.cursor()
     cur.execute("DELETE FROM Assets WHERE _id=%s", (AID,))
-    cur.execute("UPDATE Settings SET label_size=%s, qr_fields=%s WHERE id=1",
-                (before.get("label_size"), before.get("qr_fields")))
+    cur.execute("UPDATE Settings SET label_size=%s, qr_fields=%s, label_model=%s WHERE id=1",
+                (before.get("label_size"), before.get("qr_fields"),
+                 before.get("label_model") or "detail"))
     c.commit(); c.close()
     print()
     print("(test asset removed, label settings restored)")

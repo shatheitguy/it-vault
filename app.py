@@ -1843,6 +1843,13 @@ def migrate_schema():
         # The band, panel and edge models are printed in a colour. The four
         # in circulation are black, blue, red and green; this is free.
         "label_color": "VARCHAR(20) DEFAULT '#000000'",
+        # What else goes on the tag, whichever model is printing, and how big
+        # the logo is drawn. Off by default for the two lines that are new, so
+        # an existing install's tags do not change shape on an update.
+        "label_logo_size": "VARCHAR(4) DEFAULT 'md'",
+        "label_show_name": "TINYINT DEFAULT 0",
+        "label_show_contact": "TINYINT DEFAULT 0",
+        "label_show_asset": "TINYINT DEFAULT 0",
     }
     for col, typ in backup_cols.items():
         try:
@@ -4586,8 +4593,11 @@ def settings():
             d = request.get_json(force=True) or {}
             logo = None
             letterhead = None
-        # load current row so partial saves (e.g. branding only) don't reset other fields
-        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
+        # Load the current row so partial saves (e.g. branding only) do not reset
+        # other fields. Every column written below has to be in this list: one
+        # that is missing reads back as absent, and the save quietly stores the
+        # default over whatever was there.
+        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, label_model, label_caption, label_color, label_logo_size, label_show_name, label_show_contact, label_show_asset, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
         cur0 = cur.fetchone() or {}
         def gv(k, fb):
             return d.get(k) if (k in d and d.get(k) not in (None, "")) else cur0.get(k, fb)
@@ -4637,14 +4647,23 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
-        if any(k in d for k in ("label_model", "label_caption", "label_color")):
+        if any(k in d for k in ("label_model", "label_caption", "label_color",
+                                "label_logo_size", "label_show_name",
+                                "label_show_contact", "label_show_asset")):
             model = (d.get("label_model") or cur0.get("label_model") or "detail").strip().lower()
             if model not in LABEL_MODELS:
                 model = "detail"
             cap = (d.get("label_caption", cur0.get("label_caption") or "Asset No.") or "")[:40]
             col = _hex_or(d.get("label_color", cur0.get("label_color")), "#000000")
+            lsz = (d.get("label_logo_size") or cur0.get("label_logo_size") or "md").strip().lower()
+            if lsz not in LOGO_SIZES:
+                lsz = "md"
+            flag = lambda k: 1 if bool(d.get(k, cur0.get(k, 0))) else 0
             cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s, "
-                        "label_color=%s WHERE id=1", (model, cap.strip(), col))
+                        "label_color=%s, label_logo_size=%s, label_show_name=%s, "
+                        "label_show_contact=%s, label_show_asset=%s WHERE id=1",
+                        (model, cap.strip(), col, lsz, flag("label_show_name"),
+                         flag("label_show_contact"), flag("label_show_asset")))
         if any(k in d for k in ("company_phone", "company_address")):
             cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
             br0 = cur.fetchone() or {}
@@ -4742,6 +4761,8 @@ def settings():
                                           "ldap_server","ldap_domain","ldap_bind_user","ldap_base_dn",
                                           "qr_size","qr_fields","label_size","label_logo",
                                           "label_model","label_caption","label_color",
+                                          "label_logo_size","label_show_name",
+                                          "label_show_contact","label_show_asset",
                                           "theme_preset","bg_type","bg","comp_bg","radius","font","accent","accent2",
                                           "language","currency","region","portal_token",
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
@@ -6242,7 +6263,8 @@ def label_page(a_id):
         sc = conn(); scur = sc.cursor()
         scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
                      "logo_text, label_model, label_caption, label_color, "
-                     "company_phone FROM Settings WHERE id=1")
+                     "label_logo_size, label_show_name, label_show_contact, "
+                     "label_show_asset, company_phone FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
@@ -6253,10 +6275,15 @@ def label_page(a_id):
         label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
         label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
         label_contact = ((srow.get("company_phone") or "") if srow else "")
+        label_logo_scale = LOGO_SIZES.get((srow.get("label_logo_size") or "md") if srow else "md", 1.0)
+        lbl_name = bool(srow.get("label_show_name")) if srow else False
+        lbl_con = bool(srow.get("label_show_contact")) if srow else False
+        lbl_asset = bool(srow.get("label_show_asset")) if srow else False
     except Exception:
         qr_size, label_size, show_logo, app_name, logo_text = 160, "50.8x50.8", True, "IT-Vault", "IT-Vault"
         label_model, label_caption = "detail", "Asset No."
         label_color, label_contact = "#000000", ""
+        label_logo_scale, lbl_name, lbl_con, lbl_asset = 1.0, False, False, False
     if label_model not in LABEL_MODELS:
         label_model = "detail"
     # parse label physical size "WxH" mm (default 50.8x50.8)
@@ -6280,10 +6307,12 @@ def label_page(a_id):
         return _model_page(
             label_model,
             [("qr0", asset.get("AssetTag") or asset["_id"][:12],
-              f"{base}p/{_pcode}" if _pcode else f"{base}asset/{asset['_id']}")],
+              f"{base}p/{_pcode}" if _pcode else f"{base}asset/{asset['_id']}",
+              asset.get("Name") or "")],
             lw_mm, lh_mm, label_caption, brand_name(),
             _model_logo(label_model, _logo), label_color, label_contact,
-            f"Label {asset['Name']}")
+            f"Label {asset['Name']}", logo_scale=label_logo_scale,
+            show_name=lbl_name, show_contact=lbl_con, show_asset=lbl_asset)
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
     # What the head actually has to work with. Not the tag's width: the head
@@ -6292,6 +6321,10 @@ def label_page(a_id):
     # "NORTHSIDE SP...". The logo shares the line, so it is capped at what is
     # reserved for it rather than being allowed to take the rest.
     LOGO_RESERVE_MM = 3.5 if compact else 5.5
+    # the same four steps the QR resolution offers, capped at what the header
+    # row can actually hold
+    logo_h_mm = round(min(4.6 if compact else 7.0,
+                          (3.0 if compact else 5.0) * label_logo_scale), 2)
     _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
     brand_mm, brand_lines = _brand_fit(
         brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
@@ -6377,6 +6410,12 @@ def label_page(a_id):
     printable = [k for k in chosen
                  if k not in ("Name", "AssetID") and k in field_defs
                  and field_defs[k][1] not in (None, "")]
+    # A row, not an extra strip: the row budget shares the space out between
+    # however many there are, so adding one shrinks them all a little instead
+    # of pushing the last one off the tag.
+    if lbl_con and label_contact:
+        field_defs["_Contact"] = ("Contact", label_contact)
+        printable.append("_Contact")
     # a stacked field is a label line plus a value line; a single-line row
     # is one -- measured against what is left of the row once the ID and
     # the name have taken their share.
@@ -6404,7 +6443,9 @@ def label_page(a_id):
         logo_html = f'<img class=logo src="{logo_uri}" alt="">'
     # Brand first, logo after it -- the mark reads as a sign-off on the
     # name rather than a bullet in front of it.
-    head_block = f'<div class=head><span class=brand>{app_name}</span>{logo_html}</div>'
+    head_block = ('<div class=head>'
+                  + (f'<span class=brand>{app_name}</span>' if lbl_name else '<span class=brand></span>')
+                  + f'{logo_html}</div>')
     # The two things someone reads off a tag before anything else, in that
     # order, at the top of the column the QR sits beside.
     aid_val = asset.get("AssetTag") or asset["_id"][:12]
@@ -6424,7 +6465,7 @@ def label_page(a_id):
  /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
  .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
- .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
+ .logo{{height:{logo_h_mm}mm;width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
  .brand{{font-weight:800;font-size:{brand_mm}mm;letter-spacing:0.3mm;text-transform:uppercase;line-height:1.08;overflow:hidden;display:-webkit-box;-webkit-line-clamp:{brand_lines};-webkit-box-orient:vertical;word-break:break-word}}
  .cat{{font-size:2.4mm;color:#333;margin:0.3mm 0}}
@@ -6487,7 +6528,8 @@ def labels_page():
         sc = conn(); scur = sc.cursor()
         scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
                      "logo_text, label_model, label_caption, label_color, "
-                     "company_phone FROM Settings WHERE id=1")
+                     "label_logo_size, label_show_name, label_show_contact, "
+                     "label_show_asset, company_phone FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
@@ -6497,10 +6539,15 @@ def labels_page():
         label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
         label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
         label_contact = ((srow.get("company_phone") or "") if srow else "")
+        label_logo_scale = LOGO_SIZES.get((srow.get("label_logo_size") or "md") if srow else "md", 1.0)
+        lbl_name = bool(srow.get("label_show_name")) if srow else False
+        lbl_con = bool(srow.get("label_show_contact")) if srow else False
+        lbl_asset = bool(srow.get("label_show_asset")) if srow else False
     except Exception:
         qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "IT-Vault"
         label_model, label_caption = "detail", "Asset No."
         label_color, label_contact = "#000000", ""
+        label_logo_scale, lbl_name, lbl_con, lbl_asset = 1.0, False, False, False
     if label_model not in LABEL_MODELS:
         label_model = "detail"
     try:
@@ -6516,11 +6563,14 @@ def labels_page():
         for _i, _a in enumerate(ordered):
             _pc = _asset_public_code(_a["_id"])
             _items.append((f"qr{_i}", _a.get("AssetTag") or _a["_id"][:12],
-                           f"{base}p/{_pc}" if _pc else f"{base}asset/{_a['_id']}"))
+                           f"{base}p/{_pc}" if _pc else f"{base}asset/{_a['_id']}",
+                           _a.get("Name") or ""))
         return _model_page(label_model, _items, lw_mm, lh_mm, label_caption,
                            brand_name(), _model_logo(label_model, _logo),
                            label_color, label_contact,
-                           f"Print {len(ordered)} Labels", sheet=True)
+                           f"Print {len(ordered)} Labels", sheet=True,
+                           logo_scale=label_logo_scale, show_name=lbl_name,
+                           show_contact=lbl_con, show_asset=lbl_asset)
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
     # What the head actually has to work with. Not the tag's width: the head
@@ -6529,6 +6579,10 @@ def labels_page():
     # "NORTHSIDE SP...". The logo shares the line, so it is capped at what is
     # reserved for it rather than being allowed to take the rest.
     LOGO_RESERVE_MM = 3.5 if compact else 5.5
+    # the same four steps the QR resolution offers, capped at what the header
+    # row can actually hold
+    logo_h_mm = round(min(4.6 if compact else 7.0,
+                          (3.0 if compact else 5.0) * label_logo_scale), 2)
     _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
     brand_mm, brand_lines = _brand_fit(
         brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
@@ -6615,6 +6669,9 @@ def labels_page():
         printable = [k for k in chosen
                      if k not in ("Name", "AssetID") and k in field_defs
                      and field_defs[k][1] not in (None, "")]
+        if lbl_con and label_contact:
+            field_defs["_Contact"] = ("Contact", label_contact)
+            printable.append("_Contact")
         # the same fit test as the single label, so a printed sheet and a
         # one-off tag of the same asset come out identical
         rows_compact = compact or (len(printable) * 6.6 > rows_mm)
@@ -6624,7 +6681,9 @@ def labels_page():
                 rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
             else:
                 rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
-        head_block = f'<div class=head><span class=brand>{app_name}</span>{logo_html}</div>'
+        head_block = ('<div class=head>'
+                  + (f'<span class=brand>{app_name}</span>' if lbl_name else '<span class=brand></span>')
+                  + f'{logo_html}</div>')
         aid_val = asset.get("AssetTag") or asset["_id"][:12]
         meta_head = (f'<div class=aid>{aid_val}</div>'
                      + (f'<div class=name>{asset["Name"]}</div>'
@@ -6649,7 +6708,7 @@ def labels_page():
  /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
  .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
- .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
+ .logo{{height:{logo_h_mm}mm;width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
  .brand{{font-weight:800;font-size:{brand_mm}mm;letter-spacing:0.3mm;text-transform:uppercase;line-height:1.08;overflow:hidden;display:-webkit-box;-webkit-line-clamp:{brand_lines};-webkit-box-orient:vertical;word-break:break-word}}
  .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
@@ -6960,6 +7019,11 @@ LABEL_MODELS = ("detail", "plate", "banner", "sidebar", "edge")
 # Settings; the caption is free text, because the fifth organisation will
 # call it something else again.
 LABEL_CAPTION_PRESETS = ("Asset No.", "Council Asset", "Product ID Code", "Tracked Asset")
+# The logo is drawn at a share of the tag's height, and this scales that --
+# the same four steps the QR resolution setting offers, so the two controls
+# read the same way. Each model still caps it at the room it actually has, or
+# a large logo on a small tag would push the number off.
+LOGO_SIZES = {"sm": 0.72, "md": 1.0, "lg": 1.32, "xl": 1.65}
 
 
 def _fit_one_line(text, avail_mm, max_mm, min_mm=1.1):
@@ -7001,7 +7065,8 @@ def _hex_or(value, fallback="#000000"):
 
 
 def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
-                contact, title, sheet=False):
+                contact, title, sheet=False, logo_scale=1.0, show_name=False,
+                show_contact=False, show_asset=False):
     """Render one or many tags in whichever model was chosen.
 
     items: [(qr_id, id_value, qr_target)]. Shared by the single label and the
@@ -7025,6 +7090,34 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
            f'{" LABELS" if sheet else " LABEL"}</button>')
     notice = "PLEASE DO NOT REMOVE TAG"
     boxes, scripts = [], []
+    # Counted up front: a model has to know how many lines it owes room to
+    # before it decides how big its number can be. Without this the extras
+    # simply overflowed a fixed-height tag and were clipped away -- present in
+    # the markup, absent on the printer, which is the worst of both.
+    n_extra = ((1 if (show_name and brand) else 0)
+               + (1 if (show_contact and contact) else 0)
+               + (1 if show_asset else 0))
+
+    # The optional lines, in the order they read: who owns it, how to reach
+    # them, what the thing is. Every model gets the same three so a decision
+    # made in Settings does not depend on which tag is being printed.
+    def extras(asset_name, width_mm, base_mm, with_name=True):
+        out = ""
+        if with_name and show_name and brand:
+            sz = _fit_one_line(brand, width_mm, base_mm, min_mm=1.0)
+            out += f'<div class=xname style="font-size:{sz}mm">{brand}</div>'
+        if show_contact and contact:
+            sz = _fit_one_line(contact, width_mm, base_mm * 0.92, min_mm=1.0)
+            out += f'<div class=xcon style="font-size:{sz}mm">{contact}</div>'
+        if show_asset and asset_name:
+            sz = _fit_one_line(asset_name, width_mm, base_mm * 0.92, min_mm=1.0)
+            out += f'<div class=xasset style="font-size:{sz}mm">{asset_name}</div>'
+        return out
+
+    extras_css = """ .xname{font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:100%}
+ .xcon,.xasset{font-weight:600;line-height:1.1;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:100%;opacity:.92}"""
 
     # ---------------------------------------------------------------- plate
     if model == "plate":
@@ -7032,8 +7125,16 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
         qr_side = max(8.0, min(inner_h, lw_mm * 0.46))
         quiet_mm = max(0.7, qr_side * 0.10)
         right_mm = lw_mm - pad_mm * 2 - qr_side - 1.6
-        logo_mm = min(4.2, inner_h * 0.34) if logo_html else 0.0
+        # The logo gives ground first when there are extra lines: it is
+        # decoration, and the number is the tag.
+        logo_cap = inner_h * (0.44 if not n_extra else 0.26)
+        logo_mm = round(min(logo_cap, 4.2 * logo_scale), 2) if logo_html else 0.0
         cap_mm = _fit_one_line(caption, right_mm, 2.6 if lh_mm < 35 else 3.4)
+        extra_mm = round(min(2.0, max(1.1, inner_h * 0.09)), 2)
+        # what is left once the logo, the caption and the optional lines have
+        # taken their share -- the number is sized to that, not to a guess
+        id_room = inner_h - logo_mm - cap_mm * 1.25 - n_extra * extra_mm * 1.3 - 0.5
+        id_ceiling = max(1.6, min(4.6 if lh_mm < 35 else 6.4, id_room))
         css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;padding:{pad_mm}mm;box-sizing:border-box;
    display:flex;flex-direction:row;align-items:center;gap:1.6mm;overflow:hidden;background:#fff}}
  .pqr{{flex:0 0 {qr_side}mm;width:{qr_side}mm;height:{qr_side}mm;background:#fff;
@@ -7045,14 +7146,15 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
    overflow:hidden;text-overflow:ellipsis;max-width:100%}}
  .pid{{font-weight:800;line-height:1.05;letter-spacing:0.04mm;white-space:nowrap;
    overflow:hidden;text-overflow:ellipsis;max-width:100%}}"""
-        for qr_id, id_val, target in items:
-            id_mm = _fit_one_line(id_val, right_mm, 4.6 if lh_mm < 35 else 6.4, min_mm=1.6)
+        for qr_id, id_val, target, a_name in items:
+            id_mm = _fit_one_line(id_val, right_mm, id_ceiling, min_mm=1.4)
             boxes.append(
                 f'<div class="tag plate"><div id={qr_id} class=pqr></div>'
                 f'<div class=pright>{logo_html}'
                 f'<div class=pcap>{caption}</div>'
                 f'<div class=pid style="font-size:{id_mm}mm">{id_val}</div>'
-                f'</div></div>')
+                + extras(a_name, right_mm, extra_mm)
+                + '</div></div>')
             scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
 
     # --------------------------------------------------------------- banner
@@ -7086,14 +7188,19 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
  .bmsg{{font-size:{msg_mm}mm;font-weight:800;line-height:1.1;word-break:break-word;
    display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}}
  .bnote{{font-size:{note_mm}mm;font-weight:800;line-height:1.1;color:{color};letter-spacing:0.02mm}}"""
-        for qr_id, _id_val, target in items:
+        for qr_id, _id_val, target, a_name in items:
+            # The band is the owner's name, so the name line is never
+            # repeated underneath it -- with the name switched off the band
+            # is simply a colour stripe.
             boxes.append(
-                f'<div class="tag banner"><div class=bhead><span>{brand}</span></div>'
+                f'<div class="tag banner">'
+                f'<div class=bhead><span>{brand if show_name else ""}</span></div>'
                 f'<div class=bbody>'
                 f'<div class=bqrwrap><div id={qr_id} class=bqr></div><div class=bscan>SCAN ME</div></div>'
                 f'<div class=bright><div class=bmsg>{caption}</div>'
-                f'<div class=bnote>{notice}</div></div>'
-                f'</div></div>')
+                f'<div class=bnote>{notice}</div>'
+                + extras(a_name, right_mm, note_mm * 0.92, with_name=False)
+                + '</div></div></div>')
             scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
 
     # -------------------------------------------------------------- sidebar
@@ -7108,7 +7215,7 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
         qr_side = max(7.0, min(right_mm - 2.0, lh_mm * 0.60))
         quiet_mm = max(0.6, qr_side * 0.08)
         cap_mm = _brand_fit(caption, left_mm - 2.0, min(2.8, lh_mm * 0.13), min_mm=1.3)[0]
-        logo_mm = min(5.0, lh_mm * 0.26) if logo_html else 0.0
+        logo_mm = round(min(lh_mm * 0.38, 5.0 * logo_scale), 2) if logo_html else 0.0
         con_mm = _fit_one_line(contact or " ", left_mm - 2.0, min(2.1, lh_mm * 0.10), min_mm=1.1)
         css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
    background:#fff;display:flex;flex-direction:row;border-radius:1.4mm}}
@@ -7117,6 +7224,7 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
  .scap{{font-size:{cap_mm}mm;font-weight:800;line-height:1.1;word-break:break-word;
    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%}}
  .slogo{{height:{logo_mm}mm;width:auto;max-width:96%;object-fit:contain}}
+ .sfoot{{display:flex;flex-direction:column;align-items:center;gap:0.2mm;max-width:100%;min-width:0}}
  .scon{{font-size:{con_mm}mm;font-weight:700;line-height:1.1;white-space:nowrap;
    overflow:hidden;text-overflow:ellipsis;max-width:100%;opacity:.95}}
  .sright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
@@ -7125,15 +7233,25 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
    box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
  .sid{{font-weight:800;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
  .stab{{flex:0 0 {tab_mm}mm;background:{color}}}"""
-        for qr_id, id_val, target in items:
+        for qr_id, id_val, target, a_name in items:
             id_mm = _fit_one_line(id_val, right_mm - 1.0, min(4.0, lh_mm * 0.18), min_mm=1.3)
+            # Both, when both are asked for -- the panel is a column with room
+            # for two short lines, and a "show the company name" switch that
+            # silently loses to the contact number is not a switch.
+            foot = ""
+            if show_name and brand:
+                foot += f'<div class=scon>{brand}</div>'
+            if show_contact and contact:
+                foot += f'<div class=scon>{contact}</div>'
             boxes.append(
                 f'<div class="tag sidebar">'
                 f'<div class=sleft><div class=scap>{caption}</div>{logo_html}'
-                f'<div class=scon>{contact or brand}</div></div>'
-                f'<div class=sright><div id={qr_id} class=sqr></div>'
-                f'<div class=sid style="font-size:{id_mm}mm">{id_val}</div></div>'
-                f'<div class=stab></div></div>')
+                + (f'<div class=sfoot>{foot}</div>' if foot else '')
+                + f'</div><div class=sright><div id={qr_id} class=sqr></div>'
+                f'<div class=sid style="font-size:{id_mm}mm">{id_val}</div>'
+                + (f'<div class=xasset style="font-size:{min(1.8, lh_mm * 0.08)}mm">{a_name}</div>'
+                   if show_asset and a_name else '')
+                + '</div><div class=stab></div></div>')
             scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
 
     # ----------------------------------------------------------------- edge
@@ -7150,7 +7268,7 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
         side_mm = _fit_one_line(caption, lh_mm - 2.0, min(2.6, strip_mm * 0.62), min_mm=1.2)
         id_mm = _fit_one_line(items[0][1] if items else "", lh_mm - 2.0,
                               min(4.2, num_mm * 0.62), min_mm=1.3)
-        logo_mm = min(4.4, lh_mm * 0.20) if logo_html else 0.0
+        logo_mm = round(min(lh_mm * 0.30, 4.4 * logo_scale), 2) if logo_html else 0.0
         con_mm = _fit_one_line(contact or " ", mid_mm, min(2.0, lh_mm * 0.09), min_mm=1.0)
         css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
    background:#fff;display:flex;flex-direction:row;border:{max(0.5, lw_mm * 0.014)}mm solid {color};
@@ -7172,12 +7290,15 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
  .enum{{flex:0 0 {num_mm}mm;display:flex;align-items:center;justify-content:center;overflow:hidden}}
  .enum span{{writing-mode:vertical-rl;transform:rotate(180deg);font-size:{id_mm}mm;
    font-weight:800;line-height:1;white-space:nowrap;max-height:{lh_mm - 1.5}mm;overflow:hidden}}"""
-        for qr_id, id_val, target in items:
+        for qr_id, id_val, target, a_name in items:
             boxes.append(
                 f'<div class="tag edge"><div class=estrip><span>{caption}</span></div>'
                 f'<div class=emid>{logo_html}'
-                + (f'<div class=econ>{contact}</div>' if contact else '')
-                + f'<div id={qr_id} class=eqr></div></div>'
+                + (f'<div class=econ>{brand}</div>' if show_name and brand else '')
+                + (f'<div class=econ>{contact}</div>' if show_contact and contact else '')
+                + f'<div id={qr_id} class=eqr></div>'
+                + (f'<div class=econ>{a_name}</div>' if show_asset and a_name else '')
+                + '</div>'
                 f'<div class=enum><span>{id_val}</span></div></div>')
             scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
 
@@ -7188,7 +7309,13 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
  /* Every model draws its own code box, and every one of them keeps the
     symbol square and unstretched -- a rectangular QR is unreadable however
     correct its modules. */
- .tag canvas,.tag img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
+ /* The code boxes only. Scoped to them on purpose: as ".tag img" this also
+    matched the logo and overrode its height with auto, so a logo printed at
+    whatever size the uploaded file happened to be. */
+ .pqr canvas,.pqr img,.bqr canvas,.bqr img,.sqr canvas,.sqr img,.eqr canvas,.eqr img{{
+   width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
+ .hidden{{display:none}}
+{extras_css}
 {css}
  @media print{{ body{{padding:0}} .sheet{{padding:0;gap:0}} button{{display:none}} }}
 </style></head><body>

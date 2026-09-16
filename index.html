@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260916d">
+<link rel="stylesheet" href="/style.css?v=20260916e">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/logo.png">
@@ -803,8 +803,32 @@
                     <option value="50.8x25.4">Rectangle — 5.08 × 2.54 cm</option>
                   </select>
                 </div>
+                <div class="field2"><label>Logo size (printed)</label>
+                  <select id="label_logo_size">
+                    <option value="sm">Small</option>
+                    <option value="md" selected>Default</option>
+                    <option value="lg">Large</option>
+                    <option value="xl">Extra large</option>
+                  </select>
+                  <div class="fhint">Every model caps it at the room it has, so a large logo on a
+                    small tag cannot push the number off.</div>
+                </div>
               </div>
               <label class="toggle" style="margin-top:6px"><input type="checkbox" id="label_logo" checked><span>Show company logo on label</span></label>
+            </div>
+            <div class="panel" style="margin-top:14px">
+              <div class="secthead">DETAILS ON THE TAG</div>
+              <p class="sec-hint">Extra lines, on whichever model is printing. Each one is placed where
+                that model has room for it &mdash; the contact becomes a field row on Detailed, a line
+                under the number on a Plate, a line in the panel on a Panel or Spine.</p>
+              <div class="label-fields-grid">
+                <label class="toggle"><input type="checkbox" id="label_show_name"><span>Company name</span></label>
+                <label class="toggle"><input type="checkbox" id="label_show_contact"><span>Contact number</span></label>
+                <label class="toggle"><input type="checkbox" id="label_show_asset"><span>Asset name</span></label>
+              </div>
+              <p class="muted" style="margin:10px 0 0">The contact number comes from Settings &rsaquo;
+                Branding. On the Banner model the company name <i>is</i> the coloured band, so switching
+                it off leaves the band plain.</p>
             </div>
             <div class="panel" style="margin-top:14px" id="labelFieldsPanel">
               <div class="secthead">FIELDS SHOWN ON LABEL</div>
@@ -1382,6 +1406,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260916d"></script>
+<script src="/app.js?nocache=20260916e"></script>
 </body>
 </html>
