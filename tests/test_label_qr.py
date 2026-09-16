@@ -84,16 +84,30 @@ try:
     html = cl.get("/label/" + AID).get_data(as_text=True)
     url = encoded(html)
     check("a QR target is rendered", bool(url), url)
-    check("it uses the short /a/ path", "/a/" + TAG in url, url)
+    # An asset tag is sequential, so it was also an invitation: scan one
+    # label, then walk IT-1236, IT-1238, IT-1239 through the same address.
+    # The QR carries an unguessable code instead, and it is just as short.
+    c = A.conn(); cur = c.cursor()
+    cur.execute("SELECT PublicCode FROM Assets WHERE _id=%s", [AID])
+    CODE = (cur.fetchone() or {}).get("PublicCode")
+    c.close()
+    check("the asset has a public code", bool(CODE) and len(CODE) >= 8, CODE)
+    check("it uses the /p/<code> path", "/p/" + CODE in url, url)
+    check("not the asset tag", "/a/" + TAG not in url and TAG not in url, url)
     check("not the 32-character id", AID not in url, url)
     # length is the lever: every character can cost a whole symbol version
     check("it is short enough to matter", len(url) <= 45, "%d chars" % len(url))
 
     print()
     print("2. The short address resolves, and the old one still does")
-    r = cl.get("/a/" + TAG)
+    r = cl.get("/p/" + CODE)
     check("scanning the tag reaches the asset", r.status_code == 200, r.status_code)
     check("and shows the right one", "QR test laptop" in r.get_data(as_text=True))
+    check("a code that does not exist is a clean 404",
+          cl.get("/p/zzzzzzzz").status_code == 404)
+    # the two old addresses still work for staff, so a label printed before
+    # the code existed is still scannable by the people who own the place
+    check("staff can still scan an old label", cl.get("/a/" + TAG).status_code == 200)
     # tags printed before this change encode the long form, and they are on
     # hardware in the field -- they must keep working forever
     r = cl.get("/asset/" + AID)
@@ -129,7 +143,7 @@ try:
         check("a 31-ish character URL fits a small symbol", n <= 29, "%d modules" % n)
         # the code is its own full-height column on a short tag: ~19mm of a
         # 25.4mm tag, where it used to get ~10mm inside the fields row
-        for size, expect_mm in (("50.8x25.4", 17.0), ("50.8x50.8", 15.0)):
+        for size, _expect_mm in (("50.8x25.4", 17.0), ("50.8x50.8", 15.0)):
             c = A.conn(); cur = c.cursor()
             cur.execute("UPDATE Settings SET label_size=%s WHERE id=1", (size,))
             c.commit(); c.close()
@@ -138,7 +152,7 @@ try:
             mw = re.search(r"\.qr\{[^}]*max-width:(\d+)%", page)
             check("  %s caps the QR column" % size, bool(mw), mw.group(1) + "%" if mw else "none")
             u = encoded(page)
-            check("  %s still encodes the short form" % size, "/a/" in u, u)
+            check("  %s still encodes the code" % size, "/p/" + CODE in u, u)
         c = A.conn(); cur = c.cursor()
         cur.execute("UPDATE Settings SET label_size=%s WHERE id=1", ("50.8x25.4",))
         c.commit(); c.close()
@@ -148,6 +162,27 @@ try:
         n_old = modules_for(old, ec=0)
         check("the short form needs fewer modules than the old one",
               n < n_old, "%d vs %d" % (n, n_old))
+
+    print()
+    print("5b. The code itself")
+    check("it is long enough to be worth nothing to a guesser",
+          len(CODE) >= 8, len(CODE))
+    check("and drawn from an unambiguous alphabet",
+          all(ch in A.PUBLIC_CODE_ALPHABET for ch in CODE), CODE)
+    check("no 0/1/i/l/o to mistype off a label",
+          not (set("01ilo") & set(A.PUBLIC_CODE_ALPHABET)))
+    # every asset must have one, including everything that predates the
+    # column, or its label would print an address that resolves to nothing
+    c2 = A.conn(); cur2 = c2.cursor()
+    cur2.execute("SELECT COUNT(*) AS n FROM Assets WHERE PublicCode IS NULL OR PublicCode=''")
+    missing = cur2.fetchone()["n"]
+    cur2.execute("SELECT COUNT(*) AS n, COUNT(DISTINCT PublicCode) AS d FROM Assets "
+                 "WHERE PublicCode IS NOT NULL AND PublicCode<>''")
+    uq = cur2.fetchone()
+    c2.close()
+    check("the backfill left none without one", missing == 0, missing)
+    check("and no two assets share a code", uq["n"] == uq["d"], dict(uq))
+    check("two fresh codes differ", A._new_public_code() != A._new_public_code())
 
     print()
     print("6. The layout gives the code its own column")
@@ -168,7 +203,7 @@ try:
     print("7. The print sheet agrees with the single tag")
     sheet = cl.get("/labels?ids=" + AID).get_data(as_text=True)
     check("the sheet renders", "class=box" in sheet)
-    check("it encodes the same short form", "/a/" + TAG in sheet)
+    check("it encodes the same code", "/p/" + CODE in sheet)
     check("it uses the same two-column layout", "class=stack" in sheet)
     check("and the same error level", "CorrectLevel.L" in sheet)
 finally:

@@ -178,8 +178,53 @@ try:
     m = re.search(r"\.kv\{font-size:([\d.]+)mm", html)
     check("  and the type shrank to make room", bool(m) and float(m.group(1)) < 2.05,
           m.group(1) + "mm" if m else "no rule")
-    check("  but not below the legibility floor", bool(m) and float(m.group(1)) >= 1.25,
+    # The floor moved from 1.25 to 1.1mm deliberately. A long organisation
+    # name costs the head a second line, and the choice at that point is a
+    # field printed small or a field not printed at all -- about 9 dots of cap
+    # height at 203dpi, which a thermal printer does render.
+    check("  but not below the legibility floor", bool(m) and float(m.group(1)) >= 1.1,
           m.group(1) + "mm" if m else "no rule")
+    print()
+    print("The organisation's name is not cut off")
+    # It was: the brand was set at a fixed size with text-overflow:ellipsis,
+    # inside the text column -- which is barely half the tag, because the QR
+    # column beside it takes up to 46%. "NORTHSIDE SPORTS CLUB" printed as
+    # "NORTHSIDE SP...". Shrinking to fit is right; cutting the owner's name off
+    # their own property tag is not.
+    c = A.conn(); cur = c.cursor()
+    cur.execute("SELECT app_name FROM Settings WHERE id=1")
+    _brand_before = (cur.fetchone() or {}).get("app_name") or "IT-Vault"
+    LONG = "NORTHSIDE ATHLETIC SPORTS CLUB"
+    cur.execute("UPDATE Settings SET app_name=%s WHERE id=1", [LONG])
+    c.commit(); c.close()
+    try:
+        for size in ("50.8x25.4", "50.8x50.8"):
+            html = page(size)
+            body = html[html.index("<body"):]
+            check("  %s prints the whole name" % size, LONG in body)
+            m = re.search(r"\.brand\{[^}]*font-size:([\d.]+)mm", html)
+            clamp = re.search(r"\.brand\{[^}]*line-clamp:(\d)", html)
+            check("  %s sizes it to fit" % size, bool(m) and 1.5 <= float(m.group(1)) <= 3.0,
+                  (m.group(1) + "mm") if m else "no rule")
+            check("  %s allows a second line rather than cutting" % size,
+                  bool(clamp) and clamp.group(1) == "2", clamp.group(1) if clamp else "none")
+            check("  %s does not ellipsize the brand" % size,
+                  re.search(r"\.brand\{[^}]*text-overflow", html) is None)
+            # and the fields still print: the head taking a second line must
+            # come out of the type size, not out of the asset's details
+            check("  %s still prints every chosen field" % size,
+                  html.count("class=kv") >= 3, html.count("class=kv"))
+        # a short name keeps the full size
+        c = A.conn(); cur = c.cursor()
+        cur.execute("UPDATE Settings SET app_name='ACME' WHERE id=1"); c.commit(); c.close()
+        m = re.search(r"\.brand\{[^}]*font-size:([\d.]+)mm", page("50.8x50.8"))
+        check("  a short name is not shrunk", bool(m) and float(m.group(1)) >= 2.9,
+              m.group(1) + "mm" if m else "no rule")
+    finally:
+        c = A.conn(); cur = c.cursor()
+        cur.execute("UPDATE Settings SET app_name=%s WHERE id=1", [_brand_before])
+        c.commit(); c.close()
+
 finally:
     c = A.conn(); cur = c.cursor()
     cur.execute("DELETE FROM Assets WHERE _id=%s", (AID,))

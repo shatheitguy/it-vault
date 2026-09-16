@@ -1498,6 +1498,29 @@ def init_db():
     except Exception:
         try: cur.execute("ALTER TABLE Settings ADD COLUMN portal_token VARCHAR(64) DEFAULT ''")
         except Exception: pass
+    # The unguessable half of a tag's address. Backfilled for every asset
+    # that predates it, so an existing install can print a tag that works the
+    # moment it updates.
+    try:
+        cur.execute("ALTER TABLE Assets ADD COLUMN PublicCode VARCHAR(24)")
+    except Exception:
+        pass
+    try:
+        cur.execute("CREATE UNIQUE INDEX idx_assets_publiccode ON Assets (PublicCode)")
+    except Exception:
+        pass
+    try:
+        cur.execute("SELECT _id FROM Assets WHERE PublicCode IS NULL OR PublicCode=''")
+        for r in cur.fetchall():
+            for _ in range(8):
+                try:
+                    cur.execute("UPDATE Assets SET PublicCode=%s WHERE _id=%s",
+                                (_new_public_code(), r["_id"]))
+                    break
+                except Exception:
+                    continue
+    except Exception:
+        pass
     # migrate: add WarrantyMonths to Assets if missing
     try:
         cur.execute("SELECT WarrantyMonths FROM Assets LIMIT 1")
@@ -2581,7 +2604,14 @@ def create_asset():
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [_now, _now]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
-    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
+    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit()
+    # Minted now rather than when a label is first printed, so every asset has
+    # a public address from the moment it exists and the column never has holes.
+    try:
+        _asset_public_code(a_id, cur=cur, conn_=c); c.commit()
+    except Exception as e:
+        print("public code mint error:", e)
+    c.close()
     send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.", kind="asset.created")
     if (data.get("EmployeeID") or "").strip():
         notify_person_asset_assigned(data["EmployeeID"], {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
@@ -2872,6 +2902,12 @@ def import_excel():
         cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS)
         ph = ", ".join(["%s"] * (len(COLUMNS) + 1))
         cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); added += 1
+        # imported assets get a public address too, or their first printed
+        # label would be the thing that decides whether they have one
+        try:
+            _asset_public_code(a_id, cur=cur, conn_=c)
+        except Exception:
+            pass
     c.commit(); c.close()
     return jsonify({"ok": True, "added": added, "updated": updated})
 
@@ -6208,12 +6244,22 @@ def label_page(a_id):
     # silently growing taller than requested.
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
+    # What the head actually has to work with. Not the tag's width: the head
+    # lives in the text column, and the QR column beside it is capped at 46%
+    # of the box -- which is why sizing against the full width still printed
+    # "NORTHSIDE SP...". The logo shares the line, so it is capped at what is
+    # reserved for it rather than being allowed to take the rest.
+    LOGO_RESERVE_MM = 3.5 if compact else 5.5
+    _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
+    brand_mm, brand_lines = _brand_fit(
+        brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
+        2.5 if compact else 3.0, min_mm=1.6)
     # A compact tag used to have no header at all -- the brand line is now
     # always drawn, so budgeting it at zero clipped the bottom field off.
     # Measured in the browser, not estimated: the header row renders 4.04mm
     # on a compact tag once its border and margin are counted. It was
     # budgeted at zero back when a compact tag had no header at all.
-    head_mm = 4.2 if compact else 5.8
+    head_mm = (4.2 if compact else 5.8) + (brand_mm * 1.08 if brand_lines > 1 else 0.0)
     name_mm = 2.3 if compact else 4.0
     # The ID and the name now sit inside the column beside the QR rather
     # than on their own lines above it, so the row has to be tall enough
@@ -6299,8 +6345,12 @@ def label_page(a_id):
     # Each row gets an equal share of what is actually left, rather than a
     # fixed height that may not fit. Type shrinks with it, down to a floor:
     # a slightly smaller serial still reads, a clipped one does not.
-    kv_mm = max(1.55, min(2.62, rows_mm / max(1, len(printable))))
-    kv_font_mm = round(max(1.25, min(2.05, kv_mm * 0.80)), 2)
+    # Floors low enough that a long organisation name -- which costs the head
+    # a second line -- does not push the last chosen field off the tag. At
+    # 203dpi 1.1mm is about 9 dots of cap height: small, and still printed,
+    # which beats a serial number that is simply not there.
+    kv_mm = max(1.35, min(2.62, rows_mm / max(1, len(printable))))
+    kv_font_mm = round(max(1.1, min(2.05, kv_mm * 0.80)), 2)
     for key in printable:
         lbl, val = field_defs[key]
         if rows_compact:
@@ -6318,8 +6368,9 @@ def label_page(a_id):
     aid_val = asset.get("AssetTag") or asset["_id"][:12]
     # The QR points at the short path when the asset has a tag, because the
     # length of what is encoded decides how big the squares can be.
-    _tag = (asset.get("AssetTag") or "").strip()
-    qr_target = f"{base}a/{quote(_tag)}" if _tag else f"{base}asset/{asset['_id']}"
+    # minted on the spot if this asset has never had one
+    _code = _asset_public_code(asset["_id"])
+    qr_target = f"{base}p/{_code}" if _code else f"{base}asset/{asset['_id']}"
     meta_head = (f'<div class=aid>{aid_val}</div>'
                  + (f'<div class=name>{asset["Name"]}</div>'
                     if show_name else ''))
@@ -6331,9 +6382,9 @@ def label_page(a_id):
  /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
  .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
- .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
+ .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
- .brand{{font-weight:800;font-size:{'2.5mm' if compact else '3mm'};letter-spacing:0.3mm;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+ .brand{{font-weight:800;font-size:{brand_mm}mm;letter-spacing:0.3mm;text-transform:uppercase;line-height:1.08;overflow:hidden;display:-webkit-box;-webkit-line-clamp:{brand_lines};-webkit-box-orient:vertical;word-break:break-word}}
  .cat{{font-size:2.4mm;color:#333;margin:0.3mm 0}}
  .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
@@ -6407,12 +6458,22 @@ def labels_page():
         lw_mm, lh_mm = 50.8, 50.8
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
+    # What the head actually has to work with. Not the tag's width: the head
+    # lives in the text column, and the QR column beside it is capped at 46%
+    # of the box -- which is why sizing against the full width still printed
+    # "NORTHSIDE SP...". The logo shares the line, so it is capped at what is
+    # reserved for it rather than being allowed to take the rest.
+    LOGO_RESERVE_MM = 3.5 if compact else 5.5
+    _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
+    brand_mm, brand_lines = _brand_fit(
+        brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
+        2.5 if compact else 3.0, min_mm=1.6)
     # A compact tag used to have no header at all -- the brand line is now
     # always drawn, so budgeting it at zero clipped the bottom field off.
     # Measured in the browser, not estimated: the header row renders 4.04mm
     # on a compact tag once its border and margin are counted. It was
     # budgeted at zero back when a compact tag had no header at all.
-    head_mm = 4.2 if compact else 5.8
+    head_mm = (4.2 if compact else 5.8) + (brand_mm * 1.08 if brand_lines > 1 else 0.0)
     name_mm = 2.3 if compact else 4.0
     # The ID and the name now sit inside the column beside the QR rather
     # than on their own lines above it, so the row has to be tall enough
@@ -6461,8 +6522,8 @@ def labels_page():
     _n_rows = max(1, len([k for k in chosen if k not in ("Name", "AssetID")]))
     rows_mm = max(2.0, avail_h_mm - aid_mm
                   - (nm_mm if show_name else 0.0))
-    kv_mm = max(1.55, min(2.62, rows_mm / _n_rows))
-    kv_font_mm = round(max(1.25, min(2.05, kv_mm * 0.80)), 2)
+    kv_mm = max(1.35, min(2.62, rows_mm / _n_rows))
+    kv_font_mm = round(max(1.1, min(2.05, kv_mm * 0.80)), 2)
     boxes_html = ""
     scripts = ""
     # read once for the whole sheet, not once per label
@@ -6512,8 +6573,8 @@ def labels_page():
  </div>
  <div id={qr_id} class=qr></div>
 </div>"""
-        _tag = (asset.get("AssetTag") or "").strip()
-        _target = f"{base}a/{quote(_tag)}" if _tag else f"{base}asset/{asset['_id']}"
+        _code = _asset_public_code(asset["_id"])
+        _target = f"{base}p/{_code}" if _code else f"{base}asset/{asset['_id']}"
         scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{_target}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});"
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
 <style>
@@ -6523,9 +6584,9 @@ def labels_page():
  /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
  .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
  .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
- .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
+ .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
- .brand{{font-weight:800;font-size:{'2.5mm' if compact else '3mm'};letter-spacing:0.3mm;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+ .brand{{font-weight:800;font-size:{brand_mm}mm;letter-spacing:0.3mm;text-transform:uppercase;line-height:1.08;overflow:hidden;display:-webkit-box;-webkit-line-clamp:{brand_lines};-webkit-box-orient:vertical;word-break:break-word}}
  .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
  .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
  .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
@@ -6552,6 +6613,24 @@ def labels_page():
 <script>{scripts}</script>
 </body></html>"""
 
+@app.route("/p/<code>")
+def asset_public_code(code):
+    """What a printed tag's QR actually points at.
+
+    The only public way to reach an asset's page. Resolved by PublicCode, so
+    there is no sequence to walk: a wrong code is a 404 and tells the caller
+    nothing about whether any asset exists.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id FROM Assets WHERE PublicCode=%s AND is_deleted=0 LIMIT 1",
+                [(code or "").strip()])
+    row = cur.fetchone()
+    c.close()
+    if not row:
+        return "Not found", 404
+    return asset_public(row["_id"])
+
+
 @app.route("/a/<code>")
 def asset_public_short(code):
     """The short address an asset tag's QR encodes.
@@ -6569,6 +6648,13 @@ def asset_public_short(code):
     Resolved by asset tag, which is what people read off the label anyway,
     falling back to the id so a code printed before this still works.
     """
+    # Signed in only, now. Asset tags are sequential, so this address is
+    # guessable by design -- fine for someone who already has an account and
+    # is scanning their own labels, not fine as the thing a sticker on a
+    # laptop hands to whoever finds it. Labels printed before the code
+    # existed still work for staff; reprint them to give a finder a way in.
+    if not session.get("user"):
+        return "Not found", 404
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id FROM Assets WHERE AssetTag=%s LIMIT 1", [code])
     row = cur.fetchone()
@@ -6583,7 +6669,13 @@ def asset_public_short(code):
 
 @app.route("/asset/<a_id>")
 def asset_public(a_id):
-    # Public asset detail page, opened by scanning the QR on the tag
+    # Reached three ways: /p/<code> from a tag's QR (the public one), /a/<tag>
+    # and /asset/<id> from a staff scan or an old label. The id is as
+    # guessable as a 32-character hex string, which is to say not, but it is
+    # also printed on nothing -- so like /a/<tag> it is signed-in only, and
+    # /p/<code> is what a stranger uses.
+    if request.path.startswith("/asset/") and not session.get("user"):
+        return "Not found", 404
     base = _public_base()
     c = conn(); cur = c.cursor()
     # SignatureData is deliberately NOT selected. Anyone holding the tag can
@@ -6709,7 +6801,9 @@ def asset_public(a_id):
         main_html = LOSTFOUND_PUBLIC_HTML.format(
             owner=_esc(app_name), tag=_esc(tag_txt),
             contact=f"<div class=pcall>{call}</div>")
-        lf_script = ("<script>var ASSET_REF=" + json.dumps(tag_txt)
+        # the code this page was reached by -- never the asset tag, or the
+        # form would be a way back to the sequence the QR stopped exposing
+        lf_script = ("<script>var ASSET_REF=" + json.dumps(_asset_public_code(asset["_id"]))
                      + ",OWNER=" + json.dumps(app_name) + ";"
                      + LOSTFOUND_PUBLIC_JS + "</script>")
     # Rendered into the document rather than fetched on load: a QR is
@@ -6785,6 +6879,83 @@ a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--a
 {main_html}
 </div></div>{lf_script}</body></html>"""
 
+# ---------- the address a printed tag carries ------------------------------
+# A tag used to encode /a/<asset tag>, and asset tags are sequential. Anyone
+# holding one label could walk IT-1237 up and down and reach the lost-property
+# page for every other asset in the building -- and file a "found this" report
+# against any of them. Sequential ids are fine on a label a human reads; they
+# are not an address.
+#
+# So each asset also gets a code that is not derived from anything: eight
+# characters from a 31-letter alphabet, about 40 bits, and the only way in.
+# It never appears in printed text, only inside the QR.
+PUBLIC_CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"   # no 0/1/i/l/o
+PUBLIC_CODE_LEN = 8
+
+
+def _new_public_code():
+    return "".join(secrets.choice(PUBLIC_CODE_ALPHABET) for _ in range(PUBLIC_CODE_LEN))
+
+
+def _asset_public_code(a_id, cur=None, conn_=None):
+    """The asset's code, minting one the first time it is needed.
+
+    Lazy on purpose: an asset created before this existed, or by an import
+    that does not know about it, still gets a working tag the moment someone
+    prints one.
+    """
+    own = cur is None
+    c = conn_
+    if own:
+        c = conn(); cur = c.cursor()
+    try:
+        cur.execute("SELECT PublicCode FROM Assets WHERE _id=%s", [a_id])
+        row = cur.fetchone() or {}
+        code = (row.get("PublicCode") or "").strip()
+        if code:
+            return code
+        for _ in range(8):
+            code = _new_public_code()
+            try:
+                cur.execute("UPDATE Assets SET PublicCode=%s WHERE _id=%s", (code, a_id))
+                if own:
+                    c.commit()
+                return code
+            except Exception:
+                continue      # astronomically unlikely collision; try again
+        return ""
+    finally:
+        if own and c is not None:
+            try: c.close()
+            except Exception: pass
+
+
+def _brand_fit(name, avail_mm, max_mm, min_mm=1.4):
+    """Font size in mm and a line count, so an organisation name fits the head.
+
+    It did not fit: a 50.8mm tag shares its top line with the logo, the brand
+    was set at a fixed size with text-overflow:ellipsis, and "NORTHSIDE SPORTS CLUB"
+    printed as "NORTHSIDE SP..." on every label. Shrinking to fit is
+    right; cutting the owner's name off the property tag is not.
+
+    Uppercase bold sans advances about 0.62em per character, plus the
+    letter-spacing. Two lines are only used when one line would have to go
+    below legibility -- at 203dpi a 1.4mm cap height is already marginal.
+    """
+    n = max(1, len(str(name or "").strip()))
+    fits = lambda sz, chars: chars * (0.62 * sz + 0.3) <= avail_mm
+    size = max_mm
+    while size > min_mm and not fits(size, n):
+        size -= 0.05
+    if size >= min_mm + 0.3:
+        return round(size, 2), 1
+    size = max_mm
+    half = (n + 1) // 2
+    while size > min_mm and not fits(size, half):
+        size -= 0.05
+    return round(max(size, min_mm), 2), 2
+
+
 # ---------- Lost & Found ---------------------------------------------------
 # Three, because there are only three things that are true of an asset here:
 # it is missing, somebody has it, or it is back. "Open" and "closed" said
@@ -6834,7 +7005,7 @@ LOSTFOUND_PUBLIC_JS = """
       msg.textContent='Please give your name and a mobile number so we can reach you.'; return; }
     send.disabled=true; send.textContent='SENDING...'; msg.className='lfmsg'; msg.textContent='';
     fetch('/api/public/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({asset:ASSET_REF,name:n,mobile:p,note:note})})
+      body:JSON.stringify({code:ASSET_REF,name:n,mobile:p,note:note})})
     .then(function(r){ return r.json().catch(function(){return {};})
       .then(function(j){ return {ok:r.ok&&j&&j.ok, error:(j&&j.error)||'Could not send that just now.', ref:j&&j.ref}; }); })
     .then(function(res){
@@ -6936,7 +7107,10 @@ def public_lostfound_report():
     tag and a valid one differ only in the status code.
     """
     d = request.get_json(silent=True) or {}
-    ref = (d.get("asset") or "").strip()[:64]
+    # The code, not the tag. Taking a tag here would hand back the whole
+    # sequence: report against IT-1001, IT-1002, IT-1003 and so on, without
+    # ever seeing a label.
+    ref = (d.get("code") or "").strip()[:32]
     name = (d.get("name") or "").strip()[:120]
     mobile = (d.get("mobile") or "").strip()[:40]
     note = (d.get("note") or "").strip()[:500]
@@ -6948,7 +7122,7 @@ def public_lostfound_report():
                                  "Please call the number shown above."}), 429
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets "
-                "WHERE (_id=%s OR AssetTag=%s) AND is_deleted=0 LIMIT 1", (ref, ref))
+                "WHERE PublicCode=%s AND is_deleted=0 LIMIT 1", [ref])
     a = cur.fetchone()
     if not a:
         c.close()

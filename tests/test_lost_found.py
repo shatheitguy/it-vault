@@ -75,7 +75,9 @@ def fake_send(subject, body, kind=None):
 try:
     print("1. A stranger who scans the tag learns who owns it, and no more")
     A._PUBLIC_HITS.clear()
-    r = anon.get("/a/" + TAG)
+    # inserted by SQL above, so mint the code the way a real creation does
+    CODE = A._asset_public_code(AID)
+    r = anon.get("/p/" + CODE)
     check("the tag resolves", r.status_code == 200, r.status_code)
     page = r.get_data(as_text=True)
     for leak in (SERIAL, NAME, "Head Office", "4800", "2026-01-15",
@@ -101,8 +103,21 @@ try:
           "pubcard" in page and "class=powner" in page)
 
     print()
+    print("1b. A tag is not an address: the sequence cannot be walked")
+    # This is the whole reason for the code. Anyone holding one label knows
+    # the format of every other one.
+    check("  the asset tag is not a public address",
+          anon.get("/a/" + TAG).status_code == 404, anon.get("/a/" + TAG).status_code)
+    check("  nor is the internal id",
+          anon.get("/asset/" + AID).status_code == 404)
+    check("  and a guessed code says nothing",
+          anon.get("/p/zzzzzzzz").status_code == 404)
+    check("  the code is not derived from the tag",
+          TAG.lower().replace("-", "") not in CODE.lower(), CODE)
+
+    print()
     print("2. Signed in, the same address is still the full record")
-    sp = staff.get("/a/" + TAG).get_data(as_text=True)
+    sp = staff.get("/p/" + CODE).get_data(as_text=True)
     check("  staff see the serial", SERIAL in sp)
     check("  staff see the name", NAME in sp)
     check("  staff see the detail table", "Assigned To" in sp)
@@ -113,7 +128,7 @@ try:
     A._PUBLIC_HITS.clear()
     real_send, A.send_notification = A.send_notification, fake_send
     r = anon.post("/api/public/lostfound", json={
-        "asset": TAG, "name": "Ravi Kumar", "mobile": "+971 55 987 6543",
+        "code": CODE, "name": "Ravi Kumar", "mobile": "+971 55 987 6543",
         "note": "Left on the 8am bus"})
     j = r.get_json()
     check("  it is accepted", r.status_code == 200 and j.get("ok"), j)
@@ -137,21 +152,26 @@ try:
     print()
     print("5. What the endpoint refuses")
     A._PUBLIC_HITS.clear()
-    r = anon.post("/api/public/lostfound", json={"asset": TAG, "name": "", "mobile": ""})
+    r = anon.post("/api/public/lostfound", json={"code": CODE, "name": "", "mobile": ""})
     check("  no name or number", r.status_code == 400, r.status_code)
-    r = anon.post("/api/public/lostfound", json={"asset": "NOT-A-TAG", "name": "X", "mobile": "1"})
-    check("  a tag that does not exist", r.status_code == 404, r.status_code)
+    r = anon.post("/api/public/lostfound", json={"code": "zzzzzzzz", "name": "X", "mobile": "1"})
+    check("  a code that does not exist", r.status_code == 404, r.status_code)
+    # filing against a tag would hand back the sequence the QR stopped giving
+    r = anon.post("/api/public/lostfound", json={"code": TAG, "name": "X", "mobile": "1"})
+    check("  an asset tag is refused here too", r.status_code == 404, r.status_code)
+    r = anon.post("/api/public/lostfound", json={"asset": CODE, "name": "X", "mobile": "1"})
+    check("  and the old field name buys nothing", r.status_code in (400, 404), r.status_code)
     # a public endpoint with no account behind it needs a ceiling
     A._PUBLIC_HITS.clear()
     codes = [anon.post("/api/public/lostfound",
-                       json={"asset": TAG, "name": "Flood", "mobile": "1"}).status_code
+                       json={"code": CODE, "name": "Flood", "mobile": "1"}).status_code
              for _ in range(7)]
     check("  the first few get through", codes[:5] == [200] * 5, codes)
     check("  then it throttles", codes[5] == 429 and codes[6] == 429, codes)
     A._PUBLIC_HITS.clear()
     # length caps, so a public form cannot be used to write an essay into the db
     long_name = "N" * 400
-    r = anon.post("/api/public/lostfound", json={"asset": TAG, "name": long_name,
+    r = anon.post("/api/public/lostfound", json={"code": CODE, "name": long_name,
                                                  "mobile": "5" * 200, "note": "z" * 5000})
     check("  an oversized submission is stored, truncated", r.status_code == 200, r.status_code)
     cc = A.conn(); ccur = cc.cursor()
