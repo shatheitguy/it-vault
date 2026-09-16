@@ -1,6 +1,6 @@
 {
-  "versionCode": 17,
-  "versionName": "2.0.2",
+  "versionCode": 18,
+  "versionName": "2.0.3",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The mark now shows up where it belongs: the sidebar, login card, portal, status page and the phone's drawer take the square mark instead of the stacked lockup, which was unreadable at 34 pixels. The documentation site carries the new art too. Scan QR reads IT-Vault asset tags only, with a framed target and a sweeping beam."
+  "notes": "Scanning a tag in the app now opens that asset's record, from the phone's own cache first so it works with no signal. It used to search for the code, and the server's search cannot see a tag's code, so the scan came back empty. Anyone without the app still gets the Lost & Found page in their browser."
 }

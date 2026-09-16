@@ -40,6 +40,12 @@ interface ApiService {
     @GET("api/assets/{id}")
     suspend fun getAsset(@Path("id") id: String): Response<Asset>
 
+    /** A scanned tag -> the asset it belongs to. Matches the tag's public
+     * code, then the asset tag, then the id -- the three things a printed
+     * tag has carried over the years. */
+    @GET("api/assets/resolve/{ref}")
+    suspend fun resolveAsset(@Path("ref") ref: String): Response<Asset>
+
     @POST("api/assets")
     suspend fun createAsset(@Body body: Asset): Response<CreateAssetResponse>
 

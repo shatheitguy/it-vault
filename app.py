@@ -2556,6 +2556,40 @@ def list_assets():
     cur.execute(sql, params); rows = cur.fetchall(); c.close()
     return jsonify([row_to_dict(r) for r in rows])
 
+@app.route("/api/assets/resolve/<path:ref>")
+@auth_required(module="assets", level="read")
+def resolve_asset(ref):
+    """The asset a scanned tag belongs to.
+
+    The app used to hand the scanned code to /api/assets?q=, which searches
+    the visible columns -- and PublicCode is not one of them. So a scan
+    online matched nothing and opened an empty list, while the same scan
+    offline worked, because the phone's own filter does check the code. This
+    is the lookup that should always have existed: exact, and over all three
+    things a tag has ever carried.
+
+    Order matters. The code is checked first because it is the unguessable
+    one; a tag and an id are only accepted as themselves, never as a
+    substring, so this cannot be walked to enumerate the estate.
+    """
+    ref = (ref or "").strip()[:64]
+    if not ref:
+        return jsonify({"error": "nothing to resolve"}), 400
+    cols = ("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
+            + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0 AND ")
+    c = conn(); cur = c.cursor()
+    row = None
+    for clause in ("PublicCode=%s", "AssetTag=%s", "_id=%s"):
+        cur.execute(cols + clause + " LIMIT 1", [ref])
+        row = cur.fetchone()
+        if row:
+            break
+    c.close()
+    if not row:
+        return jsonify({"error": "That tag is not in this install."}), 404
+    return jsonify(row_to_dict(row))
+
+
 def _next_asset_tag(cur):
     cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
     n = (cur.fetchone() or {}).get("n") or 1000

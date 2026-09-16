@@ -8,6 +8,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
 import androidx.lifecycle.lifecycleScope
+import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.SyncManager
@@ -15,6 +16,7 @@ import com.itguy.assetmanager.data.SyncStore
 import kotlinx.coroutines.launch
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
+import com.itguy.assetmanager.ui.assets.AssetEditFragment
 import com.itguy.assetmanager.ui.assets.ScanActivity
 import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
 import com.itguy.assetmanager.ui.contracts.ContractsListFragment
@@ -55,8 +57,44 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val code = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT).orEmpty()
-        if (code.isNotBlank()) {
-            showFragment(AssetsListFragment.forQuery(code), "Assets")
+        if (code.isNotBlank()) openScanned(code)
+    }
+
+    /**
+     * What a scan lands on: that asset's record, open.
+     *
+     * It used to put the code into the assets search instead, which was
+     * wrong twice over. The point of scanning the thing in front of you is
+     * to see what it is, not to be handed a list to tap through. And the
+     * server's search covers the visible columns only -- the tag's code is
+     * not one of them -- so online the list came back empty, which is what
+     * "it does not show the asset" looked like.
+     *
+     * The cache is checked first: it is already on the phone, it answers
+     * instantly, and it is the only thing that answers at all in a store
+     * room with no signal. The server is asked only when the cache has
+     * nothing, which covers an asset added since the last sync.
+     */
+    private fun openScanned(code: String) {
+        lifecycleScope.launch {
+            val cached = OfflineCache.loadAssets()?.firstOrNull {
+                it.PublicCode.equals(code, true) || it.AssetTag.equals(code, true) ||
+                    it.id.equals(code, true)
+            }
+            val id = cached?.id ?: try {
+                ApiClient.api().resolveAsset(code).body()?.id
+            } catch (e: Exception) {
+                null
+            }
+            if (id.isNullOrBlank()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "That tag is not in this install, or it has not synced to this phone yet",
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            showFragment(AssetEditFragment.newInstance(id), "Asset", addToBackStack = true)
             syncBottomNav(R.id.nav_assets)
         }
     }
