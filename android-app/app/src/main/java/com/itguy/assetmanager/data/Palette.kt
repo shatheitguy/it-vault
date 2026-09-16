@@ -1,12 +1,15 @@
 package com.itguy.assetmanager.data
 
 import android.content.Context
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import com.itguy.assetmanager.R
 
@@ -84,15 +87,58 @@ object Palette {
     private fun bestTextOn(bg: Int): Int =
         if (contrast(bg, INK_DARK) >= contrast(bg, INK_LIGHT)) INK_DARK else INK_LIGHT
 
-    /** An accent too close to the surface it sits on is nudged toward legible. */
+    /** An accent too close to the surface it sits on is nudged toward legible.
+     *
+     * Away from the surface, not into it. Mixing an accent into the very
+     * surface it has to stand out from is how a yellow brand colour vanishes
+     * on white -- which is exactly what light mode would otherwise do to it.
+     * The hue is kept: it is still their colour, darkened or lightened only
+     * as far as it takes to be read. */
     private fun ensureVisible(accent: Int, surface: Int): Int {
         if (contrast(accent, surface) >= 2.2) return accent
-        fun mix(a: Int, b: Int) = Math.round(a * 0.65 + b * 0.35).toInt()
-        return Color.rgb(
-            mix(Color.red(accent), Color.red(surface)),
-            mix(Color.green(accent), Color.green(surface)),
-            mix(Color.blue(accent), Color.blue(surface)),
-        )
+        val away = if (isLight(surface)) Color.BLACK else Color.WHITE
+        var out = accent
+        var i = 0
+        while (i < 6 && contrast(out, surface) < 2.2) {
+            out = blend(away, out, 0.18)   // 18% toward the far end each pass
+            i++
+        }
+        return out
+    }
+
+    /**
+     * Which scheme the phone is in.
+     *
+     * Whether an interface is light or dark was never really an admin's
+     * decision: the person holding the phone answered it once, for every app
+     * they own, and expects this one to agree. What the server decides is the
+     * brand -- the accent, the hue of the ground -- which is what the palette
+     * below keeps.
+     *
+     * An explicit choice in the app's own settings still wins; "system" (the
+     * default) asks the device.
+     */
+    fun prefersLight(): Boolean = when (AppCompatDelegate.getDefaultNightMode()) {
+        AppCompatDelegate.MODE_NIGHT_NO -> true
+        AppCompatDelegate.MODE_NIGHT_YES -> false
+        else -> (Resources.getSystem().configuration.uiMode and
+            Configuration.UI_MODE_NIGHT_MASK) != Configuration.UI_MODE_NIGHT_YES
+    }
+
+    /**
+     * A configured colour, swung to the scheme in use.
+     *
+     * The whole palette derives from two values -- the page ground and the
+     * card surface -- so following the device means swinging exactly those
+     * two and letting text, muted text, outlines and button ink fall out of
+     * them as they already do. A colour already on the right side of the line
+     * is returned untouched, which is why a dark install in dark mode is what
+     * it always was.
+     */
+    private fun toScheme(c: Int, wantLight: Boolean, isSurface: Boolean): Int {
+        if (isLight(c) == wantLight) return c
+        return if (wantLight) blend(Color.WHITE, c, if (isSurface) 0.97 else 0.91)
+        else blend(Color.parseColor("#05070b"), c, if (isSurface) 0.86 else 0.90)
     }
 
     private val INK_DARK = Color.parseColor("#04121f")
@@ -110,8 +156,11 @@ object Palette {
     /** The server's palette, or null when nothing has been cached yet. */
     fun serverColours(): Colours? {
         val accentRaw = parse(Prefs.brandAccent) ?: return null
-        val baseBg = firstColour(Prefs.brandBg) ?: Color.parseColor("#0a0d13")
-        val surface = firstColour(Prefs.brandSurface) ?: Color.parseColor("#121826")
+        val wantLight = prefersLight()
+        val baseBg = toScheme(firstColour(Prefs.brandBg) ?: Color.parseColor("#0a0d13"),
+                              wantLight, false)
+        val surface = toScheme(firstColour(Prefs.brandSurface) ?: Color.parseColor("#121826"),
+                               wantLight, true)
         val light = isLight(baseBg)
         val surfaceLight = isLight(surface)
         val accent = ensureVisible(accentRaw, surface)

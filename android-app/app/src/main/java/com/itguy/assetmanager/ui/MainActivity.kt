@@ -19,6 +19,7 @@ import com.itguy.assetmanager.ui.contracts.ContractsListFragment
 import com.itguy.assetmanager.ui.dashboard.DashboardFragment
 import com.itguy.assetmanager.ui.employees.DirectoryFragment
 import com.itguy.assetmanager.ui.generic.GenericListFragment
+import com.itguy.assetmanager.ui.lostfound.LostFoundFragment
 import com.itguy.assetmanager.ui.generic.ListKind
 import com.itguy.assetmanager.ui.heartbeat.HeartbeatFragment
 import com.itguy.assetmanager.ui.login.LoginActivity
@@ -219,6 +220,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_tickets -> showFragment(TicketsListFragment(), "Tickets")
             com.itguy.assetmanager.R.id.nav_contracts -> showFragment(ContractsListFragment(), "Contracts")
             com.itguy.assetmanager.R.id.nav_catalog -> showFragment(GenericListFragment.newInstance(ListKind.CATALOG), "Product Catalog")
+            com.itguy.assetmanager.R.id.nav_lostfound -> showFragment(LostFoundFragment(), "Lost & Found")
             com.itguy.assetmanager.R.id.nav_trash -> showFragment(GenericListFragment.newInstance(ListKind.TRASH), "Trash")
             com.itguy.assetmanager.R.id.nav_audit -> showFragment(GenericListFragment.newInstance(ListKind.AUDIT), "Audit Log")
             com.itguy.assetmanager.R.id.nav_scan -> showFragment(NetworkScanFragment(), "Network Scan")

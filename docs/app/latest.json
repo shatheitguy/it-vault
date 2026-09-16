@@ -1,6 +1,6 @@
 {
-  "versionCode": 13,
-  "versionName": "1.10.0",
+  "versionCode": 14,
+  "versionName": "1.11.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Lost & Found: a scanned tag now shows only who owns the asset and a number to call, with a form for whoever found it. Notifications are one page with per-event switches. Arabic names print correctly on the signed PDF, and the warranty field states its unit."
+  "notes": "Lost & Found on the phone, a launcher icon that fills the tile, and light or dark now follows the device with your accent kept. Web: five tag models, unguessable tag links, and details you choose per tag."
 }

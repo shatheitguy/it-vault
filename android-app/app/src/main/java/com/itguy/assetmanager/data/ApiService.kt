@@ -49,6 +49,15 @@ interface ApiService {
     @DELETE("api/assets/{id}")
     suspend fun deleteAsset(@Path("id") id: String): Response<OkResponse>
 
+    @GET("api/lostfound")
+    suspend fun lostFound(): List<LostFoundReport>
+
+    @PATCH("api/lostfound/{id}")
+    suspend fun lostFoundStatus(
+        @Path("id") id: Int,
+        @Body body: Map<String, String>,
+    ): Map<String, Any>
+
     @GET("api/assets/trash")
     suspend fun trash(): Response<List<Asset>>
 
