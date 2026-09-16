@@ -39,6 +39,10 @@ data class Asset(
     /** The unguessable code a printed tag's QR encodes. Cached with the
      * rest of the asset so a scan resolves with no network at all. */
     var PublicCode: String = "",
+    /** The acknowledgement signature, as the data: URI it was drawn into.
+     * Only /api/assets/{id} returns it -- the list does not carry it, which
+     * is why a sheet printed from the cache leaves a line to sign instead. */
+    var SignatureData: String = "",
     @SerializedName("UpdatedAt") var updatedAt: String = ""
 )
 

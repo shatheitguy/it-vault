@@ -5611,7 +5611,7 @@ def dash_layout():
 @app.route("/api/branding")
 def branding():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
+    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address, has_letterhead FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
     s = s or {}
     return jsonify({"app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
                     "matrix_on": bool(s.get("matrix_on", 1)), "logo": "/logo.png",
@@ -5621,7 +5621,12 @@ def branding():
                     "font": s.get("font", "Rajdhani"), "accent": s.get("accent", "#ff3b30"),
                     "accent2": s.get("accent2", "#c0392b"), "language": s.get("language", "en"),
                     "currency": s.get("currency", "AED"),
-                    "company_phone": s.get("company_phone", ""), "company_address": s.get("company_address", "")})
+                    "company_phone": s.get("company_phone", ""), "company_address": s.get("company_address", ""),
+                    # the phone prints the asset sheet itself, and it has to
+                    # know whether to leave the top of the page clear for the
+                    # letterhead or draw its own header bar. /letterhead.png
+                    # is already public; this only says whether one is set.
+                    "has_letterhead": bool(s.get("has_letterhead"))})
 
 @app.route("/api/logo", methods=["POST"])
 @auth_required(module="settings", level="write")

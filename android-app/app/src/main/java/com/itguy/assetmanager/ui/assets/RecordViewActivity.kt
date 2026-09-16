@@ -36,6 +36,11 @@ class RecordViewActivity : AppCompatActivity() {
         private const val EXTRA_TAG = "asset_tag"
         private const val EXTRA_PRINT_NOW = "print_now"
 
+        /** Millimetres of page left clear for the letterhead, matching
+         * LETTERHEAD_CLEARANCE_MM in the web app -- the same paper, so the
+         * same gap. */
+        private const val LETTERHEAD_CLEARANCE_MM = 38
+
         fun intent(ctx: Context, assetId: String, assetTag: String, printNow: Boolean): Intent =
             Intent(ctx, RecordViewActivity::class.java)
                 .putExtra(EXTRA_ID, assetId)
@@ -46,6 +51,9 @@ class RecordViewActivity : AppCompatActivity() {
     private lateinit var web: WebView
     private var printed = false
     private var jobName = "asset"
+
+    /** Set when the server actually answered for this asset. */
+    private var serverAnswered = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -82,6 +90,10 @@ class RecordViewActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             val asset = fetchAsset(assetId)
+            // whether the record came from the server matters for the
+            // signature block: the cached copy does not carry one, and
+            // "not signed yet" would be a claim we cannot make from it
+            val fromServer = serverAnswered
             if (asset == null) {
                 Toast.makeText(
                     this@RecordViewActivity,
@@ -91,13 +103,14 @@ class RecordViewActivity : AppCompatActivity() {
                 finish(); return@launch
             }
             val employee = fetchEmployee(asset.EmployeeID)
-            // a base URL on the server so the logo in the header resolves;
-            // the sheet itself is entirely local, so it renders with or
-            // without one
+            val letterhead = hasLetterhead()
+            // a base URL on the server so the letterhead and the logo
+            // resolve; the sheet itself is local, so it still renders (and
+            // prints) with neither
             val base = Prefs.serverUrl.trimEnd('/')
             web.loadDataWithBaseURL(
                 if (base.isBlank()) null else "$base/",
-                buildHtml(asset, employee),
+                buildHtml(asset, employee, letterhead, fromServer),
                 "text/html",
                 "utf-8",
                 null,
@@ -108,7 +121,9 @@ class RecordViewActivity : AppCompatActivity() {
     /** The server's copy if it answers, otherwise the one already cached. */
     private suspend fun fetchAsset(id: String): Asset? {
         try {
-            ApiClient.api().getAsset(id).body()?.let { if (it.id != null) return it }
+            ApiClient.api().getAsset(id).body()?.let {
+                if (it.id != null) { serverAnswered = true; return it }
+            }
         } catch (_: Exception) {
             // offline: the cache below is the whole point
         }
@@ -129,7 +144,26 @@ class RecordViewActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildHtml(a: Asset, emp: Employee?): String {
+    /** Whether this install prints on a letterhead. When it does, the sheet
+     * leaves the top of the page clear and draws no header of its own --
+     * exactly what the web does, so both come out of the printer alike.
+     * Unreachable server means no letterhead to fetch either, so the header
+     * bar is the right answer offline. */
+    private suspend fun hasLetterhead(): Boolean = try {
+        ApiClient.api().branding().body()?.get("has_letterhead") == true
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * The sheet, built to match what the web prints.
+     *
+     * The fields, their order, the ID bar, the signature block and the
+     * letterhead handling are all the browser's, deliberately: an asset
+     * record printed from a phone and one printed from a desk should be the
+     * same document, not two that merely cover the same ground.
+     */
+    private fun buildHtml(a: Asset, emp: Employee?, letterhead: Boolean, fromServer: Boolean): String {
         val rows = StringBuilder()
         fun row(label: String, value: String?) {
             val v = value?.trim().orEmpty().ifBlank { "—" }
@@ -147,8 +181,8 @@ class RecordViewActivity : AppCompatActivity() {
         row("Location", a.Location)
         row("Status", a.Status)
         row("Purchase date", a.PurchaseDate)
-        // months, spelled out: the number on its own has had people reading it
-        // as years
+        // months, spelled out: the number on its own has had people reading
+        // it as years
         row("Warranty", if (a.WarrantyMonths > 0) "${a.WarrantyMonths} months" else "")
         row("Price", a.Price)
         row("Received by", a.ReceivedBy)
@@ -163,31 +197,53 @@ class RecordViewActivity : AppCompatActivity() {
         }
 
         val brand = Prefs.brandName.ifBlank { "IT-Vault" }
+        val sig = when {
+            a.SignatureData.startsWith("data:image") ->
+                "<img src=\"${a.SignatureData}\" class=\"sig-img\" alt=\"Signature\">"
+            // the server said there is none
+            fromServer -> "<div class=\"muted\">Not signed yet</div>"
+            // printed from the cache, which never carries the signature: a
+            // line to sign is honest, "not signed yet" would not be
+            else -> "<div class=\"sig-line\">Name and signature · date</div>"
+        }
+        val header =
+            if (letterhead) ""
+            else "<div class=\"hd\"><img src=\"/logo.png\" onerror=\"this.style.display='none'\">" +
+                "<span>${esc(brand)} — Asset record</span></div>"
+        val backdrop =
+            if (letterhead)
+                "<img src=\"/letterhead.png?t=${System.currentTimeMillis()}\" class=\"lh\" alt=\"\">"
+            else ""
+
         return """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-@page{size:A4;margin:14mm}
+@page{size:A4;margin:${if (letterhead) "0" else "14mm"}}
 body{font-family:'Segoe UI',Roboto,Arial,sans-serif;color:#111;background:#fff;margin:0;padding:10px}
-.card{border:1px solid #222;border-radius:8px;max-width:720px;margin:0 auto;overflow:hidden}
+.lh{position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1}
+.card{border:1px solid #222;border-radius:8px;max-width:720px;margin:${if (letterhead) "$LETTERHEAD_CLEARANCE_MM" + "mm auto 0" else "0 auto"};overflow:hidden}
 .hd{background:#101622;color:#fff;padding:12px 16px;font-weight:600;display:flex;align-items:center;gap:10px}
-.hd img{height:24px}
+.hd img{height:26px}
 .idbar{background:#f4f6fa;border-bottom:2px solid #101622;padding:12px 16px;text-align:center}
-.idbar .tag{font-size:24px;font-weight:800;letter-spacing:1px;color:#101622;font-family:ui-monospace,Consolas,monospace}
+.idbar .tag{font-size:26px;font-weight:800;letter-spacing:1px;color:#101622;font-family:ui-monospace,Consolas,monospace}
 .idbar .nm{font-size:13px;color:#555;margin-top:2px}
-.bd{padding:12px 16px}
+.bd{padding:14px 16px}
 table{width:100%;border-collapse:collapse}
 td.k{width:38%;padding:5px 8px;color:#555;font-weight:600;border-bottom:1px solid #eee;vertical-align:top}
 td.v{padding:5px 8px;border-bottom:1px solid #eee;word-break:break-word}
-.sig{margin-top:14px;padding:10px;border:1px dashed #999;border-radius:6px;font-size:12px}
-.sig .t{font-weight:700;letter-spacing:.5px;margin-bottom:26px}
-.sig .l{border-top:1px solid #777;width:60%;padding-top:4px;color:#666}
+.sig-block{margin-top:14px;padding:10px;border:1px dashed #999;border-radius:6px}
+.sig-title{font-weight:700;margin-bottom:6px;font-size:12px;letter-spacing:.5px}
+.sig-img{max-width:340px;max-height:160px;border:1px solid #ccc;border-radius:6px;background:#fff}
+.sig-line{border-top:1px solid #777;width:60%;margin-top:26px;padding-top:4px;color:#666;font-size:12px}
+.muted{color:#999;font-style:italic}
 @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;padding:0}}
 </style></head><body>
+$backdrop
 <div class="card">
-  <div class="hd"><img src="/logo.png" onerror="this.style.display='none'"><span>${esc(brand)} — Asset record</span></div>
+  $header
   <div class="idbar"><div class="tag">${esc(a.AssetTag.ifBlank { "—" })}</div><div class="nm">${esc(a.Name)}</div></div>
   <div class="bd"><table>$rows</table>
-    <div class="sig"><div class="t">SIGNATURE / ACKNOWLEDGEMENT</div><div class="l">Name and signature · date</div></div>
+    <div class="sig-block"><div class="sig-title">SIGNATURE / ACKNOWLEDGEMENT</div>$sig</div>
   </div>
 </div></body></html>"""
     }

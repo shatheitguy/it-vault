@@ -1,6 +1,6 @@
 {
-  "versionCode": 18,
-  "versionName": "2.0.3",
+  "versionCode": 19,
+  "versionName": "2.0.4",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Scanning a tag in the app now opens that asset's record, from the phone's own cache first so it works with no signal. It used to search for the code, and the server's search cannot see a tag's code, so the scan came back empty. Anyone without the app still gets the Lost & Found page in their browser."
+  "notes": "Printing an asset from the phone now produces the same sheet the web does: on your letterhead when one is set up, with the acknowledgement signature when the asset has been signed for. Printed from the cache with no signal it leaves a line to sign instead."
 }
