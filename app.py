@@ -1835,6 +1835,11 @@ def migrate_schema():
         "backup_scope": "VARCHAR(20) DEFAULT 'all'",
         "backup_retain": "INT DEFAULT 7",
         "backup_last_run": "VARCHAR(40) DEFAULT ''",
+        # Which tag model prints, and the line above the number on the plate
+        # models -- "Asset No.", "Council Asset", "Tracked Asset", whatever
+        # the organisation calls it.
+        "label_model": "VARCHAR(20) DEFAULT 'detail'",
+        "label_caption": "VARCHAR(40) DEFAULT 'Asset No.'",
     }
     for col, typ in backup_cols.items():
         try:
@@ -4629,6 +4634,13 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
+        if any(k in d for k in ("label_model", "label_caption")):
+            model = (d.get("label_model") or cur0.get("label_model") or "detail").strip().lower()
+            if model not in LABEL_MODELS:
+                model = "detail"
+            cap = (d.get("label_caption", cur0.get("label_caption") or "Asset No.") or "")[:40]
+            cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s WHERE id=1",
+                        (model, cap.strip()))
         if any(k in d for k in ("company_phone", "company_address")):
             cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
             br0 = cur.fetchone() or {}
@@ -4725,6 +4737,7 @@ def settings():
                                           "notify_new","notify_delete","app_name","logo_text","matrix_on",
                                           "ldap_server","ldap_domain","ldap_bind_user","ldap_base_dn",
                                           "qr_size","qr_fields","label_size","label_logo",
+                                          "label_model","label_caption",
                                           "theme_preset","bg_type","bg","comp_bg","radius","font","accent","accent2",
                                           "language","currency","region","portal_token",
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
@@ -6223,15 +6236,21 @@ def label_page(a_id):
     # QR / label config from Settings
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, logo_text FROM Settings WHERE id=1")
+        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
+                     "logo_text, label_model, label_caption FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
+        label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
+        label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
     except Exception:
         qr_size, label_size, show_logo, app_name, logo_text = 160, "50.8x50.8", True, "IT-Vault", "IT-Vault"
+        label_model, label_caption = "detail", "Asset No."
+    if label_model not in LABEL_MODELS:
+        label_model = "detail"
     # parse label physical size "WxH" mm (default 50.8x50.8)
     try:
         lw, lh = label_size.lower().split("x")
@@ -6242,6 +6261,20 @@ def label_page(a_id):
     # header + stacked two-line fields — switch to a compact single-line layout so
     # the label actually renders at (and fits) the physical size chosen, instead of
     # silently growing taller than requested.
+    # The plate model is a different tag, not a variation on this one: no
+    # fields, no notice, no border -- the ones it copies are cut metal, and a
+    # printed rule around the edge only makes the alignment look wrong. It is
+    # rendered on its own rather than threaded through a layout built for the
+    # detailed tag.
+    if label_model == "plate":
+        _logo = _logo_data_uri() if show_logo else ""
+        _pcode = _asset_public_code(asset["_id"])
+        return _plate_page(
+            [("qr0", asset.get("AssetTag") or asset["_id"][:12],
+              f"{base}p/{_pcode}" if _pcode else f"{base}asset/{asset['_id']}")],
+            lw_mm, lh_mm, label_caption,
+            f'<img class=plogo src="{_logo}" alt="">' if _logo else "",
+            f"Label {asset['Name']}")
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
     # What the head actually has to work with. Not the tag's width: the head
@@ -6443,19 +6476,37 @@ def labels_page():
     # QR / label config from Settings (shared by every label on this sheet)
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, logo_text FROM Settings WHERE id=1")
+        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
+                     "logo_text, label_model, label_caption FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
+        label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
+        label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
     except Exception:
         qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "IT-Vault"
+        label_model, label_caption = "detail", "Asset No."
+    if label_model not in LABEL_MODELS:
+        label_model = "detail"
     try:
         lw, lh = label_size.lower().split("x")
         lw_mm, lh_mm = float(lw), float(lh)
     except Exception:
         lw_mm, lh_mm = 50.8, 50.8
+    # Same model, many plates. Shared renderer, so a sheet and a one-off tag
+    # of the same asset come off the printer identical.
+    if label_model == "plate":
+        _logo = _logo_data_uri() if show_logo else ""
+        _items = []
+        for _i, _a in enumerate(ordered):
+            _pc = _asset_public_code(_a["_id"])
+            _items.append((f"qr{_i}", _a.get("AssetTag") or _a["_id"][:12],
+                           f"{base}p/{_pc}" if _pc else f"{base}asset/{_a['_id']}"))
+        return _plate_page(_items, lw_mm, lh_mm, label_caption,
+                           f'<img class=plogo src="{_logo}" alt="">' if _logo else "",
+                           f"Print {len(ordered)} Labels", sheet=True)
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
     # What the head actually has to work with. Not the tag's width: the head
@@ -6878,6 +6929,99 @@ a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--a
 {head_html}
 {main_html}
 </div></div>{lf_script}</body></html>"""
+
+# ---------- tag models ----------------------------------------------------
+# Two shapes of asset tag, because they answer different questions.
+#
+# "detail" is the tag this app has always printed: brand, asset ID, name, the
+# fields chosen in Settings, and the DO NOT REMOVE notice. It is for an IT
+# team reading a label off a shelf.
+#
+# "plate" is the engraved-plate convention every asset register in the world
+# uses -- the code on the left, and the owner's mark, one caption and one big
+# number on the right. Nothing else. It is for identifying a thing across a
+# room, and for surviving being read at arm's length on a machine.
+LABEL_MODELS = ("detail", "plate")
+# What the four plates in circulation actually say. Offered as presets in
+# Settings; the caption is free text, because the fifth organisation will
+# call it something else again.
+LABEL_CAPTION_PRESETS = ("Asset No.", "Council Asset", "Product ID Code", "Tracked Asset")
+
+
+def _fit_one_line(text, avail_mm, max_mm, min_mm=1.1):
+    """Largest size at which a string fits one line of a given width.
+
+    An asset number must never wrap: half of 45464544 on the next line is not
+    a number anyone can read back to you over the phone.
+    """
+    n = max(1, len(str(text or "")))
+    size = max_mm
+    while size > min_mm and n * (0.62 * size + 0.12) > avail_mm:
+        size -= 0.05
+    return round(max(size, min_mm), 2)
+
+
+def _plate_page(items, lw_mm, lh_mm, caption, logo_html, title, sheet=False):
+    """Render one or many plate-model tags.
+
+    items: [(qr_id, id_value, qr_target)]. Shared by the single label and the
+    print sheet so a sheet and a one-off tag of the same asset are identical.
+    """
+    pad_mm = 1.2
+    inner_h = lh_mm - pad_mm * 2
+    # The code is a square of the plate's height -- that is the whole idea of
+    # this layout, and it is what makes the modules big enough to scan.
+    qr_side = max(8.0, min(inner_h, lw_mm * 0.46))
+    quiet_mm = max(0.7, qr_side * 0.10)
+    qr_px = int(min(640, max(160, (qr_side - quiet_mm * 2) * 3.78 * 8)))
+    right_mm = lw_mm - pad_mm * 2 - qr_side - 1.6
+    logo_mm = min(4.2, inner_h * 0.34) if logo_html else 0.0
+    cap_mm = _fit_one_line(caption, right_mm, 2.6 if lh_mm < 35 else 3.4)
+    boxes = []
+    scripts = []
+    for qr_id, id_val, target in items:
+        id_mm = _fit_one_line(id_val, right_mm, 4.6 if lh_mm < 35 else 6.4, min_mm=1.6)
+        boxes.append(
+            f'<div class=plate><div id={qr_id} class=pqr></div>'
+            f'<div class=pright>{logo_html}'
+            f'<div class=pcap>{caption}</div>'
+            f'<div class=pid style="font-size:{id_mm}mm">{id_val}</div>'
+            f'</div></div>')
+        scripts.append(
+            f"new QRCode(document.getElementById('{qr_id}'), {{text:'{target}',"
+            f"width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});")
+    sheet_css = ("display:flex;flex-wrap:wrap;gap:3mm;padding:20px" if sheet
+                 else "display:flex;justify-content:center;padding:20px")
+    btn = ('<button onclick="window.print()" style="display:block;margin:10px auto 0;'
+           'padding:8px 16px;font-size:14px;cursor:pointer">&#128424; PRINT'
+           f'{" LABELS" if sheet else " LABEL"}</button>')
+    return f"""<!doctype html><html><head><meta charset=utf-8><title>{title}</title>
+<style>
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
+ .sheet{{{sheet_css}}}
+ /* No border: a plate is a plate, and the ones this copies are cut metal.
+    A printed rule around the edge only makes the alignment look wrong. */
+ .plate{{width:{lw_mm}mm;height:{lh_mm}mm;padding:{pad_mm}mm;box-sizing:border-box;
+   display:flex;flex-direction:row;align-items:center;gap:1.6mm;overflow:hidden;background:#fff}}
+ .pqr{{flex:0 0 {qr_side}mm;width:{qr_side}mm;height:{qr_side}mm;background:#fff;
+   padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .pqr canvas,.pqr img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
+ .pright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
+   justify-content:center;gap:0.4mm;text-align:center;overflow:hidden}}
+ .plogo{{height:{logo_mm}mm;width:auto;max-width:100%;object-fit:contain;margin-bottom:0.3mm}}
+ .pcap{{font-size:{cap_mm}mm;font-weight:700;line-height:1.1;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ /* The number is the tag. Everything else on the plate is context for it. */
+ .pid{{font-weight:800;line-height:1.05;letter-spacing:0.04mm;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ @media print{{ body{{padding:0}} .sheet{{padding:0;gap:0}} button{{display:none}} }}
+</style></head><body>
+<div class=sheet>{''.join(boxes)}</div>
+{btn}
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>{''.join(scripts)}</script>
+</body></html>"""
+
 
 # ---------- the address a printed tag carries ------------------------------
 # A tag used to encode /a/<asset tag>, and asset tags are sequential. Anyone

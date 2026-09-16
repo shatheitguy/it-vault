@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260916b">
+<link rel="stylesheet" href="/style.css?v=20260916c">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/logo.png">
@@ -738,6 +738,45 @@
           <!-- ASSET LABEL (QR / print label — separate from Branding) -->
           <section class="cfg-sec" data-sec="label" style="display:none">
             <div class="panel">
+              <div class="secthead">TAG MODEL</div>
+              <p class="sec-hint">What the printed tag looks like. <b>Detailed</b> is this app's own tag &mdash;
+                brand, asset ID, name, the fields below and the DO NOT REMOVE notice. The <b>plate</b> models are
+                the engraved-plate convention: the code on the left, and the logo, one caption and one big number
+                on the right. Nothing else. The caption is free text &mdash; the four offered are just the common ones.</p>
+              <div class="preset-grid" id="tagModelGrid">
+                <button type="button" class="preset-card" data-model="detail" data-caption="">
+                  <span class="tm-prev tm-detail"><span class="tm-lines"></span><span class="tm-qr"></span></span>
+                  <span class="pc-name">Detailed</span>
+                  <span class="pc-sub">Fields + notice</span>
+                </button>
+                <button type="button" class="preset-card" data-model="plate" data-caption="Asset No.">
+                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Asset No.</b><i>45464544</i></span></span>
+                  <span class="pc-name">Asset No.</span>
+                  <span class="pc-sub">Plate</span>
+                </button>
+                <button type="button" class="preset-card" data-model="plate" data-caption="Council Asset">
+                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Council Asset</b><i>11356151</i></span></span>
+                  <span class="pc-name">Council Asset</span>
+                  <span class="pc-sub">Plate</span>
+                </button>
+                <button type="button" class="preset-card" data-model="plate" data-caption="Product ID Code">
+                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Product ID Code</b><i>72916574</i></span></span>
+                  <span class="pc-name">Product ID Code</span>
+                  <span class="pc-sub">Plate</span>
+                </button>
+                <button type="button" class="preset-card" data-model="plate" data-caption="Tracked Asset">
+                  <span class="tm-prev"><span class="tm-qr"></span><span class="tm-side"><b>Tracked Asset</b><i>GCCC5007</i></span></span>
+                  <span class="pc-name">Tracked Asset</span>
+                  <span class="pc-sub">Plate</span>
+                </button>
+              </div>
+              <div class="field2" id="labelCaptionWrap" style="margin-top:12px;max-width:360px">
+                <label>Caption on the plate</label>
+                <input id="label_caption" maxlength="40" placeholder="Asset No.">
+                <div class="fhint">The line above the number. Ignored by the Detailed model.</div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
               <div class="secthead">LABEL SIZE</div>
               <p class="sec-hint">Two independent sizes: the QR code's own image resolution, and the physical label it gets printed onto. Pick the physical size to match your label stock, and a QR resolution that stays sharp at that size.</p>
               <div class="grid2">
@@ -758,7 +797,7 @@
               </div>
               <label class="toggle" style="margin-top:6px"><input type="checkbox" id="label_logo" checked><span>Show company logo on label</span></label>
             </div>
-            <div class="panel" style="margin-top:14px">
+            <div class="panel" style="margin-top:14px" id="labelFieldsPanel">
               <div class="secthead">FIELDS SHOWN ON LABEL</div>
               <p class="sec-hint">Choose exactly what prints on the label. <b>Category</b> and <b>Asset ID</b> always show — they're needed to identify a scanned item.</p>
               <div class="label-fields-grid" id="lblFieldsGrid">
@@ -1334,6 +1373,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260916b"></script>
+<script src="/app.js?nocache=20260916c"></script>
 </body>
 </html>
