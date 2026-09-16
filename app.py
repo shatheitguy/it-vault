@@ -5621,15 +5621,83 @@ def logo_file():
     return send_from_directory(BASE, "default_logo.png")
 
 
+# A squared icon, keyed by the bytes it was made from, so uploading a new
+# logo produces a new key and an unchanged one costs nothing after the first
+# request. One entry: there is only ever one logo.
+_ICON_CACHE = {}
+
+
+def _square_icon(data):
+    """A logo turned into something that works in a 16px square.
+
+    Two things are done to it. Any transparent margin is trimmed, because a
+    logo exported with generous padding is mostly padding once it is shrunk
+    to favicon size. What is left is centred on a transparent square, so a
+    wide wordmark keeps its shape instead of being stretched or cropped
+    through its own letters.
+
+    Returns None if the image cannot be read (or PIL is missing), which puts
+    the caller back on the bundled mark rather than a broken image.
+    """
+    key = hashlib.sha1(data).hexdigest()
+    hit = _ICON_CACHE.get(key)
+    if hit is not None:
+        return hit
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(data)).convert("RGBA")
+        box = img.split()[3].getbbox()      # opaque extent, alpha channel
+        if box:
+            img = img.crop(box)
+        edge = max(img.size)
+        if edge <= 0:
+            return None
+        canvas = PILImage.new("RGBA", (edge, edge), (0, 0, 0, 0))
+        canvas.paste(img, ((edge - img.size[0]) // 2, (edge - img.size[1]) // 2))
+        if edge > 256:
+            canvas = canvas.resize((256, 256), PILImage.LANCZOS)
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG", optimize=True)
+        out = buf.getvalue()
+    except Exception:
+        return None
+    _ICON_CACHE.clear()
+    _ICON_CACHE[key] = out
+    return out
+
+
 @app.route("/icon.png")
 def icon_file():
-    """The square mark.
+    """The square mark -- the branding's own logo, squared.
 
-    The logo is a wordmark with a tagline under it -- fine in a sidebar, a
-    smudge at 16 pixels. Every square slot (favicon, home-screen icon, app
-    tile) gets the shield instead, which is the same brand in the form that
-    survives being small.
+    Every square slot (favicon, home-screen icon, tab icon) comes through
+    here rather than through /logo.png, because a logo is free to be wide and
+    a favicon is not: /logo.png is sent as it was uploaded, which in a 16px
+    box is a strip of unreadable pixels.
+
+    It has to be the *uploaded* logo though. Serving our own shield here
+    while the sidebar showed the customer's mark meant the tab belonged to a
+    different product than the page. The bundled shield is the fallback for
+    an install that has not uploaded anything yet, not the answer for
+    everyone.
     """
+    data = _brand_blob("logo")
+    if not data:
+        try:
+            if os.path.getsize(LOGO_PATH) > 0:
+                with open(LOGO_PATH, "rb") as fp:
+                    data = fp.read()
+        except Exception:
+            data = None
+    square = _square_icon(bytes(data)) if data else None
+    if square:
+        resp = make_response(square)
+        resp.headers["Content-Type"] = "image/png"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        # revalidate rather than cache: a favicon browsers hold onto for a
+        # week is a branding change that looks like it did not save
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
     return send_from_directory(BASE, "default_icon.png")
 
 def _logo_data_uri():

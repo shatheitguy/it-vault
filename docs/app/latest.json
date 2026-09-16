@@ -1,6 +1,6 @@
 {
-  "versionCode": 15,
-  "versionName": "2.0.0",
+  "versionCode": 16,
+  "versionName": "2.0.1",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "New IT-Vault mark throughout. QR scan moves to the bottom bar and resolves from the phone's own cache, so it works with no signal. A connect screen warms every list on open, so nothing is empty offline. Asset rows print the record sheet as well as the QR label. Overview numbers are colour-coded like the web."
+  "notes": "Scan QR now reads IT-Vault asset tags only, with a framed target and a sweeping beam, and says so when a QR is not one of ours. The asset form no longer carries a scanner at all. The favicon follows your uploaded logo instead of the IT-Vault mark."
 }

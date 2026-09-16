@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The asset tag scanner.
+
+  It reads one thing: the QR printed on an IT-Vault tag. So the screen says
+  so, and frames the spot to hold the tag in rather than leaving the whole
+  viewfinder live with no clue what it wants. The line sweeping that frame is
+  the only moving part, and it is what tells you the camera is working while
+  you hold the phone against a shelf in poor light.
+-->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
@@ -9,6 +18,42 @@
         android:id="@+id/previewView"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <!-- the target: corner brackets, a sweeping line, and nothing else over
+         the picture, so what the camera sees stays readable -->
+    <FrameLayout
+        android:id="@+id/scanFrame"
+        android:layout_width="264dp"
+        android:layout_height="264dp"
+        android:layout_gravity="center">
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@drawable/scan_reticle" />
+
+        <View
+            android:id="@+id/scanLine"
+            android:layout_width="match_parent"
+            android:layout_height="3dp"
+            android:layout_marginHorizontal="10dp"
+            android:background="@drawable/scan_line" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/scanTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginTop="96dp"
+        android:text="SCAN ASSET TAG"
+        android:textAlignment="center"
+        android:textColor="@android:color/white"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.16"
+        android:shadowColor="#000000"
+        android:shadowRadius="8" />
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -22,17 +67,9 @@
             android:id="@+id/scanHint"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Point the camera at a QR code or barcode"
+            android:text="Hold the QR on the asset tag inside the frame"
             android:textAlignment="center"
             android:textColor="@android:color/white" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/scanTextBtn"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="14dp"
-            android:text="📄  SCAN TEXT ON LABEL (S/N, Model…)"
-            app:backgroundTint="@color/accent" />
     </LinearLayout>
 
     <com.google.android.material.button.MaterialButton

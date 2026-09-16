@@ -45,41 +45,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
      * The bottom bar's QR button.
      *
      * Scanning a tag is a thing you do standing in front of the thing, so it
-     * belongs on the bar rather than buried in a form. What comes back is put
-     * into the Assets search, which already falls back to the cached list
-     * when there is no network -- and a store room is exactly where there is
-     * no network.
+     * belongs on the bar rather than buried in a form. The scanner hands back
+     * the code out of the tag's own QR, already checked to be one of ours,
+     * and that goes into the Assets search -- which falls back to the cached
+     * list when there is no network, and a store room is exactly where there
+     * is no network.
      */
     private val scanLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val raw = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)
-            ?: result.data?.getStringExtra(ScanActivity.EXTRA_TEXT_RESULT)
-        val query = assetQueryFrom(raw)
-        if (query.isNullOrBlank()) {
-            if (raw != null) Toast.makeText(this, "Nothing recognisable in that code",
-                                            Toast.LENGTH_SHORT).show()
-        } else {
-            showFragment(AssetsListFragment.forQuery(query), "Assets")
+        val code = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT).orEmpty()
+        if (code.isNotBlank()) {
+            showFragment(AssetsListFragment.forQuery(code), "Assets")
             syncBottomNav(R.id.nav_assets)
         }
-    }
-
-    /**
-     * What to search for, given whatever the camera read.
-     *
-     * A tag printed today carries /p/<code>; ones printed before that carry
-     * /a/<asset tag> or /asset/<id>. All three are addresses on this server,
-     * and what matters here is the last part -- the asset list can match any
-     * of them, the code included, against its cache.
-     */
-    private fun assetQueryFrom(raw: String?): String? {
-        val s = raw?.trim().orEmpty()
-        if (s.isEmpty()) return null
-        Regex("/(?:p|a|asset)/([^/?#\\s]+)").find(s)?.let { return it.groupValues[1] }
-        // not one of our links: hand the text over as typed, which is right
-        // for a bare asset tag or a serial number read off a sticker
-        return s.take(80)
     }
 
     /** Paints the server's cached name + logo into the drawer header and toolbar. */

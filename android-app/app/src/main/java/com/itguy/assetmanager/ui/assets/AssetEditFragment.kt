@@ -47,11 +47,6 @@ class AssetEditFragment : Fragment() {
     private val NONE = "-- select --"
     private val ALLOWED_INVOICE_EXT = setOf("pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff")
 
-    private val scanLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)?.let { applyScannedText(it); return@registerForActivityResult }
-        result.data?.getStringExtra(ScanActivity.EXTRA_TEXT_RESULT)?.let { applyOcrText(it) }
-    }
-
     // Invoice/proof attachment: a newly-picked file isn't uploaded until Save
     // (mirrors the web form -- for a brand-new asset there's no _id to attach
     // it to until the asset itself is created).
@@ -665,46 +660,6 @@ class AssetEditFragment : Fragment() {
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    /** Mirrors the web app's camera-scan logic: JSON payload -> fill matching fields, otherwise treat as a raw Serial Number. */
-    private fun applyScannedText(text: String) {
-        try {
-            val obj = org.json.JSONObject(text)
-            val keys = obj.keys().asSequence().associate { it.lowercase().replace(Regex("[^a-z0-9]"), "") to obj.optString(it) }
-            fun pick(vararg names: String): String? = names.firstNotNullOfOrNull { keys[it]?.takeIf { v -> v.isNotBlank() } }
-            pick("name", "assetname")?.let { b.fName.setText(it) }
-            pick("serial", "serialnumber", "sn")?.let { b.fSerial.setText(it) }
-            pick("mac", "macaddress")?.let { b.fMacAddress.setText(it) }
-            pick("type", "category", "itemcategory")?.let { current = current.copy(Type = it); bindCategorySpinnerWithSelection(it) }
-            pick("location", "site")?.let { locSel -> current = current.copy(Location = locSel); bindLocationSpinner() }
-        } catch (e: Exception) {
-            // not JSON -> treat as a plain serial number (the common case for a SN barcode sticker)
-            b.fSerial.setText(text)
-        }
-    }
-
-    /** Best-effort OCR label parser: looks for common "S/N: X", "Model: X",
-     * "MAC: X" style lines -- also handling the label and value sitting on
-     * separate lines, which is common on printed asset stickers -- and
-     * fills the matching fields (e.g. "SNO" -> Serial, "Model" -> Model). */
-    private fun applyOcrText(text: String) {
-        val parsed = LabelParser.parse(text)
-
-        parsed.serial?.let { b.fSerial.setText(it) }
-        parsed.mac?.let { b.fMacAddress.setText(it) }
-        if (parsed.manufacturer != null || parsed.model != null) {
-            current = current.copy(
-                Manufacturer = parsed.manufacturer ?: current.Manufacturer,
-                Model = parsed.model ?: current.Model
-            )
-            bindManufacturerSpinner()
-        }
-
-        val msg = if (parsed.isEmpty)
-            "Couldn't recognize Serial, Model, or MAC on that label -- try getting closer or better lighting"
-        else "✓ Filled from label: ${parsed.filledNames.joinToString(", ")}"
-        android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onDestroyView() {

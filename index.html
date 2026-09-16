@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260916e">
+<link rel="stylesheet" href="/style.css?v=20260916f">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -940,7 +940,7 @@
 
 <!-- Asset modal -->
 <div class="modal" id="modal"><div class="modal-box">
-  <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3><button class="btn sm ghost" id="camScanBtn" type="button">📷 SCAN QR / SN</button></div>
+  <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3></div>
   <div class="modal-scroll">
     <div id="formFields"></div>
     <div class="invbox" id="maintWrap" style="display:none">
@@ -958,28 +958,6 @@
     <div class="invbox" id="histWrap"><label>CHANGE HISTORY</label><div id="histBox" class="histbox"></div></div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="cancelBtn">CANCEL</button><button class="btn" id="saveBtn">COMMIT</button></div>
-</div></div>
-
-<!-- Camera scan modal (QR / barcode -> Add Asset form) -->
-<div class="modal" id="camScanModal"><div class="modal-box" style="width:min(480px,94vw);max-width:480px">
-  <h3>SCAN QR / SERIAL NUMBER</h3>
-  
-  <div class="modal-scroll"><p class="sec-hint" id="camScanHint">Point the camera at a QR code or serial-number barcode. Detected values fill the asset form automatically -- nothing is saved until you hit COMMIT.</p>
-    <div class="camscan-view">
-      <video id="camScanVideo" autoplay playsinline muted></video>
-    </div>
-    <canvas id="camScanCanvas" style="display:none"></canvas>
-    <div class="camscan-status" id="camScanStatus"></div>
-    <div class="camscan-upload-row">
-      <button class="btn sm" id="camScanTextBtn" type="button">📄 SCAN TEXT ON LABEL (S/N, Model…)</button>
-    </div>
-    <div class="camscan-upload-row">
-      <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
-      <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
-    </div>
-  </div>
-  
-  <div class="m-actions"><button class="btn ghost" id="camScanCancel" type="button">CLOSE</button></div>
 </div></div>
 
 <!-- Contract / AMC / License / Subscription modal -->
@@ -1406,6 +1384,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260916e"></script>
+<script src="/app.js?nocache=20260916f"></script>
 </body>
 </html>
