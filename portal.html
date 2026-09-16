@@ -104,7 +104,7 @@
 </head>
 <body>
   <div class="card">
-    <div class="brand"><img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'"><span class="name" id="appName">IT-Vault Request Portal</span></div>
+    <div class="brand"><img id="logo" src="/icon.png" alt="" onerror="this.style.display='none'"><span class="name" id="appName">IT-Vault Request Portal</span></div>
     <p class="sub">Submit a support ticket or request. We'll assign it to our IT team and keep you updated by email.</p>
     
     <div class="tabs">
@@ -245,7 +245,7 @@
     var shortName = b.logo_text || b.app_name || 'IT-Vault';
     document.getElementById('appName').textContent = shortName + ' Request Portal';
     document.title = shortName + ' Request Portal';
-    if(b.logo){ document.getElementById('logo').src='/logo.png?t='+Date.now(); }
+    if(b.logo){ document.getElementById('logo').src='/icon.png?t='+Date.now(); }
     applyPortalTheme(b);
   }).catch(function(){});
 

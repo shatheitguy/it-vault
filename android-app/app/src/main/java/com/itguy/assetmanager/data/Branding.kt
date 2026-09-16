@@ -69,7 +69,9 @@ object Branding {
         runCatching {
             val base = Prefs.serverUrl
             if (base.isBlank()) return@runCatching
-            val url = ApiClient.normalize(base) + "logo.png"
+            // the square mark, not the lockup: this lands in a 52dp
+            // square, where a stacked wordmark is unreadable
+            val url = ApiClient.normalize(base) + "icon.png"
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use
                 val bytes = resp.body?.bytes() ?: return@use

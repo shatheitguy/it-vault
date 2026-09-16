@@ -1,6 +1,6 @@
 {
-  "versionCode": 16,
-  "versionName": "2.0.1",
+  "versionCode": 17,
+  "versionName": "2.0.2",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Scan QR now reads IT-Vault asset tags only, with a framed target and a sweeping beam, and says so when a QR is not one of ours. The asset form no longer carries a scanner at all. The favicon follows your uploaded logo instead of the IT-Vault mark."
+  "notes": "The mark now shows up where it belongs: the sidebar, login card, portal, status page and the phone's drawer take the square mark instead of the stacked lockup, which was unreadable at 34 pixels. The documentation site carries the new art too. Scan QR reads IT-Vault asset tags only, with a framed target and a sweeping beam."
 }

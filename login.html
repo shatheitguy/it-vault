@@ -73,7 +73,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 </head>
 <body>
 <div class="card"><div class="box" id="box">
-  <img id="loginLogo" class="logoimg" src="/logo.png?t=1" alt="" style="display:none">
+  <img id="loginLogo" class="logoimg" src="/icon.png?t=1" alt="" style="display:none">
   <div class="brand" id="brand" data-t="IT-Vault">IT-Vault</div>
   <div class="sub" id="sub">Asset Management</div>
   <div id="step1">
@@ -226,7 +226,7 @@ if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListene
     const brand=document.getElementById('brand');
     brand.textContent=name; brand.setAttribute('data-t',name);
     const lg=document.getElementById('loginLogo');
-    if(lg){ lg.src='/logo.png?t='+Date.now(); lg.style.display=''; }
+    if(lg){ lg.src='/icon.png?t='+Date.now(); lg.style.display=''; }
     applyCustomVars(b);
     applyTheme(b.theme||'dark');
     window.__matrixOn = !!b.matrix_on && !document.body.classList.contains('light');
