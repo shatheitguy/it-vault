@@ -157,9 +157,6 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         Prefs.applyThemeMode()
         super.onCreate(savedInstanceState)
         OfflineCache.init(applicationContext)
-        // Says what it is doing while it connects, and warms every cache
-        // behind itself so no screen opens empty afterwards.
-        BootOverlay.show(this, lifecycleScope)
         SyncStore.init(applicationContext)
         if (!Prefs.isLoggedIn) {
             startActivity(Intent(this, LoginActivity::class.java)); finish(); return
@@ -172,6 +169,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
         setSupportActionBar(b.toolbar)
+
+        // Says what it is doing while it connects, and warms every cache
+        // behind itself so no screen opens empty afterwards.
+        //
+        // After setContentView, and that is the whole point: addContentView
+        // puts the overlay in the activity's content frame, and
+        // setContentView replaces that frame's children. Called first, the
+        // overlay was torn down a few milliseconds later, which is why
+        // nobody ever saw it.
+        BootOverlay.show(this, lifecycleScope)
 
         drawerToggle = ActionBarDrawerToggle(this, b.drawerLayout, b.toolbar, 0, 0)
         b.drawerLayout.addDrawerListener(drawerToggle)

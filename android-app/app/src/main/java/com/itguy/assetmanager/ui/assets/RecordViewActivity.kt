@@ -17,6 +17,8 @@ import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.model.Asset
 import com.itguy.assetmanager.data.model.Employee
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * The asset record -- the A4 sheet with every field on it -- shown and printed
@@ -103,13 +105,14 @@ class RecordViewActivity : AppCompatActivity() {
                 finish(); return@launch
             }
             val employee = fetchEmployee(asset.EmployeeID)
-            val letterhead = hasLetterhead()
+            val letterhead = letterheadDataUri()
             // a base URL on the server so the letterhead and the logo
             // resolve; the sheet itself is local, so it still renders (and
             // prints) with neither
-            val base = Prefs.serverUrl.trimEnd('/')
+            val base = if (Prefs.serverUrl.isBlank()) null
+                       else ApiClient.normalize(Prefs.serverUrl)
             web.loadDataWithBaseURL(
-                if (base.isBlank()) null else "$base/",
+                base,
                 buildHtml(asset, employee, letterhead, fromServer),
                 "text/html",
                 "utf-8",
@@ -149,10 +152,54 @@ class RecordViewActivity : AppCompatActivity() {
      * exactly what the web does, so both come out of the printer alike.
      * Unreachable server means no letterhead to fetch either, so the header
      * bar is the right answer offline. */
-    private suspend fun hasLetterhead(): Boolean = try {
-        ApiClient.api().branding().body()?.get("has_letterhead") == true
-    } catch (_: Exception) {
-        false
+    /**
+     * The letterhead, as a data: URI, or null when this install has none.
+     *
+     * Two earlier attempts at this did not survive contact with a printer.
+     * Asking /api/branding whether a letterhead exists only works against a
+     * server new enough to answer, and an install that has not been updated
+     * yet says "no" and prints the wrong document. Linking the image and
+     * letting the WebView fetch it looks right on screen and then does not
+     * come out of Android's print pipeline, which renders the page it was
+     * given rather than re-fetching anything.
+     *
+     * Fetching the bytes here and inlining them settles both: the image is
+     * part of the document by the time it is printed, and whether there is
+     * one at all is answered by what came back rather than by a flag. The
+     * route is public, so no credentials are involved, and it answers with a
+     * 1x1 transparent pixel when nothing has been uploaded -- which is what
+     * the size check below is looking for.
+     */
+    private suspend fun letterheadDataUri(): String? = withContext(Dispatchers.IO) {
+        if (Prefs.serverUrl.isBlank()) return@withContext null
+        // normalize() is what puts a scheme on an address typed as a bare
+        // host or IP, which is how most of these installs are reached, and
+        // java.net.URL will not take one without
+        val base = ApiClient.normalize(Prefs.serverUrl)
+        try {
+            val conn = (java.net.URL(base + "letterhead.png").openConnection()
+                as java.net.HttpURLConnection).apply {
+                connectTimeout = 4000
+                readTimeout = 8000
+                requestMethod = "GET"
+            }
+            val bytes = conn.inputStream.use { it.readBytes() }
+            conn.disconnect()
+            // An install with no letterhead does not 404 here -- the route
+            // answers with a 1x1 transparent PNG, so "something came back"
+            // is not the same as "there is a letterhead". Measure it: the
+            // bounds decode reads the header only, not the pixels.
+            val bounds = android.graphics.BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+            if (bounds.outWidth < 200 || bounds.outHeight < 200) return@withContext null
+            "data:image/png;base64," +
+                android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+        } catch (_: Exception) {
+            // offline, or an older server: print the header bar instead
+            null
+        }
     }
 
     /**
@@ -163,7 +210,7 @@ class RecordViewActivity : AppCompatActivity() {
      * record printed from a phone and one printed from a desk should be the
      * same document, not two that merely cover the same ground.
      */
-    private fun buildHtml(a: Asset, emp: Employee?, letterhead: Boolean, fromServer: Boolean): String {
+    private fun buildHtml(a: Asset, emp: Employee?, letterhead: String?, fromServer: Boolean): String {
         val rows = StringBuilder()
         fun row(label: String, value: String?) {
             val v = value?.trim().orEmpty().ifBlank { "—" }
@@ -207,21 +254,19 @@ class RecordViewActivity : AppCompatActivity() {
             else -> "<div class=\"sig-line\">Name and signature · date</div>"
         }
         val header =
-            if (letterhead) ""
+            if (letterhead != null) ""
             else "<div class=\"hd\"><img src=\"/logo.png\" onerror=\"this.style.display='none'\">" +
                 "<span>${esc(brand)} — Asset record</span></div>"
         val backdrop =
-            if (letterhead)
-                "<img src=\"/letterhead.png?t=${System.currentTimeMillis()}\" class=\"lh\" alt=\"\">"
-            else ""
+            if (letterhead != null) "<img src=\"$letterhead\" class=\"lh\" alt=\"\">" else ""
 
         return """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-@page{size:A4;margin:${if (letterhead) "0" else "14mm"}}
+@page{size:A4;margin:${if (letterhead != null) "0" else "14mm"}}
 body{font-family:'Segoe UI',Roboto,Arial,sans-serif;color:#111;background:#fff;margin:0;padding:10px}
-.lh{position:fixed;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1}
-.card{border:1px solid #222;border-radius:8px;max-width:720px;margin:${if (letterhead) "$LETTERHEAD_CLEARANCE_MM" + "mm auto 0" else "0 auto"};overflow:hidden}
+.lh{position:absolute;top:0;left:0;width:210mm;height:297mm;object-fit:fill;z-index:-1}
+.card{border:1px solid #222;border-radius:8px;max-width:720px;margin:${if (letterhead != null) "$LETTERHEAD_CLEARANCE_MM" + "mm auto 0" else "0 auto"};overflow:hidden;position:relative}
 .hd{background:#101622;color:#fff;padding:12px 16px;font-weight:600;display:flex;align-items:center;gap:10px}
 .hd img{height:26px}
 .idbar{background:#f4f6fa;border-bottom:2px solid #101622;padding:12px 16px;text-align:center}

@@ -10,6 +10,7 @@ import com.itguy.assetmanager.R
 import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.OfflineCache
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.random.Random
@@ -30,6 +31,18 @@ import kotlin.random.Random
  */
 object BootOverlay {
 
+    /**
+     * The least time it stays on screen.
+     *
+     * On a fast LAN the warm-up finishes in a couple of hundred
+     * milliseconds, and an animation nobody can see is not an animation --
+     * this is the whole of what "there is no animation on the landing
+     * screen" turned out to mean, once the overlay was no longer being torn
+     * down by setContentView. A slower server extends it; nothing shortens
+     * it.
+     */
+    private const val MIN_VISIBLE_MS = 1900L
+
     /** Shows the overlay, warms the caches, then fades it away. */
     fun show(activity: Activity, scope: LifecycleCoroutineScope) {
         val view = activity.layoutInflater.inflate(R.layout.view_boot, null)
@@ -41,18 +54,21 @@ object BootOverlay {
             ),
         )
         val status = view.findViewById<TextView>(R.id.bootStatus)
-        val glitch = startGlitch(view)
+        val started = System.currentTimeMillis()
+        val animators = startGlitch(view)
 
         scope.launch {
             val online = warmCaches { step -> status.text = step }
             status.text = if (online) "READY" else "OFFLINE  ·  USING SAVED DATA"
-            // long enough to read the last line, short enough not to be a wait
-            view.postDelayed({
-                glitch.cancel()
-                view.animate().alpha(0f).setDuration(260).withEndAction {
-                    (view.parent as? ViewGroup)?.removeView(view)
-                }.start()
-            }, if (online) 260 else 900)
+            // hold the last line long enough to read, and the animation long
+            // enough to have been seen
+            val shown = System.currentTimeMillis() - started
+            val hold = (if (online) MIN_VISIBLE_MS else MIN_VISIBLE_MS + 600) - shown
+            if (hold > 0) delay(hold)
+            animators.forEach { it.cancel() }
+            view.animate().alpha(0f).setDuration(280).withEndAction {
+                (view.parent as? ViewGroup)?.removeView(view)
+            }.start()
         }
     }
 
@@ -98,28 +114,60 @@ object BootOverlay {
     }
 
     /**
-     * The glitch: a red copy and a cyan copy of the title, jittered a pixel or
-     * two either side of the white one, on a timer that is mostly still. A
-     * constant shake is a distraction; an occasional one reads as a machine
-     * working.
+     * The glitch, in three parts.
+     *
+     * The title is drawn three times -- a red copy and a cyan copy behind a
+     * white one -- and the coloured pair pull apart in short bursts on a
+     * timer that is mostly still: a constant shake is a distraction, an
+     * occasional one reads as a machine working. On the same bursts the whole
+     * block slips sideways a pixel or two and the white copy dips in opacity,
+     * which is what makes it look like a signal rather than a wobble.
+     *
+     * And a bar sweeps down over the mark, continuously, because that is the
+     * part that is visible from across a room.
      */
-    private fun startGlitch(root: View): ValueAnimator {
+    private fun startGlitch(root: View): List<ValueAnimator> {
         val red = root.findViewById<TextView>(R.id.bootTitleRed)
         val cyan = root.findViewById<TextView>(R.id.bootTitleCyan)
-        return ValueAnimator.ofFloat(0f, 1f).apply {
+        val white = root.findViewById<TextView>(R.id.bootTitle)
+        val block = root.findViewById<View>(R.id.bootTitleWrap)
+        val sweep = root.findViewById<View>(R.id.bootSweep)
+        val logoWrap = root.findViewById<View>(R.id.bootLogoWrap)
+
+        val split = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 1400
             repeatCount = ValueAnimator.INFINITE
             addUpdateListener {
                 val f = it.animatedFraction
                 // three short bursts per cycle, still the rest of the time
                 val busy = f < 0.08f || (f in 0.42f..0.48f) || f > 0.93f
-                val d = if (busy) Random.nextFloat() * 5f - 2.5f else 0f
+                val d = if (busy) Random.nextFloat() * 7f - 3.5f else 0f
                 red.translationX = d
                 cyan.translationX = -d
-                red.alpha = if (busy) 0.85f else 0.35f
-                cyan.alpha = if (busy) 0.85f else 0.35f
+                red.alpha = if (busy) 0.9f else 0.32f
+                cyan.alpha = if (busy) 0.9f else 0.32f
+                // the tear: the whole line jumps, and the top copy thins out
+                block.translationX = if (busy) Random.nextFloat() * 4f - 2f else 0f
+                white.alpha = if (busy) 0.78f else 1f
             }
             start()
         }
+
+        val scan = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1100
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                val f = it.animatedFraction
+                val h = logoWrap.height.toFloat()
+                if (h <= 0f) return@addUpdateListener
+                sweep.translationY = f * (h - sweep.height)
+                // brightest crossing the middle, gone at the edges, so it
+                // reads as a pass rather than a bar parked at the bottom
+                sweep.alpha = 1f - kotlin.math.abs(f - 0.5f) * 1.7f
+            }
+            start()
+        }
+
+        return listOf(split, scan)
     }
 }

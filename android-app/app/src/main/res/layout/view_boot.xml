@@ -7,9 +7,10 @@
   and the warm-up behind it pulls every list into the cache so the rest of the
   app is populated the moment it is opened, with or without a network.
 
-  The title is drawn three times: a red copy and a cyan copy behind a white
-  one, jittered a pixel or two apart. That is the whole glitch effect, and it
-  costs two extra TextViews rather than a video.
+  The glitch is three things, none of them a video: the title drawn three
+  times (a red copy and a cyan copy behind a white one, jittered a pixel or
+  two apart), a bar sweeping down over the mark, and the whole block slipping
+  sideways now and then. All of it is driven from BootOverlay.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/bootRoot"
@@ -20,6 +21,7 @@
     android:focusable="true">
 
     <LinearLayout
+        android:id="@+id/bootBlock"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
@@ -27,14 +29,28 @@
         android:gravity="center"
         android:paddingHorizontal="32dp">
 
-        <ImageView
-            android:id="@+id/bootLogo"
+        <!-- the mark, with the sweep bar riding over it -->
+        <FrameLayout
+            android:id="@+id/bootLogoWrap"
             android:layout_width="132dp"
-            android:layout_height="132dp"
-            android:src="@mipmap/ic_launcher"
-            android:contentDescription="IT-Vault" />
+            android:layout_height="132dp">
+
+            <ImageView
+                android:id="@+id/bootLogo"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@mipmap/ic_launcher"
+                android:contentDescription="IT-Vault" />
+
+            <View
+                android:id="@+id/bootSweep"
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:background="@drawable/scan_line" />
+        </FrameLayout>
 
         <FrameLayout
+            android:id="@+id/bootTitleWrap"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="26dp">

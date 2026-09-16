@@ -1,6 +1,6 @@
 {
-  "versionCode": 19,
-  "versionName": "2.0.4",
+  "versionCode": 20,
+  "versionName": "2.0.5",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Printing an asset from the phone now produces the same sheet the web does: on your letterhead when one is set up, with the acknowledgement signature when the asset has been signed for. Printed from the cache with no signal it leaves a line to sign instead."
+  "notes": "The connect screen is actually on screen now -- it was being torn down a few milliseconds after it appeared -- with a stronger glitch and a sweep over the mark. The asset sheet fetches your letterhead and prints it inside the document, so it survives Android's printer and works against any server version."
 }

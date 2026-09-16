@@ -51,13 +51,27 @@ check("both leave the same gap at the top of the page",
       m_web and m_kt and m_web.group(1) == m_kt.group(1),
       "web=%s phone=%s" % (m_web and m_web.group(1), m_kt and m_kt.group(1)))
 
-for label, text in (("web", web_sheet), ("phone", kt_sheet)):
+for label, text, whole in (("web", web_sheet, web), ("phone", kt_sheet, kt)):
     check("  %-5s draws the letterhead full page" % label,
           "210mm" in text and "297mm" in text and "object-fit:fill" in text)
     check("  %-5s drops its own header when there is a letterhead" % label,
-          "letterhead.png" in text and "/logo.png" in text)
+          "letterhead.png" in whole and "/logo.png" in text)
     check("  %-5s prints edge to edge on letterhead, margins without" % label,
           "14mm" in text and re.search(r"@page\{size:A4;margin:", text) is not None)
+
+# The browser re-fetches what it links while printing. Android's print
+# pipeline renders the page it was handed, so the phone has to have the image
+# in the document already -- and a fixed backdrop does not survive that
+# pipeline either. Both of those were why the letterhead came out missing.
+check("the phone inlines the letterhead rather than linking it",
+      "data:image/png;base64," in kt and "letterheadDataUri" in kt)
+check("the phone positions the backdrop absolutely, not fixed",
+      ".lh{position:absolute" in kt_sheet)
+check("the phone decides by what came back, not by a server flag",
+      "inJustDecodeBounds" in kt and "outWidth < 200" in kt,
+      "an install with no letterhead gets a 1x1 PNG, not a 404, so the bytes "
+      "arriving prove nothing -- and an install too old to report "
+      "has_letterhead must still print its letterhead")
 
 print("\nthe record itself")
 for label, text in (("web", web_sheet), ("phone", kt_sheet)):
