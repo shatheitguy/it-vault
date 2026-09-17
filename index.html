@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260917b">
+<link rel="stylesheet" href="/style.css?v=20260917c">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -1316,13 +1316,14 @@
     <div class="grid2">
       <div class="field2"><label>Scope</label>
         <select id="bkScope">
-          <option value="all">All (config + assets + history)</option>
-          <option value="config">Configuration only (Settings + Users)</option>
-          <option value="assets">Assets only (Assets + Checkouts + Maintenance)</option>
+          <option value="all">Everything (every table, every file)</option>
+          <option value="config">Configuration only (settings, users, roles, monitors)</option>
+          <option value="assets">Assets only (assets, tickets, contracts, invoices)</option>
         </select>
       </div>
       <div class="field2"><label>&nbsp;</label><button class="btn" id="bkDownload">⬇ CREATE &amp; DOWNLOAD</button></div>
     </div>
+    <p class="sec-hint" style="margin:6px 0 0"><b>Everything</b> is the whole application: every table in the database &mdash; assets, employees, tickets and their replies and attachments, contracts, maintenance, checkouts, history, the audit log, users, roles, settings, monitors and uptime history &mdash; plus your logo, your letterhead and every invoice file. The table list is read from the database itself, so anything a future version adds is included without being listed here. The only thing left out on purpose is raw per-check uptime telemetry, which is written every few seconds and rolls up into the uptime history that <i>is</i> included.</p>
   </div>
   <div class="invbox">
     <label>SCHEDULED BACKUPS</label>
@@ -1336,9 +1337,9 @@
       </div>
       <div class="field2"><label>Scope</label>
         <select id="bkScheduleScope">
-          <option value="all">All (config + assets + history)</option>
-          <option value="config">Configuration only (Settings + Users)</option>
-          <option value="assets">Assets only (Assets + Checkouts + Maintenance)</option>
+          <option value="all">Everything (every table, every file)</option>
+          <option value="config">Configuration only (settings, users, roles, monitors)</option>
+          <option value="assets">Assets only (assets, tickets, contracts, invoices)</option>
         </select>
       </div>
       <div class="field2"><label>Keep last N backups</label><input id="bkRetain" type="number" min="1" max="100" value="7"></div>
@@ -1386,6 +1387,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260917b"></script>
+<script src="/app.js?nocache=20260917c"></script>
 </body>
 </html>

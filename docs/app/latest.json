@@ -1,6 +1,6 @@
 {
-  "versionCode": 31,
-  "versionName": "2.5.2",
+  "versionCode": 32,
+  "versionName": "2.5.3",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Nothing but you overwrites what you typed. A field you edit is yours: the directory sync stops writing it, so a job title no longer reverts half an hour later, and a directory with no answer for a field no longer empties it. Partial updates to an asset or an employee only touch the fields they carry. Every employee change is in the audit log with its previous value, and an update takes a full backup before it starts."
+  "notes": "The start-up screen now shows your organisation's name under your logo instead of IT-Vault. The app-icon colour picker is gone -- none of those three tiles was your logo; the home-screen shortcut, which does carry it, is still there. Every message is signed off the same way: the emailed signed-acknowledgement PDF, the sign-in code, password resets, ticket mail and the SMTP check all carry your name and live links, and so do Telegram and Slack alerts."
 }

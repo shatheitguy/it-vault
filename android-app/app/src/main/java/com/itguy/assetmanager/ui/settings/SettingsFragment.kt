@@ -132,35 +132,22 @@ class SettingsFragment : Fragment() {
     }
 
     /**
-     * The launcher icon, and the shortcut that can carry the customer's own
-     * logo.
+     * The shortcut that can carry the customer's own logo.
      *
-     * Worth knowing what this cannot do: the tile Android shows for an app is
-     * a compiled resource, so no setting here or on the server can turn it
-     * into an uploaded logo. What it switches between is the three tiles this
-     * APK already contains. The shortcut button is the other half of the
-     * answer -- a shortcut icon is a bitmap, so that one really is their mark.
+     * The three-way colour picker that used to be beside this is gone: none
+     * of the three tiles is anybody's logo, and being asked to pick between
+     * red, white and grey is not an answer to "make the icon match our
+     * branding". A shortcut icon is a bitmap, so this one really is their
+     * mark.
+     *
+     * Anyone left on a variant by the old picker is put back on the default
+     * here, because there is no longer a control to do it with -- and the
+     * aliases stay in the manifest, since disabling a component a launcher
+     * is currently showing would take their icon away entirely.
      */
     private fun bindAppIcon() {
-        val current = AppIcon.current(requireContext())
-        when (current) {
-            AppIcon.Variant.LIGHT -> b.iconLight.isChecked = true
-            AppIcon.Variant.MONO -> b.iconMono.isChecked = true
-            else -> b.iconDefault.isChecked = true
-        }
-        b.iconGroup.setOnCheckedChangeListener { _, id ->
-            val want = when (id) {
-                b.iconLight.id -> AppIcon.Variant.LIGHT
-                b.iconMono.id -> AppIcon.Variant.MONO
-                else -> AppIcon.Variant.DEFAULT
-            }
-            if (want == AppIcon.current(requireContext())) return@setOnCheckedChangeListener
-            AppIcon.apply(requireContext(), want)
-            // Launchers redraw on their own schedule, and a few only notice
-            // after the home screen is next opened. Saying so beats someone
-            // deciding it did not work.
-            toast("Icon set to ${want.label}. Your launcher may take a moment, " +
-                  "or need the home screen reopened.")
+        if (AppIcon.current(requireContext()) != AppIcon.Variant.DEFAULT) {
+            AppIcon.apply(requireContext(), AppIcon.Variant.DEFAULT)
         }
 
         b.pinBrandBtn.setOnClickListener {

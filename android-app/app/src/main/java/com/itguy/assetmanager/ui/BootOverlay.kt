@@ -59,6 +59,34 @@ object BootOverlay {
         com.itguy.assetmanager.data.Branding.logo(activity)?.let { logo ->
             view.findViewById<android.widget.ImageView>(R.id.bootLogo).setImageBitmap(logo)
         }
+        // And says who it belongs to. This read "IT-VAULT" for everybody,
+        // which is the name of the software rather than the name of the place
+        // using it -- under a logo that was already the customer's, on the
+        // one screen every person sees every time they open the app. The
+        // glitch draws the same string three times, so all three copies move
+        // together.
+        val brand = com.itguy.assetmanager.data.Branding.name(activity)
+            .trim().uppercase()
+        if (brand.isNotEmpty()) {
+            for (id in intArrayOf(R.id.bootTitle, R.id.bootTitleRed, R.id.bootTitleCyan)) {
+                view.findViewById<TextView>(id).text = brand
+            }
+            // A club name is longer than "IT-VAULT" and must not fall off the
+            // edge: one line if it fits, two at a smaller size if it does not.
+            val size = when {
+                brand.length <= 10 -> 27f
+                brand.length <= 18 -> 21f
+                else -> 17f
+            }
+            for (id in intArrayOf(R.id.bootTitle, R.id.bootTitleRed, R.id.bootTitleCyan)) {
+                view.findViewById<TextView>(id).apply {
+                    textSize = size
+                    letterSpacing = if (brand.length <= 18) 0.18f else 0.10f
+                    maxLines = 2
+                    gravity = android.view.Gravity.CENTER
+                }
+            }
+        }
         val status = view.findViewById<TextView>(R.id.bootStatus)
         val started = System.currentTimeMillis()
         val animators = startGlitch(view)
