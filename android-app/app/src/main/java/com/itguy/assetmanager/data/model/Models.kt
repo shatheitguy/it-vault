@@ -36,6 +36,13 @@ data class Asset(
     var Price: String = "0",
     var EmployeeID: String = "",
     val InvoiceFile: String? = null,
+    /** The unguessable code a printed tag's QR encodes. Cached with the
+     * rest of the asset so a scan resolves with no network at all. */
+    var PublicCode: String = "",
+    /** The acknowledgement signature, as the data: URI it was drawn into.
+     * Only /api/assets/{id} returns it -- the list does not carry it, which
+     * is why a sheet printed from the cache leaves a line to sign instead. */
+    var SignatureData: String = "",
     @SerializedName("UpdatedAt") var updatedAt: String = ""
 )
 
@@ -218,3 +225,33 @@ data class HbMonitorRequest(
     val notify: Boolean?,
     val enabled: Boolean?
 )
+
+/**
+ * A Lost & Found report.
+ *
+ * Filed either by a stranger who scanned the tag on something they found, or
+ * by staff logging an asset as missing. The finder's name and number are the
+ * whole point of the record: somebody has to ring them back.
+ */
+data class LostFoundReport(
+    val id: Int = 0,
+    val ref: String? = null,
+    val asset_id: String? = null,
+    val asset_tag: String? = null,
+    val asset_name: String? = null,
+    val kind: String? = null,          // "found" (a stranger) or "lost" (staff)
+    val status: String? = null,
+    val finder_name: String? = null,
+    val finder_mobile: String? = null,
+    val finder_note: String? = null,
+    val admin_note: String? = null,
+    val handled_by: String? = null,
+    val reported_at: String? = null,
+    val updated_at: String? = null,
+)
+
+/** The three states a report can be in. Kept in step with the server's own
+ * list: lost, found, returned, and nothing else. */
+object LostFoundStatus {
+    val ALL = listOf("lost", "found", "returned")
+}

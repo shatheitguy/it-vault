@@ -9,6 +9,8 @@ import android.widget.TextView
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.OfflineCache
+import com.itguy.assetmanager.data.model.TicketDetail
 import com.itguy.assetmanager.data.model.ReplyRequest
 import com.itguy.assetmanager.databinding.FragmentTicketDetailBinding
 import kotlinx.coroutines.launch
@@ -45,28 +47,45 @@ class TicketDetailFragment : Fragment() {
         load()
     }
 
+    /**
+     * Show the conversation already on the phone, then refresh it.
+     *
+     * A ticket is mostly its replies, and those were fetched every single
+     * time it was opened -- so a ticket read a minute ago still opened empty
+     * and filled in a moment later. The last fetch is kept per ticket now, so
+     * it opens with what you last saw and updates underneath.
+     */
     private fun load() {
+        OfflineCache.loadTicketDetail(ticketId)?.let { render(it, cached = true) }
+
         lifecycleScope.launch {
             try {
                 val resp = ApiClient.api().getTicket(ticketId)
                 val d = resp.body() ?: return@launch
+                OfflineCache.saveTicketDetail(ticketId, d)
                 if (_b == null) return@launch
-                b.tSubject.text = "${d.ticket.code ?: ""} · ${d.ticket.subject}"
-                b.tMeta.text = "${d.ticket.priority} priority · ${d.ticket.category} · ${d.ticket.requester}"
-                b.tDescription.text = d.ticket.description
-                suppressStatusCallback = true
-                b.tStatus.setSelection(STATUSES.indexOf(d.ticket.status).coerceAtLeast(0))
-                suppressStatusCallback = false
-
-                b.repliesList.removeAllViews()
-                if (d.replies.isEmpty()) {
-                    addLine("No replies yet.")
-                } else {
-                    for (r in d.replies) addLine("${r.author} (${r.author_role}) · ${r.created_at}\n${r.body}")
-                }
+                render(d, cached = false)
             } catch (e: Exception) {
-                if (_b != null) addLine("Could not load ticket: ${e.message}")
+                if (_b != null && OfflineCache.loadTicketDetail(ticketId) == null) {
+                    addLine("Could not load ticket: ${e.message}")
+                }
             }
+        }
+    }
+
+    private fun render(d: TicketDetail, cached: Boolean) {
+        b.tSubject.text = "${d.ticket.code ?: ""} · ${d.ticket.subject}"
+        b.tMeta.text = "${d.ticket.priority} priority · ${d.ticket.category} · ${d.ticket.requester}"
+        b.tDescription.text = d.ticket.description
+        suppressStatusCallback = true
+        b.tStatus.setSelection(STATUSES.indexOf(d.ticket.status).coerceAtLeast(0))
+        suppressStatusCallback = false
+
+        b.repliesList.removeAllViews()
+        if (d.replies.isEmpty()) {
+            addLine(if (cached) "No replies yet." else "No replies yet.")
+        } else {
+            for (r in d.replies) addLine("${r.author} (${r.author_role}) · ${r.created_at}\n${r.body}")
         }
     }
 

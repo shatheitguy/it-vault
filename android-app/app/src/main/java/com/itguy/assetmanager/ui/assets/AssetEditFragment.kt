@@ -17,6 +17,7 @@ import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Repository
 import com.itguy.assetmanager.data.model.*
 import com.itguy.assetmanager.databinding.FragmentAssetEditBinding
@@ -47,11 +48,6 @@ class AssetEditFragment : Fragment() {
     private val NONE = "-- select --"
     private val ALLOWED_INVOICE_EXT = setOf("pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff")
 
-    private val scanLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        result.data?.getStringExtra(ScanActivity.EXTRA_RESULT)?.let { applyScannedText(it); return@registerForActivityResult }
-        result.data?.getStringExtra(ScanActivity.EXTRA_TEXT_RESULT)?.let { applyOcrText(it) }
-    }
-
     // Invoice/proof attachment: a newly-picked file isn't uploaded until Save
     // (mirrors the web form -- for a brand-new asset there's no _id to attach
     // it to until the asset itself is created).
@@ -71,9 +67,15 @@ class AssetEditFragment : Fragment() {
     }
 
     companion object {
-        fun newInstance(assetId: String?): AssetEditFragment {
+        /** [assignNow] opens the Assign dialog as soon as the asset has
+         * loaded, so the action can be reached in one tap from the list
+         * instead of only from inside this screen. */
+        fun newInstance(assetId: String?, assignNow: Boolean = false): AssetEditFragment {
             val f = AssetEditFragment()
-            f.arguments = Bundle().apply { putString("assetId", assetId) }
+            f.arguments = Bundle().apply {
+                putString("assetId", assetId)
+                putBoolean("assignNow", assignNow)
+            }
             return f
         }
 
@@ -107,7 +109,6 @@ class AssetEditFragment : Fragment() {
         // freely edited here -- matches the web form's lock.
         b.fNotesReceived.isEnabled = false
 
-        b.scanBtn.setOnClickListener { scanLauncher.launch(Intent(requireContext(), ScanActivity::class.java)) }
         b.saveBtn.setOnClickListener { save() }
         b.deleteBtn.setOnClickListener { confirmDelete() }
         b.invoicePickBtn.setOnClickListener { pickInvoiceLauncher.launch("*/*") }
@@ -128,8 +129,41 @@ class AssetEditFragment : Fragment() {
         }
     }
 
+    /**
+     * Fill the form from what is already on the phone, then quietly catch up
+     * with the server.
+     *
+     * It used to do neither of those things: five reference lists and the
+     * asset itself, all awaited over the network before a single field was
+     * drawn, so opening a record you had opened five minutes ago still meant
+     * watching a spinner. The asset was in the cache the whole time; only the
+     * dropdowns were not, and dropdowns that change once a month have no
+     * business on the critical path of opening a record.
+     *
+     * So: cache first, painted immediately and with no spinner when there is
+     * something to paint. Then the same fetch as before, which overwrites the
+     * fields only if the record actually differs -- a redraw under someone's
+     * fingers while they are typing is worse than being a few seconds stale.
+     */
     private fun loadReferenceDataAndAsset() {
-        b.formProgress.visibility = View.VISIBLE
+        val cache = OfflineCache
+        val cachedAsset = assetId?.let { id -> cache.loadAssets()?.find { it.id == id } }
+        var painted = false
+
+        // ---- what we already have, on screen now
+        categories = cache.loadCategories().orEmpty()
+        manufacturers = cache.loadManufacturers().orEmpty()
+        models = cache.loadModels().orEmpty()
+        locations = cache.loadLocations().orEmpty()
+        employees = cache.loadEmployees().orEmpty()
+        if (cachedAsset != null) {
+            current = cachedAsset
+            bindAll()
+            painted = true
+        }
+        b.formProgress.visibility = if (painted) View.GONE else View.VISIBLE
+
+        // ---- and the server's version, behind it
         lifecycleScope.launch {
             try {
                 val api = ApiClient.api()
@@ -138,20 +172,22 @@ class AssetEditFragment : Fragment() {
                 // fall back to the value already on the record.
                 suspend fun <T> safe(block: suspend () -> List<T>): List<T> =
                     try { block() } catch (e: Exception) { emptyList() }
-                categories = safe { api.categories().body().orEmpty() }
-                manufacturers = safe { api.manufacturers().body().orEmpty() }
-                models = safe { api.models().body().orEmpty() }
-                locations = safe { api.locations().body().orEmpty() }
-                employees = safe { api.listEmployees().body().orEmpty() }.ifEmpty {
-                    com.itguy.assetmanager.data.OfflineCache.loadEmployees().orEmpty()
-                }
 
-                current = if (assetId != null) {
-                    // editing: server copy if reachable, else the cached one
-                    try { api.getAsset(assetId!!).body() }
-                    catch (e: Exception) { null }
-                    ?: com.itguy.assetmanager.data.OfflineCache.loadAssets()?.find { it.id == assetId }
-                    ?: Asset()
+                safe { api.categories().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { categories = it; cache.saveCategories(it) }
+                safe { api.manufacturers().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { manufacturers = it; cache.saveManufacturers(it) }
+                safe { api.models().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { models = it; cache.saveModels(it) }
+                safe { api.locations().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { locations = it; cache.saveLocations(it) }
+                safe { api.listEmployees().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { employees = it; cache.saveEmployees(it) }
+
+                val fresh = if (assetId != null) {
+                    try { api.getAsset(assetId!!).body() } catch (e: Exception) { null }
+                        ?: cachedAsset
+                        ?: Asset()
                 } else Asset(
                     AssetTag = try { api.nextAssetTag().body()?.tag.orEmpty() } catch (e: Exception) { "" },
                     Name = arguments?.getString("prefillName").orEmpty(),
@@ -161,19 +197,32 @@ class AssetEditFragment : Fragment() {
                 )
 
                 if (_b == null) return@launch
-                bindStatusSpinner()
-                bindCategorySpinner()
-                bindLocationSpinner()
-                bindManufacturerSpinner()
-                bindModelSpinner(current.Manufacturer)
-                bindEmployeeSpinner()
-                populatePlainFields()
+                // Repainting an identical record would move the cursor and
+                // drop anything half-typed for no gain at all.
+                if (!painted || fresh != current) {
+                    current = fresh
+                    bindAll()
+                }
             } catch (e: Exception) {
-                if (_b != null) { b.formError.text = "Could not load form: ${e.message}"; b.formError.visibility = View.VISIBLE }
+                if (_b != null && !painted) {
+                    b.formError.text = "Could not load form: ${e.message}"
+                    b.formError.visibility = View.VISIBLE
+                }
             } finally {
                 _b?.formProgress?.visibility = View.GONE
             }
         }
+    }
+
+    /** Every spinner and field, from whatever [current] holds right now. */
+    private fun bindAll() {
+        bindStatusSpinner()
+        bindCategorySpinner()
+        bindLocationSpinner()
+        bindManufacturerSpinner()
+        bindModelSpinner(current.Manufacturer)
+        bindEmployeeSpinner()
+        populatePlainFields()
     }
 
     private fun populatePlainFields() {
@@ -192,6 +241,13 @@ class AssetEditFragment : Fragment() {
         val isExisting = assetId != null
         b.checkOutBtn.visibility = if (isExisting && current.Status != "Checked-Out") View.VISIBLE else View.GONE
         b.checkInBtn.visibility = if (isExisting && current.Status == "Checked-Out") View.VISIBLE else View.GONE
+
+        // Opened from the list's Assign action: show the dialog straight away,
+        // and only once, so returning to this screen does not reopen it.
+        if (arguments?.getBoolean("assignNow") == true && b.checkOutBtn.visibility == View.VISIBLE) {
+            arguments?.putBoolean("assignNow", false)
+            b.checkOutBtn.post { if (isAdded) openCheckoutDialog() }
+        }
     }
 
     /** Assign to an employee -- same "Signed Date defaults to today, only
@@ -324,33 +380,93 @@ class AssetEditFragment : Fragment() {
         }
     }
 
+    /**
+     * Downloads the attachment and hands it to whatever can open it.
+     *
+     * Three things made this a dead end. The HTTP status was never checked, so
+     * a 401 or a 404 produced the same "Could not open invoice" as a genuine
+     * failure -- with nothing to say which. ACTION_VIEW on its own needs a
+     * *default* handler to be registered, and on a phone with no default PDF
+     * viewer it throws rather than asking; a chooser asks. And when nothing on
+     * the device can view the type at all, there is still usually something
+     * that can receive it, so the last resort is Share rather than a shrug.
+     */
     private fun viewInvoice() {
-        val file = current.InvoiceFile ?: return
+        // the server stores a bare filename; File(..).name keeps it that way
+        // rather than trusting whatever arrives into a path
+        val file = current.InvoiceFile?.let { File(it).name }
+        if (file.isNullOrBlank()) return
         lifecycleScope.launch {
             try {
                 val resp = ApiClient.api().downloadInvoice(file)
+                if (!resp.isSuccessful) {
+                    val why = when (resp.code()) {
+                        401, 403 -> "not signed in any more -- sign in again"
+                        404 -> "the file is no longer on the server"
+                        else -> "server returned HTTP ${resp.code()}"
+                    }
+                    toastIfAlive("Could not open invoice: $why")
+                    return@launch
+                }
                 val body = resp.body() ?: run {
-                    Toast.makeText(requireContext(), "Could not open invoice", Toast.LENGTH_LONG).show()
+                    toastIfAlive("Could not open invoice: the server sent nothing")
                     return@launch
                 }
                 val dir = File(requireContext().cacheDir, "downloads").apply { mkdirs() }
                 val outFile = File(dir, file)
                 withContext(Dispatchers.IO) {
-                    body.byteStream().use { input -> outFile.outputStream().use { output -> input.copyTo(output) } }
+                    body.byteStream().use { input ->
+                        outFile.outputStream().use { output -> input.copyTo(output) }
+                    }
                 }
-                val uri = FileProvider.getUriForFile(requireContext(), "${requireContext().packageName}.fileprovider", outFile)
-                val mime = requireContext().contentResolver.getType(uri)
-                    ?: android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(file.substringAfterLast('.', "")) ?: "*/*"
-                val intent = Intent(Intent.ACTION_VIEW).apply {
+                if (outFile.length() == 0L) {
+                    toastIfAlive("Could not open invoice: the file came back empty")
+                    return@launch
+                }
+                if (_b == null) return@launch
+
+                val ctx = requireContext()
+                val uri = FileProvider.getUriForFile(
+                    ctx, "${ctx.packageName}.fileprovider", outFile
+                )
+                val mime = ctx.contentResolver.getType(uri)
+                    ?: android.webkit.MimeTypeMap.getSingleton()
+                        .getMimeTypeFromExtension(file.substringAfterLast('.', "").lowercase())
+                    ?: "*/*"
+
+                val view = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, mime)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                try { startActivity(intent) }
-                catch (e: Exception) { Toast.makeText(requireContext(), "No app found to open this file", Toast.LENGTH_LONG).show() }
+                // A chooser does not need a default handler to be set, which is
+                // the usual reason ACTION_VIEW silently fails on a fresh phone.
+                val chooser = Intent.createChooser(view, "Open invoice").apply {
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                try {
+                    startActivity(chooser)
+                } catch (e: android.content.ActivityNotFoundException) {
+                    // nothing can view it; something can almost certainly take it
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    try {
+                        startActivity(Intent.createChooser(send, "Send invoice to…"))
+                    } catch (e2: Exception) {
+                        toastIfAlive("No app on this phone can open a $mime file")
+                    }
+                }
             } catch (e: Exception) {
-                if (_b != null) Toast.makeText(requireContext(), "Could not open invoice: ${e.message}", Toast.LENGTH_LONG).show()
+                toastIfAlive("Could not open invoice: ${e.message}")
             }
+        }
+    }
+
+    private fun toastIfAlive(msg: String) {
+        if (_b != null && isAdded) {
+            Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -593,46 +709,6 @@ class AssetEditFragment : Fragment() {
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    /** Mirrors the web app's camera-scan logic: JSON payload -> fill matching fields, otherwise treat as a raw Serial Number. */
-    private fun applyScannedText(text: String) {
-        try {
-            val obj = org.json.JSONObject(text)
-            val keys = obj.keys().asSequence().associate { it.lowercase().replace(Regex("[^a-z0-9]"), "") to obj.optString(it) }
-            fun pick(vararg names: String): String? = names.firstNotNullOfOrNull { keys[it]?.takeIf { v -> v.isNotBlank() } }
-            pick("name", "assetname")?.let { b.fName.setText(it) }
-            pick("serial", "serialnumber", "sn")?.let { b.fSerial.setText(it) }
-            pick("mac", "macaddress")?.let { b.fMacAddress.setText(it) }
-            pick("type", "category", "itemcategory")?.let { current = current.copy(Type = it); bindCategorySpinnerWithSelection(it) }
-            pick("location", "site")?.let { locSel -> current = current.copy(Location = locSel); bindLocationSpinner() }
-        } catch (e: Exception) {
-            // not JSON -> treat as a plain serial number (the common case for a SN barcode sticker)
-            b.fSerial.setText(text)
-        }
-    }
-
-    /** Best-effort OCR label parser: looks for common "S/N: X", "Model: X",
-     * "MAC: X" style lines -- also handling the label and value sitting on
-     * separate lines, which is common on printed asset stickers -- and
-     * fills the matching fields (e.g. "SNO" -> Serial, "Model" -> Model). */
-    private fun applyOcrText(text: String) {
-        val parsed = LabelParser.parse(text)
-
-        parsed.serial?.let { b.fSerial.setText(it) }
-        parsed.mac?.let { b.fMacAddress.setText(it) }
-        if (parsed.manufacturer != null || parsed.model != null) {
-            current = current.copy(
-                Manufacturer = parsed.manufacturer ?: current.Manufacturer,
-                Model = parsed.model ?: current.Model
-            )
-            bindManufacturerSpinner()
-        }
-
-        val msg = if (parsed.isEmpty)
-            "Couldn't recognize Serial, Model, or MAC on that label -- try getting closer or better lighting"
-        else "✓ Filled from label: ${parsed.filledNames.joinToString(", ")}"
-        android.widget.Toast.makeText(requireContext(), msg, android.widget.Toast.LENGTH_LONG).show()
     }
 
     override fun onDestroyView() {

@@ -3,10 +3,12 @@ package com.itguy.assetmanager.ui
 import android.content.Intent
 import android.os.Bundle
 import androidx.appcompat.app.ActionBarDrawerToggle
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.navigation.NavigationView
 import androidx.lifecycle.lifecycleScope
+import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.SyncManager
@@ -14,17 +16,24 @@ import com.itguy.assetmanager.data.SyncStore
 import kotlinx.coroutines.launch
 import com.itguy.assetmanager.databinding.ActivityMainBinding
 import com.itguy.assetmanager.ui.assets.AssetsListFragment
+import com.itguy.assetmanager.ui.assets.AssetEditFragment
+import com.itguy.assetmanager.ui.assets.ScanActivity
 import com.itguy.assetmanager.ui.backup.BackupRestoreFragment
 import com.itguy.assetmanager.ui.contracts.ContractsListFragment
 import com.itguy.assetmanager.ui.dashboard.DashboardFragment
 import com.itguy.assetmanager.ui.employees.DirectoryFragment
 import com.itguy.assetmanager.ui.generic.GenericListFragment
+import com.itguy.assetmanager.ui.lostfound.LostFoundFragment
 import com.itguy.assetmanager.ui.generic.ListKind
 import com.itguy.assetmanager.ui.heartbeat.HeartbeatFragment
 import com.itguy.assetmanager.ui.login.LoginActivity
 import com.itguy.assetmanager.ui.scan.NetworkScanFragment
 import com.itguy.assetmanager.ui.settings.SettingsFragment
 import com.itguy.assetmanager.ui.tickets.TicketsListFragment
+
+import android.widget.Toast
+
+import com.itguy.assetmanager.R
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
 
@@ -34,6 +43,62 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     /** Guards against the bottom bar re-firing while we mirror the drawer's selection into it. */
     private var syncingNav = false
 
+    /**
+     * The bottom bar's QR button.
+     *
+     * Scanning a tag is a thing you do standing in front of the thing, so it
+     * belongs on the bar rather than buried in a form. The scanner hands back
+     * the code out of the tag's own QR, already checked to be one of ours,
+     * and that goes into the Assets search -- which falls back to the cached
+     * list when there is no network, and a store room is exactly where there
+     * is no network.
+     */
+    private val scanLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val code = result.data?.getStringExtra(ScanActivity.EXTRA_RESULT).orEmpty()
+        if (code.isNotBlank()) openScanned(code)
+    }
+
+    /**
+     * What a scan lands on: that asset's record, open.
+     *
+     * It used to put the code into the assets search instead, which was
+     * wrong twice over. The point of scanning the thing in front of you is
+     * to see what it is, not to be handed a list to tap through. And the
+     * server's search covers the visible columns only -- the tag's code is
+     * not one of them -- so online the list came back empty, which is what
+     * "it does not show the asset" looked like.
+     *
+     * The cache is checked first: it is already on the phone, it answers
+     * instantly, and it is the only thing that answers at all in a store
+     * room with no signal. The server is asked only when the cache has
+     * nothing, which covers an asset added since the last sync.
+     */
+    private fun openScanned(code: String) {
+        lifecycleScope.launch {
+            val cached = OfflineCache.loadAssets()?.firstOrNull {
+                it.PublicCode.equals(code, true) || it.AssetTag.equals(code, true) ||
+                    it.id.equals(code, true)
+            }
+            val id = cached?.id ?: try {
+                ApiClient.api().resolveAsset(code).body()?.id
+            } catch (e: Exception) {
+                null
+            }
+            if (id.isNullOrBlank()) {
+                Toast.makeText(
+                    this@MainActivity,
+                    "That tag is not in this install, or it has not synced to this phone yet",
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+            showFragment(AssetEditFragment.newInstance(id), "Asset", addToBackStack = true)
+            syncBottomNav(R.id.nav_assets)
+        }
+    }
+
     /** Paints the server's cached name + logo into the drawer header and toolbar. */
     private fun applyBranding() {
         if (!::b.isInitialized) return
@@ -42,6 +107,39 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             this,
             header.findViewById(com.itguy.assetmanager.R.id.navHeaderBrand),
             header.findViewById(com.itguy.assetmanager.R.id.navHeaderLogo)
+        )
+        // The colours as well as the name. Applied to the whole window, so the
+        // toolbar, drawer and bottom bar follow the deployment's accent instead
+        // of the bundled red.
+        com.itguy.assetmanager.data.Palette.apply(b.root)
+        com.itguy.assetmanager.data.Palette.apply(header)
+        com.itguy.assetmanager.data.Palette.apply(
+            supportFragmentManager
+                .findFragmentById(com.itguy.assetmanager.R.id.fragmentContainer)?.view
+        )
+    }
+
+    /**
+     * Themes every screen from one place.
+     *
+     * A hook per fragment would mean editing all fourteen of them and
+     * remembering to edit the fifteenth. Registering recursively means a
+     * screen written later is themed without being told theming exists, and
+     * dialogs and bottom sheets are fragments too, so they are covered.
+     */
+    private fun themeEveryScreen() {
+        supportFragmentManager.registerFragmentLifecycleCallbacks(
+            object : androidx.fragment.app.FragmentManager.FragmentLifecycleCallbacks() {
+                override fun onFragmentViewCreated(
+                    fm: androidx.fragment.app.FragmentManager,
+                    f: androidx.fragment.app.Fragment,
+                    v: android.view.View,
+                    savedInstanceState: android.os.Bundle?
+                ) {
+                    com.itguy.assetmanager.data.Palette.apply(v)
+                }
+            },
+            true
         )
     }
 
@@ -72,6 +170,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         setContentView(b.root)
         setSupportActionBar(b.toolbar)
 
+        // Says what it is doing while it connects, and warms every cache
+        // behind itself so no screen opens empty afterwards.
+        //
+        // After setContentView, and that is the whole point: addContentView
+        // puts the overlay in the activity's content frame, and
+        // setContentView replaces that frame's children. Called first, the
+        // overlay was torn down a few milliseconds later, which is why
+        // nobody ever saw it.
+        BootOverlay.show(this, lifecycleScope)
+
         drawerToggle = ActionBarDrawerToggle(this, b.drawerLayout, b.toolbar, 0, 0)
         b.drawerLayout.addDrawerListener(drawerToggle)
         drawerToggle.syncState()
@@ -90,6 +198,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         // Wear the server's own branding rather than the bundled defaults: paint
         // whatever is cached right away, then refresh from the server in the background.
+        themeEveryScreen()
         applyBranding()
         lifecycleScope.launch {
             runCatching { com.itguy.assetmanager.data.Branding.refresh(applicationContext) }
@@ -185,11 +294,16 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_tickets -> showFragment(TicketsListFragment(), "Tickets")
             com.itguy.assetmanager.R.id.nav_contracts -> showFragment(ContractsListFragment(), "Contracts")
             com.itguy.assetmanager.R.id.nav_catalog -> showFragment(GenericListFragment.newInstance(ListKind.CATALOG), "Product Catalog")
+            com.itguy.assetmanager.R.id.nav_lostfound -> showFragment(LostFoundFragment(), "Lost & Found")
             com.itguy.assetmanager.R.id.nav_trash -> showFragment(GenericListFragment.newInstance(ListKind.TRASH), "Trash")
             com.itguy.assetmanager.R.id.nav_audit -> showFragment(GenericListFragment.newInstance(ListKind.AUDIT), "Audit Log")
             com.itguy.assetmanager.R.id.nav_scan -> showFragment(NetworkScanFragment(), "Network Scan")
             com.itguy.assetmanager.R.id.nav_heartbeat -> showFragment(HeartbeatFragment(), "Heartbeat")
             com.itguy.assetmanager.R.id.nav_backup -> showFragment(BackupRestoreFragment(), "Backup / Restore")
+            com.itguy.assetmanager.R.id.nav_qr -> {
+                scanLauncher.launch(Intent(this, ScanActivity::class.java))
+                return true      // the bar keeps whatever tab it was on
+            }
             com.itguy.assetmanager.R.id.nav_settings -> showFragment(SettingsFragment(), "Settings")
         }
         item.isChecked = true

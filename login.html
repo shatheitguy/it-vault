@@ -7,6 +7,10 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css?v=20260903e">
+<!-- The install's own logo, so a browser tab is identifiable and the
+     dashboard's icon lookup finds something when pointed at itself. -->
+<link rel="icon" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
 <style>
 *{box-sizing:border-box}html,body{margin:0;height:100%}
 body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidden;
@@ -69,7 +73,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font);overflow:hidd
 </head>
 <body>
 <div class="card"><div class="box" id="box">
-  <img id="loginLogo" class="logoimg" src="/logo.png?t=1" alt="" style="display:none">
+  <img id="loginLogo" class="logoimg" src="/icon.png?t=1" alt="" style="display:none">
   <div class="brand" id="brand" data-t="IT-Vault">IT-Vault</div>
   <div class="sub" id="sub">Asset Management</div>
   <div id="step1">
@@ -143,7 +147,40 @@ function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
 function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
 function muteFor(bgHex,k){ const light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
 function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*r+0.7152*g+0.0722*bl;}; const la=L(a),lb=L(b); const hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
-function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
+/* ---- which scheme, light or dark ----
+   The device decides. Settings still decide everything else -- the accent,
+   the radius, the font, the hue of the ground -- but whether the page is
+   light or dark is the phone's business, not an admin's, because the person
+   holding it already answered that question once for every app they own.
+
+   Only two values feed the whole palette: the page ground and the card
+   surface. Swing those to the scheme in use and every derived value -- text,
+   muted text, lines, button ink -- follows exactly as it did before. A
+   background already on the right side of the line is left untouched, so a
+   dark install in dark mode is pixel for pixel what it always was. */
+function prefersLight(){
+  try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
+  catch(e){ return false; }
+}
+function mixHex(a,b,t){
+  const x=hexRgb(a), y=hexRgb(b);
+  return '#'+x.map((v,i)=>Math.max(0,Math.min(255,Math.round(v+(y[i]-v)*t)))
+    .toString(16).padStart(2,'0')).join('');
+}
+function toScheme(h,wantLight,isSurface){
+  if(isLightHex(h)===wantLight) return h;
+  return wantLight ? mixHex(h,'#ffffff',isSurface?0.97:0.91)
+                   : mixHex(h,'#05070b',isSurface?0.86:0.90);
+}
+function ensureAccentVisible(accent,surface){
+  if(contrastRatio(accent,surface)>=2.2) return accent;
+  // Away from the surface, not into it. The hue is kept -- it is still their
+  // colour, darkened or lightened only as far as it takes to be seen.
+  const away=isLightHex(surface)?'#000000':'#ffffff';
+  let out=accent;
+  for(let i=0;i<6 && contrastRatio(out,surface)<2.2;i++) out=mixHex(out,away,0.18);
+  return out;
+}
 function applyCustomVars(s){
   if(!s) return;
   const bgType=s.bg_type==='gradient'?'gradient':'solid';
@@ -153,9 +190,11 @@ function applyCustomVars(s){
     const found=bgRaw.match(/#[0-9a-fA-F]{3,6}/g)||[];
     bgA=hex6(found[0],'#0a0d13'); bgB=hex6(found[1],'#121826');
   }
-  const baseHex=bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13');
+  const wantLight=prefersLight();
+  bgA=toScheme(bgA,wantLight,false); bgB=toScheme(bgB,wantLight,false);
+  const baseHex=toScheme(bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13'),wantLight,false);
   const bgValue=bgType==='gradient'?('linear-gradient(135deg, '+bgA+', '+bgB+')'):baseHex;
-  const surface=hex6(s.comp_bg,'#121826');
+  const surface=toScheme(hex6(s.comp_bg,'#121826'),wantLight,true);
   const light=isLightHex(baseHex);
   const surfaceLight=isLightHex(surface);
   const accent=ensureAccentVisible(hex6(s.accent,'#ff3b30'), surface);
@@ -187,7 +226,7 @@ if(window.matchMedia){matchMedia('(prefers-color-scheme: dark)').addEventListene
     const brand=document.getElementById('brand');
     brand.textContent=name; brand.setAttribute('data-t',name);
     const lg=document.getElementById('loginLogo');
-    if(lg){ lg.src='/logo.png?t='+Date.now(); lg.style.display=''; }
+    if(lg){ lg.src='/icon.png?t='+Date.now(); lg.style.display=''; }
     applyCustomVars(b);
     applyTheme(b.theme||'dark');
     window.__matrixOn = !!b.matrix_on && !document.body.classList.contains('light');

@@ -42,7 +42,7 @@ object AppUpdater {
     // can lag a fresh publish, so fall back to the same file straight from the repo.
     private val MANIFEST_URLS = listOf(
         "https://shatheitguy.github.io/it-vault/app/latest.json",
-        "https://raw.githubusercontent.com/shatheitguy/it-vault/main/docs/app/latest.json"
+        "https://raw.githubusercontent.com/shatheitguy/it-vault/main-fresh/docs/app/latest.json"
     )
 
     // How often the silent launch check runs.

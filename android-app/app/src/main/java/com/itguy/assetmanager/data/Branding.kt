@@ -58,6 +58,10 @@ object Branding {
                 val name = (body["app_name"] as? String)?.trim()
                     ?: (body["logo_text"] as? String)?.trim()
                 if (!name.isNullOrBlank()) Prefs.brandName = name
+                // The same response carries the deployment's colours. They
+                // were being thrown away, which is why the app stayed red
+                // whatever the server was themed in.
+                Palette.store(body)
             }
         }
 
@@ -65,7 +69,9 @@ object Branding {
         runCatching {
             val base = Prefs.serverUrl
             if (base.isBlank()) return@runCatching
-            val url = ApiClient.normalize(base) + "logo.png"
+            // the square mark, not the lockup: this lands in a 52dp
+            // square, where a stacked wordmark is unreadable
+            val url = ApiClient.normalize(base) + "icon.png"
             http.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                 if (!resp.isSuccessful) return@use
                 val bytes = resp.body?.bytes() ?: return@use
@@ -89,6 +95,7 @@ object Branding {
     /** Clears cached branding — called when the user switches server / logs out. */
     fun clear(ctx: Context) {
         Prefs.brandName = ""
+        Palette.clear()
         runCatching { logoFile(ctx).delete() }
     }
 }

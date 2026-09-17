@@ -14,8 +14,14 @@
         android:id="@+id/nav_tickets"
         android:icon="@drawable/ic_ticket"
         android:title="Tickets" />
+    <!-- Two kinds of scanning, and they are not the same job: one looks for
+         devices on the network, the other reads the tag stuck to one. -->
     <item
         android:id="@+id/nav_scan"
         android:icon="@drawable/ic_wifi"
-        android:title="Scan" />
+        android:title="Devices" />
+    <item
+        android:id="@+id/nav_qr"
+        android:icon="@drawable/ic_qr"
+        android:title="Scan QR" />
 </menu>

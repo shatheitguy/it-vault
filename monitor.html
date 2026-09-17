@@ -8,7 +8,17 @@
   :root{ --bg:#0a0d13; --comp:#121826; --comp2:#0f1620; --line:#222c3d;
          --acc:#ff3b30; --acc2:#c0392b; --txt:#e6edf6; --mut:#8a98b0; --mut2:#5d6b82;
          --grn:#3ddc97; --red:#ff6b6b; --amber:#ffb454;
-         --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif; }
+         --font:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif;
+         color-scheme:light dark; }
+  /* First paint on a device set to light, before the branding call returns.
+     The engine overwrites these inline a moment later; without them the page
+     flashes dark on a light phone. The accent is deliberately not in here --
+     it never changes with the scheme. */
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f6fa; --comp:#ffffff; --comp2:#f7f9fc; --line:#dde3ec;
+           --txt:#16202e; --mut:#5d6b82; --mut2:#8595ad; }
+  }
+
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;overflow:hidden}
   body{font-family:var(--font);background:var(--bg);color:var(--txt);-webkit-font-smoothing:antialiased;transition:background .3s,color .3s}
@@ -63,7 +73,7 @@
 <body>
 <div class="wrap">
   <div class="header">
-    <img id="logo" src="/logo.png" alt="" onerror="this.style.display='none'">
+    <img id="logo" src="/icon.png" alt="" onerror="this.style.display='none'">
     <div>
       <div class="brand" id="brandName">IT-Vault</div>
       <div class="sub">Ticket Monitor</div>
@@ -104,7 +114,36 @@ function isLightHex(h){ var c=hexRgb(h); return (c[0]*0.299+c[1]*0.587+c[2]*0.11
 function onBg(bgHex){ return isLightHex(bgHex)?'#16202e':'#e6edf6'; }
 function muteFor(bgHex,k){ var light=isLightHex(bgHex); if(light) return k==='muted'?'#5d6b82':'#8595ad'; return k==='muted'?'#8a98b0':'#5d6b82'; }
 function contrastRatio(a,b){ function L(h){var c=hexRgb(h).map(function(v){v/=255;return v<=0.03928?v/12.92:Math.pow((v+0.055)/1.055,2.4);});return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];} var la=L(a),lb=L(b); var hi=Math.max(la,lb),lo=Math.min(la,lb); return (hi+0.05)/(lo+0.05); }
-function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; var a=hexRgb(accent),s=hexRgb(surface); var mix=a.map(function(v,i){return Math.round(v*0.65+s[i]*0.35);}); return '#'+mix.map(function(v){return v.toString(16).padStart(2,'0');}).join(''); }
+/* ---- which scheme, light or dark ----
+ The device decides; the settings still decide the accent, the radius and
+ the hue. Only the ground and the card surface are swung to the scheme in
+ use -- everything else derives from those two exactly as it did before, so
+ a dark install in dark mode is unchanged. */
+function prefersLight(){
+  try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
+  catch(e){ return false; }
+}
+function mixHex(a,b,t){
+  var x=hexRgb(a), y=hexRgb(b), o='#';
+  for(var i=0;i<3;i++){
+    var v=Math.max(0,Math.min(255,Math.round(x[i]+(y[i]-x[i])*t)));
+    o+=v.toString(16).padStart(2,'0');
+  }
+  return o;
+}
+function toScheme(h,wantLight,isSurface){
+  if(isLightHex(h)===wantLight) return h;
+  return wantLight ? mixHex(h,'#ffffff',isSurface?0.97:0.91)
+                   : mixHex(h,'#05070b',isSurface?0.86:0.90);
+}
+function ensureAccentVisible(accent,surface){
+  if(contrastRatio(accent,surface)>=2.2) return accent;
+  // away from the surface, not into it -- mixing a yellow into white is how
+  // a brand colour disappears in light mode
+  var away=isLightHex(surface)?'#000000':'#ffffff', out=accent;
+  for(var i=0;i<6 && contrastRatio(out,surface)<2.2;i++) out=mixHex(out,away,0.18);
+  return out;
+}
 function applyTheme(b){
   try{
     var bgType = b.bg_type==='gradient' ? 'gradient' : 'solid';
@@ -114,9 +153,11 @@ function applyTheme(b){
       var found = bgRaw.match(/#[0-9a-fA-F]{3,6}/g) || [];
       bgA = hex6(found[0],'#0a0d13'); bgB = hex6(found[1],'#121826');
     }
-    var baseHex = bgType==='gradient' ? bgA : hex6(bgRaw,'#0a0d13');
+    var wantLight = prefersLight();
+    bgA = toScheme(bgA,wantLight,false); bgB = toScheme(bgB,wantLight,false);
+    var baseHex = toScheme(bgType==='gradient' ? bgA : hex6(bgRaw,'#0a0d13'), wantLight, false);
     var bgValue = bgType==='gradient' ? ('linear-gradient(135deg, '+bgA+', '+bgB+')') : baseHex;
-    var surface = hex6(b.comp_bg,'#121826');
+    var surface = toScheme(hex6(b.comp_bg,'#121826'), wantLight, true);
     var surfaceLight = isLightHex(surface);
     var accent = ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
     var accent2 = ensureAccentVisible(hex6(b.accent2,'#c0392b'), surface);
@@ -223,7 +264,7 @@ fetch('/api/branding').then(function(r){return r.json()}).then(function(b){
   var name = b.app_name || 'IT-Vault';
   document.getElementById('brandName').textContent = name;
   document.title = name + ' — Ticket Monitor';
-  if(b.logo){ document.getElementById('logo').src='/logo.png?t='+Date.now(); }
+  if(b.logo){ document.getElementById('logo').src='/icon.png?t='+Date.now(); }
   applyTheme(b);
 }).catch(function(){});
 

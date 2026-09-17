@@ -32,7 +32,25 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # Without this the whole job dies at the build step and no Release is
+      # created at all -- and the web app's update check, the phone's updater
+      # and the README download badge all resolve against Releases. A tag
+      # should always produce the release; the APK is what goes missing when
+      # the secrets are not set up, and the warning says so.
+      - name: Do we have signing secrets?
+        id: signing
+        env:
+          KS: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::No KEYSTORE_BASE64 secret -- publishing the release without an APK. Build and upload IT-Vault.apk by hand (see RELEASING.md)."
+          fi
+
       - name: Restore keystore
+        if: steps.signing.outputs.ready == 'true'
         working-directory: android-app
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
@@ -44,16 +62,18 @@ jobs:
           EOF
 
       - name: Build signed release APK
+        if: steps.signing.outputs.ready == 'true'
         working-directory: android-app
         run: ./gradlew assembleRelease --no-daemon
 
       - name: Stage APK as IT-Vault.apk
+        if: steps.signing.outputs.ready == 'true'
         run: cp android-app/app/build/outputs/apk/release/app-release.apk IT-Vault.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: IT-Vault.apk
+          files: ${{ steps.signing.outputs.ready == 'true' && 'IT-Vault.apk' || '' }}
           generate_release_notes: true
 
       - name: Clean up secrets on runner
