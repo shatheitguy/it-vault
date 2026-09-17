@@ -24,4 +24,8 @@
     <color name="hb_up">#1FA971</color>
     <color name="hb_down">#E03B3B</color>
     <color name="hb_pending">#C07A10</color>
+    <!-- Tiles for the alternative launcher icons. Flat colours, so the
+         adaptive background needs no PNG set. -->
+    <color name="icon_tile_light">#FFFFFFFF</color>
+    <color name="icon_tile_mono">#FF0B0D12</color>
 </resources>

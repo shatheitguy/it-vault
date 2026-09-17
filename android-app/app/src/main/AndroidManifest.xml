@@ -27,6 +27,44 @@
             </intent-filter>
         </activity>
 
+        <!-- Alternative launcher icons.
+             Android bakes the launcher icon into the APK; an app cannot paint
+             its own tile from a logo downloaded at runtime. What it can do is
+             ship several and switch which one the launcher sees, which is what
+             these are. Each alias carries the same LAUNCHER filter and starts
+             the same activity; exactly one of them is enabled at a time (see
+             AppIcon.kt), and the default one is the activity itself.
+
+             android:enabled="false" matters: with two enabled, a launcher
+             shows the app twice. -->
+        <activity-alias
+            android:name=".ui.LauncherLight"
+            android:targetActivity=".ui.login.LoginActivity"
+            android:icon="@mipmap/ic_launcher_light"
+            android:roundIcon="@mipmap/ic_launcher_light"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".ui.LauncherMono"
+            android:targetActivity=".ui.login.LoginActivity"
+            android:icon="@mipmap/ic_launcher_mono"
+            android:roundIcon="@mipmap/ic_launcher_mono"
+            android:label="@string/app_name"
+            android:exported="true"
+            android:enabled="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="false"

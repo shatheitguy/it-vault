@@ -1,6 +1,6 @@
 {
-  "versionCode": 28,
-  "versionName": "2.4.0",
+  "versionCode": 29,
+  "versionName": "2.5.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Acknowledgement links are now short codes instead of long tokens, so mail security stops rewriting and blocking them. Email footers carry their links only in the HTML part. And IT-Vault now ships an Unraid template and a TrueNAS compose file."
+  "notes": "Settings now has App icon: pick between the three tiles the app ships, or pin a home-screen shortcut that carries your own logo. The connect screen shows your logo too. Android compiles the launcher tile into the app, so an uploaded logo cannot replace it -- the shortcut is how your mark gets onto the home screen."
 }
