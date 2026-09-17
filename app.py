@@ -909,6 +909,7 @@ FEATURE_GROUPS = [
         ("assets.labels",   "Print QR labels",               "read"),
         ("assets.catalog",  "Product catalog",               "read"),
         ("assets.trash",    "Trash (restore / purge)",       "write"),
+        ("assets.lostfound", "Lost & Found reports",         "read"),
     ]},
     {"key": "contracts", "label": "Contracts", "module": "contracts", "items": [
         ("contracts.view",   "View contracts",               "read"),
@@ -1358,6 +1359,29 @@ def init_db():
         config TEXT, enabled TINYINT DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )""")
+    # Lost & Found. A report comes from a stranger holding the asset -- they
+    # scanned the tag, so they have the thing in their hands and we have no
+    # account for them. All we keep is how to call them back.
+    #
+    # kind separates the two directions this runs in: 'found' is that
+    # stranger's report, 'lost' is staff logging an asset as missing before
+    # anyone finds it. Both live here so one list answers "what is missing
+    # and what has turned up".
+    cur.execute("""CREATE TABLE IF NOT EXISTS LostFound (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        asset_id VARCHAR(64),
+        asset_tag VARCHAR(64),
+        kind VARCHAR(12) DEFAULT 'found',
+        status VARCHAR(16) DEFAULT 'found',
+        finder_name VARCHAR(120),
+        finder_mobile VARCHAR(40),
+        finder_note TEXT,
+        admin_note TEXT,
+        handled_by VARCHAR(80),
+        reported_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        reporter_ip VARCHAR(45)
+    )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
         password VARCHAR(100),
@@ -1474,6 +1498,29 @@ def init_db():
     except Exception:
         try: cur.execute("ALTER TABLE Settings ADD COLUMN portal_token VARCHAR(64) DEFAULT ''")
         except Exception: pass
+    # The unguessable half of a tag's address. Backfilled for every asset
+    # that predates it, so an existing install can print a tag that works the
+    # moment it updates.
+    try:
+        cur.execute("ALTER TABLE Assets ADD COLUMN PublicCode VARCHAR(24)")
+    except Exception:
+        pass
+    try:
+        cur.execute("CREATE UNIQUE INDEX idx_assets_publiccode ON Assets (PublicCode)")
+    except Exception:
+        pass
+    try:
+        cur.execute("SELECT _id FROM Assets WHERE PublicCode IS NULL OR PublicCode=''")
+        for r in cur.fetchall():
+            for _ in range(8):
+                try:
+                    cur.execute("UPDATE Assets SET PublicCode=%s WHERE _id=%s",
+                                (_new_public_code(), r["_id"]))
+                    break
+                except Exception:
+                    continue
+    except Exception:
+        pass
     # migrate: add WarrantyMonths to Assets if missing
     try:
         cur.execute("SELECT WarrantyMonths FROM Assets LIMIT 1")
@@ -1778,16 +1825,52 @@ def migrate_schema():
             pass
     # Scheduled backups: frequency, scope, and how many old backups to retain
     backup_cols = {
-        "backup_schedule": "VARCHAR(20) DEFAULT 'off'",
+        # Daily, not off. A backup nobody switched on is the one they wanted
+        # the day something goes wrong, and the cost of the default being
+        # wrong is a file in a volume that backup_retain prunes anyway.
+        "backup_schedule": "VARCHAR(20) DEFAULT 'daily'",
+        # Set once, when the default above is applied to an install that
+        # predates it, so a later deliberate "off" is never overridden again.
+        "backup_defaulted": "TINYINT DEFAULT 0",
         "backup_scope": "VARCHAR(20) DEFAULT 'all'",
         "backup_retain": "INT DEFAULT 7",
         "backup_last_run": "VARCHAR(40) DEFAULT ''",
+        # Which tag model prints, and the line above the number on the plate
+        # models -- "Asset No.", "Council Asset", "Tracked Asset", whatever
+        # the organisation calls it.
+        "label_model": "VARCHAR(20) DEFAULT 'detail'",
+        "label_caption": "VARCHAR(40) DEFAULT 'Asset No.'",
+        # The band, panel and edge models are printed in a colour. The four
+        # in circulation are black, blue, red and green; this is free.
+        "label_color": "VARCHAR(20) DEFAULT '#000000'",
+        # What else goes on the tag, whichever model is printing, and how big
+        # the logo is drawn. Off by default for the two lines that are new, so
+        # an existing install's tags do not change shape on an update.
+        "label_logo_size": "VARCHAR(4) DEFAULT 'md'",
+        "label_show_name": "TINYINT DEFAULT 0",
+        "label_show_contact": "TINYINT DEFAULT 0",
+        "label_show_asset": "TINYINT DEFAULT 0",
     }
     for col, typ in backup_cols.items():
         try:
             cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
         except Exception:
             pass
+    # Which notifications are wanted, as one JSON object of {key: bool}. A
+    # column per event is what produced the scatter this replaces -- three
+    # panels of checkboxes, two of which were never read by anything.
+    try:
+        cur.execute("ALTER TABLE Settings ADD COLUMN notify_types TEXT")
+    except Exception:
+        pass
+    # Lost & Found used to have five statuses. Reports filed under the two
+    # that went away still have to mean something: an open report is one
+    # somebody has, a closed one is one that came back.
+    try:
+        cur.execute("UPDATE LostFound SET status='found' WHERE status='open'")
+        cur.execute("UPDATE LostFound SET status='returned' WHERE status='closed'")
+    except Exception:
+        pass
     # Employees: real editable staff/HR ID, separate from EmployeeID (which
     # holds the AD/login username for LDAP-synced staff)
     try:
@@ -1864,6 +1947,33 @@ def migrate_schema():
             cur.execute("ALTER TABLE Users ADD COLUMN avatar MEDIUMTEXT")
         except Exception:
             pass
+    # An install that predates the daily default has backups switched off and
+    # almost certainly never chose that -- "off" was simply what it shipped
+    # with. Turn it on once, and record that we did, so a later deliberate
+    # "off" is left alone forever after.
+    try:
+        cur.execute("SELECT backup_schedule, backup_defaulted FROM Settings WHERE id=1")
+        _bk = cur.fetchone() or {}
+        if not int(_bk.get("backup_defaulted") or 0):
+            if (_bk.get("backup_schedule") or "off").lower() == "off":
+                cur.execute("UPDATE Settings SET backup_schedule='daily' WHERE id=1")
+                print("[itvault] automatic daily backups switched on "
+                      "(Settings > Backup to change)", flush=True)
+            cur.execute("UPDATE Settings SET backup_defaulted=1 WHERE id=1")
+    except Exception:
+        pass
+    # Each user arranges their own dashboard, and it is kept here rather than
+    # in the browser so it survives a new machine, a cleared cache, and --
+    # the reason it moved -- so it is in the backup. Users is dumped in the
+    # config and all scopes, and _dump_table reads SHOW COLUMNS, so this rides
+    # along with no change to the backup code.
+    try:
+        cur.execute("SELECT dash_layout FROM Users LIMIT 1")
+    except Exception:
+        try:
+            cur.execute("ALTER TABLE Users ADD COLUMN dash_layout MEDIUMTEXT")
+        except Exception:
+            pass
     # Offline (Android) sync needs a last-modified timestamp on every
     # syncable record so the newest edit wins. Only Tickets had one; add
     # it to Assets/Contracts/Employees and backfill existing rows so a
@@ -1883,6 +1993,11 @@ def row_to_dict(row):
     return {"_id": row["_id"], "InvoiceFile": row.get("InvoiceFile", "") or "",
             "SignatureData": row.get("SignatureData", "") or "",
             "UpdatedAt": (str(row["UpdatedAt"]) if row.get("UpdatedAt") else ""),
+            # The address a printed tag carries. Passed through so a phone can
+            # match a scanned tag against its own cache with no network -- a
+            # store room is exactly where there is no signal and exactly where
+            # tags get scanned.
+            "PublicCode": row.get("PublicCode", "") or "",
             **{col: row.get(col, "") for col in COLUMNS}}
 
 def lan_base_url():
@@ -2420,7 +2535,11 @@ def ldap_sync_employees():
 def list_assets():
     c = conn(); cur = c.cursor()
     q = request.args.get("q", "").strip(); sf = request.args.get("status", "").strip(); cf = request.args.get("col", "").strip()
-    sql = "SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, UpdatedAt FROM Assets WHERE is_deleted=0"
+    # PublicCode rides along so a phone that scanned a tag can resolve it
+    # from its own cache, with no network at all -- which is the whole point
+    # of scanning a tag in a store room with no signal.
+    sql = ("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
+           + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0")
     where = []; params = []
     if sf: where.append("Status=%s"); params.append(sf)
     if q:
@@ -2436,6 +2555,40 @@ def list_assets():
         sql += " ORDER BY AssetTag='', AssetTag, Name"
     cur.execute(sql, params); rows = cur.fetchall(); c.close()
     return jsonify([row_to_dict(r) for r in rows])
+
+@app.route("/api/assets/resolve/<path:ref>")
+@auth_required(module="assets", level="read")
+def resolve_asset(ref):
+    """The asset a scanned tag belongs to.
+
+    The app used to hand the scanned code to /api/assets?q=, which searches
+    the visible columns -- and PublicCode is not one of them. So a scan
+    online matched nothing and opened an empty list, while the same scan
+    offline worked, because the phone's own filter does check the code. This
+    is the lookup that should always have existed: exact, and over all three
+    things a tag has ever carried.
+
+    Order matters. The code is checked first because it is the unguessable
+    one; a tag and an id are only accepted as themselves, never as a
+    substring, so this cannot be walked to enumerate the estate.
+    """
+    ref = (ref or "").strip()[:64]
+    if not ref:
+        return jsonify({"error": "nothing to resolve"}), 400
+    cols = ("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
+            + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0 AND ")
+    c = conn(); cur = c.cursor()
+    row = None
+    for clause in ("PublicCode=%s", "AssetTag=%s", "_id=%s"):
+        cur.execute(cols + clause + " LIMIT 1", [ref])
+        row = cur.fetchone()
+        if row:
+            break
+    c.close()
+    if not row:
+        return jsonify({"error": "That tag is not in this install."}), 404
+    return jsonify(row_to_dict(row))
+
 
 def _next_asset_tag(cur):
     cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
@@ -2509,8 +2662,15 @@ def create_asset():
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [_now, _now]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
-    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit(); c.close()
-    send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.")
+    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit()
+    # Minted now rather than when a label is first printed, so every asset has
+    # a public address from the moment it exists and the column never has holes.
+    try:
+        _asset_public_code(a_id, cur=cur, conn_=c); c.commit()
+    except Exception as e:
+        print("public code mint error:", e)
+    c.close()
+    send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.", kind="asset.created")
     if (data.get("EmployeeID") or "").strip():
         notify_person_asset_assigned(data["EmployeeID"], {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
     return jsonify({"ok": True, "_id": a_id})
@@ -2591,7 +2751,7 @@ def delete_asset(a_id):
     # GLPI-style soft delete: keep the row, just flag it
     cur.execute("UPDATE Assets SET is_deleted=1 WHERE _id=%s", [a_id])
     c.commit(); c.close()
-    send_notification("IT Guy: Asset removed", f"Asset '{r.get('Name','?')}' (S/N {r.get('Serial','?')}) was removed by {session.get('user')}.")
+    send_notification("IT Guy: Asset removed", f"Asset '{r.get('Name','?')}' (S/N {r.get('Serial','?')}) was removed by {session.get('user')}.", kind="asset.deleted")
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/history")
@@ -2800,6 +2960,12 @@ def import_excel():
         cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS)
         ph = ", ".join(["%s"] * (len(COLUMNS) + 1))
         cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); added += 1
+        # imported assets get a public address too, or their first printed
+        # label would be the thing that decides whether they have one
+        try:
+            _asset_public_code(a_id, cur=cur, conn_=c)
+        except Exception:
+            pass
     c.commit(); c.close()
     return jsonify({"ok": True, "added": added, "updated": updated})
 
@@ -3290,6 +3456,11 @@ def _send_simple_email(to_email, subject, body, html_body=None):
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
         if html_body:
+            # The footer goes inside <body>: some clients drop anything
+            # after </body>, and Gmail clips it.
+            _f = _email_footer_html(bn)
+            html_body = (html_body.replace("</body>", _f + "</body>", 1)
+                         if "</body>" in html_body else html_body + _f)
             # a plain-text link (what mail clients were rendering before)
             # still auto-links, but reads like any other line of text -- an
             # HTML alternative with a real styled button is what makes it
@@ -3309,7 +3480,8 @@ def _button_email_html(heading, button_label, button_url):
     variables -- most mail clients (Outlook especially) strip <style>
     blocks and don't support var(), so every color here is a literal hex
     matching the app's red accent."""
-    return f"""<!doctype html><html><body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
+    return f"""<!doctype html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:480px;margin:0 auto;text-align:center;">
     <p style="font-size:15px;color:#111111;margin:0 0 20px;">{heading}</p>
     <a href="{button_url}" style="display:inline-block;padding:13px 32px;background:#ff3b30;
@@ -3761,7 +3933,20 @@ def _hb_channels_for(mon, all_channels):
 
 
 def _hb_send_email(cfg, subject, body):
-    return send_notification(subject, body)
+    """An email channel can name its own address.
+
+    There was nowhere to type one: every email channel fell through to the
+    profile addresses, so "send this to the network team" was not expressible.
+    Left blank it still falls back, which is what existing channels do.
+    """
+    to = (cfg.get("to") or "").strip()
+    if not to:
+        return _email_profile_addresses(subject, body)
+    ok = False
+    for addr in [a.strip() for a in re.split(r"[,;\s]+", to) if a.strip()]:
+        if _send_simple_email(addr, subject, body):
+            ok = True
+    return ok
 
 
 def _hb_send_webhook(cfg, subject, body, payload):
@@ -3866,7 +4051,7 @@ def _hb_notify(mon, transition, err, all_channels=None):
     if not channels:
         # nothing configured: fall back to the notification address in Settings
         try:
-            send_notification(subject, body)
+            send_notification(subject, body, kind="heartbeat.down")
         except Exception as e:
             print(f"[itvault] heartbeat alert not sent for {mon.get('name')}: {e}", flush=True)
         return
@@ -4457,8 +4642,11 @@ def settings():
             d = request.get_json(force=True) or {}
             logo = None
             letterhead = None
-        # load current row so partial saves (e.g. branding only) don't reset other fields
-        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
+        # Load the current row so partial saves (e.g. branding only) do not reset
+        # other fields. Every column written below has to be in this list: one
+        # that is missing reads back as absent, and the save quietly stores the
+        # default over whatever was there.
+        cur.execute("SELECT theme, smtp_host, smtp_port, smtp_user, smtp_pass, smtp_from, notify_new, notify_delete, app_name, logo_text, matrix_on, ldap_server, ldap_domain, ldap_bind_user, ldap_bind_pass, ldap_base_dn, qr_size, qr_fields, label_size, label_logo, label_model, label_caption, label_color, label_logo_size, label_show_name, label_show_contact, label_show_asset, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, portal_token, sla_low, sla_normal, sla_high, sla_urgent, sla_breach_notify, auto_assign_roundrobin, notify_on_create, notify_on_resolve, notify_on_reply, unifi_enabled, unifi_host, unifi_port, unifi_site, unifi_user, unifi_pass, unifi_is_os, unifi_verify_ssl FROM Settings WHERE id=1")
         cur0 = cur.fetchone() or {}
         def gv(k, fb):
             return d.get(k) if (k in d and d.get(k) not in (None, "")) else cur0.get(k, fb)
@@ -4508,6 +4696,23 @@ def settings():
                          bool(d.get("unifi_is_os", cur0.get("unifi_is_os", True))),
                          bool(d.get("unifi_verify_ssl", cur0.get("unifi_verify_ssl", False)))))
             _unifi_cache["ts"] = 0  # force a fresh fetch with the new config on next widget load
+        if any(k in d for k in ("label_model", "label_caption", "label_color",
+                                "label_logo_size", "label_show_name",
+                                "label_show_contact", "label_show_asset")):
+            model = (d.get("label_model") or cur0.get("label_model") or "detail").strip().lower()
+            if model not in LABEL_MODELS:
+                model = "detail"
+            cap = (d.get("label_caption", cur0.get("label_caption") or "Asset No.") or "")[:40]
+            col = _hex_or(d.get("label_color", cur0.get("label_color")), "#000000")
+            lsz = (d.get("label_logo_size") or cur0.get("label_logo_size") or "md").strip().lower()
+            if lsz not in LOGO_SIZES:
+                lsz = "md"
+            flag = lambda k: 1 if bool(d.get(k, cur0.get(k, 0))) else 0
+            cur.execute("UPDATE Settings SET label_model=%s, label_caption=%s, "
+                        "label_color=%s, label_logo_size=%s, label_show_name=%s, "
+                        "label_show_contact=%s, label_show_asset=%s WHERE id=1",
+                        (model, cap.strip(), col, lsz, flag("label_show_name"),
+                         flag("label_show_contact"), flag("label_show_asset")))
         if any(k in d for k in ("company_phone", "company_address")):
             cur.execute("SELECT company_phone, company_address FROM Settings WHERE id=1")
             br0 = cur.fetchone() or {}
@@ -4529,6 +4734,27 @@ def settings():
                 retain = 7
             cur.execute("UPDATE Settings SET backup_schedule=%s, backup_scope=%s, backup_retain=%s WHERE id=1",
                         (sched, bscope, retain))
+        # Which notifications are wanted. Stored as one JSON object, and
+        # mirrored into the columns that predate it so the ticket code -- which
+        # reads notify_on_create and friends directly -- keeps agreeing with
+        # what the page shows.
+        if "notify_types" in d:
+            raw = d.get("notify_types")
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = {}
+            prefs = {k: bool(v) for k, v in (raw or {}).items() if k in NOTIFY_KEYS}
+            cur.execute("UPDATE Settings SET notify_types=%s WHERE id=1",
+                        [json.dumps(prefs)])
+            for key, _label, legacy in NOTIFY_TYPES:
+                if legacy and key in prefs:
+                    try:
+                        cur.execute(f"UPDATE Settings SET `{legacy}`=%s WHERE id=1",
+                                    [1 if prefs[key] else 0])
+                    except Exception:
+                        pass
         # persist DB connection config (points the app at a different MariaDB)
         if any(k in d for k in ("db_host", "db_port", "db_name", "db_user", "db_pass")):
             save_db_config(d.get("db_host", DB_HOST), d.get("db_port", DB_PORT),
@@ -4583,6 +4809,9 @@ def settings():
                                           "notify_new","notify_delete","app_name","logo_text","matrix_on",
                                           "ldap_server","ldap_domain","ldap_bind_user","ldap_base_dn",
                                           "qr_size","qr_fields","label_size","label_logo",
+                                          "label_model","label_caption","label_color",
+                                          "label_logo_size","label_show_name",
+                                          "label_show_contact","label_show_asset",
                                           "theme_preset","bg_type","bg","comp_bg","radius","font","accent","accent2",
                                           "language","currency","region","portal_token",
                                           "sla_low","sla_normal","sla_high","sla_urgent","sla_breach_notify",
@@ -4591,6 +4820,10 @@ def settings():
                                           "unifi_is_os","unifi_verify_ssl",
                                           "backup_schedule","backup_scope","backup_retain","backup_last_run",
                                           "company_phone","company_address","has_letterhead"]} | {
+                "notify_types": _notify_prefs(s),
+                # the page renders the list from this, so a type added in
+                # python needs no second edit in the html
+                "notify_catalog": [{"key": k, "label": lbl} for k, lbl, _c in NOTIFY_TYPES],
                 "db_host": DB_HOST, "db_port": DB_PORT, "db_name": DB_NAME, "db_user": DB_USER,
                 "ldap_bind_pass_set": bool(s.get("ldap_bind_pass")),
                 "unifi_pass_set": bool(s.get("unifi_pass")),
@@ -5237,10 +5470,154 @@ def ldap_test():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)[:300]}), 400
 
+@app.route("/api/widget/icon")
+@auth_required(module="settings", level="write")
+def widget_icon():
+    """Fetch a site's icon so a dashboard tile can wear it.
+
+    The browser cannot do this itself: the target is another origin (and
+    often plain http on the LAN), so the fetch is blocked by CORS and by
+    mixed-content rules. The server can, and returns a small data URI the
+    layout can store inline -- no second request when the dashboard loads,
+    and no broken image when the target is only reachable from the server.
+
+    It will happily fetch a private address, which is the point: the tiles
+    people want are the UniFi controller, the NAS, the switch. That does
+    mean an admin can aim this at anything the server can reach, so it is
+    gated on settings:write -- the same permission as changing branding --
+    and it returns only a re-encoded image, never the response body.
+    """
+    import urllib.request
+    import urllib.parse
+    import re as _re
+
+    raw = (request.args.get("url") or "").strip()
+    if not raw:
+        return jsonify({"error": "no url"}), 400
+    # Bare "10.0.0.1:8443" is how people actually type an address, so a missing
+    # scheme is filled in -- but only when one is genuinely absent. Prefixing
+    # blind turned "javascript:alert(1)" into "http://javascript:alert(1)",
+    # which passed the scheme check and failed later as a connection error
+    # instead of being refused outright.
+    if not _re.match(r"^[a-zA-Z][a-zA-Z0-9+.\-]*:", raw):
+        raw = "http://" + raw
+    parts = urllib.parse.urlsplit(raw)
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return jsonify({"error": "only http:// and https:// addresses"}), 400
+
+    MAX_BYTES = 512 * 1024
+
+    def grab(url):
+        req = urllib.request.Request(url, headers={"User-Agent": f"IT-Vault/{APP_VERSION}"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return r.read(MAX_BYTES + 1), (r.headers.get("Content-Type") or "")
+
+    origin = f"{parts.scheme}://{parts.netloc}"
+    candidates = []
+    # If the address IS an image, that is the answer -- someone pasting a
+    # direct PNG should not be told there is no icon at it.
+    direct = None
+    # What the page itself declares, first -- /favicon.ico is the fallback,
+    # not the answer, and plenty of sites no longer serve one.
+    try:
+        html, ctype = grab(origin + (parts.path or "/") +
+                           (("?" + parts.query) if parts.query else ""))
+        low = ctype.lower()
+        if low.startswith("image/") or _sniff_image(html)[0]:
+            direct = html
+        elif "html" in low:
+            text = html[:200000].decode("utf-8", "replace")
+            for m in _re.finditer(
+                    r'<link[^>]+rel=["\']?[^"\'>]*icon[^"\'>]*["\']?[^>]*>',
+                    text, _re.I):
+                href = _re.search(r'href=["\']([^"\']+)["\']', m.group(0), _re.I)
+                if href:
+                    candidates.append(urllib.parse.urljoin(
+                        origin + (parts.path or "/"), href.group(1)))
+    except Exception:
+        pass
+    candidates.append(origin + "/favicon.ico")
+
+    for url in ([None] if direct else []) + candidates[:6]:
+        try:
+            data, ctype = (direct, "") if url is None else grab(url)
+        except Exception:
+            continue
+        if not data or len(data) > MAX_BYTES:
+            continue
+        kind = _sniff_image(data)[0]
+        if not kind:
+            # an .ico is not something _sniff_image knows, and it is still
+            # the most common favicon there is
+            if not data.startswith(b"\x00\x00\x01\x00"):
+                continue
+        try:
+            png = _fit_png(data, 64, 24 * 1024)
+        except Exception:
+            continue
+        b64 = base64.b64encode(png).decode()
+        return jsonify({"ok": True, "icon": "data:image/png;base64," + b64,
+                        "source": url or raw})
+    return jsonify({"error": "No icon found at that address"}), 404
+
+@app.route("/api/dash/layout", methods=["GET", "PUT"])
+@auth_required()
+def dash_layout():
+    """The signed-in user's dashboard arrangement.
+
+    It used to live in localStorage, which meant it was one browser's
+    opinion: gone on a new machine, gone with a cleared cache, and -- the
+    reason it moved here -- absent from every backup. Stored per user
+    rather than globally because arranging a dashboard is a personal act;
+    two admins should not fight over the column count.
+
+    Kept as opaque JSON on purpose. The server has no opinion about what a
+    widget is, so a layout written by a newer front-end round-trips
+    through an older server untouched. The only checks are the ones that
+    protect the server: it must be a JSON object, and it must be small.
+    """
+    user = session.get("user")
+    if not user:
+        # an API-key caller has no per-user dashboard to speak of
+        row = _resolve_session_from_api_key()
+        user = row and row.get("username")
+    if not user:
+        return jsonify({"error": "unauthorized"}), 401
+
+    if request.method == "GET":
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT dash_layout FROM Users WHERE username=%s", [user])
+        r = cur.fetchone(); c.close()
+        raw = (r or {}).get("dash_layout") or ""
+        if not raw:
+            return jsonify({"ok": True, "layout": None})
+        try:
+            return jsonify({"ok": True, "layout": json.loads(raw)})
+        except Exception:
+            # a corrupt row should not lock someone out of their dashboard
+            return jsonify({"ok": True, "layout": None})
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "expected a layout object"}), 400
+    payload = body.get("layout", body)
+    if not isinstance(payload, dict):
+        return jsonify({"error": "expected a layout object"}), 400
+    text = json.dumps(payload, separators=(",", ":"))
+    # Icons are stored inline as data URIs, so a layout is bigger than it
+    # looks -- but MEDIUMTEXT is 16MB and a dashboard has no business
+    # approaching it.
+    if len(text) > 512 * 1024:
+        return jsonify({"error": "That layout is too large -- use smaller icons"}), 413
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Users SET dash_layout=%s WHERE username=%s", (text, user))
+    c.commit(); c.close()
+    return jsonify({"ok": True, "bytes": len(text)})
+
 @app.route("/api/branding")
 def branding():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
+    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address, has_letterhead FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
     s = s or {}
     return jsonify({"app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
                     "matrix_on": bool(s.get("matrix_on", 1)), "logo": "/logo.png",
@@ -5250,7 +5627,12 @@ def branding():
                     "font": s.get("font", "Rajdhani"), "accent": s.get("accent", "#ff3b30"),
                     "accent2": s.get("accent2", "#c0392b"), "language": s.get("language", "en"),
                     "currency": s.get("currency", "AED"),
-                    "company_phone": s.get("company_phone", ""), "company_address": s.get("company_address", "")})
+                    "company_phone": s.get("company_phone", ""), "company_address": s.get("company_address", ""),
+                    # the phone prints the asset sheet itself, and it has to
+                    # know whether to leave the top of the page clear for the
+                    # letterhead or draw its own header bar. /letterhead.png
+                    # is already public; this only says whether one is set.
+                    "has_letterhead": bool(s.get("has_letterhead"))})
 
 @app.route("/api/logo", methods=["POST"])
 @auth_required(module="settings", level="write")
@@ -5282,6 +5664,86 @@ def logo_file():
     # show the real IT-Vault shield mark instead of a blank/broken image,
     # until an admin uploads their own.
     return send_from_directory(BASE, "default_logo.png")
+
+
+# A squared icon, keyed by the bytes it was made from, so uploading a new
+# logo produces a new key and an unchanged one costs nothing after the first
+# request. One entry: there is only ever one logo.
+_ICON_CACHE = {}
+
+
+def _square_icon(data):
+    """A logo turned into something that works in a 16px square.
+
+    Two things are done to it. Any transparent margin is trimmed, because a
+    logo exported with generous padding is mostly padding once it is shrunk
+    to favicon size. What is left is centred on a transparent square, so a
+    wide wordmark keeps its shape instead of being stretched or cropped
+    through its own letters.
+
+    Returns None if the image cannot be read (or PIL is missing), which puts
+    the caller back on the bundled mark rather than a broken image.
+    """
+    key = hashlib.sha1(data).hexdigest()
+    hit = _ICON_CACHE.get(key)
+    if hit is not None:
+        return hit
+    try:
+        from PIL import Image as PILImage
+        img = PILImage.open(io.BytesIO(data)).convert("RGBA")
+        box = img.split()[3].getbbox()      # opaque extent, alpha channel
+        if box:
+            img = img.crop(box)
+        edge = max(img.size)
+        if edge <= 0:
+            return None
+        canvas = PILImage.new("RGBA", (edge, edge), (0, 0, 0, 0))
+        canvas.paste(img, ((edge - img.size[0]) // 2, (edge - img.size[1]) // 2))
+        if edge > 256:
+            canvas = canvas.resize((256, 256), PILImage.LANCZOS)
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG", optimize=True)
+        out = buf.getvalue()
+    except Exception:
+        return None
+    _ICON_CACHE.clear()
+    _ICON_CACHE[key] = out
+    return out
+
+
+@app.route("/icon.png")
+def icon_file():
+    """The square mark -- the branding's own logo, squared.
+
+    Every square slot (favicon, home-screen icon, tab icon) comes through
+    here rather than through /logo.png, because a logo is free to be wide and
+    a favicon is not: /logo.png is sent as it was uploaded, which in a 16px
+    box is a strip of unreadable pixels.
+
+    It has to be the *uploaded* logo though. Serving our own shield here
+    while the sidebar showed the customer's mark meant the tab belonged to a
+    different product than the page. The bundled shield is the fallback for
+    an install that has not uploaded anything yet, not the answer for
+    everyone.
+    """
+    data = _brand_blob("logo")
+    if not data:
+        try:
+            if os.path.getsize(LOGO_PATH) > 0:
+                with open(LOGO_PATH, "rb") as fp:
+                    data = fp.read()
+        except Exception:
+            data = None
+    square = _square_icon(bytes(data)) if data else None
+    if square:
+        resp = make_response(square)
+        resp.headers["Content-Type"] = "image/png"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        # revalidate rather than cache: a favicon browsers hold onto for a
+        # week is a branding change that looks like it did not save
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+    return send_from_directory(BASE, "default_icon.png")
 
 def _logo_data_uri():
     """Logo as a data: URI for embedding straight into a print/PDF: the
@@ -5419,24 +5881,75 @@ def notify_person_contract_assigned(employee_id, contract):
             f"End Date: {contract.get('end_date') or '—'}\n")
     return _send_simple_email(to, f"Contract assigned to you: {contract.get('name','')}", body)
 
+# Where the footer's two links point. Constants because they appear in both
+# the text and the HTML footer, and a link that rots in one of them is worse
+# than no link at all.
+PROJECT_URL = "https://github.com/shatheitguy/it-vault"
+AUTHOR_URL = "https://shatheitguy.in"
+AUTHOR_NAME = "Sha The IT Guy"
+
+
 def _email_footer(app_name):
-    """Small signature line appended to every outgoing email (notifications,
-    OTP codes, alerts) -- keeps the sender's own brand name in the subject/body
-    while still crediting the tool, unobtrusively, on its own short line."""
-    return f"\n\n—\n{app_name} · Powered by Sha The IT Guy"
-def send_notification(subject, body):
+    """The signature at the foot of every outgoing email, as plain text.
+
+    Two lines, and the order is the point: the organisation's own name
+    first, because to whoever opens this the mail is from them -- then,
+    under it, what sent it and which version. Text mail has no font sizes,
+    so "smaller" is carried by the order and the separator.
+
+    The URLs are spelled out because a text part cannot hyperlink, and a
+    reader who wants the project or the author should not have to go
+    looking for them.
+    """
+    return (f"\n\n—\n{app_name}\n"
+            f"IT-Vault v{APP_VERSION} · {PROJECT_URL} · {AUTHOR_NAME} · {AUTHOR_URL}")
+
+
+def _email_footer_html(app_name):
+    """The same footer for an HTML part, where the sizes can be real.
+
+    12px for the organisation, 10px and grey for the line beneath it, a
+    hairline rule above the lot. Every style is inline and every colour a
+    literal hex: mail clients strip <style> blocks, and Outlook does not
+    support var().
+    """
+    from html import escape as _e
+    return (
+        '<div style="margin:32px auto 0;max-width:480px;padding-top:12px;'
+        'border-top:1px solid #eeeeee;text-align:center;'
+        'font-family:Arial,Helvetica,sans-serif;">'
+        f'<div style="font-size:12px;color:#555555;line-height:1.5;">{_e(app_name)}</div>'
+        '<div style="font-size:10px;color:#999999;line-height:1.6;">'
+        f'IT-Vault v{_e(APP_VERSION)} &middot; '
+        f'<a href="{PROJECT_URL}" style="color:#999999;text-decoration:underline;">GitHub</a> &middot; '
+        f'<a href="{AUTHOR_URL}" style="color:#999999;text-decoration:underline;">{_e(AUTHOR_NAME)}</a>'
+        '</div></div>'
+    )
+
+
+def _email_profile_addresses(subject, body):
+    """Mail everyone who has an address on their profile.
+
+    The oldest delivery route in the app, and still the sensible default: with
+    no channels configured at all, a notification should reach the people who
+    already told IT-Vault how to reach them.
+    """
     import smtplib
     from email.message import EmailMessage
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Settings WHERE id=1"); s = cur.fetchone() or {}
-    cur.execute("SELECT email FROM Users WHERE email<>'' "); emails = [r["email"] for r in cur.fetchall()]
+    cur.execute("SELECT email FROM Users WHERE email<>''")
+    emails = [r["email"] for r in cur.fetchall()]
     c.close()
     if not s.get("smtp_host") or not emails:
         return False
     try:
         bn = s.get("app_name") or "IT-Vault"
-        subj = subject if subject.startswith(bn) else f"{bn}: {subject}" if not subject.startswith("IT Guy") else subject.replace("IT Guy", bn, 1)
-        msg = EmailMessage(); msg["Subject"] = subj; msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
+        subj = subject if subject.startswith(bn) else (
+            f"{bn}: {subject}" if not subject.startswith("IT Guy")
+            else subject.replace("IT Guy", bn, 1))
+        msg = EmailMessage(); msg["Subject"] = subj
+        msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = ", ".join(emails); msg.set_content(body + _email_footer(bn))
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
@@ -5444,6 +5957,120 @@ def send_notification(subject, body):
         return True
     except Exception as e:
         print("notify error:", e); return False
+
+
+# Every notification the system can send, in the order they are shown in
+# Settings. The fourth field is the column that used to hold this toggle, if
+# there was one: it seeds the default so an install that had already turned
+# something off does not get it switched back on by an upgrade.
+#
+# The two asset toggles are in here because they were in the UI and did
+# nothing at all -- the create and delete notifications fired regardless of
+# them, which is its own small answer to "why do I get mail I turned off".
+NOTIFY_TYPES = [
+    ("asset.created",     "Asset added",                      "notify_new"),
+    ("asset.deleted",     "Asset deleted",                    "notify_delete"),
+    ("asset.checkout",    "Asset checked out or returned",    None),
+    ("asset.assigned",    "Asset assigned to someone",        None),
+    ("asset.status",      "Asset status changed",              None),
+    ("lostfound.found",   "Someone reports they found an asset", None),
+    ("lostfound.status",  "A Lost & Found report changes status", None),
+    ("ticket.created",    "Ticket raised",                     "notify_on_create"),
+    ("ticket.assigned",   "Ticket assigned",                   None),
+    ("ticket.replied",    "Ticket reply added",                "notify_on_reply"),
+    ("ticket.resolved",   "Ticket resolved or closed",         "notify_on_resolve"),
+    ("sla.breach",        "SLA breached",                      "sla_breach_notify"),
+    ("heartbeat.down",    "Monitor down or recovered",         None),
+    ("contract.expiring", "Contract or warranty expiring",     None),
+    ("backup.failed",     "Scheduled backup failed",           None),
+]
+NOTIFY_KEYS = [k for k, _l, _c in NOTIFY_TYPES]
+
+
+def _notify_prefs(srow=None):
+    """The {key: bool} map, filled in from the legacy columns where unset.
+
+    Unknown or missing keys default to on: a new notification type should
+    arrive, not be silently withheld until someone finds the checkbox.
+    """
+    s = srow
+    if s is None:
+        try:
+            c = conn(); cur = c.cursor()
+            cur.execute("SELECT * FROM Settings WHERE id=1")
+            s = cur.fetchone() or {}
+            c.close()
+        except Exception:
+            s = {}
+    saved = {}
+    raw = (s or {}).get("notify_types")
+    if raw:
+        try:
+            saved = json.loads(raw) or {}
+        except Exception:
+            saved = {}
+    out = {}
+    for key, _label, legacy in NOTIFY_TYPES:
+        if key in saved:
+            out[key] = bool(saved[key])
+        elif legacy is not None and legacy in (s or {}):
+            out[key] = bool((s or {}).get(legacy, 1))
+        else:
+            out[key] = True
+    return out
+
+
+def _notify_enabled(kind, srow=None):
+    if not kind:
+        return True
+    return bool(_notify_prefs(srow).get(kind, True))
+
+
+def send_notification(subject, body, kind=None):
+    """Every system notification, down the channels configured in Settings.
+
+    Channels used to be a Heartbeat-only idea, which meant two places to set
+    up notifications and a Telegram bot that could tell you a monitor was down
+    but not that a backup had failed. They are now the one mechanism: whatever
+    is listed under Settings > Notifications receives everything -- asset
+    events, tickets, SLA breaches, backups and outage alerts alike.
+
+    With no channels at all it falls back to the profile addresses, so an
+    install that never opens the page keeps working exactly as before. A dead
+    channel never stops the others: each send is guarded on its own, because
+    the whole point of several channels is that one of them still arrives.
+    """
+    # A type switched off in Settings stops here, before any channel is
+    # touched, so one decision covers email and every channel alike.
+    if kind and not _notify_enabled(kind):
+        return False
+    payload = {"event": "notification", "subject": subject, "message": body,
+               "kind": kind or "notification"}
+    try:
+        channels = [ch for ch in _hb_all_channels() if int(ch.get("enabled") or 0)]
+    except Exception:
+        channels = []
+    if not channels:
+        return _email_profile_addresses(subject, body)
+    sent = False
+    for ch in channels:
+        kind = (ch.get("kind") or "email").lower()
+        fn = _HB_SENDERS.get(kind)
+        if not fn:
+            continue
+        cfg = ch.get("config") or {}
+        if isinstance(cfg, str):
+            try:
+                cfg = json.loads(cfg)
+            except Exception:
+                cfg = {}
+        try:
+            ok = fn(cfg, subject, body) if kind == "email" else fn(cfg, subject, body, payload)
+            sent = sent or bool(ok)
+        except Exception as e:
+            print(f"[itvault] notification via {ch.get('name') or kind} failed: {e}",
+                  flush=True)
+    return sent
 
 def notify_ticket_assigned(ticket, assignee_user):
     """Email the assignee + requester when a ticket is assigned. Returns True if sent."""
@@ -5563,7 +6190,7 @@ def checkout_asset(a_id):
                 (a_id, user, nowstr(), expected, note))
     c.commit(); c.close()
     audit(session.get("user"), "CHECKOUT", a_id, f"{a['Name']} -> {user}" + (f" (due {expected})" if expected else ""))
-    send_notification("IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.")
+    send_notification("IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.", kind="asset.checkout")
     try:
         cc = conn(); ccur = cc.cursor()
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); full_asset = ccur.fetchone(); cc.close()
@@ -5809,15 +6436,31 @@ def label_page(a_id):
     # QR / label config from Settings
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, logo_text FROM Settings WHERE id=1")
+        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
+                     "logo_text, label_model, label_caption, label_color, "
+                     "label_logo_size, label_show_name, label_show_contact, "
+                     "label_show_asset, company_phone FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
         logo_text = (srow.get("logo_text") or app_name) if srow else app_name
+        label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
+        label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
+        label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
+        label_contact = ((srow.get("company_phone") or "") if srow else "")
+        label_logo_scale = LOGO_SIZES.get((srow.get("label_logo_size") or "md") if srow else "md", 1.0)
+        lbl_name = bool(srow.get("label_show_name")) if srow else False
+        lbl_con = bool(srow.get("label_show_contact")) if srow else False
+        lbl_asset = bool(srow.get("label_show_asset")) if srow else False
     except Exception:
         qr_size, label_size, show_logo, app_name, logo_text = 160, "50.8x50.8", True, "IT-Vault", "IT-Vault"
+        label_model, label_caption = "detail", "Asset No."
+        label_color, label_contact = "#000000", ""
+        label_logo_scale, lbl_name, lbl_con, lbl_asset = 1.0, False, False, False
+    if label_model not in LABEL_MODELS:
+        label_model = "detail"
     # parse label physical size "WxH" mm (default 50.8x50.8)
     try:
         lw, lh = label_size.lower().split("x")
@@ -5828,19 +6471,64 @@ def label_page(a_id):
     # header + stacked two-line fields — switch to a compact single-line layout so
     # the label actually renders at (and fits) the physical size chosen, instead of
     # silently growing taller than requested.
+    # The plate model is a different tag, not a variation on this one: no
+    # fields, no notice, no border -- the ones it copies are cut metal, and a
+    # printed rule around the edge only makes the alignment look wrong. It is
+    # rendered on its own rather than threaded through a layout built for the
+    # detailed tag.
+    if label_model != "detail":
+        _logo = _logo_data_uri() if show_logo else ""
+        _pcode = _asset_public_code(asset["_id"])
+        return _model_page(
+            label_model,
+            [("qr0", asset.get("AssetTag") or asset["_id"][:12],
+              f"{base}p/{_pcode}" if _pcode else f"{base}asset/{asset['_id']}",
+              asset.get("Name") or "")],
+            lw_mm, lh_mm, label_caption, brand_name(),
+            _model_logo(label_model, _logo), label_color, label_contact,
+            f"Label {asset['Name']}", logo_scale=label_logo_scale,
+            show_name=lbl_name, show_contact=lbl_con, show_asset=lbl_asset)
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
-    head_mm = 0.0 if compact else 5.5
-    name_mm = 2.6 if compact else 4.0
+    # What the head actually has to work with. Not the tag's width: the head
+    # lives in the text column, and the QR column beside it is capped at 46%
+    # of the box -- which is why sizing against the full width still printed
+    # "NORTHSIDE SP...". The logo shares the line, so it is capped at what is
+    # reserved for it rather than being allowed to take the rest.
+    LOGO_RESERVE_MM = 3.5 if compact else 5.5
+    # the same four steps the QR resolution offers, capped at what the header
+    # row can actually hold
+    logo_h_mm = round(min(4.6 if compact else 7.0,
+                          (3.0 if compact else 5.0) * label_logo_scale), 2)
+    _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
+    brand_mm, brand_lines = _brand_fit(
+        brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
+        2.5 if compact else 3.0, min_mm=1.6)
+    # A compact tag used to have no header at all -- the brand line is now
+    # always drawn, so budgeting it at zero clipped the bottom field off.
+    # Measured in the browser, not estimated: the header row renders 4.04mm
+    # on a compact tag once its border and margin are counted. It was
+    # budgeted at zero back when a compact tag had no header at all.
+    head_mm = (4.2 if compact else 5.8) + (brand_mm * 1.08 if brand_lines > 1 else 0.0)
+    name_mm = 2.3 if compact else 4.0
+    # The ID and the name now sit inside the column beside the QR rather
+    # than on their own lines above it, so the row has to be tall enough
+    # for them before any chosen field gets a look in.
+    aid_mm = 2.7 if compact else 4.4
+    nm_mm = 2.5 if compact else 5.0
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
     # two lines of it: an organisation name plus DO NOT REMOVE does not fit
     # on one at a readable size, and clipping is not an option when the
     # clipped half is the instruction
-    norem_mm = 4.2 if compact else 5.2
-    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
-                   + gap_mm * (1 if compact else 2))
+    norem_mm = 2.8 if compact else 5.2
+    # Three children in the column now (header, QR row, notice), so TWO
+    # flex gaps in both modes -- compact used to have one. Plus the box
+    # border, which sits outside the padding and was never counted.
+    # Between them that was ~1.5mm of overrun, and the bottom field paid.
+    BORDER_MM = 0.55
+    reserved_mm = pad_mm * 2 + head_mm + norem_mm + gap_mm * 2 + BORDER_MM
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     # QR must fit both the label width and whatever vertical room is left
     # Capped at 44% of the label width. It used to be allowed up to
@@ -5848,7 +6536,17 @@ def label_page(a_id):
     # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
     # still scans from a phone at arm's length.
     qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
-    qr_px = int(qr_mm * 3.78)
+    # A quiet zone is not decoration: the decoder finds the symbol by its
+    # finder patterns against clear space, and qrcodejs draws none at all.
+    # Four modules is the spec; a tenth of the symbol is close to that at the
+    # versions these labels produce, and it comes out of the QR rather than
+    # growing the tag.
+    quiet_mm = max(0.7, qr_mm * 0.10)
+    # Rendered at roughly 8x the printed size. qrcodejs rasterises at exactly
+    # the pixel size it is handed, and a 41px bitmap stretched onto a 203dpi
+    # label prints soft edges -- which a scanner reads as a smudged module.
+    # Oversampling costs nothing; the browser scales it down cleanly.
+    qr_px = int(min(640, max(160, (qr_mm - quiet_mm * 2) * 3.78 * 8)))
     # embed logo as base64 if present (no extra request, prints reliably)
     logo_uri = _logo_data_uri()
     rows_html = ""
@@ -5878,13 +6576,37 @@ def label_page(a_id):
         if forced not in chosen:
             chosen.insert(1 if forced == "Type" else len(chosen), forced)
     # what will actually be printed, so the row style can be chosen on fit
+    # Name and Asset ID are rendered explicitly at the top of the column,
+    # so they must not also come through as generic rows.
+    # The name is one of the chosen fields, not furniture: unticking it in
+    # Settings has to actually drop it. Decided here rather than at render
+    # time because the height budget below spends its space.
+    show_name = "Name" in chosen
     printable = [k for k in chosen
-                 if k != "Name" and k in field_defs
+                 if k not in ("Name", "AssetID") and k in field_defs
                  and field_defs[k][1] not in (None, "")]
-    # a stacked field is a label line plus a value line; a single-line row is
-    # one. Measured against the space left after the header, name and strip.
+    # A row, not an extra strip: the row budget shares the space out between
+    # however many there are, so adding one shrinks them all a little instead
+    # of pushing the last one off the tag.
+    if lbl_con and label_contact:
+        field_defs["_Contact"] = ("Contact", label_contact)
+        printable.append("_Contact")
+    # a stacked field is a label line plus a value line; a single-line row
+    # is one -- measured against what is left of the row once the ID and
+    # the name have taken their share.
     STACKED_MM, LINE_MM = 6.6, 3.05
-    rows_compact = compact or (len(printable) * STACKED_MM > avail_h_mm)
+    rows_mm = max(2.0, avail_h_mm - aid_mm
+                  - (nm_mm if show_name else 0.0))
+    rows_compact = compact or (len(printable) * STACKED_MM > rows_mm)
+    # Each row gets an equal share of what is actually left, rather than a
+    # fixed height that may not fit. Type shrinks with it, down to a floor:
+    # a slightly smaller serial still reads, a clipped one does not.
+    # Floors low enough that a long organisation name -- which costs the head
+    # a second line -- does not push the last chosen field off the tag. At
+    # 203dpi 1.1mm is about 9 dots of cap height: small, and still printed,
+    # which beats a serial number that is simply not there.
+    kv_mm = max(1.35, min(2.62, rows_mm / max(1, len(printable))))
+    kv_font_mm = round(max(1.1, min(2.05, kv_mm * 0.80)), 2)
     for key in printable:
         lbl, val = field_defs[key]
         if rows_compact:
@@ -5894,29 +6616,46 @@ def label_page(a_id):
     logo_html = ""
     if show_logo and logo_uri:
         logo_html = f'<img class=logo src="{logo_uri}" alt="">'
-    head_block = (f'<div class=name>{logo_html}{asset["Name"]}</div>' if compact
-                  else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
+    # Brand first, logo after it -- the mark reads as a sign-off on the
+    # name rather than a bullet in front of it.
+    head_block = ('<div class=head>'
+                  + (f'<span class=brand>{app_name}</span>' if lbl_name else '<span class=brand></span>')
+                  + f'{logo_html}</div>')
+    # The two things someone reads off a tag before anything else, in that
+    # order, at the top of the column the QR sits beside.
+    aid_val = asset.get("AssetTag") or asset["_id"][:12]
+    # The QR points at the short path when the asset has a tag, because the
+    # length of what is encoded decides how big the squares can be.
+    # minted on the spot if this asset has never had one
+    _code = _asset_public_code(asset["_id"])
+    qr_target = f"{base}p/{_code}" if _code else f"{base}asset/{asset['_id']}"
+    meta_head = (f'<div class=aid>{aid_val}</div>'
+                 + (f'<div class=name>{asset["Name"]}</div>'
+                    if show_name else ''))
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Label {asset['Name']}</title>
 <style>
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;justify-content:center;padding:20px}}
- .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
- .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
- .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
+ .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:row;align-items:stretch;gap:{gap_mm}mm;overflow:hidden}}
+ /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
+ .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
+ .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
+ .logo{{height:{logo_h_mm}mm;width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
- .brand{{font-weight:800;font-size:3mm;letter-spacing:0.3mm;text-transform:uppercase}}
+ .brand{{font-weight:800;font-size:{brand_mm}mm;letter-spacing:0.3mm;text-transform:uppercase;line-height:1.08;overflow:hidden;display:-webkit-box;-webkit-line-clamp:{brand_lines};-webkit-box-orient:vertical;word-break:break-word}}
  .cat{{font-size:2.4mm;color:#333;margin:0.3mm 0}}
- .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
- .meta{{flex:1;min-width:0;overflow:hidden}}
- .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
+ .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
+ .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
+ .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
  .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
  .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
- .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv{{font-size:{kv_font_mm}mm;line-height:1.16;flex:1 1 auto;min-height:0;max-height:{kv_mm}mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
  .kv b{{color:#333;font-weight:700}}
- .aid{{font-family:'Consolas','Courier New',monospace;font-size:3.1mm;font-weight:700;letter-spacing:0.08mm}}
- .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.4mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .qr{{flex:0 0 auto;align-self:stretch;max-width:46%;overflow:hidden;background:#fff;padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .qr canvas,.qr img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
- .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
+ .norem{{flex:0 0 auto;margin-top:0.3mm;padding-top:0.4mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.5mm' if compact else '2.0mm'};letter-spacing:0.05mm;line-height:1.15;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -5927,17 +6666,20 @@ def label_page(a_id):
 </style></head><body>
 <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <div class=sheet><div class=box>
- {head_block}
- <div class=top>
-   <div class=meta>
-     {rows_html}
-   </div>
-   <div id=qr class=qr></div>
+ <div class=stack>
+  {head_block}
+  <div class=top>
+    <div class=meta>
+      {meta_head}
+      {rows_html}
+    </div>
+  </div>
+  <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
  </div>
- <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
+ <div id=qr class=qr></div>
 </div></div>
 <div class="no-print" style="text-align:center;margin-top:10px"><button onclick="window.print()">🖨 PRINT LABEL</button></div>
-<script>new QRCode(document.getElementById('qr'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});</script>
+<script>new QRCode(document.getElementById('qr'), {{text:'{qr_target}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});</script>
 </body></html>"""
 
 @app.route("/labels")
@@ -5959,45 +6701,123 @@ def labels_page():
     # QR / label config from Settings (shared by every label on this sheet)
     try:
         sc = conn(); scur = sc.cursor()
-        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, logo_text FROM Settings WHERE id=1")
+        scur.execute("SELECT qr_size, qr_fields, label_size, label_logo, app_name, "
+                     "logo_text, label_model, label_caption, label_color, "
+                     "label_logo_size, label_show_name, label_show_contact, "
+                     "label_show_asset, company_phone FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
+        label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
+        label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
+        label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
+        label_contact = ((srow.get("company_phone") or "") if srow else "")
+        label_logo_scale = LOGO_SIZES.get((srow.get("label_logo_size") or "md") if srow else "md", 1.0)
+        lbl_name = bool(srow.get("label_show_name")) if srow else False
+        lbl_con = bool(srow.get("label_show_contact")) if srow else False
+        lbl_asset = bool(srow.get("label_show_asset")) if srow else False
     except Exception:
         qr_size, label_size, show_logo, app_name = 160, "50.8x50.8", True, "IT-Vault"
+        label_model, label_caption = "detail", "Asset No."
+        label_color, label_contact = "#000000", ""
+        label_logo_scale, lbl_name, lbl_con, lbl_asset = 1.0, False, False, False
+    if label_model not in LABEL_MODELS:
+        label_model = "detail"
     try:
         lw, lh = label_size.lower().split("x")
         lw_mm, lh_mm = float(lw), float(lh)
     except Exception:
         lw_mm, lh_mm = 50.8, 50.8
+    # Same model, many plates. Shared renderer, so a sheet and a one-off tag
+    # of the same asset come off the printer identical.
+    if label_model != "detail":
+        _logo = _logo_data_uri() if show_logo else ""
+        _items = []
+        for _i, _a in enumerate(ordered):
+            _pc = _asset_public_code(_a["_id"])
+            _items.append((f"qr{_i}", _a.get("AssetTag") or _a["_id"][:12],
+                           f"{base}p/{_pc}" if _pc else f"{base}asset/{_a['_id']}",
+                           _a.get("Name") or ""))
+        return _model_page(label_model, _items, lw_mm, lh_mm, label_caption,
+                           brand_name(), _model_logo(label_model, _logo),
+                           label_color, label_contact,
+                           f"Print {len(ordered)} Labels", sheet=True,
+                           logo_scale=label_logo_scale, show_name=lbl_name,
+                           show_contact=lbl_con, show_asset=lbl_asset)
     compact = lh_mm < 35.0
     pad_mm = 1.5 if compact else 2.5
-    head_mm = 0.0 if compact else 5.5
-    name_mm = 2.6 if compact else 4.0
+    # What the head actually has to work with. Not the tag's width: the head
+    # lives in the text column, and the QR column beside it is capped at 46%
+    # of the box -- which is why sizing against the full width still printed
+    # "NORTHSIDE SP...". The logo shares the line, so it is capped at what is
+    # reserved for it rather than being allowed to take the rest.
+    LOGO_RESERVE_MM = 3.5 if compact else 5.5
+    # the same four steps the QR resolution offers, capped at what the header
+    # row can actually hold
+    logo_h_mm = round(min(4.6 if compact else 7.0,
+                          (3.0 if compact else 5.0) * label_logo_scale), 2)
+    _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
+    brand_mm, brand_lines = _brand_fit(
+        brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
+        2.5 if compact else 3.0, min_mm=1.6)
+    # A compact tag used to have no header at all -- the brand line is now
+    # always drawn, so budgeting it at zero clipped the bottom field off.
+    # Measured in the browser, not estimated: the header row renders 4.04mm
+    # on a compact tag once its border and margin are counted. It was
+    # budgeted at zero back when a compact tag had no header at all.
+    head_mm = (4.2 if compact else 5.8) + (brand_mm * 1.08 if brand_lines > 1 else 0.0)
+    name_mm = 2.3 if compact else 4.0
+    # The ID and the name now sit inside the column beside the QR rather
+    # than on their own lines above it, so the row has to be tall enough
+    # for them before any chosen field gets a look in.
+    aid_mm = 2.7 if compact else 4.4
+    nm_mm = 2.5 if compact else 5.0
     gap_mm = 0.5 if compact else 1.0
     # the DO NOT REMOVE strip is a row of its own: budget for it, or the
     # bottom field silently clips off the tag
     # two lines of it: an organisation name plus DO NOT REMOVE does not fit
     # on one at a readable size, and clipping is not an option when the
     # clipped half is the instruction
-    norem_mm = 4.2 if compact else 5.2
-    reserved_mm = (pad_mm * 2 + head_mm + name_mm + norem_mm
-                   + gap_mm * (1 if compact else 2))
+    norem_mm = 2.8 if compact else 5.2
+    # Three children in the column now (header, QR row, notice), so TWO
+    # flex gaps in both modes -- compact used to have one. Plus the box
+    # border, which sits outside the padding and was never counted.
+    # Between them that was ~1.5mm of overrun, and the bottom field paid.
+    BORDER_MM = 0.55
+    reserved_mm = pad_mm * 2 + head_mm + norem_mm + gap_mm * 2 + BORDER_MM
     avail_h_mm = max(6.0, lh_mm - reserved_mm)
     # Capped at 44% of the label width. It used to be allowed up to
     # lw_mm - 7, which on a 50.8mm tag left the fields a ~12mm column --
     # 'IT-9001' wrapped onto two lines and the serial clipped. A 20mm code
     # still scans from a phone at arm's length.
     qr_mm = max(8.0, min(float(qr_size) / 3.78, lw_mm * 0.44, avail_h_mm))
-    qr_px = int(qr_mm * 3.78)
+    # A quiet zone is not decoration: the decoder finds the symbol by its
+    # finder patterns against clear space, and qrcodejs draws none at all.
+    # Four modules is the spec; a tenth of the symbol is close to that at the
+    # versions these labels produce, and it comes out of the QR rather than
+    # growing the tag.
+    quiet_mm = max(0.7, qr_mm * 0.10)
+    # Rendered at roughly 8x the printed size. qrcodejs rasterises at exactly
+    # the pixel size it is handed, and a 41px bitmap stretched onto a 203dpi
+    # label prints soft edges -- which a scanner reads as a smudged module.
+    # Oversampling costs nothing; the browser scales it down cleanly.
+    qr_px = int(min(640, max(160, (qr_mm - quiet_mm * 2) * 3.78 * 8)))
     logo_uri = _logo_data_uri()
     chosen = [f.strip() for f in (srow.get("qr_fields") or "Name,AssetID,Type,Serial,Status,Location").split(",") if f.strip()] if srow else ["Name","AssetID","Type","Serial","Status","Location"]
     for forced in ["Type", "AssetID"]:
         if forced not in chosen:
             chosen.insert(1 if forced == "Type" else len(chosen), forced)
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if (show_logo and logo_uri) else ""
+    # One stylesheet serves the whole sheet, so the row size comes from the
+    # chosen fields -- the upper bound -- and every tag on it fits.
+    show_name = "Name" in chosen
+    _n_rows = max(1, len([k for k in chosen if k not in ("Name", "AssetID")]))
+    rows_mm = max(2.0, avail_h_mm - aid_mm
+                  - (nm_mm if show_name else 0.0))
+    kv_mm = max(1.35, min(2.62, rows_mm / _n_rows))
+    kv_font_mm = round(max(1.1, min(2.05, kv_mm * 0.80)), 2)
     boxes_html = ""
     scripts = ""
     # read once for the whole sheet, not once per label
@@ -6022,48 +6842,62 @@ def labels_page():
         }
         rows_html = ""
         printable = [k for k in chosen
-                     if k != "Name" and k in field_defs
+                     if k not in ("Name", "AssetID") and k in field_defs
                      and field_defs[k][1] not in (None, "")]
+        if lbl_con and label_contact:
+            field_defs["_Contact"] = ("Contact", label_contact)
+            printable.append("_Contact")
         # the same fit test as the single label, so a printed sheet and a
         # one-off tag of the same asset come out identical
-        rows_compact = compact or (len(printable) * 6.6 > avail_h_mm)
+        rows_compact = compact or (len(printable) * 6.6 > rows_mm)
         for key in printable:
             lbl, val = field_defs[key]
             if rows_compact:
                 rows_html += f"<div class=kv><b>{lbl}:</b> {val}</div>"
             else:
                 rows_html += f"<div class=k>{lbl}</div><div class=v>{val}</div>"
-        head_block = (f'<div class=name>{logo_html}{asset["Name"]}</div>' if compact
-                      else f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div><div class=name>{asset["Name"]}</div>')
+        head_block = ('<div class=head>'
+                  + (f'<span class=brand>{app_name}</span>' if lbl_name else '<span class=brand></span>')
+                  + f'{logo_html}</div>')
+        aid_val = asset.get("AssetTag") or asset["_id"][:12]
+        meta_head = (f'<div class=aid>{aid_val}</div>'
+                     + (f'<div class=name>{asset["Name"]}</div>'
+                        if show_name else ''))
         qr_id = f"qr{idx}"
         boxes_html += f"""<div class=box>
- {head_block}
- <div class=top>
-   <div class=meta>{rows_html}</div>
-   <div id={qr_id} class=qr></div>
+ <div class=stack>
+  {head_block}
+  <div class=top><div class=meta>{meta_head}{rows_html}</div></div>
+  <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
  </div>
- <div class=norem>Property of {app_name} &bull; Do Not Remove</div>
+ <div id={qr_id} class=qr></div>
 </div>"""
-        scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{base}asset/{asset['_id']}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.M}});"
+        _code = _asset_public_code(asset["_id"])
+        _target = f"{base}p/{_code}" if _code else f"{base}asset/{asset['_id']}"
+        scripts += f"new QRCode(document.getElementById('{qr_id}'), {{text:'{_target}',width:{qr_px},height:{qr_px},correctLevel:QRCode.CorrectLevel.L}});"
     return f"""<!doctype html><html><head><meta charset=utf-8><title>Print {len(ordered)} Labels</title>
 <style>
  body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
  .sheet{{display:flex;flex-wrap:wrap;gap:3mm;padding:20px}}
- .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
- .head{{display:flex;align-items:center;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:1mm;margin-bottom:0.5mm}}
- .logo{{height:{'3mm' if compact else '5mm'};width:auto;max-width:{'10mm' if compact else '18mm'};object-fit:contain}}
+ .box{{border:1px solid #222;padding:{pad_mm}mm;border-radius:3px;width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;display:flex;flex-direction:row;align-items:stretch;gap:{gap_mm}mm;overflow:hidden}}
+ /* The code used to sit inside the fields row, so on a 25.4mm tag it was boxed into 13mm of height while millimetres of width went unused. As its own column it gets the whole height of the tag, which is what decides how big a module can be -- and module size is what decides whether a phone reads it first time. */
+ .stack{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:{gap_mm}mm;overflow:hidden}}
+ .head{{display:flex;align-items:center;justify-content:space-between;gap:1.5mm;border-bottom:0.4mm solid #222;padding-bottom:{'0.6mm' if compact else '1mm'};margin-bottom:0.5mm}}
+ .logo{{height:{logo_h_mm}mm;width:auto;max-width:{LOGO_RESERVE_MM}mm;object-fit:contain}}
  .name .logo{{margin-right:1mm;vertical-align:middle}}
- .brand{{font-weight:800;font-size:3mm;letter-spacing:0.3mm;text-transform:uppercase}}
- .top{{display:flex;justify-content:space-between;align-items:flex-start;gap:2mm;flex:1;min-height:0;overflow:hidden}}
- .meta{{flex:1;min-width:0;overflow:hidden}}
- .name{{font-weight:700;font-size:{name_mm}mm;line-height:1.1;white-space:{'nowrap' if compact else 'normal'};overflow:hidden;text-overflow:ellipsis;word-break:break-word}}
+ .brand{{font-weight:800;font-size:{brand_mm}mm;letter-spacing:0.3mm;text-transform:uppercase;line-height:1.08;overflow:hidden;display:-webkit-box;-webkit-line-clamp:{brand_lines};-webkit-box-orient:vertical;word-break:break-word}}
+ .top{{display:flex;justify-content:space-between;align-items:stretch;gap:2mm;flex:1;min-height:0;overflow:hidden}}
+ .meta{{flex:1;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}}
+ .name{{flex:0 0 auto;font-weight:700;font-size:{name_mm}mm;line-height:1.15;margin-bottom:{'0.4mm' if compact else '0.7mm'};overflow:hidden;word-break:break-word;display:-webkit-box;-webkit-line-clamp:{'1' if compact else '2'};-webkit-box-orient:vertical}}
  .k{{color:#333;font-weight:600;font-size:2.1mm;line-height:1.15;letter-spacing:0.01mm;text-transform:uppercase}}
  .v{{font-size:2.9mm;font-weight:600;color:#000;line-height:1.15;margin-bottom:0.6mm;word-break:break-word}}
- .kv{{font-size:2.05mm;line-height:1.28;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
+ .kv{{font-size:{kv_font_mm}mm;line-height:1.16;flex:1 1 auto;min-height:0;max-height:{kv_mm}mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#000}}
  .kv b{{color:#333;font-weight:700}}
- .qr{{flex:0 0 auto;width:{qr_px}px;height:{qr_px}px}}
+ .aid{{flex:0 0 auto;font-family:'Consolas','Courier New',monospace;font-size:{'2.4mm' if compact else '3.4mm'};font-weight:700;letter-spacing:0.08mm;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+ .qr{{flex:0 0 auto;align-self:stretch;max-width:46%;overflow:hidden;background:#fff;padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .qr canvas,.qr img{{width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
  /* The reason a tag exists is to stay on the thing. Says so, in the one place nobody can miss. */
- .norem{{flex:0 0 auto;margin-top:0.4mm;padding-top:0.5mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.75mm' if compact else '2.0mm'};letter-spacing:0.12mm;line-height:1.2;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
+ .norem{{flex:0 0 auto;margin-top:0.3mm;padding-top:0.4mm;border-top:0.3mm solid #222;text-align:center;font-weight:800;font-size:{'1.5mm' if compact else '2.0mm'};letter-spacing:0.05mm;line-height:1.15;text-transform:uppercase;color:#000;overflow-wrap:anywhere;overflow:hidden}}
  @media print{{
    @page{{size:{lw_mm}mm {lh_mm}mm;margin:0}}
    body{{background:#fff}}
@@ -6078,15 +6912,83 @@ def labels_page():
 <script>{scripts}</script>
 </body></html>"""
 
+@app.route("/p/<code>")
+def asset_public_code(code):
+    """What a printed tag's QR actually points at.
+
+    The only public way to reach an asset's page. Resolved by PublicCode, so
+    there is no sequence to walk: a wrong code is a 404 and tells the caller
+    nothing about whether any asset exists.
+    """
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id FROM Assets WHERE PublicCode=%s AND is_deleted=0 LIMIT 1",
+                [(code or "").strip()])
+    row = cur.fetchone()
+    c.close()
+    if not row:
+        return "Not found", 404
+    return asset_public(row["_id"])
+
+
+@app.route("/a/<code>")
+def asset_public_short(code):
+    """The short address an asset tag's QR encodes.
+
+    Length is the whole point. /asset/<32-hex-id> is 60 characters on a LAN
+    address, which needs a version-4 symbol: 33x33 modules. On a 50.8x25.4mm
+    label the QR gets under 14mm, so those modules land at 0.34mm -- under
+    three dots on a 203dpi label printer, and below what a phone camera
+    reliably resolves. Hence the hunting around to get a scan.
+
+    /a/IT-1009 is 31 characters and fits a version-2 symbol: 25x25 modules,
+    0.42mm each in the same space. Same page, a quarter less data, noticeably
+    larger squares.
+
+    Resolved by asset tag, which is what people read off the label anyway,
+    falling back to the id so a code printed before this still works.
+    """
+    # Signed in only, now. Asset tags are sequential, so this address is
+    # guessable by design -- fine for someone who already has an account and
+    # is scanning their own labels, not fine as the thing a sticker on a
+    # laptop hands to whoever finds it. Labels printed before the code
+    # existed still work for staff; reprint them to give a finder a way in.
+    if not session.get("user"):
+        return "Not found", 404
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id FROM Assets WHERE AssetTag=%s LIMIT 1", [code])
+    row = cur.fetchone()
+    if not row:
+        cur.execute("SELECT _id FROM Assets WHERE _id=%s LIMIT 1", [code])
+        row = cur.fetchone()
+    c.close()
+    if not row:
+        return "Asset not found", 404
+    return asset_public(row["_id"])
+
+
 @app.route("/asset/<a_id>")
 def asset_public(a_id):
-    # Public asset detail page, opened by scanning the QR on the tag
+    # Reached three ways: /p/<code> from a tag's QR (the public one), /a/<tag>
+    # and /asset/<id> from a staff scan or an old label. The id is as
+    # guessable as a 32-character hex string, which is to say not, but it is
+    # also printed on nothing -- so like /a/<tag> it is signed-in only, and
+    # /p/<code> is what a stranger uses.
+    if request.path.startswith("/asset/") and not session.get("user"):
+        return "Not found", 404
     base = _public_base()
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SignatureData FROM Assets WHERE _id=%s", [a_id])
+    # SignatureData is deliberately NOT selected. Anyone holding the tag can
+    # open this page -- a courier, a visitor, whoever finds the laptop -- and a
+    # handwritten signature is a reusable thing to hand them. Whether it has
+    # been signed is the useful fact; the image is not, and the cheapest way
+    # to avoid leaking it is never to load it.
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
+                + ", InvoiceFile, (SignatureData IS NOT NULL AND SignatureData<>'') "
+                  "AS has_signature FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone()
     if not a:
         c.close(); return "Asset not found", 404
+    has_signature = bool(a.get("has_signature"))
     asset = row_to_dict(a)
     # assigned employee (from Employees by EmployeeID)
     emp_name = asset.get("EmployeeName") or ""
@@ -6109,7 +7011,7 @@ def asset_public(a_id):
     # the one page an employee sees without logging in was the one page
     # that ignored the branding.
     THEME_COLS = ("theme_preset", "bg_type", "bg", "comp_bg", "radius",
-                  "accent", "accent2")
+                  "accent", "accent2", "font")
     brand_theme = {}
     try:
         sc = conn(); scur = sc.cursor()
@@ -6143,6 +7045,7 @@ def asset_public(a_id):
             ("Status", asset.get("Status")), ("Location", asset.get("Location")),
             ("Assigned To", emp_name or "—"), ("Department", asset.get("Department") or "—"),
             ("Designation", asset.get("Designation") or "—"), ("Email", asset.get("Email") or "—"),
+            ("Signature", "✓ Signed" if has_signature else "Not signed"),
             ("Signed By", asset.get("ReceivedBy") or "—"), ("Signed Date", asset.get("NotesReceived") or "—"),
             ("Given By (Staff)", processed_by or "—"),
             ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"), ("Purchase", asset.get("PurchaseDate") or "—"),
@@ -6151,6 +7054,57 @@ def asset_public(a_id):
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if logo_uri else ""
     contact_bits = [c for c in [company_phone, company_address] if c]
     contact_html = " &nbsp;·&nbsp; ".join(contact_bits) if contact_bits else "—"
+
+    # Who is looking decides what this page is.
+    #
+    # Anyone holding the tag can open it -- that is the point of a QR on an
+    # asset -- so for a stranger it is a lost-property card: who owns the
+    # thing, the number to call, and a way to say "I have it". It prints no
+    # serial, no assignee, no department, no email, no price.
+    #
+    # Signed in, it stays the full record, because scanning a tag to see
+    # what the asset actually is remains the reason IT scans tags.
+    from html import escape as _esc
+    tag_txt = asset.get("AssetTag") or asset["_id"][:12]
+    staff_view = bool(session.get("user"))
+    card_cls = "" if staff_view else "pubcard"
+    if staff_view:
+        page_title = f"Asset {asset['Name']}"
+        head_html = f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div>'
+        main_html = f"""
+ <div class=assetid-badge>{tag_txt}</div>
+ <div class=title>{asset['Name']}</div>
+ <table>{rows_html}</table>
+ <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
+ <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
+ <div class=foot>Scanned from {app_name} • {base}</div>"""
+        lf_script = ""
+    else:
+        # the tab title is part of what leaks: it lands in browser history
+        page_title = f"{app_name} — Property tag"
+        head_html = (f'<div class=phead><img class=plogo src="{logo_uri}" alt=""></div>'
+                     if logo_uri else "")
+        phone = (company_phone or "").strip()
+        dial = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
+        # One thing on this page is an action, and it is the phone number, so
+        # it is the only thing wearing the accent colour.
+        if phone:
+            call = ('<div class=peyebrow>If found, please call</div>'
+                    f'<a class=pphone href="tel:{_esc(dial)}">{_esc(phone)}</a>')
+        else:
+            call = ('<div class=peyebrow>If found</div>'
+                    '<div class=pnophone>Use the form below and we will '
+                    'contact you.</div>')
+        if (company_address or "").strip():
+            call += f"<div class=paddr>{_esc(company_address.strip())}</div>"
+        main_html = LOSTFOUND_PUBLIC_HTML.format(
+            owner=_esc(app_name), tag=_esc(tag_txt),
+            contact=f"<div class=pcall>{call}</div>")
+        # the code this page was reached by -- never the asset tag, or the
+        # form would be a way back to the sequence the QR stopped exposing
+        lf_script = ("<script>var ASSET_REF=" + json.dumps(_asset_public_code(asset["_id"]))
+                     + ",OWNER=" + json.dumps(app_name) + ";"
+                     + LOSTFOUND_PUBLIC_JS + "</script>")
     # Rendered into the document rather than fetched on load: a QR is
     # scanned on a phone on mobile data, and a round trip before the
     # colours land is a visible flash of the wrong theme. PUBLIC_THEME_JS
@@ -6159,19 +7113,20 @@ def asset_public(a_id):
                     + "applySignTheme("
                     + json.dumps(brand_theme, default=str) + ");</script>")
     return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Asset {asset['Name']}</title>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap" rel="stylesheet">
+<title>{page_title}</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/style.css">
 <style>
+:root{{--font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif;color-scheme:light dark}}
 *{{box-sizing:border-box}}
 html{{overflow-y:auto}}
-body{{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}}
+body{{font-family:var(--font);margin:0;padding:28px 16px;padding-top:max(28px,env(safe-area-inset-top));padding-bottom:max(28px,env(safe-area-inset-bottom));min-height:100vh;min-height:100dvh;height:auto;background:var(--bg);color:var(--txt);overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch}}
 .wrap{{max-width:560px;margin:0 auto}}
 .card{{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:22px;box-shadow:0 10px 40px rgba(0,0,0,.35)}}
 .head{{display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:14px}}
 .logo{{height:32px;width:auto;max-width:120px;object-fit:contain}}
-.brand{{font-family:'Orbitron';font-weight:800;font-size:16px;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;text-transform:uppercase}}
-.assetid-badge{{font-family:'Share Tech Mono',var(--mono);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:5px 14px;display:inline-block;margin-bottom:10px}}
+.brand{{font-family:var(--font);font-weight:800;font-size:16px;letter-spacing:.5px;background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;text-transform:uppercase}}
+.assetid-badge{{font-family:var(--mono);font-size:14px;font-weight:700;letter-spacing:1px;color:var(--accent);background:var(--accent-soft);border:1px solid var(--accent);border-radius:999px;padding:5px 14px;display:inline-block;margin-bottom:10px}}
 .title{{font-size:22px;font-weight:700;margin:0 0 14px}}
 table{{width:100%;border-collapse:collapse}}
 td{{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}}
@@ -6182,20 +7137,751 @@ tr:last-child td{{border-bottom:none}}
 .contact b{{color:var(--accent)}}
 .foot{{text-align:center;color:var(--muted);font-size:12px;margin-top:18px}}
 a.btn{{display:inline-block;margin-top:14px;padding:10px 16px;background:var(--accent);color:var(--btn-text,#04121f);border-radius:var(--radius);text-decoration:none;font-weight:700;font-size:13px}}
-.sig-block{{margin-top:16px;padding:12px 14px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
-.sig-block b{{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:8px}}
-.sig-block img{{max-width:220px;max-height:110px;background:#fff;border-radius:6px;padding:6px}}
-@media(max-width:480px){{ body{{padding:16px 10px}} .card{{padding:16px}} }}
-</style>{theme_script}</head><body><div class=wrap><div class=card>
- <div class=head>{logo_html}<span class=brand>{app_name}</span></div>
- <div class=assetid-badge>{asset.get("AssetTag") or asset["_id"][:12]}</div>
- <div class=title>{asset['Name']}</div>
- <table>{rows_html}</table>
- {f'<div class=sig-block><b>Signature</b><img src="{asset.get("SignatureData")}"></div>' if asset.get("SignatureData") else ''}
- <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
- <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
- <div class=foot>Scanned from {app_name} • {base}</div>
-</div></div></body></html>"""
+/* The public card: a lost-property notice. One headline, one number to
+   call, one button. Centred, generously spaced, and only the number and the
+   button carry the accent -- everything else is quiet on purpose. */
+.pubcard{{padding:30px 24px 26px;text-align:center}}
+.phead{{margin-bottom:22px}}
+.plogo{{display:block;margin:0 auto;max-height:54px;max-width:170px;width:auto;object-fit:contain}}
+.peyebrow{{font-size:10.5px;font-weight:700;letter-spacing:1.7px;text-transform:uppercase;color:var(--muted)}}
+.powner{{font-family:var(--font);font-weight:800;font-size:24px;
+  line-height:1.28;margin:9px 0 0;color:var(--txt);word-break:break-word}}
+.prule{{height:1px;background:var(--line);margin:20px 0 18px}}
+.pmeta{{display:flex;align-items:baseline;justify-content:center;gap:10px;flex-wrap:wrap}}
+.pmetak{{font-size:10.5px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}}
+.pmetav{{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:1.2px;color:var(--txt)}}
+.pcall{{margin-top:20px;padding:17px 16px;background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius)}}
+.pphone{{display:inline-block;margin-top:7px;font-family:var(--mono);
+  font-size:23px;font-weight:700;letter-spacing:.6px;color:var(--accent);text-decoration:none}}
+.pnophone{{margin-top:6px;font-size:14.5px;font-weight:600;line-height:1.45}}
+.paddr{{font-size:12.5px;color:var(--muted);margin-top:10px;line-height:1.5}}
+.popt{{margin-left:6px;font-size:10px;letter-spacing:.8px;color:var(--muted);opacity:.85;text-transform:uppercase}}
+.lfbtn{{display:block;width:100%;margin-top:18px;padding:14px 16px;background:var(--accent);color:var(--btn-text,#04121f);border:none;border-radius:var(--radius);font-family:var(--font);font-weight:700;font-size:14.5px;letter-spacing:1px;text-transform:uppercase;cursor:pointer}}
+.lfbtn:disabled{{opacity:.6;cursor:default}}
+.lff{{margin-top:16px;display:grid;gap:12px;text-align:left}}
+.lff label{{display:block;font-size:10.5px;font-weight:700;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}}
+.lff input,.lff textarea{{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:var(--radius);padding:11px 12px;font-family:var(--font);font-size:16px}}
+.lff input:focus,.lff textarea:focus{{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}}
+.lfmsg{{font-size:13px;font-weight:600}}
+.err{{color:#ff5a5f}}
+.lfok{{margin-top:16px;padding:18px;text-align:center;background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);font-size:15px;line-height:1.5}}
+.ref{{font-family:var(--mono);font-size:13px;color:var(--muted);margin-top:8px}}
+@media(max-width:480px){{
+  body{{padding:16px 12px}}
+  .card{{padding:16px}}
+  .pubcard{{padding:24px 18px 22px}}
+  .powner{{font-size:20px}}
+  .pphone{{font-size:21px}}
+}}
+</style>{theme_script}</head><body><div class=wrap><div class="card {card_cls}">
+{head_html}
+{main_html}
+</div></div>{lf_script}</body></html>"""
+
+# ---------- tag models ----------------------------------------------------
+# Two shapes of asset tag, because they answer different questions.
+#
+# "detail" is the tag this app has always printed: brand, asset ID, name, the
+# fields chosen in Settings, and the DO NOT REMOVE notice. It is for an IT
+# team reading a label off a shelf.
+#
+# "plate" is the engraved-plate convention every asset register in the world
+# uses -- the code on the left, and the owner's mark, one caption and one big
+# number on the right. Nothing else. It is for identifying a thing across a
+# room, and for surviving being read at arm's length on a machine.
+LABEL_MODELS = ("detail", "plate", "banner", "sidebar", "edge")
+# What the four plates in circulation actually say. Offered as presets in
+# Settings; the caption is free text, because the fifth organisation will
+# call it something else again.
+LABEL_CAPTION_PRESETS = ("Asset No.", "Council Asset", "Product ID Code", "Tracked Asset")
+# The logo is drawn at a share of the tag's height, and this scales that --
+# the same four steps the QR resolution setting offers, so the two controls
+# read the same way. Each model still caps it at the room it actually has, or
+# a large logo on a small tag would push the number off.
+LOGO_SIZES = {"sm": 0.72, "md": 1.0, "lg": 1.32, "xl": 1.65}
+
+
+def _fit_one_line(text, avail_mm, max_mm, min_mm=1.1):
+    """Largest size at which a string fits one line of a given width.
+
+    An asset number must never wrap: half of 45464544 on the next line is not
+    a number anyone can read back to you over the phone.
+    """
+    n = max(1, len(str(text or "")))
+    size = max_mm
+    while size > min_mm and n * (0.62 * size + 0.12) > avail_mm:
+        size -= 0.05
+    return round(max(size, min_mm), 2)
+
+
+def _ink_on(hex_color):
+    """Black or white, whichever can be read on that colour."""
+    h = (hex_color or "#000000").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(ch * 2 for ch in h)
+    try:
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    except (ValueError, IndexError):
+        return "#ffffff"
+    return "#111111" if (r * 0.299 + g * 0.587 + b * 0.114) > 150 else "#ffffff"
+
+
+def _hex_or(value, fallback="#000000"):
+    v = (value or "").strip()
+    if len(v) == 4 and v[0] == "#":
+        v = "#" + "".join(ch * 2 for ch in v[1:])
+    if len(v) == 7 and v[0] == "#":
+        try:
+            int(v[1:], 16)
+            return v.lower()
+        except ValueError:
+            pass
+    return fallback
+
+
+def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
+                contact, title, sheet=False, logo_scale=1.0, show_name=False,
+                show_contact=False, show_asset=False):
+    """Render one or many tags in whichever model was chosen.
+
+    items: [(qr_id, id_value, qr_target)]. Shared by the single label and the
+    print sheet, so a sheet and a one-off tag of the same asset come off the
+    printer identical.
+
+    Each model is a different tag, not a different skin. They put the code,
+    the owner's name, the number and the instruction in different places
+    because they are read in different situations -- across a workshop, off a
+    shelf, on the back of a monitor -- and a tag that suits one suits none of
+    the others.
+    """
+    color = _hex_or(color)
+    ink = _ink_on(color)
+    pad_mm = 1.2
+    gap_mm = 1.4
+    sheet_css = ("display:flex;flex-wrap:wrap;gap:3mm;padding:20px" if sheet
+                 else "display:flex;justify-content:center;padding:20px")
+    btn = ('<button onclick="window.print()" style="display:block;margin:14px auto 0;'
+           'padding:8px 16px;font-size:14px;cursor:pointer">&#128424; PRINT'
+           f'{" LABELS" if sheet else " LABEL"}</button>')
+    notice = "PLEASE DO NOT REMOVE TAG"
+    boxes, scripts = [], []
+    # Counted up front: a model has to know how many lines it owes room to
+    # before it decides how big its number can be. Without this the extras
+    # simply overflowed a fixed-height tag and were clipped away -- present in
+    # the markup, absent on the printer, which is the worst of both.
+    n_extra = ((1 if (show_name and brand) else 0)
+               + (1 if (show_contact and contact) else 0)
+               + (1 if show_asset else 0))
+
+    # The optional lines, in the order they read: who owns it, how to reach
+    # them, what the thing is. Every model gets the same three so a decision
+    # made in Settings does not depend on which tag is being printed.
+    def extras(asset_name, width_mm, base_mm, with_name=True):
+        out = ""
+        if with_name and show_name and brand:
+            sz = _fit_one_line(brand, width_mm, base_mm, min_mm=1.0)
+            out += f'<div class=xname style="font-size:{sz}mm">{brand}</div>'
+        if show_contact and contact:
+            sz = _fit_one_line(contact, width_mm, base_mm * 0.92, min_mm=1.0)
+            out += f'<div class=xcon style="font-size:{sz}mm">{contact}</div>'
+        if show_asset and asset_name:
+            sz = _fit_one_line(asset_name, width_mm, base_mm * 0.92, min_mm=1.0)
+            out += f'<div class=xasset style="font-size:{sz}mm">{asset_name}</div>'
+        return out
+
+    extras_css = """ .xname{font-weight:800;line-height:1.1;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:100%}
+ .xcon,.xasset{font-weight:600;line-height:1.1;white-space:nowrap;overflow:hidden;
+   text-overflow:ellipsis;max-width:100%;opacity:.92}"""
+
+    # ---------------------------------------------------------------- plate
+    if model == "plate":
+        inner_h = lh_mm - pad_mm * 2
+        qr_side = max(8.0, min(inner_h, lw_mm * 0.46))
+        quiet_mm = max(0.7, qr_side * 0.10)
+        right_mm = lw_mm - pad_mm * 2 - qr_side - 1.6
+        # The logo gives ground first when there are extra lines: it is
+        # decoration, and the number is the tag.
+        logo_cap = inner_h * (0.44 if not n_extra else 0.26)
+        logo_mm = round(min(logo_cap, 4.2 * logo_scale), 2) if logo_html else 0.0
+        cap_mm = _fit_one_line(caption, right_mm, 2.6 if lh_mm < 35 else 3.4)
+        extra_mm = round(min(2.0, max(1.1, inner_h * 0.09)), 2)
+        # what is left once the logo, the caption and the optional lines have
+        # taken their share -- the number is sized to that, not to a guess
+        id_room = inner_h - logo_mm - cap_mm * 1.25 - n_extra * extra_mm * 1.3 - 0.5
+        id_ceiling = max(1.6, min(4.6 if lh_mm < 35 else 6.4, id_room))
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;padding:{pad_mm}mm;box-sizing:border-box;
+   display:flex;flex-direction:row;align-items:center;gap:1.6mm;overflow:hidden;background:#fff}}
+ .pqr{{flex:0 0 {qr_side}mm;width:{qr_side}mm;height:{qr_side}mm;background:#fff;
+   padding:{quiet_mm}mm;box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .pright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
+   justify-content:center;gap:0.4mm;text-align:center;overflow:hidden}}
+ .plogo{{height:{logo_mm}mm;width:auto;max-width:100%;object-fit:contain;margin-bottom:0.3mm}}
+ .pcap{{font-size:{cap_mm}mm;font-weight:700;line-height:1.1;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ .pid{{font-weight:800;line-height:1.05;letter-spacing:0.04mm;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%}}"""
+        for qr_id, id_val, target, a_name in items:
+            id_mm = _fit_one_line(id_val, right_mm, id_ceiling, min_mm=1.4)
+            boxes.append(
+                f'<div class="tag plate"><div id={qr_id} class=pqr></div>'
+                f'<div class=pright>{logo_html}'
+                f'<div class=pcap>{caption}</div>'
+                f'<div class=pid style="font-size:{id_mm}mm">{id_val}</div>'
+                + extras(a_name, right_mm, extra_mm)
+                + '</div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    # --------------------------------------------------------------- banner
+    # A coloured band across the top with the owner's name in it, then the
+    # code with SCAN ME under it and the instruction beside it in the largest
+    # type on the tag. This is the one you can read from the doorway, which is
+    # the point of "Return To Equipment Room" -- it has to work on somebody
+    # who is walking past, not somebody inspecting the label.
+    elif model == "banner":
+        head_h = max(3.6, lh_mm * 0.21)
+        body_h = lh_mm - head_h - pad_mm * 2
+        qr_side = max(7.0, min(body_h - 2.2, lw_mm * 0.40))
+        quiet_mm = max(0.6, qr_side * 0.08)
+        right_mm = lw_mm - pad_mm * 2 - qr_side - gap_mm
+        brand_mm = _fit_one_line(brand, lw_mm - 3.0, head_h * 0.62, min_mm=1.6)
+        msg_mm = _brand_fit(caption, right_mm, min(4.6, body_h * 0.30), min_mm=1.5)[0]
+        note_mm = _fit_one_line("PLEASE DO NOT", right_mm, min(2.9, body_h * 0.20), min_mm=1.2)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
+   background:#fff;display:flex;flex-direction:column;border-radius:1.2mm}}
+ .bhead{{flex:0 0 {head_h}mm;height:{head_h}mm;background:{color};color:{ink};
+   display:flex;align-items:center;justify-content:center;padding:0 1mm;box-sizing:border-box}}
+ .bhead span{{font-size:{brand_mm}mm;font-weight:800;line-height:1;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;letter-spacing:0.05mm}}
+ .bbody{{flex:1 1 auto;min-height:0;display:flex;flex-direction:row;align-items:center;
+   gap:{gap_mm}mm;padding:{pad_mm}mm;box-sizing:border-box}}
+ .bqrwrap{{flex:0 0 {qr_side}mm;display:flex;flex-direction:column;align-items:center;gap:0.3mm}}
+ .bqr{{width:{qr_side}mm;height:{qr_side}mm;background:#fff;padding:{quiet_mm}mm;
+   box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .bscan{{font-size:{max(1.3, min(2.4, qr_side * 0.16))}mm;font-weight:800;letter-spacing:0.12mm;line-height:1}}
+ .bright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:0.5mm}}
+ .bmsg{{font-size:{msg_mm}mm;font-weight:800;line-height:1.1;word-break:break-word;
+   display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}}
+ .bnote{{font-size:{note_mm}mm;font-weight:800;line-height:1.1;color:{color};letter-spacing:0.02mm}}"""
+        for qr_id, _id_val, target, a_name in items:
+            # The band is the owner's name, so the name line is never
+            # repeated underneath it -- with the name switched off the band
+            # is simply a colour stripe.
+            boxes.append(
+                f'<div class="tag banner">'
+                f'<div class=bhead><span>{brand if show_name else ""}</span></div>'
+                f'<div class=bbody>'
+                f'<div class=bqrwrap><div id={qr_id} class=bqr></div><div class=bscan>SCAN ME</div></div>'
+                f'<div class=bright><div class=bmsg>{caption}</div>'
+                f'<div class=bnote>{notice}</div>'
+                + extras(a_name, right_mm, note_mm * 0.92, with_name=False)
+                + '</div></div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    # -------------------------------------------------------------- sidebar
+    # The owner's block on a coloured panel down one side, the code and the
+    # number on white next to it, and a coloured tab at the far edge so the
+    # tag is identifiable end-on -- in a drawer, or stacked in a rack, where
+    # all you can see is the edge.
+    elif model == "sidebar":
+        tab_mm = max(1.6, lw_mm * 0.045)
+        left_mm = (lw_mm - tab_mm) * 0.54
+        right_mm = lw_mm - tab_mm - left_mm
+        qr_side = max(7.0, min(right_mm - 2.0, lh_mm * 0.60))
+        quiet_mm = max(0.6, qr_side * 0.08)
+        cap_mm = _brand_fit(caption, left_mm - 2.0, min(2.8, lh_mm * 0.13), min_mm=1.3)[0]
+        logo_mm = round(min(lh_mm * 0.38, 5.0 * logo_scale), 2) if logo_html else 0.0
+        con_mm = _fit_one_line(contact or " ", left_mm - 2.0, min(2.1, lh_mm * 0.10), min_mm=1.1)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
+   background:#fff;display:flex;flex-direction:row;border-radius:1.4mm}}
+ .sleft{{flex:0 0 {left_mm}mm;background:{color};color:{ink};display:flex;flex-direction:column;
+   align-items:center;justify-content:space-between;padding:1mm 0.8mm;box-sizing:border-box;text-align:center}}
+ .scap{{font-size:{cap_mm}mm;font-weight:800;line-height:1.1;word-break:break-word;
+   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:100%}}
+ .slogo{{height:{logo_mm}mm;width:auto;max-width:96%;object-fit:contain}}
+ .sfoot{{display:flex;flex-direction:column;align-items:center;gap:0.2mm;max-width:100%;min-width:0}}
+ .scon{{font-size:{con_mm}mm;font-weight:700;line-height:1.1;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%;opacity:.95}}
+ .sright{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
+   justify-content:center;gap:0.3mm;padding:0.8mm 0.5mm;box-sizing:border-box}}
+ .sqr{{width:{qr_side}mm;height:{qr_side}mm;background:#fff;padding:{quiet_mm}mm;
+   box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .sid{{font-weight:800;line-height:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ .stab{{flex:0 0 {tab_mm}mm;background:{color}}}"""
+        for qr_id, id_val, target, a_name in items:
+            id_mm = _fit_one_line(id_val, right_mm - 1.0, min(4.0, lh_mm * 0.18), min_mm=1.3)
+            # Both, when both are asked for -- the panel is a column with room
+            # for two short lines, and a "show the company name" switch that
+            # silently loses to the contact number is not a switch.
+            foot = ""
+            if show_name and brand:
+                foot += f'<div class=scon>{brand}</div>'
+            if show_contact and contact:
+                foot += f'<div class=scon>{contact}</div>'
+            boxes.append(
+                f'<div class="tag sidebar">'
+                f'<div class=sleft><div class=scap>{caption}</div>{logo_html}'
+                + (f'<div class=sfoot>{foot}</div>' if foot else '')
+                + f'</div><div class=sright><div id={qr_id} class=sqr></div>'
+                f'<div class=sid style="font-size:{id_mm}mm">{id_val}</div>'
+                + (f'<div class=xasset style="font-size:{min(1.8, lh_mm * 0.08)}mm">{a_name}</div>'
+                   if show_asset and a_name else '')
+                + '</div><div class=stab></div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    # ----------------------------------------------------------------- edge
+    # Text turned on its side down the left, and the number turned on its
+    # side down the right, with the code between them. For something narrow
+    # and deep -- a rack ear, a cable end, the side of a monitor stand --
+    # where a landscape tag has nowhere to go but across the front.
+    else:
+        strip_mm = max(3.0, lw_mm * 0.085)
+        num_mm = max(3.4, lw_mm * 0.095)
+        mid_mm = lw_mm - strip_mm - num_mm - pad_mm * 2
+        qr_side = max(7.0, min(mid_mm - 0.5, lh_mm * 0.52))
+        quiet_mm = max(0.6, qr_side * 0.08)
+        side_mm = _fit_one_line(caption, lh_mm - 2.0, min(2.6, strip_mm * 0.62), min_mm=1.2)
+        id_mm = _fit_one_line(items[0][1] if items else "", lh_mm - 2.0,
+                              min(4.2, num_mm * 0.62), min_mm=1.3)
+        logo_mm = round(min(lh_mm * 0.30, 4.4 * logo_scale), 2) if logo_html else 0.0
+        con_mm = _fit_one_line(contact or " ", mid_mm, min(2.0, lh_mm * 0.09), min_mm=1.0)
+        css = f""" .tag{{width:{lw_mm}mm;height:{lh_mm}mm;box-sizing:border-box;overflow:hidden;
+   background:#fff;display:flex;flex-direction:row;border:{max(0.5, lw_mm * 0.014)}mm solid {color};
+   border-radius:1.6mm}}
+ .estrip{{flex:0 0 {strip_mm}mm;background:{color};color:{ink};display:flex;
+   align-items:center;justify-content:center;overflow:hidden}}
+ /* Turned on its side: the only way a long word fits a narrow tag without
+    being cut, and it reads bottom-to-top the way a spine does. */
+ .estrip span{{writing-mode:vertical-rl;transform:rotate(180deg);font-size:{side_mm}mm;
+   font-weight:800;line-height:1;white-space:nowrap;letter-spacing:0.08mm;
+   max-height:{lh_mm - 1.5}mm;overflow:hidden}}
+ .emid{{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;align-items:center;
+   justify-content:center;gap:0.3mm;padding:{pad_mm}mm 0.6mm;box-sizing:border-box}}
+ .elogo{{height:{logo_mm}mm;width:auto;max-width:98%;object-fit:contain}}
+ .econ{{font-size:{con_mm}mm;font-weight:700;line-height:1.05;color:#222;white-space:nowrap;
+   overflow:hidden;text-overflow:ellipsis;max-width:100%}}
+ .eqr{{width:{qr_side}mm;height:{qr_side}mm;background:#fff;padding:{quiet_mm}mm;
+   box-sizing:border-box;display:flex;align-items:center;justify-content:center}}
+ .enum{{flex:0 0 {num_mm}mm;display:flex;align-items:center;justify-content:center;overflow:hidden}}
+ .enum span{{writing-mode:vertical-rl;transform:rotate(180deg);font-size:{id_mm}mm;
+   font-weight:800;line-height:1;white-space:nowrap;max-height:{lh_mm - 1.5}mm;overflow:hidden}}"""
+        for qr_id, id_val, target, a_name in items:
+            boxes.append(
+                f'<div class="tag edge"><div class=estrip><span>{caption}</span></div>'
+                f'<div class=emid>{logo_html}'
+                + (f'<div class=econ>{brand}</div>' if show_name and brand else '')
+                + (f'<div class=econ>{contact}</div>' if show_contact and contact else '')
+                + f'<div id={qr_id} class=eqr></div>'
+                + (f'<div class=econ>{a_name}</div>' if show_asset and a_name else '')
+                + '</div>'
+                f'<div class=enum><span>{id_val}</span></div></div>')
+            scripts.append(_qr_script(qr_id, target, qr_side, quiet_mm))
+
+    return f"""<!doctype html><html><head><meta charset=utf-8><title>{title}</title>
+<style>
+ body{{font-family:'Segoe UI Semibold','Segoe UI',Helvetica,Arial,sans-serif;margin:0;padding:0;background:#fff;-webkit-font-smoothing:antialiased}}
+ .sheet{{{sheet_css}}}
+ /* Every model draws its own code box, and every one of them keeps the
+    symbol square and unstretched -- a rectangular QR is unreadable however
+    correct its modules. */
+ /* The code boxes only. Scoped to them on purpose: as ".tag img" this also
+    matched the logo and overrode its height with auto, so a logo printed at
+    whatever size the uploaded file happened to be. */
+ .pqr canvas,.pqr img,.bqr canvas,.bqr img,.sqr canvas,.sqr img,.eqr canvas,.eqr img{{
+   width:auto!important;height:auto!important;max-width:100%;max-height:100%;image-rendering:pixelated}}
+ .hidden{{display:none}}
+{extras_css}
+{css}
+ @media print{{ body{{padding:0}} .sheet{{padding:0;gap:0}} button{{display:none}} }}
+</style></head><body>
+<div class=sheet>{''.join(boxes)}</div>
+{btn}
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+<script>{''.join(scripts)}</script>
+</body></html>"""
+
+
+def _model_logo(model, uri):
+    """The logo tag for a model, or nothing if there is no logo to draw.
+
+    Each model sizes its own, so the class has to be the one its CSS knows.
+    """
+    if not uri:
+        return ""
+    cls = {"plate": "plogo", "sidebar": "slogo", "edge": "elogo"}.get(model)
+    if not cls:
+        return ""          # the banner carries the name in its band instead
+    return f'<img class={cls} src="{uri}" alt="">'
+
+
+def _qr_script(qr_id, target, side_mm, quiet_mm):
+    """Rasterise well above print size.
+
+    qrcodejs draws exactly the pixel size it is handed, and a small bitmap
+    stretched onto a 203dpi label prints soft edges -- which a scanner reads
+    as smudged modules.
+    """
+    px = int(min(640, max(160, (side_mm - quiet_mm * 2) * 3.78 * 8)))
+    return (f"new QRCode(document.getElementById('{qr_id}'), {{text:'{target}',"
+            f"width:{px},height:{px},correctLevel:QRCode.CorrectLevel.L}});")
+
+
+# ---------- the address a printed tag carries ------------------------------
+# A tag used to encode /a/<asset tag>, and asset tags are sequential. Anyone
+# holding one label could walk IT-1237 up and down and reach the lost-property
+# page for every other asset in the building -- and file a "found this" report
+# against any of them. Sequential ids are fine on a label a human reads; they
+# are not an address.
+#
+# So each asset also gets a code that is not derived from anything: eight
+# characters from a 31-letter alphabet, about 40 bits, and the only way in.
+# It never appears in printed text, only inside the QR.
+PUBLIC_CODE_ALPHABET = "23456789abcdefghjkmnpqrstuvwxyz"   # no 0/1/i/l/o
+PUBLIC_CODE_LEN = 8
+
+
+def _new_public_code():
+    return "".join(secrets.choice(PUBLIC_CODE_ALPHABET) for _ in range(PUBLIC_CODE_LEN))
+
+
+def _asset_public_code(a_id, cur=None, conn_=None):
+    """The asset's code, minting one the first time it is needed.
+
+    Lazy on purpose: an asset created before this existed, or by an import
+    that does not know about it, still gets a working tag the moment someone
+    prints one.
+    """
+    own = cur is None
+    c = conn_
+    if own:
+        c = conn(); cur = c.cursor()
+    try:
+        cur.execute("SELECT PublicCode FROM Assets WHERE _id=%s", [a_id])
+        row = cur.fetchone() or {}
+        code = (row.get("PublicCode") or "").strip()
+        if code:
+            return code
+        for _ in range(8):
+            code = _new_public_code()
+            try:
+                cur.execute("UPDATE Assets SET PublicCode=%s WHERE _id=%s", (code, a_id))
+                if own:
+                    c.commit()
+                return code
+            except Exception:
+                continue      # astronomically unlikely collision; try again
+        return ""
+    finally:
+        if own and c is not None:
+            try: c.close()
+            except Exception: pass
+
+
+def _brand_fit(name, avail_mm, max_mm, min_mm=1.4):
+    """Font size in mm and a line count, so an organisation name fits the head.
+
+    It did not fit: a 50.8mm tag shares its top line with the logo, the brand
+    was set at a fixed size with text-overflow:ellipsis, and "NORTHSIDE SPORTS CLUB"
+    printed as "NORTHSIDE SP..." on every label. Shrinking to fit is
+    right; cutting the owner's name off the property tag is not.
+
+    Uppercase bold sans advances about 0.62em per character, plus the
+    letter-spacing. Two lines are only used when one line would have to go
+    below legibility -- at 203dpi a 1.4mm cap height is already marginal.
+    """
+    n = max(1, len(str(name or "").strip()))
+    fits = lambda sz, chars: chars * (0.62 * sz + 0.3) <= avail_mm
+    size = max_mm
+    while size > min_mm and not fits(size, n):
+        size -= 0.05
+    if size >= min_mm + 0.3:
+        return round(size, 2), 1
+    size = max_mm
+    half = (n + 1) // 2
+    while size > min_mm and not fits(size, half):
+        size -= 0.05
+    return round(max(size, min_mm), 2), 2
+
+
+# ---------- Lost & Found ---------------------------------------------------
+# Three, because there are only three things that are true of an asset here:
+# it is missing, somebody has it, or it is back. "Open" and "closed" said
+# nothing a date did not already say.
+LOSTFOUND_STATUSES = ["lost", "found", "returned"]
+
+# The card a stranger gets when they scan a tag. Whoever is holding the asset
+# needs exactly two things: who it belongs to, and how to hand it back. They
+# do not need the serial number, who it is assigned to, that person's
+# department, designation and email address, or what the thing cost -- all of
+# which this page used to print to anyone who scanned it.
+LOSTFOUND_PUBLIC_HTML = """
+ <div class=peyebrow>Property of</div>
+ <h1 class=powner>{owner}</h1>
+ <div class=prule></div>
+ <div class=pmeta><span class=pmetak>Asset tag</span><span class=pmetav>{tag}</span></div>
+ {contact}
+ <button class=lfbtn id=lfOpen type=button>REPORT TO LOST &amp; FOUND</button>
+ <form class=lff id=lfForm style="display:none">
+  <div><label for=lfName>Your name</label><input id=lfName maxlength=120 autocomplete=name placeholder="Full name"></div>
+  <div><label for=lfPhone>Your mobile number</label><input id=lfPhone maxlength=40 inputmode=tel autocomplete=tel placeholder="So we can call you back"></div>
+  <div><label for=lfNote>Where did you find it?<span class=popt>optional</span></label><textarea id=lfNote rows=2 maxlength=500 placeholder="e.g. left on the 8am bus"></textarea></div>
+  <button class=lfbtn type=submit id=lfSend>SUBMIT</button>
+  <div class=lfmsg id=lfMsg></div>
+ </form>
+ <div class=lfok id=lfDone style="display:none"></div>
+"""
+
+# Plain string, not an f-string: it is javascript, and every brace in it is
+# javascript's. ASSET_REF/OWNER are appended as JSON by the caller.
+LOSTFOUND_PUBLIC_JS = """
+(function(){
+  var open=document.getElementById('lfOpen'), form=document.getElementById('lfForm'),
+      done=document.getElementById('lfDone'), msg=document.getElementById('lfMsg'),
+      send=document.getElementById('lfSend');
+  if(!open||!form) return;
+  open.addEventListener('click',function(){
+    open.style.display='none'; form.style.display='grid';
+    document.getElementById('lfName').focus();
+  });
+  form.addEventListener('submit',function(e){
+    e.preventDefault();
+    var n=document.getElementById('lfName').value.trim(),
+        p=document.getElementById('lfPhone').value.trim(),
+        note=document.getElementById('lfNote').value.trim();
+    if(!n||!p){ msg.className='lfmsg err';
+      msg.textContent='Please give your name and a mobile number so we can reach you.'; return; }
+    send.disabled=true; send.textContent='SENDING...'; msg.className='lfmsg'; msg.textContent='';
+    fetch('/api/public/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code:ASSET_REF,name:n,mobile:p,note:note})})
+    .then(function(r){ return r.json().catch(function(){return {};})
+      .then(function(j){ return {ok:r.ok&&j&&j.ok, error:(j&&j.error)||'Could not send that just now.', ref:j&&j.ref}; }); })
+    .then(function(res){
+      if(!res.ok) throw new Error(res.error);
+      form.style.display='none';
+      // textContent throughout: whatever was typed is never parsed as markup
+      var h=document.createElement('b'); h.textContent='Thank you.';
+      var t=document.createElement('div');
+      t.textContent=OWNER+' has been notified and will contact you on '+p+'.';
+      done.textContent=''; done.appendChild(h); done.appendChild(t);
+      if(res.ref){ var r2=document.createElement('div'); r2.className='ref';
+        r2.textContent='Reference '+res.ref; done.appendChild(r2); }
+      done.style.display='block';
+    })
+    .catch(function(err){
+      send.disabled=false; send.textContent='SUBMIT REPORT';
+      msg.className='lfmsg err'; msg.textContent=err.message;
+    });
+  });
+})();
+"""
+
+# A public endpoint has no account behind it, so the limit is the address it
+# came from. Five an hour is far more than a genuine finder needs and far
+# less than is worth anyone's while.
+_PUBLIC_HITS = {}
+
+
+def _client_ip():
+    fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+    return (fwd or request.remote_addr or "?")[:45]
+
+
+def _public_throttle(key, limit=5, window=3600):
+    """False when this caller has used up its allowance for the window."""
+    now = time.time()
+    hits = [t for t in _PUBLIC_HITS.get(key, []) if now - t < window]
+    if len(hits) >= limit:
+        _PUBLIC_HITS[key] = hits
+        return False
+    hits.append(now)
+    _PUBLIC_HITS[key] = hits
+    if len(_PUBLIC_HITS) > 2000:      # never let a public route grow a leak
+        for k in [k for k, v in list(_PUBLIC_HITS.items())
+                  if not [t for t in v if now - t < window]]:
+            _PUBLIC_HITS.pop(k, None)
+    return True
+
+
+def _notify_lostfound(asset, rec, event="found"):
+    """Tell the admins, and the person it is assigned to, that it turned up.
+
+    The finder's name and number are the whole point of the message: someone
+    has to ring them back, and the report is useless if it only lands in a
+    list nobody is watching.
+    """
+    tag = asset.get("AssetTag") or asset.get("_id", "")
+    an = (asset.get("Name") or "").strip()
+    what = f"{tag} ({an})" if an else tag
+    if event == "found":
+        subject = f"Found: {what} - someone has it"
+        lines = [f"Someone scanned the tag on {what} and reported that they have it.", ""]
+        lines += [f"Name:   {rec.get('finder_name') or '-'}",
+                  f"Mobile: {rec.get('finder_mobile') or '-'}"]
+        if rec.get("finder_note"):
+            lines.append(f"Where:  {rec['finder_note']}")
+        lines += ["", f"Reference: LF-{rec.get('id')}",
+                  "Open Lost & Found in IT-Vault to call them back and record the outcome."]
+        kind = "lostfound.found"
+    else:
+        subject = f"Lost & Found: {what} is now {rec.get('status', '?')}"
+        lines = [f"Report LF-{rec.get('id')} for {what} was set to "
+                 f"{(rec.get('status') or '?').upper()}"
+                 f" by {rec.get('handled_by') or 'someone'}."]
+        if rec.get("admin_note"):
+            lines += ["", f"Note: {rec['admin_note']}"]
+        kind = "lostfound.status"
+    body = "\n".join(lines)
+    sent = send_notification(subject, body, kind=kind)
+    if (asset.get("EmployeeID") or "").strip() and _notify_enabled(kind):
+        try:
+            to = _lookup_person_email(asset["EmployeeID"])
+            if to:
+                _send_simple_email(to, subject, body)
+                sent = True
+        except Exception as e:
+            print("lost&found employee mail error:", e)
+    return sent
+
+
+@app.route("/api/public/lostfound", methods=["POST"])
+def public_lostfound_report():
+    """A stranger holding the asset tells us they have it.
+
+    Unauthenticated of necessity: whoever picks up a laptop in a taxi has no
+    account here. So every field is length-capped, the address is throttled,
+    a report can only be filed against an asset that already exists, and the
+    response says nothing about the asset -- not even its name. An invalid
+    tag and a valid one differ only in the status code.
+    """
+    d = request.get_json(silent=True) or {}
+    # The code, not the tag. Taking a tag here would hand back the whole
+    # sequence: report against IT-1001, IT-1002, IT-1003 and so on, without
+    # ever seeing a label.
+    ref = (d.get("code") or "").strip()[:32]
+    name = (d.get("name") or "").strip()[:120]
+    mobile = (d.get("mobile") or "").strip()[:40]
+    note = (d.get("note") or "").strip()[:500]
+    if not name or not mobile:
+        return jsonify({"error": "Please give your name and a mobile number."}), 400
+    ip = _client_ip()
+    if not _public_throttle("lf:" + ip):
+        return jsonify({"error": "Too many reports from here just now. "
+                                 "Please call the number shown above."}), 429
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets "
+                "WHERE PublicCode=%s AND is_deleted=0 LIMIT 1", [ref])
+    a = cur.fetchone()
+    if not a:
+        c.close()
+        return jsonify({"error": "That tag was not recognised."}), 404
+    cur.execute("INSERT INTO LostFound (asset_id, asset_tag, kind, status, finder_name, "
+                "finder_mobile, finder_note, reported_at, updated_at, reporter_ip) "
+                "VALUES (%s,%s,'found','found',%s,%s,%s,NOW(),NOW(),%s)",
+                (a["_id"], a.get("AssetTag") or "", name, mobile, note, ip))
+    c.commit()
+    rid = cur.lastrowid
+    c.close()
+    audit("public", "LOSTFOUND_REPORT", a["_id"], f"{name} / {mobile}")
+    try:
+        _notify_lostfound(a, {"id": rid, "finder_name": name, "finder_mobile": mobile,
+                              "finder_note": note}, event="found")
+    except Exception as e:
+        print("lost&found notify error:", e)
+    return jsonify({"ok": True, "ref": f"LF-{rid}"})
+
+
+@app.route("/api/lostfound")
+@auth_required(module="assets", level="read")
+def lostfound_list():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT lf.*, a.Name AS asset_name, a.Status AS asset_status, "
+                "a.EmployeeID AS employee_id FROM LostFound lf "
+                "LEFT JOIN Assets a ON a._id=lf.asset_id ORDER BY lf.id DESC")
+    rows = [dict(r) for r in cur.fetchall()]
+    c.close()
+    for r in rows:
+        r["ref"] = f"LF-{r['id']}"
+        for k in ("reported_at", "updated_at"):
+            if r.get(k) is not None:
+                r[k] = str(r[k])
+        r.pop("reporter_ip", None)     # kept for abuse, not for display
+    return jsonify(rows)
+
+
+@app.route("/api/lostfound", methods=["POST"])
+@auth_required(module="assets", level="write")
+def lostfound_create():
+    """Staff logging an asset as missing, before anyone has found it."""
+    d = request.get_json(force=True, silent=True) or {}
+    ref = (d.get("asset") or "").strip()
+    if not ref:
+        return jsonify({"error": "asset required"}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets "
+                "WHERE (_id=%s OR AssetTag=%s) AND is_deleted=0 LIMIT 1", (ref, ref))
+    a = cur.fetchone()
+    if not a:
+        c.close(); return jsonify({"error": "asset not found"}), 404
+    cur.execute("INSERT INTO LostFound (asset_id, asset_tag, kind, status, admin_note, "
+                "handled_by, reported_at, updated_at) "
+                "VALUES (%s,%s,'lost','lost',%s,%s,NOW(),NOW())",
+                (a["_id"], a.get("AssetTag") or "", (d.get("note") or "").strip()[:500],
+                 session.get("user")))
+    c.commit(); rid = cur.lastrowid
+    cur.execute("UPDATE Assets SET Status='Lost/Stolen' WHERE _id=%s", [a["_id"]])
+    c.commit(); c.close()
+    audit(session.get("user"), "LOSTFOUND_LOST", a["_id"], f"reported lost (LF-{rid})")
+    return jsonify({"ok": True, "id": rid, "ref": f"LF-{rid}"})
+
+
+@app.route("/api/lostfound/<int:rid>", methods=["PATCH", "DELETE"])
+@auth_required(module="assets", level="write")
+def lostfound_update(rid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM LostFound WHERE id=%s", [rid])
+    rec = cur.fetchone()
+    if not rec:
+        c.close(); return jsonify({"error": "not found"}), 404
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM LostFound WHERE id=%s", [rid])
+        c.commit(); c.close()
+        audit(session.get("user"), "LOSTFOUND_DELETE", rec.get("asset_id") or "", f"LF-{rid}")
+        return jsonify({"ok": True})
+    d = request.get_json(force=True, silent=True) or {}
+    status = (d.get("status") or rec.get("status") or "found").strip().lower()
+    if status not in LOSTFOUND_STATUSES:
+        return jsonify({"error": "unknown status"}), 400
+    note = d.get("admin_note")
+    note = rec.get("admin_note") if note is None else str(note).strip()[:500]
+    cur.execute("UPDATE LostFound SET status=%s, admin_note=%s, handled_by=%s, "
+                "updated_at=NOW() WHERE id=%s",
+                (status, note, session.get("user"), rid))
+    c.commit()
+    # The asset's own status follows the report, which is the whole reason to
+    # record one: 'lost' marks it Lost/Stolen, and getting it back puts it
+    # back in the pool -- but only from Lost/Stolen, so this can never
+    # overwrite a Checked-Out or Under-Maintenance that someone else set.
+    cur.execute("SELECT _id, AssetTag, Name, Status, EmployeeID FROM Assets WHERE _id=%s",
+                [rec.get("asset_id")])
+    a = cur.fetchone()
+    if a:
+        if status == "lost" and a.get("Status") != "Lost/Stolen":
+            cur.execute("UPDATE Assets SET Status='Lost/Stolen' WHERE _id=%s", [a["_id"]])
+            c.commit()
+        elif status == "returned" and a.get("Status") == "Lost/Stolen":
+            cur.execute("UPDATE Assets SET Status='Available' WHERE _id=%s", [a["_id"]])
+            c.commit()
+    c.close()
+    audit(session.get("user"), "LOSTFOUND_STATUS", rec.get("asset_id") or "",
+          f"LF-{rid} -> {status}")
+    if a:
+        try:
+            _notify_lostfound(a, {"id": rid, "status": status, "admin_note": note,
+                                  "handled_by": session.get("user")}, event="status")
+        except Exception as e:
+            print("lost&found status notify error:", e)
+    return jsonify({"ok": True, "status": status})
+
 
 # ---------- invoice attachment ----------
 ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"}
@@ -6413,7 +8099,40 @@ function contrastRatio(a,b){ const L=h=>{const [r,g,bl]=hexRgb(h).map(v=>{v/=255
 // so pick whichever of the two the accent actually contrasts with -- the
 // logged-in app has always done this; the public pages never did.
 function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contrastRatio(bgHex,dark)>=contrastRatio(bgHex,light)?dark:light; }
-function ensureAccentVisible(accent,surface){ if(contrastRatio(accent,surface)>=2.2) return accent; const a=hexRgb(accent),s=hexRgb(surface); const mix=a.map((v,i)=>Math.round(v*0.65+s[i]*0.35)); return '#'+mix.map(v=>v.toString(16).padStart(2,'0')).join(''); }
+/* ---- which scheme, light or dark ----
+   The device decides. Settings still decide everything else -- the accent,
+   the radius, the font, the hue of the ground -- but whether the page is
+   light or dark is the phone's business, not an admin's, because the person
+   holding it already answered that question once for every app they own.
+
+   Only two values feed the whole palette: the page ground and the card
+   surface. Swing those to the scheme in use and every derived value -- text,
+   muted text, lines, button ink -- follows exactly as it did before. A
+   background already on the right side of the line is left untouched, so a
+   dark install in dark mode is pixel for pixel what it always was. */
+function prefersLight(){
+  try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
+  catch(e){ return false; }
+}
+function mixHex(a,b,t){
+  const x=hexRgb(a), y=hexRgb(b);
+  return '#'+x.map((v,i)=>Math.max(0,Math.min(255,Math.round(v+(y[i]-v)*t)))
+    .toString(16).padStart(2,'0')).join('');
+}
+function toScheme(h,wantLight,isSurface){
+  if(isLightHex(h)===wantLight) return h;
+  return wantLight ? mixHex(h,'#ffffff',isSurface?0.97:0.91)
+                   : mixHex(h,'#05070b',isSurface?0.86:0.90);
+}
+function ensureAccentVisible(accent,surface){
+  if(contrastRatio(accent,surface)>=2.2) return accent;
+  // Away from the surface, not into it. The hue is kept -- it is still their
+  // colour, darkened or lightened only as far as it takes to be seen.
+  const away=isLightHex(surface)?'#000000':'#ffffff';
+  let out=accent;
+  for(let i=0;i<6 && contrastRatio(out,surface)<2.2;i++) out=mixHex(out,away,0.18);
+  return out;
+}
 function applySignTheme(b){
   try{
     const bgType=b.bg_type==='gradient'?'gradient':'solid';
@@ -6423,9 +8142,11 @@ function applySignTheme(b){
       const found=bgRaw.match(/#[0-9a-fA-F]{3,6}/g)||[];
       bgA=hex6(found[0],'#0a0d13'); bgB=hex6(found[1],'#121826');
     }
-    const baseHex=bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13');
+    const wantLight=prefersLight();
+    bgA=toScheme(bgA,wantLight,false); bgB=toScheme(bgB,wantLight,false);
+    const baseHex=toScheme(bgType==='gradient'?bgA:hex6(bgRaw,'#0a0d13'),wantLight,false);
     const bgValue=bgType==='gradient'?('linear-gradient(135deg, '+bgA+', '+bgB+')'):baseHex;
-    const surface=hex6(b.comp_bg,'#121826');
+    const surface=toScheme(hex6(b.comp_bg,'#121826'),wantLight,true);
     const light=isLightHex(baseHex);
     const surfaceLight=isLightHex(surface);
     const accent=ensureAccentVisible(hex6(b.accent,'#ff3b30'), surface);
@@ -6447,12 +8168,32 @@ function applySignTheme(b){
     r.setProperty('--btn-text', bestTextOn(accent));
     r.setProperty('--btn-mag-text', bestTextOn(accent2));
     r.setProperty('--radius', radius+'px');
+    // The typeface is part of the theme too. Without this the public pages
+    // kept their own hardcoded display font, so a tag scanned off an asset
+    // looked like a different product from the app that printed it.
+    const FONT_STACKS={
+      'Inter':"'Inter','Segoe UI',system-ui,-apple-system,sans-serif",
+      'Segoe UI':"'Segoe UI',system-ui,-apple-system,sans-serif",
+      'System':"system-ui,-apple-system,'Segoe UI',sans-serif"
+    };
+    const emoji=",'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji'";
+    r.setProperty('--font',(FONT_STACKS[b.font]||FONT_STACKS['Inter'])+emoji);
     // The scan page applies this from <head> so the page never paints in
     // the wrong colours first; <body> does not exist that early, and an
     // unguarded reference here threw and swallowed the class.
     const mark=()=>document.body&&document.body.classList.toggle('light', light);
     if(document.body) mark();
     else document.addEventListener('DOMContentLoaded', mark);
+    // a tag scanned on a phone that switches scheme while it is open
+    if(!applySignTheme._bound){
+      applySignTheme._bound=true;
+      try{
+        const mq=window.matchMedia('(prefers-color-scheme: light)');
+        const again=()=>applySignTheme(b);
+        if(mq.addEventListener) mq.addEventListener('change', again);
+        else if(mq.addListener) mq.addListener(again);
+      }catch(e){}
+    }
   }catch(e){}
 }
 '''
@@ -6774,6 +8515,90 @@ def verify_sign():
     c.close()
     return jsonify({"ok": True, "asset": a})
 
+# --------------------------------------------------------------------------
+# Non-Latin text in a generated PDF -- an Arabic name, in practice
+#
+# Someone signed for an asset and typed their name in Arabic, and the PDF
+# came back as a row of boxes. There are two separate causes, and fixing
+# either one on its own still leaves the name wrong:
+#
+#   1. The font. reportlab's built-in Helvetica is a Latin-1 font with no
+#      Arabic glyphs at all, and a glyph a font does not have is drawn as
+#      .notdef -- the box. So the document has to use a font that has them.
+#      DejaVu Sans (fonts/, Bitstream Vera licence) covers Latin, Arabic,
+#      the contextual presentation forms and the lam-alef ligatures.
+#
+#   2. The layout. A PDF has no text engine: it stores glyphs at
+#      coordinates, in the order they were written, and no reader will
+#      rearrange them. Arabic letters change shape according to their
+#      neighbours and run right to left, so the string has to be shaped and
+#      reordered here, before it goes onto the page.
+#
+# Both steps are no-ops on Latin text, so nothing that worked before moves.
+FONT_DIR = os.path.join(BASE, "fonts")
+PDF_FONT, PDF_FONT_BOLD = "Helvetica", "Helvetica-Bold"
+_pdf_fonts_done = False
+
+def _register_pdf_fonts():
+    """Register the bundled Unicode font once; keep Helvetica if it is absent.
+
+    A missing font file must never stop an acknowledgement being issued --
+    a Latin name in Helvetica beats an exception and no PDF at all.
+    """
+    global _pdf_fonts_done, PDF_FONT, PDF_FONT_BOLD
+    if _pdf_fonts_done:
+        return
+    _pdf_fonts_done = True
+    try:
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        from reportlab.lib.fonts import addMapping
+        reg = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+        bold = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+        if not (os.path.exists(reg) and os.path.exists(bold)):
+            print("PDF: %s is missing the DejaVu fonts -- non-Latin names will not render" % FONT_DIR)
+            return
+        pdfmetrics.registerFont(TTFont("DejaVuSans", reg))
+        pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold))
+        # <b>...</b> inside a Paragraph resolves the bold face through these
+        pdfmetrics.registerFontFamily("DejaVuSans", normal="DejaVuSans", bold="DejaVuSans-Bold",
+                                      italic="DejaVuSans", boldItalic="DejaVuSans-Bold")
+        addMapping("DejaVuSans", 0, 0, "DejaVuSans")
+        addMapping("DejaVuSans", 1, 0, "DejaVuSans-Bold")
+        PDF_FONT, PDF_FONT_BOLD = "DejaVuSans", "DejaVuSans-Bold"
+    except Exception as e:
+        print("PDF font registration failed, falling back to Helvetica:", e)
+
+# Hebrew, Arabic, Syriac, Thaana and N'Ko, plus the presentation-form blocks
+# a reshaper emits.
+_RTL_RANGES = ((0x0590, 0x08FF), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFF))
+
+def _has_rtl(s):
+    return any(lo <= ord(ch) <= hi for ch in s for lo, hi in _RTL_RANGES)
+
+def _pdf_text(value):
+    """Shape and reorder a string so a PDF reader shows it as it was typed.
+
+    Latin text is returned untouched, so this is safe to wrap around every
+    value that goes into the document rather than having to guess which
+    ones need it. If the shaping libraries are missing the text is returned
+    as typed: the letters are then at least all present and readable one by
+    one, which is a much smaller failure than a row of boxes.
+    """
+    s = "" if value is None else str(value)
+    if not s or not _has_rtl(s):
+        return s
+    try:
+        import arabic_reshaper
+        try:
+            from bidi.algorithm import get_display   # python-bidi 0.4.x
+        except ImportError:
+            from bidi import get_display             # 0.6.x moved it up
+        return get_display(arabic_reshaper.reshape(s))
+    except Exception as e:
+        print("PDF: cannot shape right-to-left text (%s); printing it unshaped" % e)
+        return s
+
 def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     """One-page A4 PDF of the signed acknowledgement -- Asset ID front and
     center, full details, and the captured signature -- emailed to both the
@@ -6784,6 +8609,11 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.enums import TA_CENTER
+    from xml.sax.saxutils import escape
+
+    # every glyph on this page comes out of the bundled font, so an Arabic
+    # name is not a special case anyone has to spot first
+    _register_pdf_fonts()
 
     # A letterhead is a whole printed page, so it has to be a full-page
     # background behind the flowed content (drawn via onFirstPage/onLaterPages
@@ -6805,6 +8635,9 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=top_margin, bottomMargin=bottom_margin,
                              leftMargin=16 * mm, rightMargin=16 * mm)
     styles = getSampleStyleSheet()
+    # the stock styles are Helvetica; anything using them plainly would sit
+    # in a different face from the rest of the page
+    body_style = ParagraphStyle("body", parent=styles["Normal"], fontName=PDF_FONT)
     story = []
 
     bn = brand_name()
@@ -6824,21 +8657,21 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                 pass
 
     title_style = ParagraphStyle("title", parent=styles["Title"], alignment=TA_CENTER,
-                                  textColor=colors.HexColor("#101622"))
-    story.append(Paragraph(f"{bn} — Asset Acknowledgement", title_style))
+                                  fontName=PDF_FONT_BOLD, textColor=colors.HexColor("#101622"))
+    # escape(): a Paragraph parses its text as markup, so an organisation
+    # name containing & or < would otherwise raise and cost the whole PDF
+    story.append(Paragraph(escape(_pdf_text(f"{bn} — Asset Acknowledgement")), title_style))
 
     tag_style = ParagraphStyle("tag", parent=styles["Normal"], alignment=TA_CENTER, fontSize=20,
-                                fontName="Helvetica-Bold", textColor=colors.HexColor("#ff3b30"),
+                                fontName=PDF_FONT_BOLD, textColor=colors.HexColor("#ff3b30"),
                                 spaceBefore=6, spaceAfter=14)
-    story.append(Paragraph(asset.get("AssetTag") or "—", tag_style))
+    story.append(Paragraph(escape(_pdf_text(asset.get("AssetTag") or "—")), tag_style))
 
-    # Same field set/order/labels as the web "print asset" page, so the
-    # emailed PDF and a manual print of the same asset read the same way.
-    currency = asset.get("_currency") or "AED"
-    try:
-        price_str = f"{currency} {float(asset.get('Price') or 0):.2f}"
-    except (TypeError, ValueError):
-        price_str = f"{currency} 0.00"
+    # The web "print asset" page's field set and order, with one deliberate
+    # difference: no price. This sheet is what someone signs to say they have
+    # the thing, and it is handed to them and mailed to their inbox -- what
+    # the organisation paid for it is nobody's business on that copy. The
+    # price is still on the asset record and on the internal printout.
     rows = [
         ["Asset ID", asset.get("AssetTag") or "—"],
         ["Asset Name", asset.get("Name") or "—"],
@@ -6846,8 +8679,7 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
         ["Serial", asset.get("Serial") or "—"],
         ["Location", asset.get("Location") or "—"],
         ["Status", asset.get("Status") or "—"],
-        ["Price", price_str],
-        ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0)],
+        ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0) + " months"],
         ["Signed Date", asset.get("NotesReceived") or "—"],
         ["Notes", asset.get("Notes") or "—"],
         ["Signed By", signer_name or "—"],
@@ -6859,9 +8691,13 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
             ["Designation", asset.get("Designation") or "—"],
             ["Email", asset.get("Email") or "—"],
         ]
+    # the label column is ours and always English; the value column is
+    # whatever was typed into the asset, which is where Arabic turns up
+    rows = [[lbl, _pdf_text(val)] for lbl, val in rows]
     t = Table(rows, colWidths=[45 * mm, 115 * mm])
     t.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTNAME", (0, 0), (-1, -1), PDF_FONT),
+        ("FONTNAME", (0, 0), (0, -1), PDF_FONT_BOLD),
         ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#555555")),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 7),
@@ -6873,7 +8709,7 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
     story.append(Spacer(1, 18))
 
     story.append(Paragraph("Signature", ParagraphStyle(
-        "sig-label", parent=styles["Normal"], fontSize=11, fontName="Helvetica-Bold", spaceAfter=6)))
+        "sig-label", parent=styles["Normal"], fontSize=11, fontName=PDF_FONT_BOLD, spaceAfter=6)))
     if sig_data_url and sig_data_url.startswith("data:image"):
         try:
             b64 = sig_data_url.split(",", 1)[1]
@@ -6885,9 +8721,9 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
             scale = min(max_w / iw, max_h / ih) if iw and ih else 1
             story.append(RLImage(io.BytesIO(sig_bytes), width=iw * scale, height=ih * scale))
         except Exception:
-            story.append(Paragraph("(signature image unavailable)", styles["Normal"]))
+            story.append(Paragraph("(signature image unavailable)", body_style))
     else:
-        story.append(Paragraph("(no signature captured)", styles["Normal"]))
+        story.append(Paragraph("(no signature captured)", body_style))
 
     def _draw_letterhead_bg(cnv, _doc):
         if used_letterhead:
@@ -6994,8 +8830,6 @@ def approve_asset():
                 full_asset["Department"] = er.get("Department") or ""
                 full_asset["Designation"] = er.get("Designation") or ""
                 full_asset["Email"] = er.get("Email") or ""
-        ccur.execute("SELECT currency FROM Settings WHERE id=1"); srow = ccur.fetchone() or {}
-        full_asset["_currency"] = srow.get("currency") or "AED"
         cc.close()
         if full_asset:
             emailed = _email_signed_asset_pdf(full_asset, name, sigData)
@@ -7366,15 +9200,72 @@ def _dump_section(cur, table):
     upserting rows on top of whatever is there now, then the REPLACE INTOs."""
     return [f"-- == {table} ==", f"DELETE FROM `{table}`;", *_dump_table(cur, table)]
 
-# Every business table, so an "all"/"assets" backup is a complete,
-# restorable snapshot. A factory wipe drops whatever the schema actually
-# holds (read from information_schema), so there's no parallel list to
-# keep in sync with this one.
+# A preferred order for the tables we know about -- parents before children,
+# so a restore that does hit a foreign key does so in the right sequence.
+# This is an ORDERING, not the list of what gets backed up: that is read from
+# the schema, below.
 ASSET_SCOPE_TABLES = [
     "Assets", "Checkouts", "Maintenance", "Contracts", "Employees",
-    "Tickets", "TicketReplies", "Manufacturers", "Models", "Categories",
-    "ContractTypes", "Departments", "Designations", "Locations", "Roles", "History",
+    "Tickets", "TicketReplies", "TicketHistory", "TicketAttachments",
+    "Manufacturers", "Models", "Categories",
+    "ContractTypes", "Departments", "Designations", "Locations", "History",
+    "HeartbeatEvents", "HeartbeatHourly",
 ]
+
+# What you configure, as opposed to what you accumulate.
+BACKUP_CONFIG_TABLES = ["Settings", "Users", "Roles",
+                        "HeartbeatChannels", "HeartbeatMonitors"]
+
+# Raw per-check telemetry. It is written every few seconds per monitor and
+# never pruned, so including it would grow every nightly archive without
+# bound -- and it rolls up into HeartbeatHourly, which IS backed up, so the
+# uptime history survives even though the individual pings do not.
+BACKUP_SKIP_TABLES = ["HeartbeatSamples"]
+
+
+def _schema_tables(cur):
+    """Every base table in this database, as the schema actually spells it."""
+    try:
+        cur.execute("SELECT TABLE_NAME AS t FROM information_schema.TABLES "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = 'BASE TABLE'")
+        return [r["t"] for r in cur.fetchall()]
+    except Exception:
+        return []
+
+
+def _backup_tables(cur, scope):
+    """The tables a backup of [scope] should contain.
+
+    Read from the schema rather than a list kept by hand. The hand-kept list
+    had silently drifted by seven tables -- notification channels, every
+    Heartbeat monitor, ticket history and attachments among them -- because
+    nothing fails when a feature adds a table and forgets to add it here. A
+    backup missing a table is not discovered until a restore, which is the
+    worst moment to discover anything.
+
+    Anything new is therefore included automatically, and leaving it out has
+    to be a deliberate entry in BACKUP_SKIP_TABLES.
+    """
+    have = _schema_tables(cur)
+    by_lower = {t.lower(): t for t in have}
+    skip = {t.lower() for t in BACKUP_SKIP_TABLES}
+    cfg_l = {t.lower() for t in BACKUP_CONFIG_TABLES}
+
+    def real(names):
+        return [by_lower[n.lower()] for n in names if n.lower() in by_lower]
+
+    if scope == "config":
+        return real(BACKUP_CONFIG_TABLES)
+
+    known = cfg_l | skip | {"auditlog"}
+    ordered = [t for t in real(ASSET_SCOPE_TABLES) if t.lower() not in known]
+    seen = {t.lower() for t in ordered} | known
+    # whatever the schema has that nobody thought to order: alphabetical, and
+    # present, which is the part that matters
+    extra = sorted(by_lower[k] for k in by_lower if k not in seen)
+    if scope == "assets":
+        return ordered + extra
+    return real(BACKUP_CONFIG_TABLES) + ordered + extra
 
 BACKUP_BRANDING_FILES = ("logo.png", "letterhead.png")
 
@@ -7384,20 +9275,18 @@ def _run_backup(scope="all"):
     c = conn(); cur = c.cursor()
     lines = [f"-- IT-Vault backup | scope={scope} | {datetime.now().strftime('%Y-%m-%d %H:%M')}"]
     include_branding = scope in ("config", "all")
-    if scope in ("config", "all"):
-        lines += _dump_section(cur, "Settings")
-        lines += _dump_section(cur, "Users")
-    if scope in ("assets", "all"):
-        for t in ASSET_SCOPE_TABLES:
-            lines += _dump_section(cur, t)
+    # An assets backup carries invoice files now, so it can no longer be a
+    # plain .sql either -- anything with files alongside the dump is a zip.
+    include_files = include_branding or scope == "assets"
+    for t in _backup_tables(cur, scope):
+        lines += _dump_section(cur, t)
     if scope == "all":
         lines += _dump_section(cur, "AuditLog")
     c.close()
     sql_text = "\n".join(lines) + "\n"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if not include_branding:
-        # assets-only scope never touches Settings, so there's no branding to
-        # bundle -- keep it a plain .sql, same as before.
+    if not include_files:
+        # nothing but rows in this scope -- keep it a plain .sql, same as before.
         fname = f"itvault_backup_{scope}_{stamp}.sql"
         with open(os.path.join(BACKUP_DIR, fname), "w", encoding="utf-8") as f:
             f.write(sql_text)
@@ -7425,6 +9314,19 @@ def _run_backup(scope="all"):
                         zf.write(p, bf)
                 except Exception:
                     pass
+            # Invoice attachments. The dump records the FILENAME on each asset
+            # row; the file itself lives in its own volume, so a restore onto a
+            # new host used to bring back rows pointing at attachments that
+            # were never in the archive. Under invoices/ so restore can tell
+            # them apart from the branding files.
+            if scope in ("assets", "all"):
+                try:
+                    for fn in sorted(os.listdir(INVOICE_DIR)):
+                        fp = os.path.join(INVOICE_DIR, fn)
+                        if os.path.isfile(fp) and os.path.getsize(fp) > 0:
+                            zf.write(fp, "invoices/" + fn)
+                except Exception as e:
+                    print(f"[itvault] backup: could not bundle invoices: {e}", flush=True)
     _prune_old_backups()
     return fname
 
@@ -7547,14 +9449,27 @@ def check_update():
     cmd = ""
     method = _update_method()
     if newer and IS_DOCKER:
-        cmd = "docker compose pull && docker compose up -d"
-        how = ("You're running the container image. Pull the new image and "
-               "recreate the container:\n\n"
+        # The installer, not raw compose commands. It pulls the image and
+        # recreates the container carrying over the database credentials,
+        # published port and network the running one already has -- which is
+        # the part that got done wrong by hand. HEAD rather than a branch
+        # name, so the link cannot rot when the default branch is renamed.
+        cmd = ("curl -fsSL https://raw.githubusercontent.com/shatheitguy/"
+               "it-vault/HEAD/install.sh | sh")
+        how = ("You're running the container image. Run the installer again "
+               "-- it pulls the new image and recreates the container with "
+               "the database credentials, port and network it already has, "
+               "so there is nothing to re-enter:\n\n"
                f"    {cmd}\n\n"
+               "On Windows, run the PowerShell one instead:\n\n"
+               "    irm https://raw.githubusercontent.com/shatheitguy/"
+               "it-vault/HEAD/install.ps1 | iex\n\n"
                "Your database, invoices and backups live in named volumes, "
-               "so they survive the swap. To have this happen automatically "
-               "whenever a release lands, run Watchtower alongside IT-Vault "
-               "-- the README has the one-liner.")
+               "so they survive the swap. Note that `docker restart` on its "
+               "own updates nothing -- a container keeps the image it was "
+               "created from, so it has to be recreated. To have this happen "
+               "automatically whenever a release lands, run Watchtower "
+               "alongside IT-Vault -- the README has the one-liner.")
     elif newer:
         cmd = "git pull && pip install -r requirements.txt"
         how = ("You're running from source. Fetch the new release, install "
@@ -7825,6 +9740,8 @@ def _apply_restore_bytes(data, filename=""):
                 return None, "invalid backup: missing dump.sql in archive"
             sql_text = zf.read("dump.sql").decode("utf-8", "replace")
             branding = {bf: zf.read(bf) for bf in BACKUP_BRANDING_FILES if bf in names}
+            invoices = [n for n in names
+                        if n.startswith("invoices/") and not n.endswith("/")]
     except zipfile.BadZipFile:
         return None, "invalid backup: not a valid .zip archive"
     applied, err = _apply_restore_sql(sql_text)
@@ -7834,7 +9751,40 @@ def _apply_restore_bytes(data, filename=""):
     # they are never written straight over the cache, which used to put them
     # in BASE where nothing serves them from anyway
     _brand_keep_after_restore(before, branding)
+    _restore_invoices(zipfile.ZipFile(io.BytesIO(data)), invoices)
     return applied, None
+
+def _restore_invoices(zf, names):
+    """Put the bundled attachments back beside the rows that name them.
+
+    Written with the basename only: an archive is untrusted input, and a path
+    like ../../etc in a zip entry is the oldest trick there is. Existing files
+    are left alone -- a restore should not destroy an attachment that is
+    already present and not mentioned in the archive.
+    """
+    if not names:
+        return
+    written = 0
+    try:
+        with zf:
+            for n in names:
+                base = os.path.basename(n)
+                if not base or base in (".", ".."):
+                    continue
+                dest = os.path.join(INVOICE_DIR, base)
+                if os.path.exists(dest):
+                    continue
+                try:
+                    with zf.open(n) as src, open(dest, "wb") as out:
+                        out.write(src.read())
+                    written += 1
+                except Exception as e:
+                    print(f"[itvault] restore: could not write {base}: {e}", flush=True)
+    except Exception as e:
+        print(f"[itvault] restore: could not read invoices: {e}", flush=True)
+    if written:
+        print(f"[itvault] restore: {written} invoice file(s) restored", flush=True)
+
 
 @app.route("/api/restore", methods=["POST"])
 @auth_required([ROLE_ADMIN])
@@ -8257,9 +10207,55 @@ def start_contract_expiry_scheduler():
     t = threading.Thread(target=_contract_expiry_loop, daemon=True)
     t.start()
 
+def warn_if_invoices_missing():
+    """Say so when the invoice files are not where the database expects them.
+
+    An asset row names its attachment by filename; the file itself lives in
+    INVOICE_DIR, a separate volume. Mount the wrong one -- which is what
+    happens when `docker compose` prefixes a volume name with its project
+    directory and a later run mounts the unprefixed twin -- and every invoice
+    silently 404s. The rows look fine, the files are simply somewhere else,
+    and nothing anywhere says why.
+
+    It costs one query at startup to turn that into a sentence.
+    """
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT COUNT(*) AS n FROM Assets "
+                    "WHERE InvoiceFile IS NOT NULL AND InvoiceFile<>''")
+        expected = int((cur.fetchone() or {}).get("n") or 0)
+        c.close()
+    except Exception:
+        return
+    if not expected:
+        return
+    try:
+        on_disk = len([f for f in os.listdir(INVOICE_DIR)
+                       if os.path.isfile(os.path.join(INVOICE_DIR, f))])
+    except Exception:
+        on_disk = 0
+    if on_disk:
+        return
+    bar = "=" * 72
+    print(bar, flush=True)
+    print(f"[itvault] WARNING: {expected} asset(s) have an invoice attached, but "
+          f"{INVOICE_DIR} is empty.", flush=True)
+    print("[itvault] The files are almost certainly in another volume -- Docker "
+          "Compose", flush=True)
+    print("[itvault] prefixes volume names with its project directory, so "
+          "invoices_data", flush=True)
+    print("[itvault] and <project>_invoices_data can both exist. Check with:",
+          flush=True)
+    print("[itvault]   docker volume ls", flush=True)
+    print("[itvault] and re-run the installer, which adopts the one holding the "
+          "data.", flush=True)
+    print(bar, flush=True)
+
+
 if __name__ == "__main__":
     init_db()
     migrate_schema()
+    warn_if_invoices_missing()
     start_ldap_scheduler()
     start_backup_scheduler()
     start_contract_expiry_scheduler()

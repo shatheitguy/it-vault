@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The screen between opening the app and the dashboard having something on it.
+
+  Without it the app lands on an empty dashboard and fills in a second or two
+  later, which reads as broken rather than busy. This says what it is doing,
+  and the warm-up behind it pulls every list into the cache so the rest of the
+  app is populated the moment it is opened, with or without a network.
+
+  The glitch is three things, none of them a video: the title drawn three
+  times (a red copy and a cyan copy behind a white one, jittered a pixel or
+  two apart), a bar sweeping down over the mark, and the whole block slipping
+  sideways now and then. All of it is driven from BootOverlay.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/bootRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg"
+    android:clickable="true"
+    android:focusable="true">
+
+    <LinearLayout
+        android:id="@+id/bootBlock"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:paddingHorizontal="32dp">
+
+        <!-- the mark, with the sweep bar riding over it -->
+        <FrameLayout
+            android:id="@+id/bootLogoWrap"
+            android:layout_width="132dp"
+            android:layout_height="132dp">
+
+            <ImageView
+                android:id="@+id/bootLogo"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:src="@mipmap/ic_launcher"
+                android:contentDescription="IT-Vault" />
+
+            <View
+                android:id="@+id/bootSweep"
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:background="@drawable/scan_line" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/bootTitleWrap"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="26dp">
+
+            <TextView
+                android:id="@+id/bootTitleRed"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="IT-VAULT"
+                android:textSize="27sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.18"
+                android:textColor="#FF3B30" />
+
+            <TextView
+                android:id="@+id/bootTitleCyan"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="IT-VAULT"
+                android:textSize="27sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.18"
+                android:textColor="#39D0FF" />
+
+            <TextView
+                android:id="@+id/bootTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="IT-VAULT"
+                android:textSize="27sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.18"
+                android:textColor="@color/text" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/bootStatus"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="CONNECTING TO SERVER"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.14"
+            android:textColor="@color/muted" />
+
+        <ProgressBar
+            android:id="@+id/bootBar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="180dp"
+            android:layout_height="3dp"
+            android:layout_marginTop="22dp"
+            android:indeterminate="true" />
+    </LinearLayout>
+</FrameLayout>

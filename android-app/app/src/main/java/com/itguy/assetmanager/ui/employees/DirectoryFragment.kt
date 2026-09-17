@@ -59,6 +59,12 @@ class DirectoryFragment : Fragment(), Refreshable {
                 when (tab) {
                     0 -> {
                         b.searchWrap.visibility = View.VISIBLE
+                        // the cached directory first, so the screen is never
+                        // blank while the fetch runs
+                        com.itguy.assetmanager.data.OfflineCache.loadEmployees()?.let {
+                            employees = it
+                            renderEmployees(b.searchInput.text?.toString().orEmpty())
+                        }
                         if (com.itguy.assetmanager.data.NetworkUtils.isOnline(requireContext())) {
                             employees = ApiClient.api().listEmployees().body().orEmpty()
                             com.itguy.assetmanager.data.OfflineCache.saveEmployees(employees)

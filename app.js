@@ -137,10 +137,11 @@ function applyNavPermissions(){
   show('navExport', canDo('assets.export'));
   show('navCatalog', canDo('assets.catalog'));
   show('navTrash',   canDo('assets.trash'));
+  show('navLostFound', canDo('assets.lostfound'));
 
   // Group headings are noise when everything under them is hidden.
   const groups=[
-    ['Records', ['navDirectory','navCatalog','navTrash','navAudit']],
+    ['Records', ['navDirectory','navCatalog','navLostFound','navTrash','navAudit']],
     ['Tools',   ['navScan','navHeartbeat','navBackup']],
   ];
   document.querySelectorAll('.nav-grp').forEach(g=>{
@@ -343,6 +344,31 @@ function printGroup(safeKey){
     @media print{body{padding:0}button{display:none}}
   </style></head><body>${printHeaderHtml('Asset Group: '+esc(LABELS[groupBy]||groupBy)+' — '+esc(k))}<div class="sub">${rows.length} asset${rows.length>1?'s':''} • generated ${new Date().toLocaleString()}</div><table><thead><tr>${COLUMNS.map(c=>`<th>${LABELS[c]||c}</th>`).join('')}</tr></thead><tbody>${rows.map(a=>`<tr>${COLUMNS.map(c=>`<td>${esc(a[c])}</td>`).join('')}</tr>`).join('')}</tbody></table><button onclick="window.print()">🖨 PRINT</button>${printReadyScript()}</body></html>`);
   win.document.close();
+}
+// 18 -> "1 year 6 months". Spelled out because a plain month count is the
+// thing nobody can read at a glance.
+function monthsInWords(m){
+  const y=Math.floor(m/12), r=m%12, parts=[];
+  if(y)parts.push(y+' year'+(y>1?'s':''));
+  if(r)parts.push(r+' month'+(r>1?'s':''));
+  return parts.join(' ');
+}
+// The line under the Warranty box: what the number means, what blank does,
+// and -- once there is a purchase date -- the day cover actually ends.
+function warrantyHint(){
+  const el=document.getElementById('warrHint'); if(!el)return;
+  const inp=document.getElementById('f_WarrantyMonths');
+  const raw=inp?String(inp.value).trim():'';
+  if(raw===''){ el.textContent='Counted in months — blank means the default, 12 months (1 year).'; return; }
+  const m=parseInt(raw,10);
+  if(isNaN(m)||m<0){ el.textContent='Enter a whole number of months.'; return; }
+  if(m===0){ el.textContent='0 — no warranty.'; return; }
+  let txt=m+' month'+(m===1?'':'s');
+  if(m>=12)txt+=' = '+monthsInWords(m);
+  const pd=document.getElementById('f_PurchaseDate');
+  const w=warrantyEnd({PurchaseDate:pd?String(pd.value).trim():'',WarrantyMonths:m});
+  if(w)txt+=' • covered until '+w.end;
+  el.textContent=txt;
 }
 function warrantyEnd(a){
   if(!a.PurchaseDate)return null;
@@ -674,6 +700,8 @@ async function loadDashboard(){
   if(eb) eb.innerHTML=exp.map(c=>`<tr style="cursor:pointer" onclick="showPage('page-contracts');openContractModal(${c.id})"><td>${esc(c.name)}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.type||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${c.days_left}d</td></tr>`).join('');
   const ee=document.getElementById('dashContractsExpEmpty'); if(ee) ee.style.display=exp.length?'none':'block';
   applyDashLayout();
+  // the cached copy has already painted; this corrects it from the server
+  syncDashLayout();
   loadDashHeartbeat();
   // widget bodies (recent assets / open tickets / activity) must refresh too --
   // previously these only reloaded when you navigated to the page
@@ -749,15 +777,138 @@ async function loadUnifiWidgets(force){
 let _unifiTimer=null;
 function startUnifiAutoRefresh(){ stopUnifiAutoRefresh(); _unifiTimer=setInterval(()=>loadUnifiWidgets(), 30000); }
 function stopUnifiAutoRefresh(){ if(_unifiTimer){ clearInterval(_unifiTimer); _unifiTimer=null; } }
-const DASH_LAYOUT_KEY='itvault_dash_layout_v1';
-function getDashLayout(){ try{ const v=localStorage.getItem(DASH_LAYOUT_KEY); return v?JSON.parse(v):null; }catch(e){ return null; } }
-function applyDashLayout(){
-  const order=getDashLayout(); if(!order||!order.length) return;
-  const cont=document.getElementById('dashWidgets'); if(!cont) return;
-  order.forEach(k=>{ const el=cont.querySelector('.widget[data-wkey="'+k+'"]'); if(el) cont.appendChild(el); });
+const DASH_LAYOUT_KEY='itvault_dash_layout_v1';   // legacy: a bare order array
+const DASH_LAYOUT_KEY2='itvault_dash_layout_v2';
+/* The layout grew from "what order" into "what is shown, how wide, and which
+   tiles the user invented". v1 stays on disk untouched and is migrated on
+   read, so nothing is lost if someone rolls back. */
+function blankLayout(){ return {v:2, cols:2, order:[], hidden:[], links:[]}; }
+function getDashLayout(){
+  try{
+    const v2=localStorage.getItem(DASH_LAYOUT_KEY2);
+    if(v2){ const o=JSON.parse(v2); return Object.assign(blankLayout(), o||{}); }
+  }catch(e){}
+  const L=blankLayout();
+  try{
+    const v1=JSON.parse(localStorage.getItem(DASH_LAYOUT_KEY)||'null');
+    if(Array.isArray(v1)) L.order=v1;
+  }catch(e){}
+  return L;
 }
-function saveDashLayout(){ const cont=document.getElementById('dashWidgets'); if(!cont) return [];
-  return [...cont.querySelectorAll('.widget')].map(w=>w.getAttribute('data-wkey')); }
+/* Written to both: the server so it is the user's layout wherever they sign
+   in (and so it lands in the backup, which is why it moved off the browser),
+   and localStorage so the dashboard paints in the right shape on the next
+   load without waiting for a round trip. */
+function putDashLayout(L){
+  try{ localStorage.setItem(DASH_LAYOUT_KEY2, JSON.stringify(L)); }catch(e){}
+  api('/api/dash/layout', {method:'PUT', headers:{'Content-Type':'application/json'},
+                           body:JSON.stringify({layout:L})})
+    .then(async r=>{
+      if(r&&r.ok) return;
+      const j=r?await r.json().catch(()=>({})):{};
+      // saved locally either way, so say what did not happen rather than
+      // pretending the whole save failed
+      toast('✕ Saved on this device only: '+((j&&j.error)||'server refused'));
+    }).catch(()=>toast('✕ Saved on this device only — server unreachable'));
+}
+
+/* Pulls the stored layout once per dashboard visit. The cached copy has
+   already painted by now, so this only corrects it -- and when it differs,
+   re-applies rather than reloading the page. */
+async function syncDashLayout(){
+  try{
+    const r=await api('/api/dash/layout');
+    if(!r||!r.ok) return;
+    const j=await r.json().catch(()=>null);
+    if(!j||!j.layout) return;
+    const server=JSON.stringify(Object.assign(blankLayout(), j.layout));
+    if(server===JSON.stringify(getDashLayout())) return;
+    try{ localStorage.setItem(DASH_LAYOUT_KEY2, server); }catch(e){}
+    applyDashLayout();
+  }catch(e){}
+}
+function dashCont(){ return document.getElementById('dashWidgets'); }
+
+/* Built-in widgets are whatever the markup ships with; a title for the picker
+   comes from the widget's own heading so the two can never disagree. */
+function builtinWidgets(){
+  const cont=dashCont(); if(!cont) return [];
+  return [...cont.querySelectorAll('.widget[data-wkey]')]
+    .filter(w=>!w.getAttribute('data-wkey').startsWith('link:'))
+    .map(w=>({key:w.getAttribute('data-wkey'),
+              title:(w.querySelector('.secthead')?.textContent||w.getAttribute('data-wkey')).trim()}));
+}
+
+function applyDashLayout(){
+  const cont=dashCont(); if(!cont) return;
+  const L=getDashLayout();
+  cont.style.setProperty('--dashcols', String(L.cols||2));
+  renderLinkWidgets(L);
+  // order first, then visibility -- a hidden widget still has a place in the
+  // order so unhiding it puts it back where it was, not at the end
+  (L.order||[]).forEach(k=>{ const el=cont.querySelector('.widget[data-wkey="'+CSS.escape(k)+'"]'); if(el) cont.appendChild(el); });
+  const hidden=new Set(L.hidden||[]);
+  cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
+    w.classList.toggle('w-hidden', hidden.has(w.getAttribute('data-wkey')));
+  });
+  const sel=document.getElementById('dashCols'); if(sel) sel.value=String(L.cols||2);
+}
+
+/* The user's own tiles. Rebuilt from the layout rather than mutated in place,
+   so there is exactly one source of truth for what exists. */
+function renderLinkWidgets(L){
+  const cont=dashCont(); if(!cont) return;
+  cont.querySelectorAll('.widget[data-wkey^="link:"]').forEach(w=>w.remove());
+  (L.links||[]).forEach(t=>{
+    // The add form used to be the only thing checking the scheme. It is gone,
+    // so the check moved to the point of use, which is where it belonged: a
+    // layout is stored data, and stored data gets validated when it is read,
+    // not only when it was written. Anything that is not http(s) -- an old
+    // javascript: tile, a file:, a data: -- simply does not render.
+    if(!/^https?:\/\//i.test(String(t.url||''))) return;
+    const el=document.createElement('div');
+    el.className='panel widget wlink';
+    el.setAttribute('data-wkey', t.key);
+    // _self is offered, but noopener stays on either way: a page opened from
+    // here must never get a handle on this one.
+    const tgt=(t.target==='_self')?'_self':'_blank';
+    el.innerHTML=`<div class="secthead">${esc(t.title||'LINK')}</div>
+      <a class="wlink-body" href="${esc(t.url)}" target="${tgt}" rel="noopener noreferrer">
+        ${t.icon?`<img class="wlink-ico" src="${esc(t.icon)}" alt="">`:'<div class="wlink-ico wlink-ico-none">🔗</div>'}
+        <div class="wlink-txt">
+          <div class="wlink-host">${esc(t.desc||hostOf(t.url))}</div>
+          <div class="wlink-sub">${esc(t.desc?hostOf(t.url):'')}</div>
+          <div class="wlink-state" data-mon="${t.monitor||''}"></div>
+        </div>
+      </a>`;
+    cont.appendChild(el);
+  });
+}
+function hostOf(u){ try{ return new URL(u).host; }catch(e){ return String(u||''); } }
+
+/* Heartbeat state is already fetched for the dashboard's own widget; the tiles
+   read the same response rather than each polling for themselves. */
+function paintLinkStates(monitors){
+  const byId={}; (monitors||[]).forEach(m=>{ byId[String(m.id)]=m; });
+  document.querySelectorAll('.wlink-state[data-mon]').forEach(el=>{
+    const id=el.getAttribute('data-mon'); if(!id){ el.textContent=''; return; }
+    const m=byId[id];
+    if(!m){ el.innerHTML='<span class="muted">monitor gone</span>'; return; }
+    const st=hbStatusOf(m);
+    const ms=(m.last_ms!=null)?` · ${m.last_ms} ms`:'';
+    el.innerHTML=`<span class="hbpill ${st==='disabled'?'paused':st}">${st==='disabled'?'paused':st}</span>${ms}`;
+  });
+}
+
+function saveDashLayout(){
+  const cont=dashCont(); if(!cont) return blankLayout();
+  const L=getDashLayout();
+  L.order=[...cont.querySelectorAll('.widget[data-wkey]')].map(w=>w.getAttribute('data-wkey'));
+  L.hidden=[...cont.querySelectorAll('.widget.w-hidden[data-wkey]')].map(w=>w.getAttribute('data-wkey'));
+  const sel=document.getElementById('dashCols');
+  if(sel) L.cols=Math.max(1, Math.min(4, parseInt(sel.value,10)||2));
+  return L;
+}
 function getDragAfterElement(container, y){
   const els=[...container.querySelectorAll('.widget:not(.dragging)')];
   let closest={offset:-Infinity, el:null};
@@ -794,12 +945,80 @@ function initDashDrag(){
 }
 function setEditLayout(on){
   document.body.classList.toggle('edit-layout', on);
-  document.getElementById('dashSaveLayout').style.display=on?'':'none';
-  document.getElementById('dashResetLayout').style.display=on?'':'none';
-  document.getElementById('dashEditLayout').style.display=on?'none':'';
-  document.getElementById('dashLayoutMsg').textContent=on?'Drag widgets to any position, then SAVE':'';
+  const show=(id,v)=>{ const el=document.getElementById(id); if(el) el.style.display=v?'':'none'; };
+  show('dashSaveLayout', on); show('dashResetLayout', on);
+  show('dashColsWrap', on);
+  show('dashEditLayout', !on);
+  document.getElementById('dashLayoutMsg').textContent=on
+    ? 'Drag to reorder, ✕ to hide — anything hidden is listed below to bring back — then SAVE'
+    : '';
+  decorateWidgets(on);
+  renderHiddenChips(on);
   if(on) initDashDrag();
-  else { const cont=document.getElementById('dashWidgets'); if(cont) cont.querySelectorAll('.widget').forEach(w=>w.draggable=false); }
+  else { const cont=dashCont(); if(cont) cont.querySelectorAll('.widget').forEach(w=>w.draggable=false); }
+}
+
+/* One ✕ per widget, added only while editing so the chrome never shows in
+   normal use.
+
+   It hides, it does not delete. Nothing on this dashboard can be created any
+   more, so nothing on it should be destroyable either -- a widget put away by
+   mistake has to be one click from coming back, and the row of chips under
+   the tools is where it waits. */
+function decorateWidgets(on){
+  const cont=dashCont(); if(!cont) return;
+  cont.querySelectorAll('.wtools').forEach(b=>b.remove());
+  if(!on) return;
+  cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
+    const key=w.getAttribute('data-wkey');
+    const bar=document.createElement('div');
+    bar.className='wtools';
+    const btn=document.createElement('button');
+    btn.type='button'; btn.className='wtool wkill';
+    btn.title='Hide this widget';
+    btn.textContent='✕';
+    btn.onclick=(e)=>{
+      e.stopPropagation(); e.preventDefault();
+      const L=getDashLayout();
+      L.hidden=Array.from(new Set((L.hidden||[]).concat([key])));
+      putDashLayout(L); applyDashLayout(); decorateWidgets(true);
+      renderHiddenChips(true); initDashDrag();
+    };
+    bar.appendChild(btn);
+    w.appendChild(bar);
+  });
+}
+
+/* What a hidden widget is called, so the chip offering it back is readable:
+   a link tile's own title first, otherwise the heading it renders with. */
+function widgetLabel(key){
+  const L=getDashLayout();
+  const tile=(L.links||[]).find(t=>t.key===key);
+  if(tile) return tile.title||tile.url||key;
+  const w=document.querySelector('.widget[data-wkey="'+key+'"]');
+  const el=w?w.querySelector('.wtitle, h3, .secthead'):null;
+  const t=el?el.textContent.trim():'';
+  return t||key.replace(/^link:/,'');
+}
+
+/* The hidden ones, listed while editing. This is the only way back, so it
+   only appears when there is something to bring back. */
+function renderHiddenChips(on){
+  const box=document.getElementById('dashHidden'); if(!box) return;
+  const hidden=(getDashLayout().hidden||[]);
+  if(!on||!hidden.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='';
+  box.innerHTML='<span class="dh-label">Hidden</span>'+hidden.map(k=>
+    '<button type="button" class="dh-chip" data-k="'+esc(k)+'" title="Show this widget again">'+
+    '<span class="dh-eye">+</span>'+esc(widgetLabel(k))+'</button>').join('');
+  box.querySelectorAll('.dh-chip').forEach(b=>{
+    b.onclick=()=>{
+      const L=getDashLayout();
+      L.hidden=(L.hidden||[]).filter(k=>k!==b.dataset.k);
+      putDashLayout(L); applyDashLayout(); decorateWidgets(true);
+      renderHiddenChips(true); initDashDrag();
+    };
+  });
 }
 
 /* ---------- modal / crud ---------- */
@@ -819,6 +1038,15 @@ async function openModal(id,prefill){
     if(c==='NotesReceived')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(set automatically at Check Out)</span></label><input id="f_${c}" type="date" value="${esc(val)}" readonly disabled></div>`;
     if(c==='ReceivedBy')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(set automatically at Check Out)</span></label><input id="f_${c}" value="${esc(val)}" readonly disabled></div>`;
     if(c==='Price')return`<div class="field2"><label>${LABELS[c]||c} (${CURRENCY})</label><input id="f_${c}" type="number" step="0.01" min="0" value="${esc(val)}"></div>`;
+    // "24" in a box says nothing -- months or years? The column is
+    // WarrantyMonths and every readout ("24 mo", the expiry KPI, the tag)
+    // is months, so the form has to say so and show what it works out to.
+    if(c==='WarrantyMonths')return`<div class="field2"><label>${LABELS[c]||c} <span class="muted" style="font-weight:400">(in months)</span></label><input id="f_${c}" type="number" min="0" max="600" step="1" value="${esc(val)}" placeholder="12" oninput="warrantyHint()"><div class="fhint" id="warrHint"></div></div>`;
+    // a picker, so the value is always the ISO date the warranty maths and
+    // the "expiring in 30 days" count both parse. Typed text stays text --
+    // an existing "15/09/2026" would vanish from a date input and a save
+    // would then wipe it.
+    if(c==='PurchaseDate')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" ${(!val||/^\d{4}-\d{2}-\d{2}$/.test(val))?'type="date" ':''}value="${esc(val)}" oninput="warrantyHint()"></div>`;
     return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" value="${esc(val)}"></div>`;
   };
   const groups=[
@@ -856,6 +1084,7 @@ async function openModal(id,prefill){
         ${inv?`<a class="btn sm ghost" href="/invoice/${esc(inv)}" target="_blank">VIEW</a><button class="btn sm danger" type="button" onclick="delInvoice('${editingId}')">REMOVE</button>`:'<span class="muted">none yet</span>'}
       </div>
     </div>`;
+  warrantyHint();
   const histWrap=document.getElementById('histWrap');
   if(histWrap)histWrap.style.display=id?'':'none';
   document.getElementById('maintWrap').style.display=id?'':'none';
@@ -974,193 +1203,6 @@ async function loadAssetHistory(id){
   const r=await api('/api/assets/'+id+'/history'); if(!r)return; const h=await r.json();
   box.innerHTML = h.length? h.map(e=>`<div class="hist"><span class="hfield">${esc(e.field)}</span> <span class="hold">${esc(e.old_val||'—')}</span> → <span class="hnew">${esc(e.new_val||'—')}</span> <span class="hmeta">${esc(e.user)} · ${esc(e.ts)}</span></div>`).join('') : '<div class="muted">No history yet.</div>';
 }
-// ---------- Camera scan (QR / barcode) -> Add Asset form ----------
-let camScanStream=null, camScanLoopId=null, camScanDetector=null, camScanBusy=false;
-async function getCamScanDetector(){
-  if(camScanDetector) return camScanDetector;
-  if(!('BarcodeDetector' in window)) return null;
-  const formats=['qr_code','code_128','code_39','code_93','codabar','ean_13','ean_8','itf','upc_a','upc_e','data_matrix','pdf417'];
-  try{ camScanDetector=new BarcodeDetector({formats}); }
-  catch(e){ try{ camScanDetector=new BarcodeDetector({formats:['qr_code']}); }catch(e2){ return null; } }
-  return camScanDetector;
-}
-async function openCamScan(){
-  const status=document.getElementById('camScanStatus'); status.textContent='';
-  document.getElementById('camScanModal').classList.add('show');
-  const det=await getCamScanDetector();
-  if(!det){
-    status.textContent='✕ This browser doesn\'t support camera barcode scanning (try Chrome or Edge) -- use "Upload Photo Instead", or type the value in manually.';
-    return;
-  }
-  try{
-    camScanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});
-    const vid=document.getElementById('camScanVideo');
-    vid.srcObject=camScanStream;
-    status.textContent='Point the camera at a QR code or barcode…';
-    const tick=async()=>{
-      if(!camScanStream)return;
-      if(!camScanBusy){
-        camScanBusy=true;
-        try{
-          const codes=await det.detect(vid);
-          if(codes && codes.length){ await onCamScanDecoded(codes[0].rawValue); return; }
-        }catch(e){}
-        camScanBusy=false;
-      }
-      camScanLoopId=requestAnimationFrame(tick);
-    };
-    camScanLoopId=requestAnimationFrame(tick);
-  }catch(e){
-    status.textContent='✕ Could not access the camera ('+(e.message||e.name||'permission denied')+') -- use "Upload Photo Instead".';
-  }
-}
-function closeCamScan(){
-  if(camScanLoopId){ cancelAnimationFrame(camScanLoopId); camScanLoopId=null; }
-  if(camScanStream){ camScanStream.getTracks().forEach(t=>t.stop()); camScanStream=null; }
-  camScanBusy=false;
-  document.getElementById('camScanModal').classList.remove('show');
-}
-async function onCamScanDecoded(text){
-  closeCamScan();
-  const status=document.getElementById('camScanStatus');
-  if(!text){ return; }
-  // 1) this app's own printed asset QR (http://host/asset/<id>) -- open that
-  //    existing asset for editing instead of prefilling a duplicate
-  const m=text.match(/\/asset\/([a-f0-9]{8,40})\b/i);
-  if(m && assets.some(a=>a._id===m[1])){
-    toast('✓ SCANNED — opened existing asset');
-    openModal(m[1]);
-    return;
-  }
-  // 2) a QR payload that itself carries structured asset data as JSON
-  let obj=null;
-  try{ const p=JSON.parse(text); if(p && typeof p==='object') obj=p; }catch(e){}
-  if(obj){
-    await applyScannedFields(obj);
-    toast('✓ SCANNED — form filled from QR data');
-    return;
-  }
-  // 3) otherwise treat the raw decoded text as a serial number (the common
-  //    case: a manufacturer's SN barcode/QR sticker)
-  const f=document.getElementById('f_Serial');
-  if(f){ f.value=text; toast('✓ SCANNED — Serial Number filled'); }
-  else{ toast('✓ SCANNED: '+text); }
-}
-async function applyScannedFields(obj){
-  const norm={}; Object.keys(obj).forEach(k=>norm[k.toLowerCase().replace(/[^a-z0-9]/g,'')]=obj[k]);
-  const pick=(...keys)=>{ for(const k of keys){ if(norm[k]!=null && norm[k]!=='') return String(norm[k]); } return ''; };
-  const name=pick('name','assetname','device','devicename');
-  const serial=pick('serial','serialnumber','sn','serialno');
-  const mac=pick('mac','macaddress');
-  const type=pick('type','category','itemcategory');
-  const mfr=pick('manufacturer','brand','make');
-  const model=pick('model');
-  const loc=pick('location','site');
-  if(name && document.getElementById('f_Name')) document.getElementById('f_Name').value=name;
-  if(serial && document.getElementById('f_Serial')) document.getElementById('f_Serial').value=serial;
-  if(mac && document.getElementById('f_MacAddress')) document.getElementById('f_MacAddress').value=mac;
-  if(type && document.getElementById('f_Type')) await loadCategoryOptions(type);
-  if(loc && document.getElementById('f_Location')) await loadLocationOptions(loc);
-  if(mfr || model) await loadMfrModelOptions(mfr, model);
-}
-async function camScanFromFile(file){
-  const status=document.getElementById('camScanStatus');
-  const det=await getCamScanDetector();
-  if(!det){ status.textContent='✕ This browser doesn\'t support barcode scanning (try Chrome or Edge).'; return; }
-  status.textContent='Reading photo…';
-  try{
-    const bmp=await createImageBitmap(file);
-    const codes=await det.detect(bmp);
-    if(codes && codes.length){ await onCamScanDecoded(codes[0].rawValue); }
-    else { status.textContent='✕ No QR/barcode found in that photo -- try again or type the value manually.'; }
-  }catch(e){
-    status.textContent='✕ Could not read that photo ('+(e.message||e.name||'error')+').';
-  }
-}
-document.getElementById('camScanBtn').onclick=openCamScan;
-document.getElementById('camScanCancel').onclick=closeCamScan;
-document.getElementById('camScanUploadBtn').onclick=()=>document.getElementById('camScanUploadFile').click();
-document.getElementById('camScanUploadFile').onchange=(e)=>{
-  const f=e.target.files[0]; e.target.value='';
-  if(f) camScanFromFile(f);
-};
-
-// ---------- OCR (read a printed label's text -- S/N, Model, MAC -- not just QR/barcode) ----------
-// Loaded on demand (only when the user actually taps "Scan Text") rather than
-// on every page load, since it's a ~2MB library most visits never touch.
-let _tesseractLoadPromise=null;
-function loadTesseract(){
-  if(window.Tesseract) return Promise.resolve();
-  if(_tesseractLoadPromise) return _tesseractLoadPromise;
-  _tesseractLoadPromise=new Promise((resolve,reject)=>{
-    const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
-    s.onload=()=>resolve();
-    s.onerror=()=>{ _tesseractLoadPromise=null; reject(new Error('could not load the text-recognition library (check your internet connection)')); };
-    document.head.appendChild(s);
-  });
-  return _tesseractLoadPromise;
-}
-// Mirrors the Android app's OCR label parser: same-line "KEY: VALUE" lines,
-// plus the common two-line layout (label alone on one line, value on the
-// next) that's typical on printed asset stickers.
-function ocrParseFields(text){
-  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-  function findLabeled(aliasesLongestFirst){
-    const escaped=aliasesLongestFirst.map(a=>a.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'));
-    const sameLine=new RegExp('\\b('+escaped.join('|')+')\\b\\.?\\s*[:\\-]\\s*(.+)','i');
-    for(const line of lines){
-      const m=line.match(sameLine);
-      if(m){ const v=(m[2]||'').trim(); if(v) return v; }
-    }
-    for(let i=0;i<lines.length;i++){
-      const norm=lines[i].replace(/:$/,'').trim().toLowerCase();
-      if(aliasesLongestFirst.some(a=>a.toLowerCase()===norm) && i+1<lines.length){
-        const v=lines[i+1].trim(); if(v) return v;
-      }
-    }
-    return '';
-  }
-  const serial=findLabeled(['serial number','serial no','serial#','s/n','sno','sn','serial']);
-  const model=findLabeled(['model number','model no','model']);
-  const manufacturer=findLabeled(['manufacturer','brand','make']);
-  let mac=findLabeled(['mac address','mac id','mac']);
-  if(!mac){ const mm=text.match(/([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/); if(mm) mac=mm[0]; }
-  return {serial, model, manufacturer, mac};
-}
-async function captureAndReadText(){
-  const status=document.getElementById('camScanStatus');
-  const vid=document.getElementById('camScanVideo');
-  const btn=document.getElementById('camScanTextBtn');
-  if(!camScanStream || !vid.videoWidth){ status.textContent='✕ Camera not ready yet -- wait a moment and try again.'; return; }
-  btn.disabled=true;
-  status.textContent='Loading text reader…';
-  try{
-    await loadTesseract();
-    const canvas=document.getElementById('camScanCanvas');
-    canvas.width=vid.videoWidth; canvas.height=vid.videoHeight;
-    canvas.getContext('2d').drawImage(vid,0,0,canvas.width,canvas.height);
-    status.textContent='Reading label…';
-    const { data }=await Tesseract.recognize(canvas,'eng');
-    const text=(data&&data.text)||'';
-    if(!text.trim()){ status.textContent='✕ No text found on that label -- try getting closer or better lighting.'; return; }
-    const f=ocrParseFields(text);
-    const obj={};
-    if(f.serial) obj.serial=f.serial;
-    if(f.model) obj.model=f.model;
-    if(f.manufacturer) obj.manufacturer=f.manufacturer;
-    if(f.mac) obj.mac=f.mac;
-    if(!Object.keys(obj).length){ status.textContent='✕ Couldn\'t recognize S/N, Model, or MAC on that label -- try getting closer or better lighting.'; return; }
-    closeCamScan();
-    await applyScannedFields(obj);
-    toast('✓ Filled from label: '+Object.keys(obj).join(', '));
-  }catch(e){
-    status.textContent='✕ Text recognition failed: '+(e.message||e);
-  }finally{
-    btn.disabled=false;
-  }
-}
-document.getElementById('camScanTextBtn').onclick=captureAndReadText;
 
 async function fetchEmployees(selEmpId,selReqId){
   const r=await api('/api/employees');
@@ -1217,7 +1259,7 @@ async function saveModal(){
     }else if(r){toast('✕ '+await apiError(r));}
   }
 }
-function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;closeCamScan();}
+function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;}
 
 /* ---------- checkout / checkin / maint / qr ---------- */
 async function doCheckout(){
@@ -1296,6 +1338,7 @@ async function printAsset(id){
   const fields=[...visCols(),'Price','WarrantyMonths','NotesReceived','Notes','ReceivedBy'].filter(f=>f!=='EmployeeID');
   const seen=new Set(); const rowsHtml=fields.filter(f=>!seen.has(f)&&seen.add(f)).map(f=>{
     let v=a[f]; if(f==='Price')v=fmtMoney(a.Price||0,CURRENCY); if(v==null||v==='')v='—';
+    if(f==='WarrantyMonths'&&v!=='—'){ const w=warrantyEnd(a); v=v+' months'+(w?' — covered until '+w.end:''); }
     return `<tr><td class="k">${esc(LABELS[f]||f)}</td><td class="v">${esc(v)}</td></tr>`;
   }).join('') + (a.EmployeeID ? `
     <tr><td class="k">Employee Name</td><td class="v">${esc((emp&&emp.EmployeeName)||a.EmployeeID)}</td></tr>
@@ -1322,6 +1365,174 @@ async function printAsset(id){
   w.document.close();
 }
 
+
+/* ---------- tag model ---------- */
+/* Which tag gets printed. The plate models have no fields and no notice, so
+   the field checkboxes are put away while one is selected rather than left
+   sitting there doing nothing. */
+const TAG_MODELS = ['detail','plate','banner','sidebar','edge'];
+/* Only three of the five are printed in a colour, and only four of them use
+   the text field, so the inputs that do nothing for the chosen model are put
+   away rather than left sitting there looking connected. */
+const TAG_COLOURED = ['banner','sidebar','edge'];
+let TAG_MODEL = 'detail';
+function applyTagModel(model, caption){
+  TAG_MODEL = TAG_MODELS.includes(model) ? model : 'detail';
+  const cap = document.getElementById('label_caption');
+  if (cap && typeof caption === 'string' && !cap.dataset._touched) cap.value = caption;
+  document.querySelectorAll('#tagModelGrid .preset-card').forEach(b => {
+    b.classList.toggle('active', b.dataset.model === TAG_MODEL);
+  });
+  const show = (id, on) => { const el = document.getElementById(id); if (el) el.style.display = on ? '' : 'none'; };
+  show('labelFieldsPanel', TAG_MODEL === 'detail');
+  show('labelCaptionWrap', TAG_MODEL !== 'detail');
+  show('labelColorWrap', TAG_COLOURED.includes(TAG_MODEL));
+}
+document.addEventListener('click', e => {
+  const card = e.target.closest ? e.target.closest('#tagModelGrid .preset-card') : null;
+  if (!card) return;
+  const cap = document.getElementById('label_caption');
+  // picking a model offers the text that model is usually printed with; typing
+  // over it sticks, because the next organisation says something else
+  if (cap && card.dataset.model !== 'detail'){ cap.value = card.dataset.caption; delete cap.dataset._touched; }
+  applyTagModel(card.dataset.model, cap ? cap.value : '');
+});
+document.addEventListener('input', e => {
+  if (e.target && e.target.id === 'label_caption'){
+    e.target.dataset._touched = '1';
+    applyTagModel(TAG_MODEL, e.target.value);
+  }
+});
+
+/* ---------- lost & found ---------- */
+/* A report is a stranger's phone number and nothing else -- the whole value
+   of this page is that somebody rings them back. So the number is the one
+   thing that is a tap-to-call link on a phone, and the status is a control
+   rather than a label, because reading a list is not the job. */
+let LF_ROWS=[];
+const LF_STATUS={
+  lost:    {label:'LOST',     cls:'lf-lost'},
+  found:   {label:'FOUND',    cls:'lf-found'},
+  returned:{label:'RETURNED', cls:'lf-returned'}
+};
+async function loadLostFound(){
+  const r=await api('/api/lostfound');
+  LF_ROWS=r&&r.ok?await r.json():[];
+  renderLostFound();
+}
+function renderLostFound(){
+  const body=document.getElementById('lfBody'); if(!body)return;
+  const want=(document.getElementById('lfFilter')||{value:''}).value;
+  const rows=LF_ROWS.filter(r=>!want||(r.status||'found')===want);
+  const empty=document.getElementById('lfEmpty');
+  if(empty)empty.style.display=rows.length?'none':'block';
+  body.innerHTML=rows.map(r=>{
+    const st=LF_STATUS[r.status||'found']||LF_STATUS.found;
+    const who=r.finder_name
+      ? `<div class="lf-who">${esc(r.finder_name)}</div>`+
+        `<a class="lf-tel" href="tel:${esc((r.finder_mobile||'').replace(/[^\d+]/g,''))}">${esc(r.finder_mobile||'')}</a>`+
+        (r.finder_note?`<div class="lf-note">${esc(r.finder_note)}</div>`:'')
+      : '<span class="muted">reported by staff</span>';
+    const opts=Object.keys(LF_STATUS).map(k=>
+      `<option value="${k}" ${((r.status||'found')===k)?'selected':''}>${LF_STATUS[k].label}</option>`).join('');
+    return `<tr>
+      <td class="mono">${esc(r.ref||('LF-'+r.id))}</td>
+      <td><div class="lf-asset">${esc(r.asset_name||'(deleted asset)')}</div>
+          <div class="mono muted" style="font-size:11px">${esc(r.asset_tag||'')}</div></td>
+      <td><div>${esc((r.reported_at||'').slice(0,16))}</div>
+          <div class="muted" style="font-size:11px">${r.kind==='lost'?'logged by staff':'scanned the tag'}</div></td>
+      <td>${who}</td>
+      <td><span class="lf-badge ${st.cls}">${st.label}</span>
+          <select class="lf-set" data-id="${r.id}">${opts}</select></td>
+      <td><button class="btn sm danger lf-del" data-id="${r.id}">🗑</button></td>
+    </tr>`;
+  }).join('');
+  body.querySelectorAll('.lf-set').forEach(sel=>{
+    sel.onchange=async()=>{
+      const r=await api('/api/lostfound/'+sel.dataset.id,{method:'PATCH',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({status:sel.value})});
+      if(r&&r.ok){ toast('✓ STATUS UPDATED'); loadLostFound(); }
+      else toast('✕ could not update that');
+    };
+  });
+  body.querySelectorAll('.lf-del').forEach(btn=>{
+    btn.onclick=async()=>{
+      if(!confirm('Delete this report? The asset itself is not touched.'))return;
+      const r=await api('/api/lostfound/'+btn.dataset.id,{method:'DELETE'});
+      if(r&&r.ok){ toast('✓ REPORT DELETED'); loadLostFound(); }
+    };
+  });
+}
+function bindLostFound(){
+  const f=document.getElementById('lfFilter'); if(f)f.onchange=renderLostFound;
+  const rf=document.getElementById('lfRefreshBtn'); if(rf)rf.onclick=loadLostFound;
+  const lb=document.getElementById('lfLostBtn');
+  if(lb)lb.onclick=openLostModal;
+  const lc=document.getElementById('lmCancel');
+  if(lc)lc.onclick=()=>document.getElementById('lostModal').classList.remove('show');
+  const ls=document.getElementById('lmSave');
+  if(ls)ls.onclick=saveLostReport;
+}
+/* Typing an asset tag into a prompt() box meant knowing the tag by heart and
+   getting no second chance at a typo. Same modal shape as an asset or a
+   contract, and the asset is picked from a list. */
+async function openLostModal(){
+  const sel=document.getElementById('lm_asset');
+  const note=document.getElementById('lm_note');
+  if(!sel)return;
+  note.value='';
+  sel.innerHTML='<option value="">-- select asset --</option>';
+  const r=await api('/api/assets');
+  const list=r&&r.ok?await r.json():[];
+  (list.items||list).filter(a=>a.Status!=='Lost/Stolen')
+    .sort((a,b)=>(a.AssetTag||'').localeCompare(b.AssetTag||''))
+    .forEach(a=>{
+      const o=document.createElement('option');
+      o.value=a.AssetTag||a._id;
+      o.textContent=(a.AssetTag?a.AssetTag+' — ':'')+(a.Name||'(no name)')
+        +(a.EmployeeID?'  ·  '+a.EmployeeID:'');
+      sel.appendChild(o);
+    });
+  document.getElementById('lostModal').classList.add('show');
+}
+async function saveLostReport(){
+  const sel=document.getElementById('lm_asset');
+  const ref=sel.value.trim();
+  if(!ref){ toast('✕ PICK AN ASSET FIRST'); sel.focus(); return; }
+  const btn=document.getElementById('lmSave'); btn.disabled=true;
+  const r=await api('/api/lostfound',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({asset:ref,note:document.getElementById('lm_note').value.trim()})});
+  btn.disabled=false;
+  if(r&&r.ok){
+    document.getElementById('lostModal').classList.remove('show');
+    toast('✓ LOGGED AS LOST'); loadLostFound();
+  } else {
+    const j=r?await r.json().catch(()=>({})):{};
+    toast('✕ '+(j.error||'could not log that'));
+  }
+}
+bindLostFound();
+
+/* ---------- notification types ---------- */
+/* Rendered from what the server says it can send, so adding a notification in
+   python does not need a second edit here to make it switchable. */
+let NOTIF_PREFS={};
+function renderNotifTypes(s){
+  const box=document.getElementById('notifTypes'); if(!box)return;
+  const cat=s.notify_catalog||[]; NOTIF_PREFS=s.notify_types||{};
+  box.innerHTML=cat.map(t=>
+    `<label class="toggle ntype"><input type="checkbox" data-nk="${t.key}" ${
+      (NOTIF_PREFS[t.key]!==false)?'checked':''}><span>${esc(t.label)}</span>
+      <code class="nkey">${esc(t.key)}</code></label>`).join('');
+}
+function collectNotifTypes(){
+  const box=document.getElementById('notifTypes');
+  const out={};
+  if(!box)return NOTIF_PREFS;
+  box.querySelectorAll('input[data-nk]').forEach(i=>{ out[i.dataset.nk]=i.checked; });
+  return out;
+}
 
 /* ---------- audit ---------- */
 let _auditRows=[];
@@ -1516,12 +1727,21 @@ async function wireUpdateCheck(){
                     : 'One click pulls the new code, installs any new requirements and restarts. Your database is untouched.')
                 : 'One-click updating needs Watchtower running alongside IT-Vault — a container can\'t replace itself. Click UPDATE NOW for the exact steps, or copy the command and run it yourself.'
             }</div>
-            ${cmd?`<pre class="mono updlog" id="updCmd">${esc(cmd)}</pre>`:''}
+            ${cmd?`<pre class="mono updlog updcmd" id="updCmd" title="Click to copy">${esc(cmd)}</pre>`:''}
             <div id="updLive" style="margin-top:8px"></div>
           </div>`;
         const live=document.getElementById('updLive');
         const nowBtn=document.getElementById('updNowBtn');
         if(nowBtn) nowBtn.onclick=()=>applyUpdate(nowBtn, live, j.current);
+        const copyCmd=async(el,done,back)=>{
+          try{
+            await navigator.clipboard.writeText(cmd);
+            if(el){el.textContent=done;setTimeout(()=>{el.textContent=back;},1800);}
+            else toast('✓ COPIED');
+          }catch(e){ toast('✕ Copy failed — select and copy manually'); }
+        };
+        const pre=document.getElementById('updCmd');
+        if(pre) pre.onclick=()=>copyCmd(null);
         const cp=document.getElementById('updCopyBtn');
         if(cp) cp.onclick=async()=>{
           try{
@@ -1916,8 +2136,7 @@ async function loadSettings(){
     document.getElementById('s_from').value=s.smtp_from||'';
     document.getElementById('s_user').value=s.smtp_user||'';
     document.getElementById('s_pass').value=s.smtp_pass||'';
-    document.getElementById('uNew').checked=s.notify_new!==0;
-    document.getElementById('uDel').checked=s.notify_delete!==0;
+    renderNotifTypes(s);
     document.getElementById('b_name').value=s.app_name||'IT-Vault';
     document.getElementById('b_logoText').value=s.logo_text||'IT-Vault';
     document.getElementById('b_phone').value=s.company_phone||'';
@@ -1927,6 +2146,16 @@ async function loadSettings(){
     if(document.getElementById('qr_size'))document.getElementById('qr_size').value=(s.qr_size||160).toString();
     if(document.getElementById('label_size'))document.getElementById('label_size').value=(s.label_size||'50x19');
     if(document.getElementById('label_logo'))document.getElementById('label_logo').checked=(s.label_logo!=0);
+    const _lc=document.getElementById('label_color');
+    if(_lc) _lc.value = s.label_color || '#000000';
+    const _ls=document.getElementById('label_logo_size');
+    if(_ls) _ls.value = s.label_logo_size || 'md';
+    [['label_show_name', s.label_show_name], ['label_show_contact', s.label_show_contact],
+     ['label_show_asset', s.label_show_asset]].forEach(([id, v]) => {
+      const el = document.getElementById(id);
+      if (el) el.checked = !!Number(v);
+    });
+    applyTagModel(s.label_model||'detail', s.label_caption||'Asset No.');
     const chosenFields=(s.qr_fields||'Name,AssetID,Type,Serial,Status,Location').split(',').map(f=>f.trim()).filter(Boolean);
     LABEL_FIELD_KEYS.forEach(k=>{ const cb=document.getElementById('lf_'+k); if(cb && !cb.disabled) cb.checked=chosenFields.includes(k); });
   }
@@ -1962,7 +2191,7 @@ function applyTheme(t){
   document.body.classList.toggle('light', t === 'light');
 }
 async function saveSettings(){
-  const body={matrix_on:(document.getElementById('matrixOn')||{checked:false}).checked?1:0,smtp_host:document.getElementById('s_host').value.trim(),smtp_port:parseInt(document.getElementById('s_port').value||'587',10),smtp_from:document.getElementById('s_from').value.trim(),smtp_user:document.getElementById('s_user').value.trim(),smtp_pass:document.getElementById('s_pass').value,notify_new:document.getElementById('uNew').checked?1:0,notify_delete:document.getElementById('uDel').checked?1:0};
+  const body={matrix_on:(document.getElementById('matrixOn')||{checked:false}).checked?1:0,smtp_host:document.getElementById('s_host').value.trim(),smtp_port:parseInt(document.getElementById('s_port').value||'587',10),smtp_from:document.getElementById('s_from').value.trim(),smtp_user:document.getElementById('s_user').value.trim(),smtp_pass:document.getElementById('s_pass').value,notify_types:collectNotifTypes()};
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ SETTINGS SAVED');}
   else if(r){toast('✕ '+await apiError(r));}
@@ -2008,7 +2237,13 @@ async function applyBranding(){
   const nm=me.app_name||me.display||'IT-Vault';
   window.APP_NAME=nm;
   window.HAS_LETTERHEAD=!!me.has_letterhead;
-  document.getElementById('sideName').textContent=nm;
+  // The sidebar shows Logo Text, which is a separate setting from the
+  // organisation name -- that is the whole point of having both, and the
+  // field is even labelled "Logo Text (sidebar)". It was being ignored,
+  // so the sidebar always read the company name.
+  const sideText=(me.logo_text||'').trim()||nm;
+  window.SIDE_TEXT=sideText;
+  document.getElementById('sideName').textContent=sideText;
   document.title=nm+' // Assets Manager';
   const sideLogo=document.getElementById('sideLogo');
   if(sideLogo){
@@ -2020,7 +2255,7 @@ async function applyBranding(){
   if(loginLogo){ loginLogo.src='/logo.png?t='+Date.now(); loginLogo.style.display=''; }
   const logoPrev=document.getElementById('b_logoPrev');
   if(logoPrev){ logoPrev.src='/logo.png?t='+Date.now(); }
-  const st=document.getElementById('sideName'); if(st) st.textContent=nm;
+  const st=document.getElementById('sideName'); if(st) st.textContent=sideText;
   // rebrand any static "IT GUY / ..." crumb text
   const crumbPrefix='IT GUY';
   document.querySelectorAll('.crumb').forEach(el=>{
@@ -2034,7 +2269,14 @@ async function saveLabel(){
     qr_size: document.getElementById('qr_size').value,
     qr_fields: fields.join(','),
     label_size: document.getElementById('label_size').value.trim(),
-    label_logo: document.getElementById('label_logo').checked ? 1 : 0
+    label_logo: document.getElementById('label_logo').checked ? 1 : 0,
+    label_model: TAG_MODEL,
+    label_caption: (document.getElementById('label_caption')||{value:''}).value.trim(),
+    label_color: (document.getElementById('label_color')||{value:'#000000'}).value,
+    label_logo_size: (document.getElementById('label_logo_size')||{value:'md'}).value,
+    label_show_name: (document.getElementById('label_show_name')||{}).checked ? 1 : 0,
+    label_show_contact: (document.getElementById('label_show_contact')||{}).checked ? 1 : 0,
+    label_show_asset: (document.getElementById('label_show_asset')||{}).checked ? 1 : 0
   };
   const r=await api('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r&&r.ok){toast('✓ LABEL SETTINGS SAVED');}
@@ -2113,7 +2355,7 @@ const HB_KIND_HINT={
   dns:'Resolves the name and fails if it stops resolving. Worth having on anything whose DNS you depend on but do not control.'
 };
 const HB_CHAN_HINT={
-  email:'Email uses the SMTP server and notification address already configured in Settings.',
+  email:'Uses the SMTP server configured above. Leave Send to empty and it goes to every user with an email on their profile.',
   webhook:'Every alert is POSTed as JSON: event, monitor, target, status, error and the message text. Point it at whatever you already run.',
   slack:'Create an incoming webhook in Slack (Apps ▸ Incoming Webhooks) and paste the URL here.',
   telegram:'Talk to @BotFather to create a bot and get its token, then add the bot to the chat and use that chat id.'
@@ -2203,8 +2445,6 @@ async function loadHeartbeat(){
   const j=await r.json().catch(()=>null);
   if(!j){ st.textContent='✕ could not read monitor status'; return; }
   HB=j; st.textContent='';
-  const cb=document.getElementById('hbChanBtn');
-  if(cb) cb.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
   renderHeartbeat();
   if(hbDetailId) loadHbDetail(hbDetailId, true);
 }
@@ -2333,9 +2573,12 @@ function hbChanChecklist(selected){
   const chans=(HB.channels||[]);
   if(!chans.length){
     box.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';
+    // channels are configured in one place now, so point at it rather than
+    // opening a second copy of the same form from here
     list.innerHTML='<p class="muted" style="margin:0">No channels set up yet. '
-      +'<a class="mlink" onclick="openHbChannels()">Add one ↗</a> or leave this alone and '
-      +'alerts go to the notification address in Settings.</p>';
+      +'<a class="mlink" onclick="goToNotificationSettings()">'
+      +'Set them up in Settings ▸ Notifications ↗</a>, or leave this alone and '
+      +'alerts go to everyone with an email on their profile.</p>';
     return;
   }
   box.style.display='';
@@ -2530,8 +2773,22 @@ function hbSparkChart(series){
 }
 
 // ---- alert channels ---------------------------------------------------
+// One hop from wherever notifications are mentioned to the page that owns
+// them, so nothing has to reproduce the navigation inline.
+window.goToNotificationSettings=()=>{
+  showPage('page-usettings');
+  // click the real nav item rather than toggling display directly, so the
+  // sidebar highlight follows too
+  const item=document.querySelector('.cfgitem[data-sec="notif"]');
+  if(item) item.click();
+  const sec=document.querySelector('.cfg-sec[data-sec="notif"]');
+  if(sec) sec.scrollIntoView({behavior:'smooth', block:'start'});
+};
+
+// The channel list lives in Settings > Notifications now rather than behind a
+// button on the Heartbeat page: one page that owns every notification, instead
+// of alerts being configured somewhere separate from everything else.
 window.openHbChannels=async()=>{
-  document.getElementById('hbChanModal').classList.add('show');
   hbcReset();
   await loadHbChannels();
 };
@@ -2563,6 +2820,7 @@ async function loadHbChannels(){
 function hbcKindUI(){
   const k=document.getElementById('hbc_kind').value;
   const show=(id,on)=>{document.getElementById(id).style.display=on?'':'none';};
+  show('hbc_toWrap', k==='email');
   show('hbc_urlWrap', k==='webhook'||k==='slack');
   show('hbc_tokenWrap', k==='telegram');
   show('hbc_chatWrap', k==='telegram');
@@ -2572,7 +2830,7 @@ function hbcKindUI(){
 function hbcReset(){
   hbChanEditId=null;
   document.getElementById('hbChanFormTitle').textContent='ADD A CHANNEL';
-  ['hbc_name','hbc_url','hbc_token','hbc_chat'].forEach(id=>document.getElementById(id).value='');
+  ['hbc_name','hbc_to','hbc_url','hbc_token','hbc_chat'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('hbc_kind').value='email';
   document.getElementById('hbc_enabled').checked=true;
   document.getElementById('hbcReset').style.display='none';
@@ -2586,6 +2844,7 @@ window.hbcEdit=(id)=>{
   document.getElementById('hbChanFormTitle').textContent='EDIT CHANNEL';
   document.getElementById('hbc_name').value=c.name||'';
   document.getElementById('hbc_kind').value=c.kind||'email';
+  document.getElementById('hbc_to').value=cfg.to||'';
   document.getElementById('hbc_url').value=cfg.url||'';
   document.getElementById('hbc_chat').value=cfg.chat_id||'';
   document.getElementById('hbc_token').value='';
@@ -2599,6 +2858,9 @@ async function saveHbChannel(){
   const g=(id)=>document.getElementById(id);
   const kind=g('hbc_kind').value;
   const cfg={};
+  // blank means "everyone with an email on their profile", which is what an
+  // email channel did before there was anywhere to type an address
+  if(kind==='email') cfg.to=g('hbc_to').value.trim();
   if(kind==='webhook'||kind==='slack') cfg.url=g('hbc_url').value.trim();
   if(kind==='telegram'){ cfg.token=g('hbc_token').value.trim(); cfg.chat_id=g('hbc_chat').value.trim(); }
   const body={name:g('hbc_name').value.trim()||kind, kind, config:cfg, enabled:g('hbc_enabled').checked};
@@ -2642,12 +2904,15 @@ async function loadDashHeartbeat(){
   const body=document.getElementById('dashHbBody'); if(!body) return;
   const widget=document.querySelector('.widget[data-wkey="heartbeat"]');
   const hide=()=>{ if(widget) widget.style.display='none'; };
-  if(!canDo('tools.heartbeat')){ hide(); return; }
+  if(!canDo('tools.heartbeat')){ hide(); paintLinkStates([]); return; }
   const r=await api('/api/heartbeat/state?hours=24');
   if(!r||!r.ok){ hide(); return; }
   const j=await r.json().catch(()=>null);
   if(!j){ hide(); return; }
   if(widget) widget.style.display='';
+  // user tiles bound to a monitor read this same response rather than each
+  // polling on its own timer
+  paintLinkStates(j.monitors);
   const c=j.counts||{};
   const label=(k)=>k==='pending'?'checking':(k==='disabled'?'paused':k);
   const cn=document.getElementById('dashHbCounts');
@@ -2674,7 +2939,8 @@ async function loadDashHeartbeat(){
 document.getElementById('navHeartbeat').onclick=()=>showPage('page-heartbeat');
 document.getElementById('hbAddBtn').onclick=()=>openHbModal(null);
 document.getElementById('hbCheckBtn').onclick=hbCheckNow;
-document.getElementById('hbChanBtn').onclick=()=>openHbChannels();
+// loaded with the Settings page it now lives on
+if(document.getElementById('hbChanBody')) openHbChannels();
 document.getElementById('hbSearch').oninput=renderHeartbeat;
 document.getElementById('hbFilter').onchange=renderHeartbeat;
 document.getElementById('hbWindow').onchange=loadHeartbeat;
@@ -2714,12 +2980,14 @@ document.getElementById('hbdEdit').onclick=()=>{
   const id=hbDetailId; hbDetailId=null;
   openHbModal(id);
 };
-document.getElementById('hbChanClose').onclick=()=>{
-  document.getElementById('hbChanModal').classList.remove('show');
-  loadHeartbeat();
-};
-document.getElementById('hbc_kind').onchange=hbcKindUI;
-document.getElementById('hbcSave').onclick=saveHbChannel;
+// The channel list is part of the Settings page now, so there is no CLOSE
+// button to bind. These elements only exist on that page, hence the guards:
+// an unguarded getElementById(...).onclick on a page that does not have the
+// element throws, and everything after it in this file never runs.
+const _hbKind=document.getElementById('hbc_kind');
+if(_hbKind) _hbKind.onchange=hbcKindUI;
+const _hbSave=document.getElementById('hbcSave');
+if(_hbSave) _hbSave.onclick=saveHbChannel;
 document.getElementById('hbcReset').onclick=hbcReset;
 window.loadHeartbeat=loadHeartbeat;
 window.loadDashHeartbeat=loadDashHeartbeat;
@@ -2779,10 +3047,10 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-lostfound','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
-  const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-tickets':'navTickets',
+  const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-lostfound':'navLostFound','page-tickets':'navTickets',
     'page-contracts':'navContracts','page-catalog':'navCatalog',
     'page-usettings':'navSettings','page-scan':'navScan','page-heartbeat':'navHeartbeat',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
@@ -2794,6 +3062,7 @@ function showPage(id){
   else if(id==='page-assets'){ load(); loadStats(); }
   else if(id==='page-employees')loadDirectory();
   else if(id==='page-trash'){loadTrash();loadContractsTrash();}
+  else if(id==='page-lostfound')loadLostFound();
   else if(id==='page-tickets')loadTickets();
   else if(id==='page-contracts')loadContracts();
   else if(id==='page-catalog')loadCatalog();
@@ -3642,6 +3911,7 @@ window.loadContracts=loadContracts;
 
 document.getElementById('navDirectory').onclick=()=>showPage('page-employees');
 document.getElementById('navTrash').onclick=()=>showPage('page-trash');
+document.getElementById('navLostFound').onclick=()=>showPage('page-lostfound');
 document.getElementById('navTickets').onclick=()=>showPage('page-tickets');
 document.getElementById('navContracts').onclick=()=>showPage('page-contracts');
 document.getElementById('logoutBtn').onclick=async()=>{ try{ await api('/api/logout',{method:'POST'}); }catch(e){} location.href='/'; };
@@ -3652,8 +3922,41 @@ const ne=document.getElementById('navExport'); if(ne) ne.onclick=()=>window.loca
 const na2=document.getElementById('navAdd'); if(na2) na2.onclick=()=>openModal();
 document.getElementById('navHome').onclick=()=>showPage('page-dashboard');
 document.getElementById('dashEditLayout').onclick=()=>setEditLayout(true);
-document.getElementById('dashSaveLayout').onclick=()=>{ const o=saveDashLayout(); try{ localStorage.setItem(DASH_LAYOUT_KEY, JSON.stringify(o)); }catch(e){} setEditLayout(false); document.getElementById('dashLayoutMsg').textContent='✓ Layout saved'; };
-document.getElementById('dashResetLayout').onclick=()=>{ try{ localStorage.removeItem(DASH_LAYOUT_KEY); }catch(e){} document.getElementById('dashLayoutMsg').textContent='↺ Reset to default'; location.reload(); };
+document.getElementById('dashSaveLayout').onclick=()=>{
+  putDashLayout(saveDashLayout());
+  applyDashLayout();
+  setEditLayout(false);
+  document.getElementById('dashLayoutMsg').textContent='✓ Layout saved';
+};
+document.getElementById('dashResetLayout').onclick=()=>{
+  // both keys: leaving v1 behind would have it migrated straight back in
+  try{ localStorage.removeItem(DASH_LAYOUT_KEY2); localStorage.removeItem(DASH_LAYOUT_KEY); }catch(e){}
+  document.getElementById('dashLayoutMsg').textContent='↺ Reset to default';
+  location.reload();
+};
+
+/* Type-to-find, matching a widget's heading and a tile's title/address.
+   Purely visual -- it never touches the saved layout. */
+const dashFilterEl=document.getElementById('dashFilter');
+if(dashFilterEl) dashFilterEl.oninput=()=>{
+  const q=dashFilterEl.value.trim().toLowerCase();
+  const cont=dashCont(); if(!cont) return;
+  cont.classList.toggle('filtering', !!q);
+  cont.querySelectorAll('.widget[data-wkey]').forEach(w=>{
+    if(!q){ w.classList.remove('w-nomatch'); return; }
+    const hay=[w.querySelector('.secthead')?.textContent,
+               w.querySelector('.wlink-host')?.textContent,
+               w.querySelector('.wlink-sub')?.textContent,
+               w.querySelector('.wlink-body')?.getAttribute('href')]
+              .join(' ').toLowerCase();
+    w.classList.toggle('w-nomatch', !hay.includes(q));
+  });
+};
+
+document.getElementById('dashCols').onchange=(e)=>{
+  const n=Math.max(1, Math.min(4, parseInt(e.target.value,10)||2));
+  dashCont()?.style.setProperty('--dashcols', String(n));
+};
 document.getElementById('navAssets').onclick=()=>showPage('page-assets');
 
 function showFatal(msg){
@@ -3687,7 +3990,7 @@ window.repairDashStructure=repairDashStructure;
 // old empty-column or bad-layout selection can't blank the UI for returning users.
 (function healStorage(){
   try{
-    const KEEP=new Set(['itvault_dash_layout_v1','itvault_cols','itvault_sess','itvault_scan_last']);
+    const KEEP=new Set(['itvault_dash_layout_v1','itvault_dash_layout_v2','itvault_cols','itvault_sess','itvault_scan_last']);
     const bad=[];
     for(let i=localStorage.length-1;i>=0;i--){
       const k=localStorage.key(i);
@@ -3861,12 +4164,39 @@ function contrastRatio(a, b){
   return (hi+0.05)/(lo+0.05);
 }
 /* Ensure an accent is visible on a surface: if contrast < 2.2, mix toward surface */
-function ensureAccentVisible(accent, surface){
-  if (contrastRatio(accent, surface) >= 2.2) return accent;
-  // blend 35% toward surface
-  const a = hexRgb(accent), s = hexRgb(surface);
-  const mix = a.map((v,i)=> Math.round(v*0.65 + s[i]*0.35));
-  return '#' + mix.map(v=>v.toString(16).padStart(2,'0')).join('');
+/* ---- which scheme, light or dark ----
+   The device decides. Settings still decide everything else -- the accent,
+   the radius, the font, the hue of the ground -- but whether the page is
+   light or dark is the phone's business, not an admin's, because the person
+   holding it already answered that question once for every app they own.
+
+   Only two values feed the whole palette: the page ground and the card
+   surface. Swing those to the scheme in use and every derived value -- text,
+   muted text, lines, button ink -- follows exactly as it did before. A
+   background already on the right side of the line is left untouched, so a
+   dark install in dark mode is pixel for pixel what it always was. */
+function prefersLight(){
+  try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
+  catch(e){ return false; }
+}
+function mixHex(a,b,t){
+  const x=hexRgb(a), y=hexRgb(b);
+  return '#'+x.map((v,i)=>Math.max(0,Math.min(255,Math.round(v+(y[i]-v)*t)))
+    .toString(16).padStart(2,'0')).join('');
+}
+function toScheme(h,wantLight,isSurface){
+  if(isLightHex(h)===wantLight) return h;
+  return wantLight ? mixHex(h,'#ffffff',isSurface?0.97:0.91)
+                   : mixHex(h,'#05070b',isSurface?0.86:0.90);
+}
+function ensureAccentVisible(accent,surface){
+  if(contrastRatio(accent,surface)>=2.2) return accent;
+  // Away from the surface, not into it. The hue is kept -- it is still their
+  // colour, darkened or lightened only as far as it takes to be seen.
+  const away=isLightHex(surface)?'#000000':'#ffffff';
+  let out=accent;
+  for(let i=0;i<6 && contrastRatio(out,surface)<2.2;i++) out=mixHex(out,away,0.18);
+  return out;
 }
 
 /* Normalizes any settings-ish object (from /api/me or /api/settings) into theme fields */
@@ -3906,17 +4236,20 @@ function normCustom(s){
 function applyCustomVars(s){
   const c = normCustom(s);
   const st = document.documentElement.style;
+  const wantLight = prefersLight();
+  const gA = toScheme(c.bgA, wantLight, false), gB = toScheme(c.bgB, wantLight, false);
+  const solidBg = toScheme(c.bg, wantLight, false);
   const bgValue = c.bg_type === 'gradient'
-    ? 'linear-gradient(135deg, ' + c.bgA + ', ' + c.bgB + ')'
-    : c.bg;
-  const baseHex = c.bg_type === 'gradient' ? c.bgA : c.bg;
+    ? 'linear-gradient(135deg, ' + gA + ', ' + gB + ')'
+    : solidBg;
+  const baseHex = c.bg_type === 'gradient' ? gA : solidBg;
   const light = isLightHex(baseHex);
 
   // Keep the light/dark class in sync (used only for matrix + scrollbar tweaks now)
   document.body.classList.toggle('light', light);
 
   // Surface / component background
-  const surface = c.comp_bg;
+  const surface = toScheme(c.comp_bg, wantLight, true);
   const surfaceLight = isLightHex(surface);
 
   // Accents guaranteed visible on surface
@@ -3956,6 +4289,15 @@ function applyCustomVars(s){
   return c;
 }
 window.applyCustomVars = applyCustomVars;
+
+/* Someone flipping their phone to light mode mid-session should watch the app
+   follow, not have to reload it. */
+try{
+  const _mq = window.matchMedia('(prefers-color-scheme: light)');
+  const _onScheme = () => { if (window.__customTheme) applyCustomVars(window.__customTheme); };
+  if (_mq.addEventListener) _mq.addEventListener('change', _onScheme);
+  else if (_mq.addListener) _mq.addListener(_onScheme);
+}catch(e){}
 
 /* ---------- CUSTOMIZATION PAGE ---------- */
 function customGradToggle(){
@@ -4256,8 +4598,7 @@ async function loadUserSettings(){
   setSel(g('uLang'), s.language, 'en');
   setSel(g('uCur'), s.currency, 'AED');
   setSel(g('uRegion'), s.region, 'UAE');
-  if (g('uNew')) g('uNew').checked = (s.notify_new != 0);
-  if (g('uDel')) g('uDel').checked = (s.notify_delete != 0);
+  renderNotifTypes(s);
   if (g('uMatrix')) g('uMatrix').checked = (s.matrix_on != 0);
   // DB + LDAP config fields
   if (g('db_host')) g('db_host').value = s.db_host || '127.0.0.1';
@@ -4287,9 +4628,6 @@ async function loadUserSettings(){
   if (g('sla_breach_notify')) g('sla_breach_notify').checked = (s.sla_breach_notify != 0);
   if (g('auto_assign_roundrobin')) g('auto_assign_roundrobin').checked = (s.auto_assign_roundrobin != 0);
   // Notification toggles
-  if (g('notify_on_create')) g('notify_on_create').checked = (s.notify_on_create != 0);
-  if (g('notify_on_resolve')) g('notify_on_resolve').checked = (s.notify_on_resolve != 0);
-  if (g('notify_on_reply')) g('notify_on_reply').checked = (s.notify_on_reply != 0);
 
   const page = document.getElementById('page-usettings');
   if (page.dataset._wired) return;
@@ -4424,11 +4762,7 @@ async function loadUserSettings(){
     smtp_user: g('s_user').value.trim(),
     smtp_pass: g('s_pass').value,
     smtp_from: g('s_from').value.trim(),
-    notify_on_create: g('notify_on_create').checked,
-    notify_on_resolve: g('notify_on_resolve').checked,
-    notify_on_reply: g('notify_on_reply').checked,
-    notify_new: g('uNew').checked ? 1 : 0,
-    notify_delete: g('uDel').checked ? 1 : 0
+    notify_types: collectNotifTypes()
   };
   const r = await api('/api/settings', {method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
   if (r && r.ok){ toast('✓ NOTIFICATIONS SAVED'); }

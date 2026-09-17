@@ -23,6 +23,8 @@ itvault_spawn.py
 
 # --- python ---
 __pycache__/
+*.egg-info/
+*.egg-link
 *.pyc
 *.pyo
 .venv/
@@ -43,5 +45,3 @@ Thumbs.db
 # Release APKs are attached to GitHub Releases, not committed
 *.apk
 
-# local editor/preview scratch
-.claude/

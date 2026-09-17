@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An adaptive icon, because a legacy PNG is shrunk to two thirds and
+     dropped on a white plate by every launcher since Android 8. The
+     background is drawn to all four edges so the tile is full-bleed in
+     whatever shape the launcher masks it to; the crest sits inside the
+     safe zone so no mask can clip it. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@mipmap/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

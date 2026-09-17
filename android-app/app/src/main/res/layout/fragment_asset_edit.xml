@@ -12,16 +12,6 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/scanBtn"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:text="📷  Scan QR/Barcode or Read Label Text"
-            android:textColor="@color/accent"
-            app:strokeColor="@color/accent" />
-
         <TextView style="@style/SectionLabel" android:text="IDENTITY" />
         <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Asset ID">
             <com.google.android.material.textfield.TextInputEditText android:id="@+id/f_AssetTag" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />

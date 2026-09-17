@@ -11,6 +11,8 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.NetworkUtils
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.model.HbMonitor
 import com.itguy.assetmanager.data.model.HbMonitorRequest
 import com.itguy.assetmanager.databinding.DialogHeartbeatEditBinding
@@ -84,12 +86,14 @@ class HeartbeatFragment : Fragment(), Refreshable {
                     adapter.submit(emptyList())
                     return@launch
                 }
-                if (!resp.isSuccessful) {
-                    b.statusLine.text = "✕ Could not read monitor status"
+                if (!resp.isSuccessful || resp.body() == null) {
+                    showFromCache("server returned HTTP ${resp.code()}")
                     return@launch
                 }
+                b.offlineBanner.visibility = View.GONE
                 val state = resp.body()
-                val list = state?.monitors.orEmpty()
+                OfflineCache.saveHeartbeat(state!!)
+                val list = state.monitors.orEmpty()
                 // down first, then still-being-retried, then healthy, then paused
                 monitors = list.sortedWith(
                     compareBy({ rank(it.uiStatus) }, { it.label.lowercase() })
@@ -104,9 +108,39 @@ class HeartbeatFragment : Fragment(), Refreshable {
                     else "${list.size} monitor${if (list.size == 1) "" else "s"} · checked around the clock"
                 b.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
             } catch (e: Exception) {
-                if (_b != null) b.statusLine.text = "✕ ${e.message ?: "connection failed"}"
+                if (_b != null) showFromCache(e.message ?: "connection failed")
             }
         }
+    }
+
+    /**
+     * Monitor status from the last successful read, labelled with its age.
+     *
+     * Stale up/down is worth showing as long as it is obviously stale -- what
+     * is not worth showing is an empty list, which reads as "no monitors
+     * configured" when the truth is "could not ask".
+     */
+    private fun showFromCache(why: String) {
+        if (_b == null) return
+        val cached = OfflineCache.loadHeartbeat()
+        if (cached == null) {
+            b.offlineBanner.visibility = View.GONE
+            b.statusLine.text = "✕ $why"
+            return
+        }
+        val list = cached.monitors.orEmpty()
+        monitors = list.sortedWith(compareBy({ rank(it.uiStatus) }, { it.label.lowercase() }))
+        adapter.submit(monitors)
+        val c = cached.counts
+        b.nDown.text = (c?.down ?: 0).toString()
+        b.nPending.text = (c?.pending ?: 0).toString()
+        b.nUp.text = (c?.up ?: 0).toString()
+        b.nPaused.text = (c?.disabled ?: 0).toString()
+        val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("heartbeat"))
+        b.offlineBanner.text = "📡 Offline — last known status from $age"
+        b.offlineBanner.visibility = View.VISIBLE
+        b.statusLine.text = "✕ $why"
+        b.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun rank(status: String) = when (status) {

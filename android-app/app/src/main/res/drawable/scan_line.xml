@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The sweeping line: brightest in the middle, faded at both ends, so it
+     reads as a beam rather than a bar sliding about. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <gradient
+        android:startColor="#00F43F5E"
+        android:centerColor="#FFF43F5E"
+        android:endColor="#00F43F5E"
+        android:angle="0" />
+    <corners android:radius="2dp" />
+</shape>

@@ -61,6 +61,12 @@ class ContractsListFragment : Fragment(), Refreshable {
     override fun refresh() = load()
 
     private fun load() {
+        // what the phone already has, before the server is asked
+        OfflineCache.loadContracts()?.let {
+            all = it
+            render(b.searchInput.text?.toString().orEmpty())
+            renderStats()
+        }
         lifecycleScope.launch {
             b.offlineBanner.visibility = View.GONE
             if (!NetworkUtils.isOnline(requireContext())) {

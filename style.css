@@ -14,6 +14,22 @@
   --radius:12px; --shadow:0 1px 2px rgba(0,0,0,.28),0 6px 20px rgba(0,0,0,.22);
   --font:'Inter','Segoe UI',system-ui,-apple-system,sans-serif,'Segoe UI Emoji','Apple Color Emoji','Noto Color Emoji';
   --mono:ui-monospace,'Cascadia Mono','Consolas',Menlo,monospace;
+  /* native scrollbars, form controls and date pickers follow the device
+     too, now that the rest of the page does */
+  color-scheme:light dark;
+}
+
+/* First paint, before app.js has read the settings. The values above are
+   the dark defaults; on a device set to light these are what stops the
+   page flashing dark for the moment it takes JS to work out the real
+   palette. The engine overwrites both sets inline a tick later. */
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#f4f6fa; --bg1:#eef1f7; --surface:#ffffff; --surface2:#f7f9fc;
+    --line:#dde3ec; --line2:#c8d2e0;
+    --txt:#16202e; --muted:#5d6b82; --muted2:#8595ad;
+    --shadow:0 1px 2px rgba(16,32,64,.05),0 6px 18px rgba(16,32,64,.07);
+  }
 }
 body.light{
   /* applyCustomVars() computes bg/surface/line/txt/muted from the chosen palette --
@@ -228,10 +244,6 @@ tbody tr.group-head:hover td{background:var(--bg1)}
    the height cap is what removes the vertical scroll: with no max-height the
    wrapper grows to fit its rows, so overflow-y never triggers. */
 .modal-box .modal-scroll .tablewrap{max-height:none;overflow-x:auto;overflow-y:visible}
-.camscan-view{background:#000;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-.camscan-view video{width:100%;height:100%;object-fit:cover}
-.camscan-status{margin-top:10px;font-family:var(--font);font-size:13px;color:var(--muted);min-height:18px;flex:0 0 auto}
-.camscan-upload-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:12px;flex:0 0 auto}
 .modal-box .m-actions{flex:0 0 auto;position:sticky;bottom:0;background:var(--surface);display:flex;gap:10px;justify-content:flex-end;margin-top:18px;padding-top:14px;border-top:1px solid var(--line)}
 .invbox{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
 .invbox label{display:block;font-family:var(--font);font-weight:700;letter-spacing:.6px;color:var(--muted);
@@ -389,6 +401,9 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 .sesslist .sl-v{font-family:var(--mono);font-size:12px;color:var(--txt);
   text-align:right;word-break:break-all}
 
+/* the explanation line under a field: unit, default, computed preview */
+.field2 .fhint{font-size:11px;color:var(--muted);line-height:1.4;min-height:15px;margin-top:-1px}
+
 /* range + color inputs inside .field2 */
 /* Fixed, theme-independent border -- var(--line) can be near-white on the
    Clean Light preset, which made a white/near-white swatch value (e.g. the
@@ -404,7 +419,11 @@ tbody tr.group-head:hover td{background:var(--bg1)}
   #sideName{display:none}
   .userbox{justify-content:center;padding:6px}
   .userbox > div:not(.avatar){display:none}
-  .logout{font-size:0;padding:8px 0}
+  /* font-size:0 was meant to drop the word LOGOUT on the narrow rail, but
+     it collapses the power glyph with it -- so the only way out of the
+     app became an invisible sliver. Hide the label, keep the icon. */
+  .logout{font-size:0;padding:10px 0;min-height:40px}
+  .logout::before{content:"⏻";font-size:18px;line-height:1}
   .side-foot{gap:6px}
   /* nav labels are bare text nodes — collapse them, keep the .ni glyph */
   .nav a{justify-content:center;padding:10px 0;font-size:0;gap:0}
@@ -429,9 +448,11 @@ tbody tr.group-head:hover td{background:var(--bg1)}
 }
 
 .dash-tools{display:flex;align-items:center;gap:10px;margin:14px 0 4px}
-#dashWidgets{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+/* Column count is the user's, defaulting to the two it always was. */
+#dashWidgets{display:grid;grid-template-columns:repeat(var(--dashcols,2),minmax(0,1fr));gap:16px;align-items:start}
 #dashWidgets .widget{position:relative;min-width:0}
 #dashWidgets .widget[data-wkey="feed"]{grid-column:1/-1}
+#dashWidgets .widget.wlink{grid-column:auto}
 body.edit-layout #dashWidgets .widget{cursor:grab;outline:1px dashed var(--accent);outline-offset:-4px}
 body.edit-layout #dashWidgets .widget::before{content:"⠿";position:absolute;top:8px;right:10px;color:var(--accent);font-size:16px;opacity:.7;z-index:2}
 body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
@@ -736,3 +757,198 @@ body.edit-layout #dashWidgets .widget:hover{outline-color:var(--grn)}
   background:var(--bg1);border:1px solid var(--line)}
 .tkhist .hist:last-child{border-bottom:none}
 .tkhist .muted{padding:10px 2px}
+
+/* The update command is the thing people reach for, so it behaves like a
+   button: whole block copies on click. */
+.updcmd{cursor:pointer;word-break:break-all;white-space:pre-wrap}
+.updcmd:hover{border-color:var(--accent);color:var(--txt)}
+
+/* ---------- customisable dashboard ---------- */
+.dashcols{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.dashcols select{background:var(--surface2);color:var(--txt);border:1px solid var(--line);
+  border-radius:6px;padding:4px 6px}
+/* Hidden widgets vanish in normal use, and show ghosted while editing so they
+   can be dragged and brought back. */
+/* Removed is removed -- it returns through + ADD WIDGET, not by hunting for a
+   greyed-out panel that is still taking up the grid. */
+#dashWidgets .widget.w-hidden{display:none}
+.wtools{position:absolute;top:6px;right:32px;z-index:3;display:flex;gap:4px}
+.wtool{width:24px;height:24px;line-height:1;border:1px solid var(--line);
+  background:var(--surface2);color:var(--muted);border-radius:7px;cursor:pointer;
+  font-size:12px;padding:0;display:flex;align-items:center;justify-content:center;
+  transition:background .12s,color .12s,border-color .12s}
+.wtool:hover{color:var(--btn-text,#04121f);background:var(--accent);border-color:var(--accent)}
+.wkill:hover{color:#fff;background:var(--red,#e03b3b);border-color:var(--red,#e03b3b)}
+/* A link tile: the whole body is the target, so it is a big easy hit. */
+.wlink-body{display:flex;align-items:center;gap:12px;text-decoration:none;color:inherit;
+  padding:6px 2px 2px}
+.wlink-ico{width:40px;height:40px;flex:0 0 auto;object-fit:contain;border-radius:8px;
+  background:var(--surface2);padding:4px}
+.wlink-ico-none{display:flex;align-items:center;justify-content:center;font-size:20px}
+.wlink-txt{min-width:0}
+.wlink-host{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wlink-state{font-size:12px;color:var(--muted);margin-top:3px}
+.wlink-body:hover .wlink-host{color:var(--accent)}
+.wmlist{display:flex;flex-wrap:wrap;gap:8px}
+.wmicon{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.wmicon img{width:32px;height:32px;object-fit:contain;border:1px solid var(--line);
+  border-radius:6px;background:var(--surface2);padding:2px}
+/* Edit mode reads as a mode: a faint board behind the grid, so it is obvious
+   that panels are movable and that the chrome on them is temporary. */
+body.edit-layout #dashWidgets{padding:10px;border-radius:12px;
+  background:
+    linear-gradient(var(--line) 1px, transparent 1px) 0 0/100% 28px,
+    var(--surface2);
+  background-blend-mode:soft-light;outline:1px dashed var(--line)}
+body.edit-layout #dashWidgets .widget{transition:transform .12s,box-shadow .12s}
+body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
+  box-shadow:0 6px 18px rgba(0,0,0,.28)}
+/* Panels in a row should end level. Tables inside them already scroll, so a
+   uniform height reads as a grid rather than a ragged staircase. */
+#dashWidgets .widget{display:flex;flex-direction:column}
+#dashWidgets .widget > .tablewrap{flex:1;min-height:0}
+
+/* A link tile is a target, not a document: it gets the whole panel and a
+   little lift, so it looks pressable next to the data panels. */
+#dashWidgets .widget.wlink{padding-bottom:12px}
+.wlink-body{border-radius:10px;transition:background .12s}
+.wlink-body:hover{background:var(--surface2)}
+
+@media(max-width:820px){
+  /* One column is right on a phone, but not a column of full-height panels:
+     cap the tall ones so the page can be thumbed through instead of scrolled
+     past, and let the link tiles pair up two-across since they are short. */
+  #dashWidgets{grid-template-columns:1fr!important;gap:12px}
+  #dashWidgets .widget > .tablewrap{max-height:240px!important}
+  #dashWidgets .widget[data-wkey="feed"] .feed{max-height:260px;overflow:auto}
+  .dash-tools{flex-wrap:wrap;gap:8px}
+  .wtools{right:8px}
+}
+@media(max-width:560px){
+  #dashWidgets{gap:10px}
+  #dashWidgets .widget{padding:12px 12px 14px}
+  .wlink-ico{width:34px;height:34px}
+  .wlink-host{font-size:13.5px}
+}
+
+.dashfilter{background:var(--surface2);color:var(--txt);border:1px solid var(--line);
+  border-radius:8px;padding:6px 10px;font-size:13px;min-width:150px;max-width:230px}
+.dashfilter:focus{outline:none;border-color:var(--accent)}
+/* Filtering hides non-matches outright rather than dimming them: a dashboard
+   half full of greyed-out panels is harder to read than a short one. */
+#dashWidgets .widget.w-nomatch{display:none}
+.wlink-sub{font-size:11.5px;color:var(--muted2,var(--muted));margin-top:1px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* The base .dashfilter rule is defined further down this file than the mobile
+   block above, so an override there could never win. On a phone the filter
+   takes its own full-width row under the buttons. */
+@media(max-width:820px){
+  .dashfilter{flex:1 1 100%;max-width:none;order:99}
+}
+
+/* ---------- Lost & Found ---------- */
+/* Read on a phone, standing next to whoever is asking about the laptop: the
+   number has to be tappable and the status has to be changeable without
+   hunting for a row. */
+.lftools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lfsel{background:var(--surface2);color:var(--txt);border:1px solid var(--line);
+  border-radius:8px;padding:6px 10px;font-family:var(--font);font-size:13px;min-height:34px}
+.lfsel:focus{outline:none;border-color:var(--accent)}
+.lf-asset{font-weight:600}
+.lf-who{font-weight:600}
+.lf-tel{display:inline-block;font-family:var(--mono);font-size:13.5px;color:var(--accent);
+  text-decoration:none;margin-top:2px}
+.lf-tel:hover{text-decoration:underline}
+.lf-note{font-size:12px;color:var(--muted);margin-top:3px;max-width:34ch}
+.lf-badge{display:inline-block;font-size:10.5px;font-weight:700;letter-spacing:.7px;
+  padding:3px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.lf-lost{color:var(--red,#ff5a5f)}
+.lf-found{color:var(--amber,#f0a020)}
+.lf-returned{color:var(--grn,#3fbf6f)}
+.lf-set{display:block;margin-top:6px;background:var(--surface2);color:var(--txt);
+  border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:12px;
+  font-family:var(--font);min-height:30px;max-width:140px}
+.lf-set:focus{outline:none;border-color:var(--accent)}
+
+/* ---------- notification types ---------- */
+/* Two columns of checkboxes on a desktop; one on a phone. The event key is
+   shown because it is what turns up in a webhook payload. */
+.ntypes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 18px}
+.ntype{display:flex;align-items:center;gap:8px;min-width:0}
+.ntype span{flex:1 1 auto;min-width:0}
+.nkey{font-family:var(--mono);font-size:10.5px;color:var(--muted);opacity:.8;
+  white-space:nowrap}
+
+@media(max-width:820px){
+  .ntypes{grid-template-columns:minmax(0,1fr)}
+  .nkey{display:none}
+}
+@media(max-width:760px){
+  /* The table becomes cards: a phone has no room for six columns, and the
+     horizontal scroll a .tablewrap would otherwise give hides the status
+     control off the right edge -- which is the one thing this page is for. */
+  #lfGrid thead{display:none}
+  #lfGrid, #lfGrid tbody, #lfGrid tr, #lfGrid td{display:block;width:auto}
+  #lfGrid tr{border:1px solid var(--line);border-radius:var(--radius);
+    padding:10px 12px;margin-bottom:10px;background:var(--surface2)}
+  #lfGrid td{border:none;padding:3px 0}
+  #lfGrid td:first-child{font-size:11px;color:var(--muted)}
+  .lf-note{max-width:none}
+  .lf-set{max-width:none;width:100%;min-height:38px;font-size:14px}
+  .lftools{width:100%}
+  .lfsel{flex:1 1 auto}
+  #page-lostfound .topbar .btn{width:100%}
+}
+
+/* Hidden widgets wait here while the layout is being edited, one click from
+   coming back. Nothing on this dashboard is created any more, so nothing is
+   destroyed either: the cross means "not on my dashboard for now". */
+.dashhidden{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1 1 100%;
+  margin-top:4px;padding-top:10px;border-top:1px dashed var(--line)}
+.dh-label{font-size:10.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+.dh-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface2);
+  color:var(--txt);border:1px dashed var(--line2);border-radius:999px;padding:5px 12px;
+  font-family:var(--font);font-size:12.5px;cursor:pointer;max-width:240px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dh-chip:hover{border-color:var(--accent);border-style:solid}
+.dh-eye{color:var(--accent);font-weight:700;font-size:14px;line-height:1}
+@media(max-width:560px){
+  .dh-chip{max-width:100%;font-size:13px;padding:7px 13px}
+}
+
+/* ---------- tag model picker ---------- */
+/* Each card is a small drawing of the tag it prints. "Banner" and "Spine"
+   mean nothing until you have seen one come off a printer, and a name in a
+   dropdown is not a preview. */
+.tm-prev{position:relative;display:flex;align-items:center;gap:4px;width:100%;height:40px;
+  padding:4px;border-radius:8px;border:1px solid var(--line);background:#fff;box-sizing:border-box;
+  overflow:hidden}
+.tm-prev i.tm-q{flex:0 0 auto;width:26px;height:26px;border-radius:1px;
+  background:repeating-conic-gradient(#111 0 25%,#fff 0 50%) 0 0/6px 6px}
+.tm-prev b{font-size:6.5px;font-weight:800;line-height:1.15;color:#111;text-align:left;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.tm-prev u{font-size:9px;font-weight:800;text-decoration:none;color:#111}
+.tm-prev i.tm-rows{flex:1 1 auto;height:20px;border-radius:1px;
+  background:repeating-linear-gradient(#9aa4b2 0 2px,transparent 2px 5px)}
+/* the coloured part of each model: a band, a panel, a spine */
+.tm-prev em{background:var(--accent)}
+.tm-p-detail{flex-direction:row-reverse}
+.tm-p-plate{flex-direction:column;justify-content:center;gap:1px}
+.tm-p-plate i.tm-q{position:absolute;left:5px;top:50%;transform:translateY(-50%)}
+.tm-p-plate b,.tm-p-plate u{margin-left:30px}
+.tm-p-banner{flex-direction:column;align-items:stretch;gap:2px;padding:0 0 3px}
+.tm-p-banner em{display:block;height:10px;border-radius:7px 7px 0 0}
+.tm-p-banner i.tm-q{position:absolute;left:5px;bottom:4px;width:20px;height:20px}
+.tm-p-banner b{margin-left:28px;padding-right:4px}
+.tm-p-side{padding:0}
+.tm-p-side em{display:block;width:46%;height:100%;border-radius:7px 0 0 7px}
+.tm-p-side i.tm-q{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:22px;height:22px}
+.tm-p-side s{position:absolute;right:0;top:0;bottom:0;width:6px;background:var(--accent);
+  text-decoration:none;border-radius:0 7px 7px 0}
+.tm-p-edge{padding:0}
+.tm-p-edge em{display:block;width:9px;height:100%;border-radius:7px 0 0 7px}
+.tm-p-edge i.tm-q{position:absolute;left:16px;top:50%;transform:translateY(-50%);width:22px;height:22px}
+.tm-p-edge s{position:absolute;right:4px;top:8px;bottom:8px;width:5px;
+  background:repeating-linear-gradient(#111 0 3px,transparent 3px 6px);text-decoration:none}
+@media(max-width:560px){ .tm-prev{height:36px} }

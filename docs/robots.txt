@@ -1,4 +1,15 @@
-# IT-Vault project site
+# IT-Vault project site.
+#
+# A crawler only ever reads robots.txt from the root of a host, so this file
+# -- served at /it-vault/robots.txt -- is not the one Google obeys for
+# shatheitguy.github.io, and the Sitemap line below never reaches it. It is
+# kept because it is correct for anything that does fetch it, and because the
+# host root answers 404, which means "crawl everything" rather than "crawl
+# nothing".
+#
+# For the sitemap to be discovered the URL has to be submitted in Search
+# Console, or the site has to move to a host whose root we control -- a custom
+# domain, or a user-site repository. docs/SEO.md has both routes.
 User-agent: *
 Allow: /
 

@@ -1,5 +1,8 @@
 # IT-Vault
 
+<img src="docs/img/it-vault-logo.png" alt="IT-Vault — discover, manage, secure" width="360">
+
+
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
 [![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/it-vault)
 [![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)
@@ -547,6 +550,31 @@ ITVAULT_WATCHTOWER_URL=http://127.0.0.1:8080
 
 If you'd rather stay deliberate about upgrades, skip Watchtower entirely:
 pin a version in `.env` (`ITVAULT_TAG=1.6.1`) and bump it when you choose.
+
+## Let an agent run it — MCP
+
+IT-Vault ships an [MCP server](mcp/README.md) so an AI agent can work the
+register the way a person does: find a device, see who has it, assign it,
+take it back, raise and answer tickets, chase expiring contracts, handle the
+reports that arrive when somebody scans a lost asset's tag.
+
+```bash
+cd mcp && pip install -e .
+ITVAULT_URL=http://itvault.lan:5000 ITVAULT_API_KEY=your-key itvault-mcp --selftest
+```
+
+It runs on the agent's side and talks to this server over the same HTTP API
+the apps use, with an API key — so **the agent has exactly the permissions of
+the user that key belongs to, and no more**. Give a watching agent a key from
+a read-only user and nothing can persuade it to change anything. Deleting is
+behind a second switch of its own, off by default.
+
+Wiring for **Hermes**, **OpenClaw**, **ZeroClaw**, **Claude Desktop**,
+**Claude Code** and **ChatGPT** — and the reasons behind the design — is in
+[mcp/README.md](mcp/README.md). Clients that dial in over the network rather
+than spawning a process (Claude's custom connectors, ChatGPT) get an HTTP
+transport that refuses to bind anywhere but loopback without a bearer token,
+because the API key lives in that process.
 
 ## Configuration
 

@@ -1,17 +1,16 @@
 package com.itguy.assetmanager.ui.assets
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
-import android.view.View
+import android.view.animation.LinearInterpolator
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -20,48 +19,83 @@ import com.google.mlkit.vision.barcode.BarcodeScannerOptions
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.itguy.assetmanager.databinding.ActivityScanBinding
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Camera scanner for the Add/Edit Asset form -- real native ML Kit, not a
- * browser API. Two modes: (1) continuous live QR/barcode detection, and
- * (2) tap-to-capture text recognition (OCR) for reading a printed asset
- * label (S/N, Model, MAC…) that isn't a barcode at all. */
+/**
+ * Reads the QR printed on an IT-Vault asset tag. Nothing else.
+ *
+ * It used to read every barcode symbology ML Kit knows, plus the text on a
+ * label through OCR, because it fed the asset form -- a serial off a
+ * manufacturer's sticker was a useful thing to catch. That form no longer
+ * has a scan button: this is reached from the bottom bar, and the one
+ * question it answers is "which asset is this?". So it takes QR codes, and
+ * of those only the ones carrying an address this app understands. A
+ * shipping barcode on the same shelf is not an answer to that question, and
+ * silently treating one as a search term sends you to an empty list with no
+ * hint as to why.
+ */
 class ScanActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_RESULT = "scan_result"
-        const val EXTRA_TEXT_RESULT = "scan_text_result"
+
+        /**
+         * What an IT-Vault tag's QR carries: /p/<code> on tags printed now,
+         * /a/<tag> or /asset/<id> on older ones. The host is not checked --
+         * the same server is reached by LAN address, hostname and domain
+         * depending on where you are standing, and refusing a tag because it
+         * names one of its own other addresses would be nonsense.
+         */
+        private val TAG_URL = Regex("/(?:p|a|asset)/([^/?#\\s]+)")
     }
 
     private lateinit var b: ActivityScanBinding
     private val handled = AtomicBoolean(false)
-    private val ocrBusy = AtomicBoolean(false)
     private val cameraExecutor = Executors.newSingleThreadExecutor()
-    private var imageCapture: ImageCapture? = null
-    private val textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private var sweep: ValueAnimator? = null
+    private var lastRejectAt = 0L
 
-    private val permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startCamera() else {
-            Toast.makeText(this, "Camera permission is required to scan", Toast.LENGTH_LONG).show()
-            finish()
+    private val permissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startCamera() else {
+                Toast.makeText(this, "Camera permission is required to scan", Toast.LENGTH_LONG).show()
+                finish()
+            }
         }
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         b = ActivityScanBinding.inflate(layoutInflater)
         setContentView(b.root)
         b.closeBtn.setOnClickListener { finish() }
-        b.scanTextBtn.setOnClickListener { captureAndReadText() }
+        startSweep()
 
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+            == PackageManager.PERMISSION_GRANTED
+        ) {
             startCamera()
         } else {
             permissionLauncher.launch(Manifest.permission.CAMERA)
+        }
+    }
+
+    /** The line crossing the frame. It is the only thing on screen that says
+     * the camera is alive: a still viewfinder in a dim store room looks
+     * identical to a frozen one. */
+    private fun startSweep() {
+        b.scanFrame.post {
+            val travel = (b.scanFrame.height - b.scanLine.height).toFloat()
+            if (travel <= 0f) return@post
+            sweep = ValueAnimator.ofFloat(0f, travel).apply {
+                duration = 1700
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                interpolator = LinearInterpolator()
+                addUpdateListener { b.scanLine.translationY = it.animatedValue as Float }
+                start()
+            }
         }
     }
 
@@ -69,30 +103,25 @@ class ScanActivity : AppCompatActivity() {
         val providerFuture = ProcessCameraProvider.getInstance(this)
         providerFuture.addListener({
             val provider = providerFuture.get()
-            val preview = Preview.Builder().build().also { it.setSurfaceProvider(b.previewView.surfaceProvider) }
+            val preview = Preview.Builder().build()
+                .also { it.setSurfaceProvider(b.previewView.surfaceProvider) }
 
-            val scannerOptions = BarcodeScannerOptions.Builder()
-                .setBarcodeFormats(
-                    Barcode.FORMAT_QR_CODE, Barcode.FORMAT_CODE_128, Barcode.FORMAT_CODE_39,
-                    Barcode.FORMAT_CODE_93, Barcode.FORMAT_CODABAR, Barcode.FORMAT_EAN_13,
-                    Barcode.FORMAT_EAN_8, Barcode.FORMAT_ITF, Barcode.FORMAT_UPC_A,
-                    Barcode.FORMAT_UPC_E, Barcode.FORMAT_DATA_MATRIX, Barcode.FORMAT_PDF417
-                ).build()
-            val scanner = BarcodeScanning.getClient(scannerOptions)
+            // QR only: every other symbology is a thing this screen has no
+            // answer for, and asking ML Kit for fewer formats is also faster
+            val scanner = BarcodeScanning.getClient(
+                BarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
+                    .build()
+            )
 
             val analysis = ImageAnalysis.Builder()
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .build()
             analysis.setAnalyzer(cameraExecutor) { proxy -> analyze(proxy, scanner) }
 
-            val capture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                .build()
-            imageCapture = capture
-
             try {
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis, capture)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (e: Exception) {
                 Toast.makeText(this, "Could not start camera: ${e.message}", Toast.LENGTH_LONG).show()
                 finish()
@@ -107,60 +136,40 @@ class ScanActivity : AppCompatActivity() {
         val image = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
         scanner.process(image)
             .addOnSuccessListener { barcodes ->
-                val value = barcodes.firstOrNull()?.rawValue
-                if (value != null && handled.compareAndSet(false, true)) {
-                    val data = Intent().putExtra(EXTRA_RESULT, value)
-                    setResult(RESULT_OK, data)
+                val value = barcodes.firstNotNullOfOrNull { it.rawValue }
+                if (value == null) return@addOnSuccessListener
+                val code = TAG_URL.find(value)?.groupValues?.get(1)
+                if (code.isNullOrBlank()) {
+                    rejected()
+                } else if (handled.compareAndSet(false, true)) {
+                    setResult(RESULT_OK, Intent().putExtra(EXTRA_RESULT, code))
                     finish()
                 }
             }
             .addOnCompleteListener { proxy.close() }
     }
 
-    @androidx.camera.core.ExperimentalGetImage
-    private fun captureAndReadText() {
-        if (!ocrBusy.compareAndSet(false, true)) return
-        val capture = imageCapture
-        if (capture == null) { ocrBusy.set(false); return }
-        b.scanTextBtn.isEnabled = false
-        b.scanHint.text = "Reading label…"
-        capture.takePicture(cameraExecutor, object : ImageCapture.OnImageCapturedCallback() {
-            override fun onCaptureSuccess(image: ImageProxy) {
-                val mediaImage = image.image
-                if (mediaImage == null) { image.close(); ocrFailed("Could not read the camera frame"); return }
-                val input = InputImage.fromMediaImage(mediaImage, image.imageInfo.rotationDegrees)
-                textRecognizer.process(input)
-                    .addOnSuccessListener { result ->
-                        val text = result.text
-                        if (text.isBlank()) {
-                            ocrFailed("No text found on that label -- try getting closer or better lighting")
-                        } else if (handled.compareAndSet(false, true)) {
-                            val data = Intent().putExtra(EXTRA_TEXT_RESULT, text)
-                            setResult(RESULT_OK, data)
-                            finish()
-                        }
-                    }
-                    .addOnFailureListener { e -> ocrFailed("Text recognition failed: ${e.message}") }
-                    .addOnCompleteListener { image.close() }
-            }
-            override fun onError(exception: ImageCaptureException) {
-                ocrFailed("Capture failed: ${exception.message}")
-            }
-        })
-    }
-
-    private fun ocrFailed(msg: String) {
+    /** A QR that is not one of ours. Say so on the hint line and keep
+     * scanning -- closing the camera to show an error, on a code the user
+     * may not even have meant to point at, is worse than a line of text. */
+    private fun rejected() {
+        val now = System.currentTimeMillis()
+        if (now - lastRejectAt < 1500) return      // the same code, every frame
+        lastRejectAt = now
         runOnUiThread {
-            ocrBusy.set(false)
-            b.scanTextBtn.isEnabled = true
-            b.scanHint.text = "Point the camera at a QR code or barcode"
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
+            if (isFinishing) return@runOnUiThread
+            b.scanHint.text = "That QR is not an IT-Vault asset tag"
+            b.scanHint.postDelayed({
+                if (!isFinishing && !handled.get()) {
+                    b.scanHint.text = "Hold the QR on the asset tag inside the frame"
+                }
+            }, 2200)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        sweep?.cancel()
         cameraExecutor.shutdown()
-        textRecognizer.close()
     }
 }

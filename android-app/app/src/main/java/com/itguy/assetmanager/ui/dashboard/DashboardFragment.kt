@@ -37,12 +37,86 @@ class DashboardFragment : Fragment(), Refreshable {
         b.statMaint.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "MAINTENANCE"
         b.statDue.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "CHECKOUTS DUE SOON"
         b.statWarr.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "WARRANTY EXPIRING"
+        // One colour per role, as on the web. Five numbers all painted in the
+        // accent read as one number repeated; the colour is what says which
+        // of them is the one to worry about.
+        listOf(
+            b.statTotal to com.itguy.assetmanager.R.color.accent,
+            b.statOut to com.itguy.assetmanager.R.color.stat_cyan,
+            b.statMaint to com.itguy.assetmanager.R.color.stat_green,
+            b.statDue to com.itguy.assetmanager.R.color.stat_amber,
+            b.statWarr to com.itguy.assetmanager.R.color.stat_red,
+        ).forEach { (card, colour) ->
+            card.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue)
+                .setTextColor(androidx.core.content.ContextCompat.getColor(requireContext(), colour))
+        }
         refresh()
+    }
+
+    /**
+     * The numbers and the bars, from whatever stats we were handed.
+     *
+     * Split out so the cached copy can be painted the moment the screen
+     * opens: this used to run only on the reply from the server, which is
+     * why the dashboard sat empty behind a spinner every time, holding
+     * numbers it had had all along.
+     */
+    /** Recent assets and open tickets, from the cached lists. The server
+     * orders "recent" itself, which the cache cannot reproduce, so this is
+     * the right shape rather than the right order until the fetch lands. */
+    private fun prepaintLists() {
+        OfflineCache.loadAssets()?.takeIf { it.isNotEmpty() }?.let { cached ->
+            b.recentAssets.removeAllViews()
+            cached.take(12).forEach { a ->
+                addTwoLineRow(b.recentAssets, a.Name.ifBlank { "(unnamed)" },
+                              "${a.Type} · ${a.Serial} · ${a.Status}") {
+                    (activity as? MainActivity)?.showFragment(
+                        AssetEditFragment.newInstance(a.id), "Edit Asset", addToBackStack = true)
+                }
+            }
+        }
+        OfflineCache.loadTickets()?.let { cached ->
+            val open = cached.filter { it.status !in listOf("Resolved", "Closed") }.take(12)
+            b.openTickets.removeAllViews()
+            if (open.isEmpty()) emptyRow(b.openTickets, "No open tickets")
+            else open.forEach { t ->
+                addTwoLineRow(b.openTickets, "${t.code ?: ""} · ${t.subject}", t.status) {
+                    (activity as? MainActivity)?.showFragment(
+                        TicketDetailFragment.newInstance(t.id), "Ticket ${t.code ?: ""}",
+                        addToBackStack = true)
+                }
+            }
+        }
+    }
+
+    private fun paintStats(d: com.itguy.assetmanager.data.model.DashboardStats) {
+            b.statTotal.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.total.toString()
+            b.statOut.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.checked_out.toString()
+            b.statMaint.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.maintenance.toString()
+            b.statDue.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.due_soon.toString()
+            b.statWarr.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.warranty_expiring.toString()
+
+            renderBars(b.statusBars, (d.by_status ?: emptyMap()), ::statusColor)
+            renderBars(b.typeBars, (d.by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent, null) }
+            renderBars(b.contractsBars, (d.contracts_by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent2, null) }
+            b.contractsExpiring.removeAllViews()
+            val expiring = d.expiring_contracts ?: emptyList()
+            if (expiring.isEmpty()) emptyRow(b.contractsExpiring, "No contracts expiring soon")
+            else expiring.forEach { ec ->
+                addTwoLineRow(b.contractsExpiring, "${ec.name} · ${ec.type ?: "—"}", "${ec.vendor ?: "—"} · ends ${ec.end_date ?: "—"} · ${ec.days_left}d left") {
+                    (activity as? MainActivity)?.showFragment(com.itguy.assetmanager.ui.contracts.ContractEditFragment.newInstance(ec.id), "Edit Contract", addToBackStack = true)
+                }
+            }
     }
 
     override fun refresh() {
         val bb = _b ?: return
-        bb.dashProgress.visibility = View.VISIBLE
+        // Everything the phone already knows, on screen before a single
+        // request goes out. The fetches below overwrite it in place.
+        val known = OfflineCache.loadDashboard()
+        if (known != null) paintStats(known)
+        prepaintLists()
+        bb.dashProgress.visibility = if (known == null) View.VISIBLE else View.GONE
         bb.offlineBanner.visibility = View.GONE
         lifecycleScope.launch {
             try {
@@ -58,25 +132,7 @@ class DashboardFragment : Fragment(), Refreshable {
                         b.offlineBanner.visibility = View.VISIBLE
                     }
                 }
-                if (_b != null && d != null) {
-                    b.statTotal.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.total.toString()
-                    b.statOut.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.checked_out.toString()
-                    b.statMaint.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.maintenance.toString()
-                    b.statDue.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.due_soon.toString()
-                    b.statWarr.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statValue).text = d.warranty_expiring.toString()
-
-                    renderBars(b.statusBars, (d.by_status ?: emptyMap()), ::statusColor)
-                    renderBars(b.typeBars, (d.by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent, null) }
-                    renderBars(b.contractsBars, (d.contracts_by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent2, null) }
-                    b.contractsExpiring.removeAllViews()
-                    val expiring = d.expiring_contracts ?: emptyList()
-                    if (expiring.isEmpty()) emptyRow(b.contractsExpiring, "No contracts expiring soon")
-                    else expiring.forEach { ec ->
-                        addTwoLineRow(b.contractsExpiring, "${ec.name} · ${ec.type ?: "—"}", "${ec.vendor ?: "—"} · ends ${ec.end_date ?: "—"} · ${ec.days_left}d left") {
-                            (activity as? MainActivity)?.showFragment(com.itguy.assetmanager.ui.contracts.ContractEditFragment.newInstance(ec.id), "Edit Contract", addToBackStack = true)
-                        }
-                    }
-                }
+                if (_b != null && d != null) paintStats(d)
             } catch (e: Exception) {}
 
             try {
