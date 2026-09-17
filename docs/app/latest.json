@@ -1,6 +1,6 @@
 {
-  "versionCode": 22,
-  "versionName": "2.1.1",
+  "versionCode": 23,
+  "versionName": "2.2.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Every screen now opens from the phone's own copy and refreshes underneath, instead of showing a spinner over data it already had. Assets, contracts, tickets, the directory and the dashboard all paint instantly; the dropdown lists forms are built from are cached and warmed at start-up."
+  "notes": "IT-Vault now ships an MCP server, so an AI agent can run the register: find a device, see who has it, assign it, take it back, work the ticket queue. It acts with the permissions of the API key's own user and nothing more."
 }
