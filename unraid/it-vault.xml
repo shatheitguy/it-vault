@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>IT-Vault</Name>
+  <Repository>ghcr.io/shatheitguy/it-vault</Repository>
+  <Registry>https://github.com/shatheitguy/it-vault/pkgs/container/it-vault</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/shatheitguy/it-vault/issues</Support>
+  <Project>https://shatheitguy.github.io/it-vault/</Project>
+  <Overview>
+    IT-Vault is a self-hosted IT asset register and helpdesk for whoever IS the IT department: assets, employees, contracts, tickets, a public request portal, LDAP/AD sync, network scanning, printable QR labels and e-signed handovers.&#xD;
+&#xD;
+    IT-VAULT BRINGS NO DATABASE OF ITS OWN. Install MariaDB first (the MariaDB template in Community Applications is fine), then create an empty database and a user for it:&#xD;
+&#xD;
+    CREATE DATABASE itvault CHARACTER SET utf8mb4;&#xD;
+    CREATE USER 'itvault'@'%' IDENTIFIED BY 'a-strong-password';&#xD;
+    GRANT ALL PRIVILEGES ON itvault.* TO 'itvault'@'%';&#xD;
+&#xD;
+    Then either fill in the DB fields below, or leave them empty and the first-run wizard will ask. The schema builds itself on first start and migrates itself on every update -- there is nothing to run by hand.&#xD;
+&#xD;
+    The three paths below keep your data outside the image, so updating replaces the container without touching anything: /app/data holds the session key and the database pointer, /app/invoices the attachments, /app/backups the scheduled backups.&#xD;
+&#xD;
+    First run: open the WebUI and the setup wizard creates your admin account. There is no default password.&#xD;
+  </Overview>
+  <Category>Tools: Productivity: Network:Management</Category>
+  <WebUI>http://[IP]:[PORT:5000]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/shatheitguy/it-vault/main/unraid/it-vault.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/shatheitguy/it-vault/main/default_icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DonateText/>
+  <DonateLink/>
+  <Description>
+    IT-Vault is a self-hosted IT asset register and helpdesk: assets, employees, contracts, tickets, a public request portal, LDAP/AD sync, network scanning, QR labels and e-signed handovers. Bring your own MariaDB or MySQL.&#xD;
+  </Description>
+
+  <Config Name="WebUI Port" Target="5000" Default="5000" Mode="tcp"
+          Description="The port you will open IT-Vault on."
+          Type="Port" Display="always" Required="true" Mask="false">5000</Config>
+
+  <Config Name="Data" Target="/app/data" Default="/mnt/user/appdata/it-vault/data" Mode="rw"
+          Description="Session key and the saved database pointer. Keep this: losing it signs everyone out and forgets which database to use."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/it-vault/data</Config>
+
+  <Config Name="Invoices" Target="/app/invoices" Default="/mnt/user/appdata/it-vault/invoices" Mode="rw"
+          Description="Invoices and proof-of-purchase files attached to assets."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/it-vault/invoices</Config>
+
+  <Config Name="Backups" Target="/app/backups" Default="/mnt/user/appdata/it-vault/backups" Mode="rw"
+          Description="Where scheduled backups are written. Put this on a share you actually back up."
+          Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/it-vault/backups</Config>
+
+  <Config Name="Database host" Target="DB_HOST" Default="" Mode=""
+          Description="Your MariaDB/MySQL server. For a MariaDB container on this Unraid box, use the server's LAN IP (bridge networking cannot reach it by container name). Leave empty to be asked by the setup wizard instead."
+          Type="Variable" Display="always" Required="false" Mask="false"/>
+
+  <Config Name="Database port" Target="DB_PORT" Default="3306" Mode=""
+          Description="3306 unless you changed it."
+          Type="Variable" Display="always" Required="false" Mask="false">3306</Config>
+
+  <Config Name="Database name" Target="DB_NAME" Default="itvault" Mode=""
+          Description="The empty database you created for IT-Vault."
+          Type="Variable" Display="always" Required="false" Mask="false">itvault</Config>
+
+  <Config Name="Database user" Target="DB_USER" Default="" Mode=""
+          Description="A user with rights on that database -- not root."
+          Type="Variable" Display="always" Required="false" Mask="false"/>
+
+  <Config Name="Database password" Target="DB_PASS" Default="" Mode=""
+          Description="That user's password."
+          Type="Variable" Display="always" Required="false" Mask="true"/>
+
+  <Config Name="Public URL" Target="ITVAULT_PUBLIC_URL" Default="" Mode=""
+          Description="The address people reach this on from outside, e.g. https://itvault.example.com. Used for the links in acknowledgement and portal emails, which are useless if they point at a LAN address. Leave empty if you only use it on the LAN."
+          Type="Variable" Display="advanced" Required="false" Mask="false"/>
+
+  <Config Name="Force secure cookies" Target="ITVAULT_COOKIE_SECURE" Default="" Mode=""
+          Description="Set to 1 to insist the session cookie is only ever sent over HTTPS. Leave empty and it is decided per request, which is right if you reach it both ways."
+          Type="Variable" Display="advanced" Required="false" Mask="false"/>
+
+  <Config Name="Session secret" Target="ITVAULT_SECRET" Default="" Mode=""
+          Description="Leave empty. IT-Vault generates a strong one on first start and keeps it in the data path above, which beats any value typed into a template -- a known secret lets anyone forge an admin session. Set it only to share one key across several instances."
+          Type="Variable" Display="advanced" Required="false" Mask="true"/>
+</Container>

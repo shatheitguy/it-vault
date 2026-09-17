@@ -1,0 +1,83 @@
+# IT-Vault on TrueNAS, as a Custom App.
+#
+# TrueNAS Apps (24.10 "Electric Eel" and later) runs Docker Compose directly,
+# so this file is the whole installation: Apps -> Discover Apps -> Custom App
+# -> Install via YAML, paste this, edit the four things marked EDIT, save.
+#
+# Unlike the main docker-compose.yml at the root of this repository, this one
+# brings its own MariaDB. On a NAS the usual answer to "where is your
+# database" is "nowhere yet", and an app that cannot start without one you
+# have to go and build first is an app nobody finishes installing.
+#
+# Storage: the paths under /mnt below are host paths on your pool, which is
+# what makes them visible in the TrueNAS UI, backed up by your snapshots, and
+# still there when the app is updated or reinstalled. Create the dataset
+# first (Datasets -> Add Dataset), then point these at it.
+
+services:
+  itvault-db:
+    image: mariadb:11
+    container_name: itvault-db
+    restart: unless-stopped
+    environment:
+      # EDIT: both of these. Anything long and random; you will not type them
+      # again -- the app below reads them from here.
+      MARIADB_ROOT_PASSWORD: change-me-root-password
+      MARIADB_DATABASE: itvault
+      MARIADB_USER: itvault
+      MARIADB_PASSWORD: change-me-app-password
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      # EDIT: your dataset
+      - /mnt/tank/apps/it-vault/db:/var/lib/mysql
+    healthcheck:
+      # The app is held back until the database actually answers, rather than
+      # until its container merely exists -- otherwise first start races the
+      # schema build and the setup wizard asks for a database that is coming
+      # up half a second later.
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  itvault:
+    image: ghcr.io/shatheitguy/it-vault:latest
+    container_name: itvault
+    restart: unless-stopped
+    depends_on:
+      itvault-db:
+        condition: service_healthy
+    environment:
+      DB_HOST: itvault-db
+      DB_PORT: "3306"
+      DB_NAME: itvault
+      DB_USER: itvault
+      # EDIT: the same password as MARIADB_PASSWORD above.
+      DB_PASS: change-me-app-password
+      # Keeps the generated session key and the database pointer outside the
+      # image, so an update replaces the container without signing anyone out.
+      ITVAULT_DATA_DIR: /app/data
+      # EDIT (optional): the address people reach this on from outside. The
+      # links in acknowledgement and portal emails are built from it, and a
+      # link to a LAN address is no use in somebody's inbox.
+      # ITVAULT_PUBLIC_URL: https://itvault.example.com
+      #
+      # Deliberately unset: ITVAULT_SECRET and ITVAULT_ADMIN_PASS. The app
+      # generates its own session key into the data path, and the first-run
+      # wizard creates the admin account -- so there is no default password
+      # and no secret sitting in a file on your NAS.
+    ports:
+      # EDIT if 5000 is taken. TrueNAS itself uses 80/443; 5000 is usually free.
+      - "5000:5000"
+    volumes:
+      # EDIT: your dataset. Three paths, because they are three different
+      # kinds of thing to lose.
+      - /mnt/tank/apps/it-vault/data:/app/data           # session key + DB pointer
+      - /mnt/tank/apps/it-vault/invoices:/app/invoices   # files attached to assets
+      - /mnt/tank/apps/it-vault/backups:/app/backups     # scheduled backups
+    # No healthcheck block: the image ships its own (curl against the app's
+    # own port), and repeating it here only creates a second definition to
+    # keep in step with the Dockerfile. There is no /healthz endpoint --
+    # asking for one would have failed every check and left the app marked
+    # unhealthy for ever.

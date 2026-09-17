@@ -44,8 +44,11 @@ check("is two lines", len(lines) == 2, lines)
 check("the organisation comes first", lines[0] == BRAND, lines[0])
 check("the credit line comes second", lines[1].startswith("IT-Vault v"), lines[1])
 check("it names the running version", A.APP_VERSION in text, A.APP_VERSION)
-check("it spells out both URLs, since text cannot link",
-      "https://github.com/shatheitguy/it-vault" in text and "https://shatheitguy.in" in text)
+check("it carries no URLs at all",
+      "http" not in text,
+      "mail security rewrites every link it can see; in a text part the reader "
+      "sees the rewrite -- 200 characters of clicktime proxy, twice, every message")
+check("but it still names the author", "Sha The IT Guy" in text)
 
 print("\nthe HTML footer")
 check("the organisation is larger than the credit",
@@ -60,6 +63,9 @@ check("Sha The IT Guy is a link to shatheitguy.in",
       "this is the one the request was actually about")
 check("the project is a link too",
       '<a href="https://github.com/shatheitguy/it-vault"' in html)
+check("the links live only in the HTML part, where a rewrite is invisible",
+      "http" in html and "http" not in text,
+      "the reader sees the anchor text, whatever the gateway does to the href")
 check("every style is inline", "<style" not in html and "class=" not in html,
       "mail clients strip style blocks")
 check("the separator is an entity, not a raw character",

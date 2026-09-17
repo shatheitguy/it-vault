@@ -1760,6 +1760,29 @@ def migrate_schema():
 
     c = conn(); cur = c.cursor()
 
+    # Acknowledgement links used to carry their whole payload in the query
+    # string: a couple of hundred characters of base64 and a signature. Mail
+    # security does not like that. Trend Micro, Defender and Mimecast all
+    # rewrite links they consider risky, and a long opaque blob on an
+    # uncategorised host is the shape of a phishing link -- so the mail got
+    # through and the link did not.
+    #
+    # A code in the path is short, says nothing, and is revocable here rather
+    # than only by rotating the asset's nonce. The payload it replaced was
+    # also readable by anyone who base64-decoded it, asset name included, and
+    # every gateway that rewrote the link logged that.
+    try:
+        cur.execute("""CREATE TABLE IF NOT EXISTS SignLinks (
+            code VARCHAR(16) PRIMARY KEY,
+            asset_id VARCHAR(64) NOT NULL,
+            nonce VARCHAR(32) NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            INDEX idx_signlinks_asset (asset_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+    except Exception as e:
+        print("[itvault] could not create SignLinks:", e, flush=True)
+
     # The password column was VARCHAR(100), which fitted the old salt$sha256
     # exactly and cannot hold a PBKDF2 hash at 118 characters. Without this,
     # MySQL refuses the write: nobody's hash upgrades on login, and creating a
@@ -6072,12 +6095,16 @@ def _email_footer(app_name):
     under it, what sent it and which version. Text mail has no font sizes,
     so "smaller" is carried by the order and the separator.
 
-    The URLs are spelled out because a text part cannot hyperlink, and a
-    reader who wants the project or the author should not have to go
-    looking for them.
+    No URLs in this part, deliberately. Mail security rewrites every link
+    it can see -- Trend Micro, Defender and Mimecast all do -- and in an
+    HTML part that is invisible, because the reader sees the anchor text.
+    In a plain-text part the reader sees the rewrite itself: a couple of
+    hundred characters of "clicktime" proxy, twice, at the foot of every
+    message. The HTML part below carries the links; this one carries the
+    names, which are short enough to type.
     """
     return (f"\n\n—\n{app_name}\n"
-            f"IT-Vault v{APP_VERSION} · {PROJECT_URL} · {AUTHOR_NAME} · {AUTHOR_URL}")
+            f"IT-Vault v{APP_VERSION} · {AUTHOR_NAME}")
 
 
 def _email_footer_html(app_name):
@@ -8154,9 +8181,36 @@ def _issue_sign_link(a_id, name=""):
     nonce = secrets.token_hex(8)
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Assets SET SignNonce=%s WHERE _id=%s", (nonce, a_id))
+    # Superseded codes are kept, not deleted. The nonce above already retires
+    # them -- but only a row that still exists can say WHY it is dead, and
+    # "a newer one was issued, use the most recent email" is the difference
+    # between someone finding the right mail and someone ringing IT. Expired
+    # rows are swept here instead, since this is the one place that writes
+    # the table.
+    code = ""
+    try:
+        cur.execute("DELETE FROM SignLinks WHERE expires_at < NOW()")
+        for _ in range(6):
+            candidate = _new_public_code()
+            try:
+                cur.execute("INSERT INTO SignLinks (code, asset_id, nonce, expires_at) "
+                            "VALUES (%s,%s,%s, DATE_ADD(NOW(), INTERVAL 7 DAY))",
+                            (candidate, a_id, nonce))
+                code = candidate
+                break
+            except Exception:
+                continue          # collision on the primary key; draw again
+    except Exception as e:
+        print("[itvault] could not store a short sign link:", e, flush=True)
     c.commit(); c.close()
+
+    # The token is still minted and still returned -- it is what the resend
+    # path and anything holding an older link rely on -- but the URL people
+    # are sent is the short one.
     tk = _sign_token({"asset_id": a_id, "name": name or "", "n": nonce},
                      exp_hours=24 * 7)
+    if code:
+        return tk, f"{_public_base()}s/{code}"
     return tk, f"{_public_base()}sign?token={quote(tk)}"
 
 
@@ -8453,7 +8507,11 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
   <div id="result"></div>
 </div>
 <script>
-const token = new URLSearchParams(window.location.search).get('token');
+// Either shape: /s/<code>, or the ?token= link from before this existed
+// (still in inboxes, still valid until it expires).
+const _m = window.location.pathname.match(/\\/s\\/([^/?#]+)/);
+const token = _m ? decodeURIComponent(_m[1])
+                 : new URLSearchParams(window.location.search).get('token');
 if(!token){document.body.innerHTML='<div class=sign-card><h3>❌ No token</h3><p>Invalid or missing signature link.</p></div>';throw 0;}
 const placeholder=document.getElementById('sigPlaceholder');
 const canvas=document.getElementById('sigCanvas');
@@ -8642,6 +8700,17 @@ SIGNATURE_HTML = SIGNATURE_HTML.replace("/*__PUBLIC_THEME_JS__*/", PUBLIC_THEME_
 def sign_page():
     return SIGNATURE_HTML
 
+
+@app.route("/s/<code>")
+def sign_page_short(code):
+    """The short acknowledgement link.
+
+    Same page; the difference is entirely in the address, which is the point.
+    Two segments and eight characters gets through mail security that
+    rewrites -- and sometimes refuses -- a long opaque query string.
+    """
+    return SIGNATURE_HTML
+
 def _sign_link_asset(cur, tk):
     """Resolve a sign link to an asset id. Returns (asset_id, error).
 
@@ -8654,16 +8723,29 @@ def _sign_link_asset(cur, tk):
     the asset is signed, so anything already in someone's inbox still works,
     and they age out on their own.
     """
-    data = _verify_token(tk)
-    if not isinstance(data, dict) or not data.get("asset_id"):
-        return None, ("This signature link has expired. Ask IT to send you a "
-                      "new one.")
-    aid = data["asset_id"]
+    ref = (tk or "").strip()
+    sent = ""
+    aid = ""
+    if ref and "." not in ref and len(ref) <= 16:
+        # a short code from /s/<code>
+        cur.execute("SELECT asset_id, nonce FROM SignLinks "
+                    "WHERE code=%s AND expires_at > NOW()", [ref])
+        row = cur.fetchone()
+        if not row:
+            return None, ("This signature link has expired. Ask IT to send you "
+                          "a new one.")
+        aid, sent = row["asset_id"], (row.get("nonce") or "")
+    else:
+        data = _verify_token(ref)
+        if not isinstance(data, dict) or not data.get("asset_id"):
+            return None, ("This signature link has expired. Ask IT to send you a "
+                          "new one.")
+        aid = data["asset_id"]
+        sent = (data.get("n") or "").strip()
     cur.execute("SELECT SignNonce, SignatureData FROM Assets WHERE _id=%s", [aid])
     row = cur.fetchone()
     if not row:
         return None, "That asset no longer exists."
-    sent = (data.get("n") or "").strip()
     held = (row.get("SignNonce") or "").strip()
     if sent:
         if not held:
