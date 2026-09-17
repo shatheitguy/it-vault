@@ -26,8 +26,8 @@
   </Overview>
   <Category>Tools: Productivity: Network:Management</Category>
   <WebUI>http://[IP]:[PORT:5000]/</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/shatheitguy/it-vault/main/unraid/it-vault.xml</TemplateURL>
-  <Icon>https://raw.githubusercontent.com/shatheitguy/it-vault/main/default_icon.png</Icon>
+  <TemplateURL>https://raw.githubusercontent.com/shatheitguy/unraid-templates/main/it-vault.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/shatheitguy/unraid-templates/main/it-vault-icon.png</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
