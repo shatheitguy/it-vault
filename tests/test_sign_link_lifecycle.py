@@ -184,6 +184,37 @@ check("the code gives nothing away",
       "Link" not in _url and aid not in _url,
       "the token it replaced carried the asset name in decodable base64")
 
+print()
+print("A blocked link is not a dead end")
+# Mail security rewrites links and sometimes refuses them. The code is
+# printed in the email as text as well, and the page asks for it when it is
+# opened without one -- which is what happens when someone gives up on the
+# link and types the address by hand.
+page = anon.get("/sign").get_data(as_text=True)
+check("opening /sign with no code offers a code box",
+      "ENTER YOUR CODE" in page and "codeGo" in page)
+check("it does not just say 'no token'", "No token" not in page,
+      "that message told the reader nothing they could act on")
+with A.app.test_request_context("http://itvault.example/"):
+    _t2, _u2 = A._issue_sign_link(aid, "Code in the email")
+    _code = _u2.rsplit("/", 1)[-1]
+    _html = A._button_email_html("head", "SIGN", _u2, code=_code,
+                                 code_url="http://itvault.example/sign")
+check("the email prints the code as well as the button",
+      _code.upper() in _html and "Button blocked by your mail system" in _html,
+      "a gateway rewrites the href; it leaves text alone")
+
+print()
+print("The name field is as visible as the pad")
+form = anon.get("/s/" + _code).get_data(as_text=True)
+check("it is a white field, not the page background", "#signer,#codeIn{width:100%" in form
+      and "background:#ffffff" in form)
+check("the two blanks are numbered",
+      "<b>1</b>Your full name" in form and "<b>2</b>Sign with your finger" in form,
+      "people were signing and submitting with the name empty")
+check("an empty name is pointed at, not only reported",
+      "signerInput.classList.add('missing')" in form and "scrollIntoView" in form)
+
 c = A.conn(); cur = c.cursor()
 cur.execute("DELETE FROM Assets WHERE _id=%s", [aid])
 c.commit(); c.close()
