@@ -1,0 +1,43 @@
+app_version: 2.5.0
+capabilities: []
+categories:
+- productivity
+changelog_url: https://github.com/shatheitguy/it-vault/releases
+date_added: '2026-09-17'
+description: Self-hosted IT asset register and helpdesk -- assets, contracts, tickets,
+  LDAP sync, QR labels and e-signed handovers
+home: https://shatheitguy.github.io/it-vault/
+host_mounts: []
+icon: https://media.sys.truenas.net/apps/it-vault/icons/icon.png
+keywords:
+- asset-management
+- helpdesk
+- itsm
+- inventory
+- cmdb
+lib_version: 2.3.4
+lib_version_hash: 2e3a8847308fb2eb0da046018f287c73822c094b5950a10377c3235794ff1242
+maintainers:
+- email: it@shatheitguy.in
+  name: Sharqan Ahamed
+  url: https://shatheitguy.in
+name: it-vault
+run_as_context:
+- description: Container [it-vault] runs as non-root user and group.
+  gid: 1000
+  group_name: Host group is [unknown (1000)]
+  uid: 1000
+  user_name: Host user is [unknown (1000)]
+- description: Container [mariadb] runs as non-root user and group.
+  gid: 999
+  group_name: Host group is [docker]
+  uid: 999
+  user_name: Host user is [netdata]
+screenshots:
+- https://media.sys.truenas.net/apps/it-vault/screenshots/screenshot1.png
+sources:
+- https://github.com/shatheitguy/it-vault
+- https://github.com/shatheitguy/it-vault/pkgs/container/it-vault
+title: IT-Vault
+train: community
+version: 1.0.0

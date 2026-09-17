@@ -140,6 +140,52 @@ check("neither ships a password that would work",
           tpl.findtext("Overview") if tpl is not None else ""),
       "no default admin password anywhere; the wizard asks")
 
+print("\nthe TrueNAS catalogue app")
+CAT = os.path.join(ROOT, "truenas", "catalog", "it-vault")
+if not os.path.isdir(CAT):
+    print("  (not present -- skipped)")
+else:
+    import yaml as _y
+
+    def cat(*p):
+        return _y.safe_load(read("truenas", "catalog", "it-vault", *p))
+
+    for f in ("app.yaml", "ix_values.yaml", "questions.yaml", "README.md",
+              "templates/docker-compose.yaml",
+              "templates/test_values/basic-values.yaml"):
+        check("  %-38s present" % f, os.path.exists(os.path.join(CAT, *f.split("/"))))
+
+    meta = cat("app.yaml")
+    values = cat("ix_values.yaml")
+    version = read("VERSION").strip()
+    check("the app name matches its directory", meta.get("name") == "it-vault", meta.get("name"))
+    check("it is submitted to the community train", meta.get("train") == "community")
+    # Two numbers that rot the moment a release happens: the catalogue shows
+    # app_version to users, and the image tag is what actually gets pulled.
+    check("app_version matches VERSION", meta.get("app_version") == version,
+          "%s vs %s" % (meta.get("app_version"), version))
+    check("the pinned image tag matches VERSION",
+          str(values["images"]["image"]["tag"]) == version,
+          "%s vs %s" % (values["images"]["image"]["tag"], version))
+    check("the image is ours", values["images"]["image"]["repository"] == IMAGE,
+          values["images"]["image"]["repository"])
+    check("it pins a tag rather than tracking latest",
+          str(values["images"]["image"]["tag"]) != "latest",
+          "a catalogue entry that moves under the user is not reproducible")
+
+    compose_tpl = read("truenas", "catalog", "it-vault", "templates", "docker-compose.yaml")
+    envs = set(re.findall(r'add_env\("([A-Z][A-Z0-9_]+)"', compose_tpl))
+    unknown = sorted(e for e in envs if e not in app_env and e != "TZ")
+    check("every variable the template sets is one the app reads", not unknown, unknown)
+    for path in APP_PATHS:
+        check("  mounts %-16s" % path, 'add_storage("%s"' % path in compose_tpl)
+    check("it brings its own database", "deps.mariadb(" in compose_tpl,
+          "the catalogue version must not ask the user to build one first")
+    check("the app waits for the database to be healthy",
+          'add_dependency(values.consts.mariadb_container_name, "service_healthy")' in compose_tpl)
+    check("the notes say there is no default password",
+          "no default password" in read("truenas", "catalog", "it-vault", "ix_values.yaml"))
+
 print()
 if fails:
     print("FAILED (%d): %s" % (len(fails), ", ".join(fails)))
