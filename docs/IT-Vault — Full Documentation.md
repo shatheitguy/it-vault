@@ -284,12 +284,67 @@ Both accessible from the Assets area.
 `GET /api/scan` → ARP/ping sweep of the LAN, returns discovered devices (used by the Scan modal; "CLEAN + RESCAN" re-runs).
 
 ### 8.10 Backup / Restore
-- `GET /api/backup?scope=...` → downloads SQL dump (+ optional config).
+- `GET /api/backup?scope=...` → downloads the backup (`config`, `assets`, `all`).
 - `GET /api/backups` → lists stored backups.
-- `POST /api/restore` → restores from an uploaded dump.
+- `POST /api/restore` → restores from an uploaded dump or archive.
+
+What an `all` backup contains: **every base table in the schema**, read from
+`information_schema` rather than a list kept by hand, so a table added by a
+new feature is included without anybody remembering to add it. The one
+deliberate exclusion is `HeartbeatSamples` (raw per-check telemetry, written
+every few seconds and never pruned; it rolls up into `HeartbeatHourly`,
+which *is* included). Alongside the dump, the archive carries the logo, the
+letterhead and every invoice attachment — those live in volumes, so a dump
+alone would restore rows pointing at files that were never in the backup.
+Binary columns, ticket attachments included, are written as hex literals so
+they round-trip exactly.
+
+Automatic backups are on by default (daily, keeping the last 7). Two places
+take one without being asked:
+
+- **Before an update.** `install.sh` asks the running container for a full
+  backup before it replaces it. An update does not touch the volumes, so
+  this is not insurance against the update itself — it is the "what did this
+  look like before" that is impossible to reconstruct afterwards.
+- **Before the audit log is cleared**, and before a factory reset. Both
+  refuse to proceed if the backup fails.
+
+### 8.10b What overwrites what
+
+The rule: **nothing but a person overwrites what a person typed.** Three
+mechanisms enforce it.
+
+*A field you edit becomes yours.* Editing an employee records that column in
+`Employees.manual_fields`, and the Active Directory sync stops writing it.
+Before this, a job title typed into IT-Vault because AD had the old one was
+replaced by AD's answer at the next sync, half an hour later; retyping did
+not help, because the next sync undid that too.
+
+*A directory with no answer does not get to erase.* AD returns `""` for an
+attribute a user does not have. The sync writes only non-empty values, so a
+person with no `title` in AD keeps whatever IT-Vault holds. The sync result
+reports this as "left as entered".
+
+*An absent field is not an instruction to clear one.* `PUT /api/assets/<id>`
+and `PUT /api/employees/<id>` write only the columns present in the request
+body. The web forms post whole records, but the phone app, an import and
+anything holding an API key send what they changed — and a status update
+that also emptied the serial number and the warranty is not an update.
+Clearing a field on purpose still works: send it as `""`. The difference
+between an empty string and an absent key is the whole distinction.
+
+Every employee change is written to the audit log field by field, with the
+value it had before, so a value that does change can be traced to who
+changed it and when. `tests/test_no_silent_blanking.py` holds all of this.
 
 ### 8.11 LDAP / Active Directory Sync
 Configured in **System** settings (LDAP server, domain, bind user, base DN). `POST /api/ldap/test` validates; `POST /api/employees/ldap-import` pulls users; a background scheduler auto-syncs every 30 min (`POST /api/employees/ldap-sync`).
+
+The sync adds people it has not seen, and fills in name, department,
+designation and email for anyone nobody has edited. It never writes an empty
+value and never overwrites a field edited in IT-Vault — see 8.10b. Its
+result is `{added, updated, kept, total}`, where `kept` counts the rows it
+deliberately left as entered.
 
 
 ### 8.12 Heartbeat (uptime monitoring)
@@ -401,7 +456,10 @@ Themes apply to:
 Flask prints to the terminal where `app.py` runs. Watch for tracebacks there.
 
 ### Backups
-Use Backup/Restore (TOOLS) regularly. Store the `.sql` dump off-host.
+Automatic backups are on by default (daily, last 7 kept), and an update takes
+one first. Store a copy off-host anyway: retention prunes, and a host that
+loses its volumes loses the backups with them. 8.10 lists what an archive
+contains.
 
 ---
 

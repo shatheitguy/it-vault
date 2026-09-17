@@ -513,7 +513,7 @@ async function doLdapImport(){
 async function syncLdap(){
   document.getElementById('ldapStatus').textContent='Syncing from Active Directory…';
   const r=await api('/api/employees/ldap-sync',{method:'POST'});
-  if(r&&r.ok){const j=await r.json();document.getElementById('ldapStatus').textContent=`✓ Synced: ${j.added} added, ${j.updated} updated (${j.total} users)`;toast('✓ LDAP SYNCED');loadEmployees();}
+  if(r&&r.ok){const j=await r.json();const kept=j.kept?`, ${j.kept} left as entered`:'';document.getElementById('ldapStatus').textContent=`✓ Synced: ${j.added} added, ${j.updated} updated${kept} (${j.total} users)`;toast('✓ LDAP SYNCED');loadEmployees();}
   else if(r){const j=await r.json().catch(()=>({}));document.getElementById('ldapStatus').textContent='✕ '+(j.error||'failed');toast('✕ '+(j.error||'failed'));}
 }
 
@@ -4675,7 +4675,10 @@ async function loadUserSettings(){
   const m = g('ldapTestMsg2'); m.textContent = 'syncing…';
   const r = await api('/api/employees/ldap-sync', {method:'POST'});
   const j = r ? await r.json().catch(()=>({})) : {};
-  m.textContent = (r&&r.ok? '✓ ' : '✕ ') + (j.msg||j.error||''); m.style.color = (r&&r.ok)? 'var(--grn)':'var(--red)';
+  const _sum = (r&&r.ok&&j.total!==undefined)
+    ? `${j.added} added, ${j.updated} updated${j.kept?`, ${j.kept} left as entered`:''} (${j.total} users)`
+    : (j.msg||j.error||'');
+  m.textContent = (r&&r.ok? '✓ ' : '✕ ') + _sum; m.style.color = (r&&r.ok)? 'var(--grn)':'var(--red)';
   if(r&&r.ok) loadEmployees();
   };
   // System Config sub-nav: toggle section panels

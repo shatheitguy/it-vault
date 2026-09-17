@@ -186,10 +186,12 @@ check("the code gives nothing away",
 
 print()
 print("A blocked link is not a dead end")
-# Mail security rewrites links and sometimes refuses them. The code is
-# printed in the email as text as well, and the page asks for it when it is
-# opened without one -- which is what happens when someone gives up on the
-# link and types the address by hand.
+# Mail security rewrites links and sometimes refuses them outright. The
+# answer is the short address, not a second set of instructions: the code
+# printed under the button read as a hoop to jump through, and the request
+# was to put the mail back to one link and one button. Anyone who does end
+# up on the sign page without a code is still asked for one there, which
+# covers the person who gave up on the link and typed the address by hand.
 page = anon.get("/sign").get_data(as_text=True)
 check("opening /sign with no code offers a code box",
       "ENTER YOUR CODE" in page and "codeGo" in page)
@@ -198,13 +200,12 @@ check("it does not just say 'no token'", "No token" not in page,
 with A.app.test_request_context("http://itvault.example/"):
     _t2, _u2 = A._issue_sign_link(aid, "Code in the email")
     _code = _u2.rsplit("/", 1)[-1]
-    _html = A._button_email_html("head", "SIGN", _u2, code=_code,
-                                 code_url="http://itvault.example/sign")
-check("the email prints the code as well as the button",
-      _code.upper() in _html and "Button blocked by your mail system" in _html,
-      "a gateway rewrites the href; it leaves text alone")
+    _html = A._button_email_html("head", "SIGN", _u2)
+check("the email is one line and one button", _u2 in _html and "SIGN" in _html)
+check("and nothing else -- no code, no fallback instructions",
+      _code.upper() not in _html and "blocked" not in _html.lower(),
+      "asked for: same as before")
 
-print()
 print("The name field is as visible as the pad")
 form = anon.get("/s/" + _code).get_data(as_text=True)
 check("it is a white field, not the page background", "#signer,#codeIn{width:100%" in form

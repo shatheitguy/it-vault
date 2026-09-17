@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260917a">
+<link rel="stylesheet" href="/style.css?v=20260917b">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -1036,6 +1036,7 @@
       <div class="field2"><label>Designation</label><select id="e_Designation"><option value="">-- select designation --</option></select></div>
       <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
     </div>
+    <p class="sec-hint" style="margin:10px 0 0">Anything you change here stays as you typed it. The Active Directory sync fills in name, department, designation and email for people nobody has edited, and leaves your edits alone from then on -- so a title you set does not revert at the next sync.</p>
   </div>
   
   <div class="m-actions"><button class="btn ghost" id="empCancel">CANCEL</button><button class="btn" id="empSave">SAVE</button></div>
@@ -1045,7 +1046,7 @@
 <div class="modal" id="ldapModal"><div class="modal-box" style="width:min(520px,94vw);max-width:520px">
   <h3>SYNC EMPLOYEES FROM ACTIVE DIRECTORY</h3>
   
-  <div class="modal-scroll"><p class="muted" style="margin-top:0">Pulls all users from your Domain Controller and keeps the employee list in sync automatically (every 30 min).</p>
+  <div class="modal-scroll"><p class="muted" style="margin-top:0">Pulls all users from your Domain Controller and keeps the employee list in sync automatically (every 30 min). It never clears a field the directory has no answer for, and never overwrites one you have edited by hand.</p>
   </div>
   
   <div class="m-actions" style="justify-content:flex-start">
@@ -1385,6 +1386,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260917a"></script>
+<script src="/app.js?nocache=20260917b"></script>
 </body>
 </html>

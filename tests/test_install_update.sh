@@ -82,6 +82,28 @@ grep -q 'Pulling' "$WORK/out1.txt" && check "it pulls the new image" 1 || check 
 grep -q 'rm -f itvault' "$LOG" && check "it replaces the app container" 1 || check "it replaces the app container" 0
 grep -q 'Updated' "$WORK/out1.txt" && check "it reports an update, not an install" 1 || check "it reports an update, not an install" 0
 
+# A snapshot BEFORE the container goes, taken by the app that is still
+# running. An update does not touch the volumes, so this is not insurance
+# against the update: it is the "what did this look like yesterday" that was
+# missing when fields turned out to have been quietly emptied for weeks.
+if grep -q 'exec itvault python' "$LOG"; then
+  check "it asks the running app for a full backup first" 1
+else
+  check "it asks the running app for a full backup first" 0 "$(head -5 "$LOG")"
+fi
+snap_at="$(grep -n 'exec itvault python' "$LOG" | head -1 | cut -d: -f1)"
+rm_at="$(grep -n 'rm -f itvault' "$LOG" | head -1 | cut -d: -f1)"
+if [ -n "$snap_at" ] && [ -n "$rm_at" ] && [ "$snap_at" -lt "$rm_at" ]; then
+  check "the backup is taken before the container is replaced" 1
+else
+  check "the backup is taken before the container is replaced" 0 "snapshot at $snap_at, removal at $rm_at"
+fi
+# The fake docker answers nothing, so this run is also the "backup failed"
+# case: it has to warn and carry on, not strand the host with no container.
+grep -q 'Could not take a backup first' "$WORK/out1.txt" \
+  && check "a failed backup warns and does not stop the update" 1 \
+  || check "a failed backup warns and does not stop the update" 0 "$(tail -5 "$WORK/out1.txt")"
+
 # the recreate must carry the database, or the wizard comes back
 if grep 'run -d' "$LOG" | grep -q 'DB_PASS=from-db-container'; then
   check "credentials are carried over to the new container" 1
