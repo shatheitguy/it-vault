@@ -630,6 +630,7 @@
       <a href="#screens" class="hide-sm">Screens</a>
       <a href="#automated" class="hide-sm">Automation</a>
       <a href="#database" class="hide-sm">Database</a>
+      <a href="#agents" class="hide-sm">Agents</a>
       <a href="#install">Install</a>
       <a href="https://github.com/shatheitguy/it-vault">GitHub&nbsp;&#8599;</a>
     </nav>
@@ -1114,6 +1115,58 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
 
 <span class="sig"># latest follows main, so a pull always brings the current build</span></pre>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="reg" id="nas">
+    <div class="wrap">
+      <div class="reg-head">
+        <span class="fld">NAS</span>
+        <div>
+          <h2>Unraid and TrueNAS, without a compose file.</h2>
+          <p>
+            Most homelabs already have the box. On <b>Unraid</b>, IT-Vault is a
+            Community Applications template &mdash; ports, the three data paths and the
+            database fields, with an overview that says up front that it brings no
+            database of its own, so you install MariaDB first and point it there.
+            On <b>TrueNAS</b> (24.10 and later, which runs Docker Compose),
+            paste one file into Custom App &rarr; Install via YAML; that one
+            <em>does</em> bring MariaDB with it.
+          </p>
+        </div>
+      </div>
+      <div class="btn-row">
+        <a class="btn" href="https://github.com/shatheitguy/unraid-templates">UNRAID TEMPLATE &#8599;</a>
+        <a class="btn ghost" href="https://github.com/shatheitguy/it-vault/blob/main/truenas/docker-compose.yaml">TRUENAS YAML &#8599;</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="reg" id="agents">
+    <div class="wrap">
+      <div class="reg-head">
+        <span class="fld">Agents</span>
+        <div>
+          <h2>Let an AI run the register.</h2>
+          <p>
+            IT-Vault ships an MCP server, so an agent can do what a person does:
+            find a device, see who has it, assign it, take it back, raise and answer
+            tickets, chase the contracts that are about to lapse. It runs on the
+            agent's side and authenticates with an API key &mdash; which means
+            <b>the agent has exactly the permissions of the user that key belongs
+            to, and nothing more</b>. Give a watching agent a read-only key and no
+            amount of prompting changes anything; deleting needs a second switch of
+            its own.
+          </p>
+          <p>
+            Wiring for Hermes, OpenClaw, ZeroClaw, Claude Desktop, Claude Code and
+            ChatGPT is in the repository.
+          </p>
+        </div>
+      </div>
+      <div class="btn-row">
+        <a class="btn" href="https://github.com/shatheitguy/it-vault/blob/main/mcp/README.md">SET IT UP &#8599;</a>
       </div>
     </div>
   </section>

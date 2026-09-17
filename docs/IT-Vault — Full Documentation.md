@@ -56,6 +56,22 @@ MariaDB on 127.0.0.1:3306  (you provide it; install it as a service so it
 
 > ⚠️ On Windows, the `python3` on PATH may be the Microsoft Store shim, which exits immediately with code 23. Use your virtualenv's interpreter.
 
+### 3.1b On a NAS
+
+**Unraid** — Community Applications, search IT-Vault. Install MariaDB first
+(the CA template is fine), create an empty database and a user for it, then
+fill in the database fields or leave them empty and let the first-run wizard
+ask. The template is published from
+[shatheitguy/unraid-templates](https://github.com/shatheitguy/unraid-templates);
+its source lives in `unraid/it-vault.xml` in this repository, where the test
+suite checks it against the code.
+
+**TrueNAS** (24.10 and later, which runs Docker Compose) — Apps → Discover
+Apps → Custom App → Install via YAML, and paste
+`truenas/docker-compose.yaml`. That file brings MariaDB with it, so there is
+nothing to set up first; edit the four values marked EDIT and the dataset
+paths before you save.
+
 ### 3.2 Get a database running
 IT-Vault ships without one. Any MariaDB 10.6+ or MySQL 8+ works — pick one:
 
@@ -189,7 +205,7 @@ Session-based (Flask `session` cookie, signed by `ITVAULT_SECRET`).
 | **Read-Write** | `read-write` | Assets/contracts/tickets CRUD; **no** user/settings/LDAP management |
 | **Read-Only** | `read-only` | View + change own password only |
 
-Auth decorator: `@auth_required([ROLE_ADMIN, ROLE_EDIT])` etc. The sign-off page (`/sign`) is **public** (token-signed, no session needed).
+Auth decorator: `@auth_required([ROLE_ADMIN, ROLE_EDIT])` etc. The sign-off page (`/s/<code>`, and the older `/sign?token=`) is **public** by design — the person acknowledging an asset does not have a login. What makes it safe is that the code is unguessable, single use and short-lived, not that the page is hidden.
 
 ### Endpoints
 - `POST /api/login` `{username, password}` → sets session
@@ -216,7 +232,7 @@ Asset table features:
 ### Asset row actions
 | Button | What it does |
 |---|---|
-| **SIGN** | Opens the public acknowledgement flow (`/sign?token=...` link generated via `/api/assets/<id>/sign/link`); after sign-off the signature is stored in `SignatureData`. |
+| **SIGN** | Opens the public acknowledgement flow (a short `/s/<code>` link generated via `/api/assets/<id>/sign/link`); after sign-off the signature is stored in `SignatureData`. |
 | **EDIT** | Opens asset modal (all `COLUMNS` + history tab). |
 | **CHECKOUT** | Assigns to a user (creates `Checkouts` row, sets `Status='Checked-Out'`). |
 | **MAINT** | Maintenance/Repair log modal — add/delete records (date, type, cost, note). |
@@ -240,7 +256,10 @@ Asset table features:
 
 ### 8.4 Digital Sign-off (Acknowledgement)
 1. Click **SIGN** on an asset → generates a token link `/api/assets/<id>/sign/link`.
-2. Open `/sign?token=...` (can be sent to the recipient).
+2. The recipient gets a short link, `/s/<code>` — a code resolved server-side,
+   single use, seven days, one live link per asset. (Before 2.4.0 this was
+   `/sign?token=...`; those links still work until they expire. The change was
+   forced by mail security, which rewrote and then refused the long form.)
 3. Recipient enters name, draws signature on canvas, clicks **SAVE**.
 4. `POST /api/assets/sign/approve` stores the base64 signature in `SignatureData`, sets `Status='Checked-Out'`, logs `ACKNOWLEDGE` in AuditLog.
 5. The signature now appears on the asset **PRINT** card and the `/sign` view.
@@ -404,12 +423,76 @@ it-vault/
 ---
 
 ## 13. Security Notes
-- Passwords hashed (not plaintext) in `Users`.
-- Session cookie signed by `ITVAULT_SECRET` — **change it** for any non-local use.
-- Sign-off tokens are JWT-signed + expiring; the sign page is public by design (so recipients can acknowledge without a login).
-- This is a **local** tool; do not expose `:5000` to the internet without a reverse proxy + TLS.
-- Admin user cannot be demoted/deleted if it's the last admin (guard in `/api/users`).
+
+Current as of 2.4.0. Where something changed recently it says so, because the
+old behaviour is what you will find written down elsewhere.
+
+**Passwords** are stored as PBKDF2-HMAC-SHA256 at 600,000 rounds, salted per
+password, with the round count inside the stored value so it can be raised
+later. They were one round of salted SHA-256 until 2.3.0 — fast enough to
+brute-force on a GPU at billions of guesses a second. Old hashes still verify
+and are replaced the next time their owner signs in, which is the only moment
+the password is in hand.
+
+**Logging in** is rate limited: ten failures for one account from one address
+inside fifteen minutes and that pair has to wait. A correct password clears
+the count. Failures and throttling both go to the audit log.
+
+**Sessions** are signed with a key the app generates on first start and keeps
+in the data directory (`ITVAULT_DATA_DIR`), so it survives updates and never
+lands in a config file. Set `ITVAULT_SECRET` only to share one key across
+several instances. The cookie is HttpOnly and SameSite=Lax, and is marked
+Secure on any request that arrived over TLS — including behind a proxy, via
+`X-Forwarded-Proto`. `ITVAULT_COOKIE_SECURE=1` insists on it always.
+
+**Acknowledgement links** are a short opaque code in the path — `/s/<code>` —
+resolved server-side against the `SignLinks` table. They are single use, one
+live link per asset, and expire after seven days; issuing a new one retires
+the last. Until 2.4.0 the link carried a signed token in the query string,
+which mail security rewrote and sometimes refused outright, and which anyone
+could base64-decode to read the asset name. Those older links are still
+honoured until they expire.
+
+**Signatures** are personal data. `/api/assets/<id>/signature` requires Assets
+*read* (it accepted any logged-in account before 2.3.0), the public tag page
+never includes one, and the signed PDF omits the price. They are stored
+unencrypted in `Assets.SignatureData` and are included in backups — treat a
+backup file accordingly.
+
+**API keys** are per user and carry that user's permissions exactly, which is
+how an agent is scoped (see §14). They are stored in the clear in
+`Users.api_key`; a backup therefore contains working credentials.
+
+**Uploads**: ticket attachments from the public portal are checked by magic
+bytes, capped at 4 MB and 4 per ticket, and SVG is refused because it carries
+script. Invoice uploads are checked by extension only and served from the
+app's own origin.
+
+**Still open**, and worth knowing about: no global `X-Frame-Options` or CSP;
+invoices are not content-sniffed and are served inline; API keys and backups
+are unencrypted; there is no retention policy for signatures.
+
+**Deployment**: this is a LAN tool by default. Put a reverse proxy with TLS in
+front of anything reachable from outside, and set `ITVAULT_PUBLIC_URL` so the
+links in emails point at the address people can actually reach.
+
+## 14. Agents (MCP)
+
+IT-Vault ships an MCP server (`mcp/` in the repository) so an agent can work
+the register: find a device, see who has it, assign it, take it back, raise
+and answer tickets, chase expiring contracts, handle Lost & Found reports.
+
+It runs on the agent's side and talks to this server over the same HTTP API
+the apps use, authenticated with an API key — so **an agent has exactly the
+permissions of the user that key belongs to, and nothing more**. Two switches
+narrow it further: `ITVAULT_MCP_READONLY=1` refuses every write whatever the
+key could do, and `trash_asset` needs `ITVAULT_MCP_ALLOW_DELETE=1`.
+
+Wiring for Hermes, OpenClaw, ZeroClaw, Claude Desktop, Claude Code and ChatGPT
+is in `mcp/README.md`. Clients that connect over the network rather than
+spawning a process (ChatGPT, Claude's custom connectors) use the HTTP
+transport, which refuses to bind anywhere but loopback without a bearer token.
 
 ---
 
-*Generated from the current source (`app.py`, `index.html`, `app.js`, `style.css`).*
+*Written against the source at 2.4.0 (`app.py`, `index.html`, `app.js`, `style.css`).*
