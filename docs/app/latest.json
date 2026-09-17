@@ -1,6 +1,6 @@
 {
-  "versionCode": 26,
-  "versionName": "2.2.3",
+  "versionCode": 27,
+  "versionName": "2.3.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Every email now signs off the same way: your organisation's name, then a smaller line naming IT-Vault, its version, the project and the author -- with links in the HTML part and the URLs spelled out in the plain-text one."
+  "notes": "Security: passwords move to PBKDF2 (upgraded as people sign in), login is rate limited, signatures need Assets read rather than any login at all, session cookies are Secure over TLS, and acknowledgement links carry a full-length signature."
 }

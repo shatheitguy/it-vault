@@ -18,11 +18,12 @@ IT-Vault — Flask + MariaDB backend.
 Roles: admin (full), read-write (assets CRUD), read-only (view + own password).
 Docker-ready. No Access DB.
 """
-import os, io, json, hashlib, uuid, secrets, time, base64, re, zipfile, threading, sys
+import os, io, json, hashlib, hmac, uuid, secrets, time, base64, re, zipfile, threading, sys
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect, make_response
 from flask import g, has_request_context
+from flask.sessions import SecureCookieSessionInterface
 import pymysql
 from dbutils.pooled_db import PooledDB
 from openpyxl import Workbook, load_workbook
@@ -1082,6 +1083,23 @@ def _feature_allowed(key):
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
+
+
+class _TlsAwareSession(SecureCookieSessionInterface):
+    """Marks the session cookie Secure when the request came over TLS.
+
+    Flask writes the session cookie in save_session, which runs after every
+    after_request handler -- so rewriting headers there never sees it. This is
+    the hook that does, and it is asked per request, which is what lets one
+    install serve HTTP on the LAN and HTTPS through a proxy without a setting
+    that is wrong for half of it.
+    """
+
+    def get_cookie_secure(self, app):
+        return COOKIE_SECURE_ALWAYS or _request_is_https()
+
+
+app.session_interface = _TlsAwareSession()
 # Flask's session lifetime is a single app-wide value, so it can't express
 # "5 minutes for this user, until-logout for that one". Mutating it per
 # request would race across waitress' worker threads. Instead the COOKIE is
@@ -1092,6 +1110,12 @@ SHORT_SESSION_SECONDS = 5 * 60
 app.permanent_session_lifetime = timedelta(days=30)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+# Secure cannot simply be switched on: plenty of these installs are reached
+# over plain HTTP on a LAN, and a Secure cookie there is never sent at all --
+# nobody could log in. So it is decided per response, in _secure_cookies()
+# below: set when the request actually arrived over TLS, or when
+# ITVAULT_COOKIE_SECURE says to insist on it.
+COOKIE_SECURE_ALWAYS = (_env("ITVAULT_COOKIE_SECURE") or "").lower() in ("1", "true", "yes")
 
 # UniFi Controller integration -- cached device/client snapshot (see _unifi_refresh)
 _unifi_cache = {"ts": 0, "devices": [], "clients": [], "error": None}
@@ -1124,6 +1148,40 @@ def _release_db_connections(exc):
         except Exception: pass
 
 
+def _request_is_https():
+    """Whether the browser's side of this connection is TLS.
+
+    Behind a reverse proxy the app itself speaks HTTP, and only the forwarded
+    header knows the truth -- which is the usual deployment here (Cloudflare,
+    nginx), so ignoring it would mean never setting Secure on exactly the
+    installs that have TLS.
+    """
+    if request.is_secure:
+        return True
+    proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
+    return proto.lower() == "https"
+
+
+@app.after_request
+def _secure_cookies(resp):
+    """Add Secure to cookies on a TLS request.
+
+    Without it the session cookie travels in clear on every HTTP hop, and on
+    a flat office network that is an admin session for whoever is listening.
+    """
+    if not (COOKIE_SECURE_ALWAYS or _request_is_https()):
+        return resp
+    cookies = resp.headers.getlist("Set-Cookie")
+    if not cookies:
+        return resp
+    del resp.headers["Set-Cookie"]
+    for cookie in cookies:
+        if "secure" not in cookie.lower().replace("samesite", ""):
+            cookie += "; Secure"
+        resp.headers.add("Set-Cookie", cookie)
+    return resp
+
+
 @app.after_request
 def _no_cache(resp):
     # Prevent stale JS/HTML caching so dashboard always re-renders fresh
@@ -1132,17 +1190,65 @@ def _no_cache(resp):
     resp.headers["Expires"] = "0"
     return resp
 
-# ---------- password hashing (salted sha256) ----------
-def hash_pw(pw, salt=None):
-    if salt is None:
-        salt = secrets.token_hex(8)
-    return salt + "$" + hashlib.sha256((salt + pw).encode()).hexdigest()
+# ---------- password hashing ----------
+# One round of salted SHA-256 is what this used to be, and it is what every
+# password-cracking rig on earth is built to chew through: a commodity GPU
+# does billions of SHA-256 guesses a second, so a stolen Users table -- or one
+# backup file, which carries the same column -- was a list of plaintext
+# passwords for anything short of a long random one.
+#
+# PBKDF2-HMAC-SHA256 makes each guess cost about a millisecond instead of a
+# nanosecond. It is in the standard library, so nothing new to install on an
+# air-gapped box, and the iteration count travels inside the stored value so
+# it can be raised later without invalidating anything.
+PBKDF2_ROUNDS = 600_000
+
+
+def hash_pw(pw, salt=None, rounds=PBKDF2_ROUNDS):
+    salt = salt or secrets.token_hex(16)
+    dk = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt.encode("ascii"), rounds)
+    return f"pbkdf2_sha256${rounds}${salt}${dk.hex()}"
+
 
 def verify_pw(pw, stored):
+    """True if `pw` matches, in either format.
+
+    The old hashes are still accepted -- refusing them would lock every
+    existing user out of their own system, which is not a security
+    improvement. They are replaced on the next successful login instead; see
+    needs_rehash().
+    """
     if not stored or "$" not in stored:
         return False
-    salt, h = stored.split("$", 1)
-    return h == hashlib.sha256((salt + pw).encode()).hexdigest()
+    try:
+        if stored.startswith("pbkdf2_sha256$"):
+            _, rounds, salt, want = stored.split("$", 3)
+            dk = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"),
+                                     salt.encode("ascii"), int(rounds))
+            return hmac.compare_digest(dk.hex(), want)
+        # legacy: salt$sha256(salt+pw)
+        salt, want = stored.split("$", 1)
+        got = hashlib.sha256((salt + pw).encode()).hexdigest()
+        # constant time even here: a plain == leaks how much of the digest
+        # matched, one byte at a time
+        return hmac.compare_digest(got, want)
+    except (ValueError, TypeError):
+        return False
+
+
+def needs_rehash(stored):
+    """True for a hash that should be replaced next time we hold the password.
+
+    That is every legacy one, and any PBKDF2 hash written with fewer rounds
+    than we use now -- so raising PBKDF2_ROUNDS upgrades the estate quietly as
+    people sign in.
+    """
+    if not stored or not stored.startswith("pbkdf2_sha256$"):
+        return True
+    try:
+        return int(stored.split("$", 2)[1]) < PBKDF2_ROUNDS
+    except (ValueError, IndexError):
+        return True
 
 # ---------- db ----------
 # Opening a fresh MariaDB connection costs ~33ms (TCP + auth handshake);
@@ -1384,7 +1490,7 @@ def init_db():
     )""")
     cur.execute("""CREATE TABLE IF NOT EXISTS Users (
         username VARCHAR(50) PRIMARY KEY,
-        password VARCHAR(100),
+        password VARCHAR(255),   -- a PBKDF2 hash is ~118 chars; 100 truncated it
         role VARCHAR(50),
         display VARCHAR(80),
         email VARCHAR(160)
@@ -1651,7 +1757,22 @@ def init_db():
 
 def migrate_schema():
     """Add new columns for the Customization engine / Profile / User Settings without dropping data."""
+
     c = conn(); cur = c.cursor()
+
+    # The password column was VARCHAR(100), which fitted the old salt$sha256
+    # exactly and cannot hold a PBKDF2 hash at 118 characters. Without this,
+    # MySQL refuses the write: nobody's hash upgrades on login, and creating a
+    # user fails outright. Widening is free and does not touch the values.
+    try:
+        cur.execute("SELECT CHARACTER_MAXIMUM_LENGTH AS n FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='Users' AND COLUMN_NAME='password'")
+        row = cur.fetchone() or {}
+        if int(row.get("n") or 0) < 255:
+            cur.execute("ALTER TABLE Users MODIFY password VARCHAR(255)")
+            print("[itvault] widened Users.password for stronger hashes", flush=True)
+    except Exception as e:
+        print("[itvault] could not widen Users.password:", e, flush=True)
     # Heartbeat: the monitor table grew a lot of per-check options, and the
     # roll-up / event / channel tables are new. ADD COLUMN is a no-op once
     # the column exists, so this is safe to run on every start.
@@ -2014,14 +2135,66 @@ def lan_base_url():
 def role_of():
     return session.get("role")
 
+# How many wrong passwords, and over what window, before an address has to
+# wait. Ten is generous for a person and nothing at all for a script.
+LOGIN_MAX_ATTEMPTS = 10
+LOGIN_WINDOW_S = 900
+_LOGIN_HITS = {}
+
+
+def _login_allowed(key):
+    now = time.time()
+    hits = [t for t in _LOGIN_HITS.get(key, []) if now - t < LOGIN_WINDOW_S]
+    _LOGIN_HITS[key] = hits
+    return len(hits) < LOGIN_MAX_ATTEMPTS
+
+
+def _login_failed(key):
+    now = time.time()
+    _LOGIN_HITS.setdefault(key, []).append(now)
+    # in-process dict, so it cannot be allowed to grow for ever
+    if len(_LOGIN_HITS) > 5000:
+        for k, v in list(_LOGIN_HITS.items()):
+            if not [x for x in v if now - x < LOGIN_WINDOW_S]:
+                _LOGIN_HITS.pop(k, None)
+
+
+def _login_clear(key):
+    """A correct password clears the count: someone who mistyped four times
+    and then got it right is not half way to being locked out."""
+    _LOGIN_HITS.pop(key, None)
+
+
 @app.route("/api/login", methods=["POST"])
 def login():
     d = request.get_json(force=True, silent=True) or {}
     u = (d.get("username") or "").strip(); p = d.get("password", "")
+
+    # Guessing was free before this: no delay, no lockout, nothing in the
+    # audit log. Keyed on the address and the username together, so one
+    # noisy client cannot lock a colleague out by guessing at their account
+    # from somewhere else.
+    gate = f"login:{_client_ip()}:{u.lower()}"
+    if not _login_allowed(gate):
+        audit("-", "LOGIN_THROTTLED", u or "?", _client_ip())
+        return jsonify({"ok": False, "error": "Too many attempts. Wait a few "
+                                              "minutes and try again."}), 429
+
     c = conn(); cur = c.cursor()
     cur.execute("SELECT username, password, role, display, email, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [u])
     row = cur.fetchone(); c.close()
     if row and verify_pw(p, row["password"]):
+        _login_clear(gate)
+        # The password is in hand exactly here and nowhere else, so this is
+        # the only place an old hash can be upgraded.
+        if needs_rehash(row["password"]):
+            try:
+                c2 = conn(); cur2 = c2.cursor()
+                cur2.execute("UPDATE Users SET password=%s WHERE username=%s",
+                             (hash_pw(p), row["username"]))
+                c2.commit(); c2.close()
+            except Exception as e:
+                print("[itvault] could not upgrade password hash:", e, flush=True)
         methods = []
         if row.get("totp_enabled"): methods.append("totp")
         if row.get("email_otp_enabled"): methods.append("email")
@@ -2036,6 +2209,8 @@ def login():
             return jsonify({"ok": True, "need_2fa": True, "methods": methods})
         _start_session(row["username"], row["role"], row["display"], bool(d.get("remember")))
         return jsonify({"ok": True, "role": row["role"]})
+    _login_failed(gate)
+    audit("-", "LOGIN_FAILED", u or "?", _client_ip())
     return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
 def _pending_2fa_user():
@@ -7942,15 +8117,22 @@ import base64, hmac, hashlib, json as _json
 def _sign_token(data, exp_hours=168):
     payload = _json.dumps({"a":data,"exp":int(time.time())+exp_hours*3600}, separators=(',',':'))
     b64 = base64.urlsafe_b64encode(payload.encode()).decode().rstrip('=')
-    sig = hmac.new(SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()[:16]
+    # The whole digest. This used to be truncated to 16 hex characters -- 64
+    # bits -- which is a lot to brute force online but not a margin worth
+    # having on a link that check-in, check-out and a signature hang off.
+    sig = hmac.new(SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()
     return f"{b64}.{sig}"
 
 def _verify_token(tk):
     try:
         if not tk or '.' not in tk: return None
         b64, sig = tk.rsplit('.', 1)
-        expected = hmac.new(SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()[:16]
-        if not hmac.compare_digest(sig, expected): return None
+        expected = hmac.new(SECRET.encode(), b64.encode(), hashlib.sha256).hexdigest()
+        # Links already in inboxes carry the old 16-character tag and stay
+        # valid until they expire; anything issued from now on is full length.
+        ok = hmac.compare_digest(sig, expected) or (
+            len(sig) == 16 and hmac.compare_digest(sig, expected[:16]))
+        if not ok: return None
         payload = base64.urlsafe_b64decode(b64 + '==').decode()
         obj = _json.loads(payload)
         if obj.get('exp',0) < time.time(): return None
@@ -8841,8 +9023,13 @@ def approve_asset():
     return jsonify({"ok": True, "emailed": bool(emailed)})
 
 @app.route("/api/assets/<aid>/signature")
-@auth_required()
+@auth_required(module="assets", level="read")
 def asset_signature(aid):
+    # A signature is a person's handwriting, kept because they acknowledged
+    # holding something. It was behind a bare @auth_required, which is any
+    # account at all -- a helpdesk-only login, a viewer, an API key issued to
+    # an agent for reading tickets. Every other asset route asks for assets
+    # read; so does this one now.
     c = conn(); cur = c.cursor()
     cur.execute("SELECT SignatureData FROM Assets WHERE _id=%s", [aid])
     row = cur.fetchone(); c.close()
