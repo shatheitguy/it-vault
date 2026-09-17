@@ -63,17 +63,20 @@ if parsed:
     check("it does not ask for privileged",
           (tpl.findtext("Privileged") or "false").lower() == "false")
 
+    # Community Applications scans an entire repository, so the template is
+    # published from one that holds nothing else. Submitting this repository
+    # produced a not_unraid_application warning for each of the Android app's
+    # 67 XML files -- layouts and drawables, none of them a template. The copy
+    # here is the source the published one is made from, which is why both
+    # URLs point away from it.
+    PUBLISHED = "https://raw.githubusercontent.com/shatheitguy/unraid-templates/main/"
     icon = (tpl.findtext("Icon") or "")
-    check("the icon is a raw URL to a file that exists in this repo",
-          icon.endswith("default_icon.png") and
-          os.path.exists(os.path.join(ROOT, "default_icon.png")), icon)
     turl = (tpl.findtext("TemplateURL") or "")
-    check("TemplateURL points at this very file",
-          turl.endswith("unraid/it-vault.xml") and
-          os.path.exists(os.path.join(ROOT, "unraid", "it-vault.xml")), turl)
-    check("both URLs use the one branch, not a stale one",
-          "/main/" in icon and "/main/" in turl,
-          "a template that fetches from a dead branch shows a broken icon for ever")
+    check("the icon is served from the templates repo", icon.startswith(PUBLISHED), icon)
+    check("TemplateURL points at the published copy",
+          turl == PUBLISHED + "it-vault.xml", turl)
+    check("neither URL names a branch that is not the default",
+          "main-fresh" not in icon and "main-fresh" not in turl)
 
     configs = tpl.findall("Config")
     check("it exposes a port, three paths and the database settings",
@@ -95,17 +98,8 @@ if parsed:
           "MariaDB" in overview and "DATABASE" in overview.upper(),
           "someone installing this needs to know before they start")
 
-print("\nthe maintainer profile Community Applications asks for")
-try:
-    # at the repository root, which is where Community Applications looks for
-    # it -- in a subfolder the scan finds the templates and no maintainer
-    prof = ET.fromstring(read("ca_profile.xml"))
-    check("it is valid XML", True)
-    check("it carries a non-empty Profile",
-          (prof.findtext("Profile") or "").strip() != "")
-    check("and an icon", (prof.findtext("Icon") or "").strip() != "")
-except (ET.ParseError, FileNotFoundError) as e:
-    check("ca_profile.xml is present and valid", False, e)
+# ca_profile.xml is not here: it belongs next to the published template, in
+# the repository Community Applications actually scans.
 
 print("\nthe TrueNAS compose")
 compose = read("truenas", "docker-compose.yaml")
