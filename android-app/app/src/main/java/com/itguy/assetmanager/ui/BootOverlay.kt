@@ -53,6 +53,12 @@ object BootOverlay {
                 ViewGroup.LayoutParams.MATCH_PARENT,
             ),
         )
+        // The launcher tile cannot be the customer's logo -- it is a compiled
+        // resource -- but this screen is ours to draw, so it shows theirs when
+        // the app has one cached.
+        com.itguy.assetmanager.data.Branding.logo(activity)?.let { logo ->
+            view.findViewById<android.widget.ImageView>(R.id.bootLogo).setImageBitmap(logo)
+        }
         val status = view.findViewById<TextView>(R.id.bootStatus)
         val started = System.currentTimeMillis()
         val animators = startGlitch(view)

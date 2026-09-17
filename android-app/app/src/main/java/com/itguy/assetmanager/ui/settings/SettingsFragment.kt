@@ -10,6 +10,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.Prefs
+import com.itguy.assetmanager.ui.AppIcon
 import com.itguy.assetmanager.databinding.FragmentSettingsBinding
 import com.itguy.assetmanager.ui.login.LoginActivity
 import kotlinx.coroutines.launch
@@ -116,6 +117,7 @@ class SettingsFragment : Fragment() {
             "dark" -> b.themeDark.isChecked = true
             else -> b.themeSystem.isChecked = true
         }
+        bindAppIcon()
         b.themeGroup.setOnCheckedChangeListener { _, checkedId ->
             val mode = when (checkedId) {
                 b.themeLight.id -> "light"
@@ -127,6 +129,55 @@ class SettingsFragment : Fragment() {
                 requireActivity().recreate()
             }
         }
+    }
+
+    /**
+     * The launcher icon, and the shortcut that can carry the customer's own
+     * logo.
+     *
+     * Worth knowing what this cannot do: the tile Android shows for an app is
+     * a compiled resource, so no setting here or on the server can turn it
+     * into an uploaded logo. What it switches between is the three tiles this
+     * APK already contains. The shortcut button is the other half of the
+     * answer -- a shortcut icon is a bitmap, so that one really is their mark.
+     */
+    private fun bindAppIcon() {
+        val current = AppIcon.current(requireContext())
+        when (current) {
+            AppIcon.Variant.LIGHT -> b.iconLight.isChecked = true
+            AppIcon.Variant.MONO -> b.iconMono.isChecked = true
+            else -> b.iconDefault.isChecked = true
+        }
+        b.iconGroup.setOnCheckedChangeListener { _, id ->
+            val want = when (id) {
+                b.iconLight.id -> AppIcon.Variant.LIGHT
+                b.iconMono.id -> AppIcon.Variant.MONO
+                else -> AppIcon.Variant.DEFAULT
+            }
+            if (want == AppIcon.current(requireContext())) return@setOnCheckedChangeListener
+            AppIcon.apply(requireContext(), want)
+            // Launchers redraw on their own schedule, and a few only notice
+            // after the home screen is next opened. Saying so beats someone
+            // deciding it did not work.
+            toast("Icon set to ${want.label}. Your launcher may take a moment, " +
+                  "or need the home screen reopened.")
+        }
+
+        b.pinBrandBtn.setOnClickListener {
+            if (!AppIcon.canPin(requireContext())) {
+                toast("This launcher does not accept pinned shortcuts.")
+                return@setOnClickListener
+            }
+            if (!AppIcon.pinBrandedShortcut(requireContext())) {
+                toast("No logo cached yet — open the app once while connected " +
+                      "to the server, then try again.")
+            }
+        }
+    }
+
+    private fun toast(msg: String) {
+        if (isAdded) android.widget.Toast.makeText(requireContext(), msg,
+                                                   android.widget.Toast.LENGTH_LONG).show()
     }
 
     private fun loadProfile() {

@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260916g">
+<link rel="stylesheet" href="/style.css?v=20260917a">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -632,7 +632,8 @@
               <div class="field2"><label>Logo Text (sidebar)</label><input id="b_logoText" placeholder="IT-Vault"></div>
               <div class="field2"><label>Company Phone</label><input id="b_phone" placeholder="+971 4 000 0000"></div>
               <div class="field2"><label>Company Address</label><input id="b_address" placeholder="Office / building, city, country"></div>
-              <div class="field2" style="grid-column:1/-1"><label>Logo (PNG, max 500KB)</label><input type="file" id="b_logo" accept="image/png"></div>
+              <div class="field2" style="grid-column:1/-1"><label>Logo (PNG, max 500KB)</label><input type="file" id="b_logo" accept="image/png">
+              <p class="sec-hint">Used in the sidebar, the login page, the portal, printed labels and PDF headers, and the phone app once it syncs. <b>It cannot become the phone's launcher icon</b> &mdash; Android compiles that into the app. In the app: Settings &rarr; App icon picks between the tiles it ships, or adds a home-screen shortcut that does carry this logo.</p></div>
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="pm_saveBrand">✓ SAVE BRANDING</button><button class="btn danger" id="removeLogoBtn" type="button">🗑 REMOVE LOGO</button><img id="b_logoPrev" src="/logo.png?t=1" style="height:34px;margin-left:10px"></div>
             <div class="invbox" style="margin-top:14px">
@@ -1384,6 +1385,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260916g"></script>
+<script src="/app.js?nocache=20260917a"></script>
 </body>
 </html>

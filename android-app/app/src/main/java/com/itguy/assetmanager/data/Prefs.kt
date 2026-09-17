@@ -110,6 +110,15 @@ object Prefs {
             applyThemeMode()
         }
 
+    /** Which launcher icon was chosen. The package manager is the real
+     * source of truth -- this is only so Settings can show the choice
+     * without querying three components on every open. */
+    var appIcon: String
+        get() = prefs.getString("app_icon", "DEFAULT") ?: "DEFAULT"
+        set(v) {
+            prefs.edit().putString("app_icon", v).apply()
+        }
+
     /** Call once at the top of every entry-point Activity's onCreate, before
      * super.onCreate() -- AppCompatDelegate needs to know the mode before the
      * theme is resolved for this Activity's window. */
