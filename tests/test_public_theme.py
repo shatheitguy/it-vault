@@ -1,6 +1,6 @@
 """A scanned QR opens in the colours the install is themed in.
 
-/asset/<id> is the one page an employee sees without logging in, and it was the
+/p/<code> is the one page an employee sees without logging in, and it was the
 one page that ignored the branding: it selected the app name and contact only,
 linked style.css and read var(--accent) straight out of it, so a tag scanned on
 a yellow-themed install opened stock red.
@@ -87,7 +87,9 @@ cur.execute("UPDATE Settings SET accent=%s, accent2=%s, comp_bg=%s WHERE id=1",
 c.commit(); c.close()
 
 try:
-    r = cl.get("/asset/" + aid)
+    # /p/<code> is the public address now: /asset/<id> and /a/<tag> are
+    # signed-in only, so a sequential asset tag cannot be walked.
+    r = cl.get("/p/" + A._asset_public_code(aid))
     check("the page loads", r.status_code == 200, r.status_code)
     page = r.get_data(as_text=True)
 

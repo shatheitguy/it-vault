@@ -1,5 +1,8 @@
 # IT-Vault
 
+<img src="docs/img/it-vault-logo.png" alt="IT-Vault — discover, manage, secure" width="360">
+
+
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
 [![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/it-vault)
 [![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)

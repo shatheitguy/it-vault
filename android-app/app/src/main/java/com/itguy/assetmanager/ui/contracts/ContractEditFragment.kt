@@ -17,6 +17,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import android.widget.Toast
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Repository
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.model.Asset
@@ -81,33 +82,83 @@ class ContractEditFragment : Fragment() {
         }
     }
 
+    /**
+     * Fill the form from the cache, then catch up with the server.
+     *
+     * Every dropdown on this form -- assets, people, locations, departments,
+     * contract types -- was fetched before anything was drawn, and the
+     * contract itself came out of a full contracts fetch after that. Six
+     * round trips to open a record the phone already had. They are all
+     * cached now, so the form is on screen immediately and the fetch behind
+     * it only redraws if the contract has actually changed.
+     */
     private fun load() {
-        b.formProgress.visibility = View.VISIBLE
+        val cache = OfflineCache
+        var painted = false
+
+        assets = cache.loadAssets().orEmpty()
+        employees = cache.loadEmployees().orEmpty()
+        locations = cache.loadLocations().orEmpty()
+        departments = cache.loadDepartments().orEmpty()
+        cache.loadContractTypes()?.map { it.name }?.takeIf { it.isNotEmpty() }?.let { TYPES = it }
+        val cached = if (contractId != 0)
+            cache.loadContracts()?.firstOrNull { it.id == contractId } else null
+        if (cached != null || contractId == 0) {
+            current = cached ?: Contract()
+            bindAll()
+            painted = true
+        }
+        b.formProgress.visibility = if (painted) View.GONE else View.VISIBLE
+
         lifecycleScope.launch {
             try {
                 val api = ApiClient.api()
-                assets = api.listAssets().body().orEmpty()
-                employees = api.listEmployees().body().orEmpty()
-                locations = api.locations().body().orEmpty()
-                departments = api.departments().body().orEmpty()
-                val types = api.contractTypes().body().orEmpty().map { it.name }
-                if (types.isNotEmpty()) TYPES = types
-                current = if (contractId != 0) {
-                    api.contracts().body().orEmpty().firstOrNull { it.id == contractId } ?: Contract()
+                suspend fun <T> safe(block: suspend () -> List<T>): List<T> =
+                    try { block() } catch (e: Exception) { emptyList() }
+
+                safe { api.listAssets().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { assets = it; cache.saveAssets(it) }
+                safe { api.listEmployees().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { employees = it; cache.saveEmployees(it) }
+                safe { api.locations().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { locations = it; cache.saveLocations(it) }
+                safe { api.departments().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { departments = it; cache.saveDepartments(it) }
+                safe { api.contractTypes().body().orEmpty() }.takeIf { it.isNotEmpty() }?.let {
+                    cache.saveContractTypes(it)
+                    TYPES = it.map { item -> item.name }
+                }
+
+                val fresh = if (contractId != 0) {
+                    val all = safe { api.contracts().body().orEmpty() }
+                    if (all.isNotEmpty()) cache.saveContracts(all)
+                    all.firstOrNull { it.id == contractId } ?: cached ?: Contract()
                 } else Contract()
+
                 if (_b == null) return@launch
-                bindTypeSpinner()
-                bindAssetSpinner()
-                bindEmployeeSpinner()
-                bindLocationSpinner()
-                bindDepartmentSpinner()
-                populateFields()
+                if (!painted || fresh != current) {
+                    current = fresh
+                    bindAll()
+                }
             } catch (e: Exception) {
-                if (_b != null) { b.formError.text = "Could not load form: ${e.message}"; b.formError.visibility = View.VISIBLE }
+                if (_b != null && !painted) {
+                    b.formError.text = "Could not load form: ${e.message}"
+                    b.formError.visibility = View.VISIBLE
+                }
             } finally {
                 _b?.formProgress?.visibility = View.GONE
             }
         }
+    }
+
+    /** Every spinner and field, from whatever [current] holds right now. */
+    private fun bindAll() {
+        bindTypeSpinner()
+        bindAssetSpinner()
+        bindEmployeeSpinner()
+        bindLocationSpinner()
+        bindDepartmentSpinner()
+        populateFields()
     }
 
     private fun populateFields() {

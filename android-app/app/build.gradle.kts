@@ -24,8 +24,8 @@ android {
         // 11). The in-app updater offers an update on versionCode alone,
         // so it has to clear both -- keeping either side's number would
         // leave a build that will not install over the other.
-        versionCode = 12
-        versionName = "1.9.0"
+        versionCode = 22
+        versionName = "2.1.1"
     }
 
     signingConfigs {
@@ -94,7 +94,6 @@ dependencies {
     implementation("androidx.camera:camera-view:1.3.4")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
     // text recognition (OCR) -- for reading printed labels (S/N, Model, MAC…) into the Add Asset form
-    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     implementation("de.hdodenhof:circleimageview:3.1.0")
 }

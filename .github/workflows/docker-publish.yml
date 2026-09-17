@@ -5,10 +5,12 @@ name: Build and publish Docker image
 # build (to catch a broken Dockerfile) — they never push.
 on:
   push:
-    branches: [ "main" ]
+    # Both names: the default branch was renamed, and a workflow that names
+    # only the old one silently stops publishing.
+    branches: [ "main", "main-fresh" ]
     tags: [ "v*.*.*" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "main-fresh" ]
 
 env:
   REGISTRY: ghcr.io
@@ -24,6 +26,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Cheap, and it runs before anything is built or pushed. VERSION, the
+      # Android versionName/versionCode and the update manifest phones poll
+      # drifted three ways once because nothing compared them.
+      - name: Check the version sources agree
+        run: python tests/test_versions_agree.py
 
       # QEMU lets the amd64 runner build the arm64 image too, so the install
       # one-liner works on Apple Silicon and a Raspberry Pi, not just x86.

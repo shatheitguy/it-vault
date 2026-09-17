@@ -6,7 +6,11 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20260910d">
+<link rel="stylesheet" href="/style.css?v=20260916g">
+<!-- The install's own logo, so a browser tab is identifiable and the
+     dashboard's icon lookup finds something when pointed at itself. -->
+<link rel="icon" href="/icon.png">
+<link rel="apple-touch-icon" href="/icon.png">
 </head>
 <body>
 <canvas id="bgCanvas"></canvas><div class="backdrop-veil"></div><div class="vignette"></div>
@@ -15,7 +19,7 @@
 
 <div id="app">
   <aside class="side">
-    <div class="logo"><img id="sideLogo" src="/logo.png" alt="" onerror="this.style.display='none'"><span id="sideName">IT-Vault</span></div>
+    <div class="logo"><img id="sideLogo" src="/icon.png" alt="" onerror="this.style.display='none'"><span id="sideName">IT-Vault</span></div>
     <nav class="nav">
       <div class="nav-grp">Main</div>
       <a id="navHome" class="active"><span class="ni">🏠</span>Dashboard</a>
@@ -26,6 +30,7 @@
       <div class="nav-grp">Records</div>
       <a id="navDirectory" style="display:none"><span class="ni">👥</span>Directory</a>
       <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
+      <a id="navLostFound" style="display:none" data-i18n="LostFound"><span class="ni">🔎</span>Lost &amp; Found</a>
       <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
       <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Log</a>
 
@@ -86,6 +91,35 @@
           <label>DESIGNATIONS <span id="desCount" class="cat-count"></span></label>
           <div class="catrow"><input id="desInput" placeholder="e.g. Manager, Technician"><button class="btn sm" id="desAdd">＋ ADD</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="desBody"></tbody></table></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="page-lostfound" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / LOST &amp; FOUND</div><h2>Lost &amp; Found</h2></div>
+        <div class="spacer"></div>
+        <button class="btn sm" id="lfLostBtn">＋ REPORT AN ASSET LOST</button>
+      </div>
+
+      <div class="panel">
+        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <span>REPORTS</span>
+          <div class="lftools">
+            <select id="lfFilter" class="lfsel">
+              <option value="">All</option>
+              <option value="lost">Lost</option>
+              <option value="found">Found</option>
+              <option value="returned">Returned</option>
+            </select>
+            <button class="btn sm ghost" id="lfRefreshBtn">⟳ REFRESH</button>
+          </div>
+        </div>
+        <p class="sec-hint">Anyone who scans an asset tag can say they have the item. What they leave &mdash;
+          their name and number &mdash; lands here, and whoever it is assigned to is emailed at the same time.</p>
+        <div class="tablewrap">
+          <table id="lfGrid"><thead><tr><th>REF</th><th>ASSET</th><th>REPORTED</th><th>WHO HAS IT</th><th>STATUS</th><th></th></tr></thead><tbody id="lfBody"></tbody></table>
+          <div class="empty" id="lfEmpty" style="display:none">NOTHING REPORTED LOST OR FOUND</div>
         </div>
       </div>
     </div>
@@ -270,9 +304,20 @@
 
       <div class="dash-tools" id="dashTools">
         <button class="btn ghost" id="dashEditLayout">✎ EDIT LAYOUT</button>
+        <label class="dashcols" id="dashColsWrap" style="display:none">Columns
+          <select id="dashCols">
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+          </select>
+        </label>
         <button class="btn" id="dashSaveLayout" style="display:none">💾 SAVE LAYOUT</button>
         <button class="btn ghost" id="dashResetLayout" style="display:none">↺ RESET</button>
         <span id="dashLayoutMsg" class="muted"></span>
+        <span class="spacer" style="flex:1"></span>
+        <input id="dashFilter" class="dashfilter" placeholder="Filter widgets…" autocomplete="off">
+        <div class="dashhidden" id="dashHidden" style="display:none"></div>
       </div>
 
       <div id="dashWidgets">
@@ -471,15 +516,45 @@
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="saveSettings">Save notifications</button><button class="btn ghost" id="smtpTestBtn">⚡ TEST EMAIL</button><span id="smtpTestMsg" class="muted" style="margin-left:8px"></span></div>
             </div>
-            <div class="panel" style="margin-top:14px"><div class="secthead">ASSET EVENT NOTIFICATIONS</div>
-              <label class="toggle"><input type="checkbox" id="uNew"><span>Notify on new asset created</span></label>
-              <label class="toggle"><input type="checkbox" id="uDel"><span>Notify on asset deletion</span></label>
-            </div>
-            <div class="panel" style="margin-top:14px"><div class="secthead">TICKET EVENT NOTIFICATIONS</div>
-              <label class="toggle"><input type="checkbox" id="notify_on_create"><span>New ticket created</span></label>
-              <label class="toggle"><input type="checkbox" id="notify_on_resolve"><span>Ticket resolved/closed</span></label>
-              <label class="toggle"><input type="checkbox" id="notify_on_reply"><span>Reply added (email requester)</span></label>
-              <p class="muted" style="margin:12px 0 0">All emails sent from the SMTP above. Recipients = users with emails set in their profile.</p>
+            <div class="panel" style="margin-top:14px"><div class="secthead">NOTIFICATION CHANNELS</div>
+<p class="sec-hint">Where every notification is delivered &mdash; asset events, tickets, SLA breaches, backups and Heartbeat outage alerts. With none set up they go to users who have an email on their profile. Test a channel before something has to rely on it.</p>
+    <div class="tablewrap">
+      <table class="dtable"><thead><tr><th>NAME</th><th>TYPE</th><th>WHERE</th><th>ACTIVE</th><th></th></tr></thead>
+      <tbody id="hbChanBody"></tbody></table>
+    </div>
+    <div class="empty" id="hbChanEmpty" style="display:none">NO CHANNELS YET &mdash; NOTIFICATIONS GO TO USERS WITH AN EMAIL ON THEIR PROFILE</div>
+    <div class="invbox" style="margin-top:14px">
+      <label id="hbChanFormTitle">ADD A CHANNEL</label>
+      <div class="grid2">
+        <div class="field2"><label>Name</label><input id="hbc_name" placeholder="e.g. IT team email, Ops Slack"></div>
+        <div class="field2" id="hbc_toWrap" style="grid-column:1/-1"><label>Send to</label><input id="hbc_to" class="mono" placeholder="netops@example.com, oncall@example.com"></div>
+        <div class="field2"><label>Type</label>
+          <select id="hbc_kind">
+            <option value="email">Email (uses your SMTP settings)</option>
+            <option value="webhook">Webhook (JSON POST)</option>
+            <option value="slack">Slack incoming webhook</option>
+            <option value="telegram">Telegram bot</option>
+          </select>
+        </div>
+        <div class="field2" id="hbc_urlWrap" style="display:none;grid-column:1/-1"><label id="hbc_urlLabel">Webhook URL</label><input id="hbc_url" class="mono" placeholder="https://hooks.example.com/..."></div>
+        <div class="field2" id="hbc_tokenWrap" style="display:none"><label>Bot token</label><input id="hbc_token" type="password" placeholder="123456:ABC-DEF..."></div>
+        <div class="field2" id="hbc_chatWrap" style="display:none"><label>Chat ID</label><input id="hbc_chat" class="mono" placeholder="-1001234567890"></div>
+      </div>
+      <div class="scanrow" style="margin-top:10px">
+        <label class="toggle"><input type="checkbox" id="hbc_enabled" checked><span>Channel active</span></label>
+      </div>
+      <p class="muted scan-hint" id="hbc_hint">Email uses the SMTP server and notification address already configured in Settings.</p>
+      <div class="m-actions" style="justify-content:flex-start">
+        <button class="btn" id="hbcSave" type="button">SAVE CHANNEL</button>
+        <button class="btn ghost" id="hbcReset" type="button" style="display:none">CANCEL EDIT</button>
+      </div>
+    </div>
+  </div>
+            <div class="panel" style="margin-top:14px"><div class="secthead">WHAT TO SEND</div>
+              <p class="sec-hint">Every notification the system can send. Whatever is ticked goes out over
+                the channels above &mdash; and by email to users who have an address on their profile when no
+                channel is set up. Untick something and it stops, everywhere.</p>
+              <div class="ntypes" id="notifTypes"></div>
             </div>
             <div class="m-actions"><button class="btn mag" id="saveNotifBtn">✓ SAVE NOTIFICATIONS</button></div>
           </section>
@@ -663,6 +738,54 @@
           <!-- ASSET LABEL (QR / print label — separate from Branding) -->
           <section class="cfg-sec" data-sec="label" style="display:none">
             <div class="panel">
+              <div class="secthead">TAG MODEL</div>
+              <p class="sec-hint">What the printed tag looks like. <b>Detailed</b> is this app's own tag &mdash;
+                brand, asset ID, name, the fields below and the DO NOT REMOVE notice. The <b>plate</b> models are
+                the engraved-plate convention: the code on the left, and the logo, one caption and one big number
+                on the right. Nothing else. The caption is free text &mdash; the four offered are just the common ones.</p>
+              <div class="preset-grid" id="tagModelGrid">
+                <button type="button" class="preset-card" data-model="detail" data-caption="">
+                  <span class="tm-prev tm-p-detail"><i class="tm-q"></i><i class="tm-rows"></i></span>
+                  <span class="pc-name">Detailed</span>
+                  <span class="pc-sub">Fields + notice</span>
+                </button>
+                <button type="button" class="preset-card" data-model="plate" data-caption="Asset No.">
+                  <span class="tm-prev tm-p-plate"><i class="tm-q"></i><b>Asset No.</b><u>45464544</u></span>
+                  <span class="pc-name">Plate</span>
+                  <span class="pc-sub">Code + big number</span>
+                </button>
+                <button type="button" class="preset-card" data-model="banner" data-caption="Return To Equipment Room">
+                  <span class="tm-prev tm-p-banner"><em></em><i class="tm-q"></i><b>Return To Equipment Room</b></span>
+                  <span class="pc-name">Banner</span>
+                  <span class="pc-sub">Colour band + message</span>
+                </button>
+                <button type="button" class="preset-card" data-model="sidebar" data-caption="Asset Tag">
+                  <span class="tm-prev tm-p-side"><em></em><i class="tm-q"></i><s></s></span>
+                  <span class="pc-name">Panel</span>
+                  <span class="pc-sub">Colour panel + edge tab</span>
+                </button>
+                <button type="button" class="preset-card" data-model="edge" data-caption="Asset Tag">
+                  <span class="tm-prev tm-p-edge"><em></em><i class="tm-q"></i><s></s></span>
+                  <span class="pc-name">Spine</span>
+                  <span class="pc-sub">Sideways text + number</span>
+                </button>
+              </div>
+              <div class="grid2" style="margin-top:12px">
+                <div class="field2" id="labelCaptionWrap">
+                  <label>Text on the tag</label>
+                  <input id="label_caption" maxlength="40" placeholder="Asset No.">
+                  <div class="fhint">The caption on a Plate, the message on a Banner, the sideways
+                    line on a Panel or Spine. Ignored by the Detailed model.</div>
+                </div>
+                <div class="field2" id="labelColorWrap">
+                  <label>Tag colour</label>
+                  <input type="color" id="label_color" value="#000000">
+                  <div class="fhint">The band, the panel, the spine. Text on it flips to black or
+                    white on its own, whichever can be read.</div>
+                </div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
               <div class="secthead">LABEL SIZE</div>
               <p class="sec-hint">Two independent sizes: the QR code's own image resolution, and the physical label it gets printed onto. Pick the physical size to match your label stock, and a QR resolution that stays sharp at that size.</p>
               <div class="grid2">
@@ -680,10 +803,34 @@
                     <option value="50.8x25.4">Rectangle — 5.08 × 2.54 cm</option>
                   </select>
                 </div>
+                <div class="field2"><label>Logo size (printed)</label>
+                  <select id="label_logo_size">
+                    <option value="sm">Small</option>
+                    <option value="md" selected>Default</option>
+                    <option value="lg">Large</option>
+                    <option value="xl">Extra large</option>
+                  </select>
+                  <div class="fhint">Every model caps it at the room it has, so a large logo on a
+                    small tag cannot push the number off.</div>
+                </div>
               </div>
               <label class="toggle" style="margin-top:6px"><input type="checkbox" id="label_logo" checked><span>Show company logo on label</span></label>
             </div>
             <div class="panel" style="margin-top:14px">
+              <div class="secthead">DETAILS ON THE TAG</div>
+              <p class="sec-hint">Extra lines, on whichever model is printing. Each one is placed where
+                that model has room for it &mdash; the contact becomes a field row on Detailed, a line
+                under the number on a Plate, a line in the panel on a Panel or Spine.</p>
+              <div class="label-fields-grid">
+                <label class="toggle"><input type="checkbox" id="label_show_name"><span>Company name</span></label>
+                <label class="toggle"><input type="checkbox" id="label_show_contact"><span>Contact number</span></label>
+                <label class="toggle"><input type="checkbox" id="label_show_asset"><span>Asset name</span></label>
+              </div>
+              <p class="muted" style="margin:10px 0 0">The contact number comes from Settings &rsaquo;
+                Branding. On the Banner model the company name <i>is</i> the coloured band, so switching
+                it off leaves the band plain.</p>
+            </div>
+            <div class="panel" style="margin-top:14px" id="labelFieldsPanel">
               <div class="secthead">FIELDS SHOWN ON LABEL</div>
               <p class="sec-hint">Choose exactly what prints on the label. <b>Category</b> and <b>Asset ID</b> always show — they're needed to identify a scanned item.</p>
               <div class="label-fields-grid" id="lblFieldsGrid">
@@ -732,7 +879,6 @@
           <option value="8760">Last year</option>
         </select>
         <label class="toggle" style="margin:0"><input type="checkbox" id="hbAuto" checked><span>Auto&#8209;refresh</span></label>
-        <button class="btn ghost" id="hbChanBtn" style="display:none">&#128276; ALERTS</button>
         <button class="btn ghost" id="hbCheckBtn">&#9889; CHECK NOW</button>
         <button class="btn" id="hbAddBtn">+ ADD MONITOR</button>
       </div>
@@ -794,7 +940,7 @@
 
 <!-- Asset modal -->
 <div class="modal" id="modal"><div class="modal-box">
-  <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3><button class="btn sm ghost" id="camScanBtn" type="button">📷 SCAN QR / SN</button></div>
+  <div class="modal-title-row"><h3 id="modalTitle">ADD ASSET</h3></div>
   <div class="modal-scroll">
     <div id="formFields"></div>
     <div class="invbox" id="maintWrap" style="display:none">
@@ -812,28 +958,6 @@
     <div class="invbox" id="histWrap"><label>CHANGE HISTORY</label><div id="histBox" class="histbox"></div></div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="cancelBtn">CANCEL</button><button class="btn" id="saveBtn">COMMIT</button></div>
-</div></div>
-
-<!-- Camera scan modal (QR / barcode -> Add Asset form) -->
-<div class="modal" id="camScanModal"><div class="modal-box" style="width:min(480px,94vw);max-width:480px">
-  <h3>SCAN QR / SERIAL NUMBER</h3>
-  
-  <div class="modal-scroll"><p class="sec-hint" id="camScanHint">Point the camera at a QR code or serial-number barcode. Detected values fill the asset form automatically -- nothing is saved until you hit COMMIT.</p>
-    <div class="camscan-view">
-      <video id="camScanVideo" autoplay playsinline muted></video>
-    </div>
-    <canvas id="camScanCanvas" style="display:none"></canvas>
-    <div class="camscan-status" id="camScanStatus"></div>
-    <div class="camscan-upload-row">
-      <button class="btn sm" id="camScanTextBtn" type="button">📄 SCAN TEXT ON LABEL (S/N, Model…)</button>
-    </div>
-    <div class="camscan-upload-row">
-      <button class="btn sm ghost" id="camScanUploadBtn" type="button">⬆ UPLOAD PHOTO INSTEAD</button>
-      <input type="file" id="camScanUploadFile" accept="image/*" capture="environment" style="display:none">
-    </div>
-  </div>
-  
-  <div class="m-actions"><button class="btn ghost" id="camScanCancel" type="button">CLOSE</button></div>
 </div></div>
 
 <!-- Contract / AMC / License / Subscription modal -->
@@ -871,6 +995,32 @@
     </div>
   </div>
   <div class="m-actions"><button class="btn ghost" id="ctCancel" type="button">CANCEL</button><button class="btn danger" id="ctDelete" type="button" style="display:none">DELETE</button><button class="btn" id="ctSave" type="button">SAVE</button></div>
+</div></div>
+
+<!-- Report an asset lost -->
+<div class="modal" id="lostModal"><div class="modal-box">
+  <h3>REPORT AN ASSET LOST</h3>
+  <div class="modal-scroll">
+    <div class="invbox">
+      <label>WHICH ASSET</label>
+      <div class="grid2">
+        <div class="field2" style="grid-column:1/-1"><label>Asset</label>
+          <select id="lm_asset"><option value="">-- select asset --</option></select>
+          <div class="fhint">Only assets that are not already recorded as lost are listed.</div>
+        </div>
+      </div>
+    </div>
+    <div class="invbox">
+      <label>DETAILS</label>
+      <div class="grid2">
+        <div class="field2" style="grid-column:1/-1"><label>What happened? <span class="muted" style="font-weight:400">(optional)</span></label>
+          <textarea id="lm_note" rows="3" placeholder="e.g. not returned after the Dubai site visit"></textarea></div>
+      </div>
+      <p class="muted" style="margin:10px 0 0">Saving marks the asset <b>Lost/Stolen</b> and opens a Lost &amp; Found
+        record. If someone scans its tag and reports it found, that report joins the same record.</p>
+    </div>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="lmCancel" type="button">CANCEL</button><button class="btn" id="lmSave" type="button">SAVE</button></div>
 </div></div>
 
 <!-- Employee modal -->
@@ -1127,45 +1277,7 @@
 </div></div>
 
 <!-- Heartbeat alert channels -->
-<div class="modal" id="hbChanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
-  <h3>ALERT CHANNELS</h3>
-  <div class="modal-scroll">
-    <p class="sec-hint">Where outage alerts are delivered. A monitor can use any combination of these; with none set up,
-    alerts fall back to the notification address in Settings &#9656; Notifications. Test a channel before an outage has
-    to rely on it.</p>
-    <div class="tablewrap">
-      <table class="dtable"><thead><tr><th>NAME</th><th>TYPE</th><th>WHERE</th><th>ACTIVE</th><th></th></tr></thead>
-      <tbody id="hbChanBody"></tbody></table>
-    </div>
-    <div class="empty" id="hbChanEmpty" style="display:none">NO CHANNELS YET &mdash; ALERTS GO TO THE NOTIFICATION ADDRESS</div>
-    <div class="invbox" style="margin-top:14px">
-      <label id="hbChanFormTitle">ADD A CHANNEL</label>
-      <div class="grid2">
-        <div class="field2"><label>Name</label><input id="hbc_name" placeholder="e.g. IT team email, Ops Slack"></div>
-        <div class="field2"><label>Type</label>
-          <select id="hbc_kind">
-            <option value="email">Email (uses your SMTP settings)</option>
-            <option value="webhook">Webhook (JSON POST)</option>
-            <option value="slack">Slack incoming webhook</option>
-            <option value="telegram">Telegram bot</option>
-          </select>
-        </div>
-        <div class="field2" id="hbc_urlWrap" style="display:none;grid-column:1/-1"><label id="hbc_urlLabel">Webhook URL</label><input id="hbc_url" class="mono" placeholder="https://hooks.example.com/..."></div>
-        <div class="field2" id="hbc_tokenWrap" style="display:none"><label>Bot token</label><input id="hbc_token" type="password" placeholder="123456:ABC-DEF..."></div>
-        <div class="field2" id="hbc_chatWrap" style="display:none"><label>Chat ID</label><input id="hbc_chat" class="mono" placeholder="-1001234567890"></div>
-      </div>
-      <div class="scanrow" style="margin-top:10px">
-        <label class="toggle"><input type="checkbox" id="hbc_enabled" checked><span>Channel active</span></label>
-      </div>
-      <p class="muted scan-hint" id="hbc_hint">Email uses the SMTP server and notification address already configured in Settings.</p>
-      <div class="m-actions" style="justify-content:flex-start">
-        <button class="btn" id="hbcSave" type="button">SAVE CHANNEL</button>
-        <button class="btn ghost" id="hbcReset" type="button" style="display:none">CANCEL EDIT</button>
-      </div>
-    </div>
-  </div>
-  <div class="m-actions"><button class="btn ghost" id="hbChanClose" type="button">CLOSE</button></div>
-</div></div>
+
 
 <!-- Network scan modal -->
 <div class="modal" id="scanModal"><div class="modal-box" style="width:min(720px,94vw);max-width:720px">
@@ -1270,7 +1382,8 @@
   <div class="m-actions"><button class="btn ghost" onclick="document.getElementById('signModal').classList.remove('show')">CLOSE</button></div>
 </div></div>
 
+
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20260910d"></script>
+<script src="/app.js?nocache=20260916g"></script>
 </body>
 </html>

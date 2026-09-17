@@ -12,6 +12,13 @@
     <color name="muted">#5C6A80</color>
     <color name="outline">#DCE1EA</color>
     <color name="bar_track">#E6EAF1</color>
+    <!-- The overview numbers, one role each, matching the web: total in the
+         accent, checked out cyan, maintenance green, due soon amber, warranty
+         red. Darkened here because the light surface needs it. -->
+    <color name="stat_cyan">#0E8FB3</color>
+    <color name="stat_green">#0F9D63</color>
+    <color name="stat_amber">#B0761A</color>
+    <color name="stat_red">#D24545</color>
     <!-- Heartbeat status. Chosen to stay legible on the light surface,
          which the web palette's neon greens do not. -->
     <color name="hb_up">#1FA971</color>

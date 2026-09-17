@@ -10,3 +10,12 @@ reportlab
 pymupdf
 requests
 urllib3
+
+# Arabic (and Hebrew) names in the signed-acknowledgement PDF. A PDF has
+# no text engine, so the letters have to be swapped for their contextual
+# forms and reordered right-to-left before they are drawn.
+arabic-reshaper
+# pinned to the last pure-Python release deliberately: 0.5+ is a Rust
+# extension and this image has no Rust toolchain, so any architecture
+# without a prebuilt wheel would fail the docker build outright.
+python-bidi==0.4.2

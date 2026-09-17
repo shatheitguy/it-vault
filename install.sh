@@ -136,8 +136,14 @@ ART
     esac
 }
 
-BANNER_SUB1='             IT Asset register + Helpdesk'
-BANNER_SUB2='               powered by Sha The IT Guy'
+# Kept whole for the flat path, and split so the animated one can type
+# them on a word at a time (word splitting would eat the indent).
+BANNER_PAD1='             '
+BANNER_PAD2='               '
+BANNER_TXT1='IT Asset register + Helpdesk'
+BANNER_TXT2='powered by Sha The IT Guy'
+BANNER_SUB1="${BANNER_PAD1}${BANNER_TXT1}"
+BANNER_SUB2="${BANNER_PAD2}${BANNER_TXT2}"
 
 # IT-Vault's accent is #ff3b30, so the banner is red rather than the green it
 # used to be. The reveal ramps from a dark ember to that accent, which reads
@@ -175,31 +181,62 @@ banner() {
         return
     fi
 
-    # dark ember -> the accent, one shade per line as it is revealed
-    _ramp='88 124 160 196 203 203'
+    # Every line is written to the terminal exactly once, and only ever
+    # rewritten in place with a carriage return. That is the rule here.
+    #
+    # The obvious way to animate a block of art is to redraw it: move the
+    # cursor back up over it and paint the next frame. On screen that looks
+    # like one banner. In scrollback, and in any captured install log, it
+    # leaves every frame behind -- the install output used to show the banner
+    # three times. A \r rewrite stays inside one line of the buffer, so what
+    # survives is the last thing written to it, which is what we want.
+    #
+    # So each line powers up where it is: ember, hotter, a cyan tear on the
+    # way (the same RGB-split glitch the app's own start-up screen uses), then
+    # it settles on the accent. Then a rule sweeps out underneath, drawn by
+    # appending one character at a time, and the two subtitles type on.
+    # Four frames, not more: every frame costs a `sleep`, and a `sleep` is a
+    # process. On a host where spawning one takes 50ms -- which is any busy
+    # box, and every Windows shell -- a five-frame ramp over six lines turned
+    # a banner into a three-second wait. Four frames read the same and the
+    # whole thing lands under a second where it matters.
+    _pulse='52 88 45 196'
     printf '\n'
-    _i=0
     banner_art | while IFS= read -r _line; do
-        _i=$((_i + 1))
-        _c=0; _n=0
-        for _s in $_ramp; do
-            _n=$((_n + 1))
-            [ "$_n" -eq "$_i" ] && _c="$_s"
+        for _c in $_pulse; do
+            printf '\r\033[38;5;%sm%s\033[0m' "$_c" "$_line"
+            sleep 0.012
         done
-        [ "$_c" -eq 0 ] && _c=203
-        printf '\033[38;5;%sm%s\033[0m\n' "$_c" "$_line"
-        sleep 0.03
+        printf '\r\033[1;38;5;203m%s\033[0m\n' "$_line"
     done
 
-    # No second pass over the finished block. Redrawing it needed the cursor
-    # moved back up over the art, which renders as one banner on screen but
-    # leaves every frame behind in scrollback and in any captured log -- the
-    # install output showed the banner three times. The reveal above is
-    # animation enough and only ever writes each line once.
+    # the rule: appended, never rewritten, so it sweeps and leaves one line
+    printf '  '
+    _n=0
+    while [ "$_n" -lt 55 ]; do
+        printf '\033[38;5;203m\342\224\200\033[0m'
+        _n=$((_n + 1))
+        [ $((_n % 12)) -eq 0 ] && sleep 0.02
+    done
+    printf '\n'
 
-    printf '\033[2m%s\033[0m\n' "$BANNER_SUB1"
-    sleep 0.04
-    printf '\033[38;5;203m%s\033[0m\n\n' "$BANNER_SUB2"
+    printf '\033[2m%s' "$BANNER_PAD1"
+    _first=1
+    for _w in $BANNER_TXT1; do
+        [ "$_first" -eq 1 ] && _first=0 || printf ' '
+        printf '%s' "$_w"
+        sleep 0.03
+    done
+    printf '\033[0m\n'
+
+    printf '\033[38;5;203m%s' "$BANNER_PAD2"
+    _first=1
+    for _w in $BANNER_TXT2; do
+        [ "$_first" -eq 1 ] && _first=0 || printf ' '
+        printf '%s' "$_w"
+        sleep 0.025
+    done
+    printf '\033[0m\n\n'
 }
 
 warn() { printf '%s !%s  %s\n' "$Y" "$N" "$*"; }
@@ -472,6 +509,87 @@ save_conf() {
     return 0
 }
 
+# ---------------------------------------------------------------------------
+# Volumes left behind by an older layout.
+#
+# `docker compose` prefixes volume names with its project directory, so running
+# compose from /home/it/itvault creates itvault_invoices_data next to the
+# invoices_data this installer uses. Both are real volumes holding real data,
+# and a container mounted on the wrong one looks exactly like data loss: the
+# rows are there, the files are not, and nothing says why.
+#
+# docker-compose.yml pins `name:` on every volume now, so the two can no longer
+# diverge -- but that does nothing for an install where they already have. This
+# finds the twin, and adopts it when the answer is unambiguous.
+#
+# The rule is deliberately narrow: copy ONLY when the volume we are about to
+# mount is empty and its twin is not. Two volumes with data in both is a
+# question about which is current, and guessing at that is how the wrong copy
+# wins. In that case it says so and changes nothing.
+# ---------------------------------------------------------------------------
+
+# Number of files in a volume, or 0 if it does not exist / cannot be read.
+# Uses the app image, which is already pulled by the time this runs, rather
+# than pulling busybox just to count files.
+_vol_files() {
+    $DK run --rm -v "$1":/v "$IMAGE:$TAG" \
+        sh -c 'find /v -type f 2>/dev/null | wc -l' 2>/dev/null \
+        | tr -d " \r\n" || echo 0
+}
+
+# Any volume whose name ends in _<canonical>, which is what compose prefixing
+# produces. itvault_invoices_data is the twin of invoices_data.
+_vol_twins() {
+    $DK volume ls --format '{{.Name}}' 2>/dev/null \
+        | grep -E "_$1\$" | grep -v "^$1\$" || true
+}
+
+adopt_orphan_volumes() {
+    _adopted=0
+    for _v in itvault_data invoices_data backups_data itvault_db; do
+        _mine="$(_vol_files "$_v")"
+        case "$_mine" in ''|*[!0-9]*) _mine=0 ;; esac
+        for _twin in $(_vol_twins "$_v"); do
+            _theirs="$(_vol_files "$_twin")"
+            case "$_theirs" in ''|*[!0-9]*) _theirs=0 ;; esac
+            [ "$_theirs" -gt 0 ] || continue
+            if [ "$_mine" -gt 0 ]; then
+                say ""
+                warn "Two volumes hold data for $_v:"
+                say  "    ${B}$_v${N} ($_mine files) is the one IT-Vault will use"
+                say  "    ${B}$_twin${N} ($_theirs files) was left by an older compose layout"
+                say  "  Nothing was changed -- which one is current is your call. To look inside:"
+                say  "    ${B}$DK run --rm -v $_twin:/v $IMAGE:$TAG ls -la /v${N}"
+                continue
+            fi
+            step "Adopting $_twin into $_v ($_theirs files)"
+            if [ -n "$DRY" ]; then
+                printf '    docker run --rm -v %s:/from -v %s:/to %s sh -c "cp -an /from/. /to/"\n' \
+                    "$_twin" "$_v" "$IMAGE:$TAG"
+                continue
+            fi
+            # -n never overwrites, so this can only ever add files. The source
+            # volume is left untouched: if this turns out to be the wrong
+            # choice, nothing has been destroyed to undo.
+            if $DK run --rm -v "$_twin":/from -v "$_v":/to "$IMAGE:$TAG" \
+                    sh -c 'cp -an /from/. /to/ 2>/dev/null; exit 0' >/dev/null 2>&1; then
+                _adopted=$((_adopted + 1))
+                _mine="$(_vol_files "$_v")"
+                say "    ${G}recovered${N} -- $_v now holds $_mine files"
+            else
+                warn "Could not copy $_twin into $_v; left both alone."
+            fi
+        done
+    done
+    if [ "$_adopted" -gt 0 ]; then
+        say ""
+        say "  ${G}$_adopted volume(s) recovered${N} from an older compose layout."
+        say "  The originals were not deleted -- remove them yourself once you are happy:"
+        say "    ${B}$DK volume ls${N}"
+        say ""
+    fi
+}
+
 # One value out of the database container's environment. That is where the
 # credentials that created it still live, which is what makes adopting it
 # possible at all.
@@ -535,6 +653,11 @@ update_in_place() {
     case "$PORT" in
         ''|*[!0-9]*) die "Could not work out which port to publish (got '$PORT'). Nothing was changed." ;;
     esac
+
+    # Before the container is recreated: if an older compose layout left a
+    # prefixed twin holding the real data, adopt it now, while the volume this
+    # install mounts is still the empty one.
+    adopt_orphan_volumes
 
     step "Replacing the container (volumes are kept)"
     run rm -f "$NAME"
@@ -642,6 +765,12 @@ provision_db() {
     step "Creating volume itvault_db"
     run volume create itvault_db
 
+    # The two --character-set-server flags at the end are passed to the
+    # server, not to docker: MariaDB still defaults to latin1, and
+    # MARIADB_DATABASE creates the database with the server default. On a
+    # latin1 server an Arabic asset or signer name is stored as a row of
+    # question marks -- lost on the way in, before anything that displays it
+    # is involved. Only a first-time initialisation is affected.
     step "Starting MariaDB as '$DB_CONTAINER' (not published to the network)"
     run run -d \
         --name "$DB_CONTAINER" \
@@ -654,7 +783,8 @@ provision_db() {
         -v itvault_db:/var/lib/mysql \
         --health-cmd "healthcheck.sh --connect --innodb_initialized" \
         --health-interval 5s --health-timeout 5s --health-retries 20 \
-        "$DB_IMAGE"
+        "$DB_IMAGE" \
+        --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 
     [ -n "$DRY" ] && return 0
 
@@ -1102,6 +1232,11 @@ step "Creating volumes (itvault_data, invoices_data, backups_data)"
 run volume create itvault_data
 run volume create invoices_data
 run volume create backups_data
+
+# Installing over a host that has run compose from a directory called
+# something else: the data is in prefixed volumes and this would otherwise
+# come up empty and look like a fresh install.
+adopt_orphan_volumes
 
 step "Starting container '$NAME' on port $PORT"
 # --add-host is what lets DB_HOST=host.docker.internal reach a database

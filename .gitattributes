@@ -5,3 +5,14 @@ install.sh text eol=lf
 uninstall.sh text eol=lf
 install.ps1 text eol=crlf
 uninstall.ps1 text eol=crlf
+
+# Fonts are binary. core.autocrlf is on here, and a line-ending "fix" applied
+# to a TTF corrupts it -- whose symptom is exactly the row of boxes the fonts
+# were added to get rid of. Do not leave this to git's content heuristic.
+*.ttf binary
+*.otf binary
+# Same reasoning for raster assets: a launcher icon that git
+# decided was text would be corrupt on checkout.
+*.png binary
+*.jpg binary
+*.webp binary
