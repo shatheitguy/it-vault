@@ -564,7 +564,10 @@ that belongs to the Android app.
 **TrueNAS** — Apps → Discover Apps → Custom App → Install via YAML, and paste
 [`truenas/docker-compose.yaml`](truenas/docker-compose.yaml). That one brings
 MariaDB with it; the Unraid template expects you to install MariaDB
-separately, which is the usual way round on each platform.
+separately, which is the usual way round on each platform. The catalogue
+version — for appearing in Discover Apps rather than being pasted — is in
+[`truenas/catalog/`](truenas/catalog/SUBMITTING.md), ready to submit to
+[truenas/apps](https://github.com/truenas/apps).
 
 ## Let an agent run it — MCP
 

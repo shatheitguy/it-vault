@@ -1,0 +1,35 @@
+images:
+  image:
+    repository: ghcr.io/shatheitguy/it-vault
+    tag: "2.5.0"
+  container_utils_image:
+    repository: ixsystems/container-utils
+    tag: 1.0.2
+  mariadb_image:
+    repository: mariadb
+    tag: "13.0.2"
+
+consts:
+  it_vault_container_name: it-vault
+  perms_container_name: permissions
+  mariadb_container_name: mariadb
+  db_user: itvault
+  db_name: itvault
+  internal_web_port: 5000
+  # The image creates its own user at 1000 and runs as it (see its
+  # Dockerfile); the perms container has to match or the data paths come back
+  # unwritable.
+  run_as_user: 1000
+  run_as_group: 1000
+  notes_body: |
+    There is no default password. Open the app and the first-run wizard
+    creates your admin account.
+
+    The database is already set up -- this app brings MariaDB with it and
+    connects to it, so the setup wizard will not ask you for one.
+
+    Worth doing next:
+    - Settings -> Branding: your name and logo, which the app and the phone
+      app both pick up.
+    - Settings -> General -> Public URL: the address people reach this on, so
+      the links in acknowledgement emails are usable.
