@@ -97,7 +97,9 @@ if parsed:
 
 print("\nthe maintainer profile Community Applications asks for")
 try:
-    prof = ET.fromstring(read("unraid", "ca_profile.xml"))
+    # at the repository root, which is where Community Applications looks for
+    # it -- in a subfolder the scan finds the templates and no maintainer
+    prof = ET.fromstring(read("ca_profile.xml"))
     check("it is valid XML", True)
     check("it carries a non-empty Profile",
           (prof.findtext("Profile") or "").strip() != "")
