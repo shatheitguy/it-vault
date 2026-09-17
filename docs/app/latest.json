@@ -1,6 +1,6 @@
 {
-  "versionCode": 29,
-  "versionName": "2.5.0",
+  "versionCode": 30,
+  "versionName": "2.5.1",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Settings now has App icon: pick between the three tiles the app ships, or pin a home-screen shortcut that carries your own logo. The connect screen shows your logo too. Android compiles the launcher tile into the app, so an uploaded logo cannot replace it -- the shortcut is how your mark gets onto the home screen."
+  "notes": "The acknowledgement email now prints the code as text under the button, and the sign page asks for it -- so a link your mail system blocks is no longer a dead end. The name field looks like the signature pad, because people were signing with it empty."
 }

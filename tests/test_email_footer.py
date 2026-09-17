@@ -92,8 +92,11 @@ window = src[src.index("if html_body:"):][:700]
 check("the HTML part is given the HTML footer", "_email_footer_html(bn)" in window)
 check("it goes inside <body>", '"</body>"' in window,
       "some clients drop what comes after </body>, and Gmail clips it")
+# Asked of the rendered email rather than of a fixed slice of the source: the
+# window was 600 characters, and adding the code block to that function pushed
+# the meta tag past it, failing a check about something that had not changed.
 check("the button template declares a charset",
-      '<meta charset="utf-8">' in src.split("def _button_email_html")[1][:600])
+      '<meta charset="utf-8">' in A._button_email_html("h", "b", "https://x"))
 
 print("\nthe version cannot go stale")
 check("the footer reads APP_VERSION rather than a literal",

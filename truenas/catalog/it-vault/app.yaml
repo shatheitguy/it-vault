@@ -1,4 +1,4 @@
-app_version: 2.5.0
+app_version: 2.5.1
 capabilities: []
 categories:
 - productivity
@@ -40,4 +40,4 @@ sources:
 - https://github.com/shatheitguy/it-vault/pkgs/container/it-vault
 title: IT-Vault
 train: community
-version: 1.0.0
+version: 1.0.1

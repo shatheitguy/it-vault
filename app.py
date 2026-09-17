@@ -3671,13 +3671,27 @@ def _send_simple_email(to_email, subject, body, html_body=None):
     except Exception as e:
         print("email send error:", e); return False
 
-def _button_email_html(heading, button_label, button_url):
+def _button_email_html(heading, button_label, button_url, code="", code_url=""):
     """Self-contained, inline-styled HTML for a transactional email: one
     line of context and a call-to-action button, nothing else -- no card,
     no branded header, no details table. No external stylesheet or CSS
     variables -- most mail clients (Outlook especially) strip <style>
     blocks and don't support var(), so every color here is a literal hex
     matching the app's red accent."""
+    # Printed under the button rather than instead of it: a gateway that
+    # rewrites the link leaves this alone, because it is not a link.
+    from html import escape as _e
+    code_block = ""
+    if code:
+        code_block = (
+            '<p style="font-size:12px;color:#777777;margin:22px 0 0;line-height:1.7;">'
+            'Button blocked by your mail system? Go to '
+            f'<span style="color:#111111">{_e(code_url)}</span> and enter this code:'
+            '</p>'
+            '<p style="font-family:ui-monospace,Consolas,monospace;font-size:20px;'
+            'letter-spacing:3px;color:#111111;margin:8px 0 0;font-weight:700;">'
+            f'{_e(code.upper())}</p>'
+        )
     return f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:480px;margin:0 auto;text-align:center;">
@@ -3685,6 +3699,7 @@ def _button_email_html(heading, button_label, button_url):
     <a href="{button_url}" style="display:inline-block;padding:13px 32px;background:#ff3b30;
        color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;border-radius:8px;
        letter-spacing:.3px;">{button_label}</a>
+    {code_block}
   </div>
 </body></html>"""
 
@@ -6030,9 +6045,24 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False, reminder
             # does not immediately invalidate the link it just mailed.
             if not sign_url:
                 _tk, sign_url = _issue_sign_link(aid, asset.get("Name", ""))
+            # The code in words, as well as the link.
+            #
+            # Corporate mail security rewrites links and sometimes
+            # refuses them outright -- one install's gateway blocked
+            # this one, so the mail arrived and the acknowledgement
+            # never happened. A code the reader can type into the sign
+            # page is the way round that, and it costs one line. The
+            # page asks for it when opened with no code.
+            code = (sign_url.rstrip("/").rsplit("/", 1)[-1]
+                    if "/s/" in sign_url else "")
             body += f"\n{ask}\n{sign_url}\n"
+            if code:
+                body += (f"\nIf that link does not open -- some mail "
+                         f"systems block them -- go to {_public_base()}sign "
+                         f"and enter this code:\n\n    {code.upper()}\n")
             html_body = _button_email_html(
-                head, "Review &amp; Sign Acknowledgement", sign_url)
+                head, "Review &amp; Sign Acknowledgement", sign_url,
+                code=code, code_url=f"{_public_base()}sign")
         except Exception as e:
             print("sign link build error:", e)
     return _send_simple_email(to, subj, body, html_body=html_body)
@@ -8467,6 +8497,19 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
    alone and drops onto the PDF without a box around it. */
 #sigCanvas{width:100%;max-width:480px;height:160px;border-radius:var(--radius);background:#ffffff;border:2px solid var(--line);cursor:crosshair;display:none;touch-action:none}
 #sigPlaceholder{width:100%;max-width:480px;height:160px;display:flex;align-items:center;justify-content:center;color:#5d6b82;font-size:14px;border:2px dashed var(--line);border-radius:var(--radius);background:#ffffff;cursor:pointer}
+/* The name field used to be an unstyled input: on a dark card it read as
+   part of the background, so people signed and submitted with it empty and
+   got told off by the server. It now looks like the signature pad -- white,
+   dashed, the same size -- because they are the same kind of thing: two
+   blanks to fill before the button works. The dashes go solid once there is
+   something in it, so "done" is visible without reading. */
+.step{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;margin-bottom:6px}
+.step b{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700}
+#signer,#codeIn{width:100%;max-width:480px;height:56px;box-sizing:border-box;padding:0 16px;font-size:16px;font-family:inherit;color:#101622;background:#ffffff;border:2px dashed var(--line);border-radius:var(--radius)}
+#signer::placeholder,#codeIn::placeholder{color:#8794a8}
+#signer:focus,#codeIn:focus{outline:none;border-style:solid;border-color:var(--accent)}
+#signer.filled{border-style:solid;border-color:#2e7d32}
+#signer.missing{border-style:solid;border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,59,48,.18)}
 #sigPlaceholder.hidden{display:none}
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 .btnrow .btn{flex:1;min-width:140px;min-height:44px}
@@ -8492,9 +8535,9 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
   <div id="linkNotice" class="link-notice" style="display:none"></div>
   <div id="assetCard"></div>
   <div id="signForm">
-    <div class="field2"><label>Your Full Name</label><input id="signer" placeholder="Enter your full name"></div>
+    <div class="field2"><span class="step"><b>1</b>Your full name</span><input id="signer" placeholder="Type your name" autocomplete="name" autocapitalize="words"></div>
     <div class="sig-wrap">
-      <span class="sig-label">Signature</span>
+      <span class="step"><b>2</b>Sign with your finger</span>
       <div id="sigPlaceholder">✏️ Click here to sign</div>
       <canvas id="sigCanvas"></canvas>
     </div>
@@ -8512,7 +8555,38 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
 const _m = window.location.pathname.match(/\\/s\\/([^/?#]+)/);
 const token = _m ? decodeURIComponent(_m[1])
                  : new URLSearchParams(window.location.search).get('token');
-if(!token){document.body.innerHTML='<div class=sign-card><h3>❌ No token</h3><p>Invalid or missing signature link.</p></div>';throw 0;}
+if(!token){
+  // No code in the address. That used to be a dead end reading "invalid or
+  // missing signature link", which is no help to the person it happens to --
+  // and it happens to anyone whose mail security mangled or refused the link.
+  // The email carries the code in text as well, so this asks for it.
+  document.body.innerHTML='<div class="sign-card">'
+    +'<div class="brand">Acknowledgement</div>'
+    +'<div class="sub">// ENTER YOUR CODE</div>'
+    +'<p style="color:var(--muted);font-size:14px;line-height:1.6">'
+    +'The link in your email did not carry a code &mdash; some mail systems '
+    +'rewrite or block links. The code is printed in the same email, just '
+    +'under the button.</p>'
+    +'<div class="field2"><span class="step"><b>1</b>Your code</span>'
+    +'<input id="codeIn" placeholder="8 characters" autocapitalize="off" '
+    +'autocomplete="off" spellcheck="false" style="letter-spacing:2px"></div>'
+    +'<div class="btnrow"><button class="btn" id="codeGo">CONTINUE</button></div></div>';
+  var go=function(){
+    var v=(document.getElementById('codeIn').value||'').trim().toLowerCase();
+    if(v.length<4) return;
+    window.location.href='/s/'+encodeURIComponent(v);
+  };
+  document.getElementById('codeGo').onclick=go;
+  document.getElementById('codeIn').addEventListener('keydown',function(e){
+    if(e.key==='Enter') go();
+  });
+  throw 0;
+}
+const signerInput=document.getElementById('signer');
+signerInput.addEventListener('input',()=>{
+  signerInput.classList.toggle('filled', signerInput.value.trim().length>1);
+  signerInput.classList.remove('missing');
+});
 const placeholder=document.getElementById('sigPlaceholder');
 const canvas=document.getElementById('sigCanvas');
 let ctx=null, isDrawing=false, hasSig=false;
@@ -8671,7 +8745,14 @@ document.getElementById('viewSign').addEventListener('click',()=>{const sig=(doc
 document.getElementById('saveSign').addEventListener('click',async()=>{
   const name=document.getElementById('signer').value.trim();
   const res=document.getElementById('result');
-  if(!name){res.className='err';res.textContent='⚠ Please enter your name.';return;}
+  if(!name){res.className='err';res.textContent='⚠ Please enter your name.';
+    // point at the field as well as saying it: the message sits under
+    // the button, which on a phone is off screen when the name is the
+    // thing that was missed
+    signerInput.classList.add('missing');
+    signerInput.scrollIntoView({block:'center',behavior:'smooth'});
+    signerInput.focus();
+    return;}
   if(!hasSig||!ctx||ctx.getImageData(0,0,canvas.width,canvas.height).data.filter(c=>c>0).length<100){ res.className='err';res.textContent='⚠ Please sign above.';return; }
   const data=getSigData();
   res.textContent='Submitting…';
