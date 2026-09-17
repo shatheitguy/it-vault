@@ -569,8 +569,12 @@ the user that key belongs to, and no more**. Give a watching agent a key from
 a read-only user and nothing can persuade it to change anything. Deleting is
 behind a second switch of its own, off by default.
 
-Wiring for Hermes, OpenClaw and ZeroClaw — and the reasons behind the design
-— are in [mcp/README.md](mcp/README.md).
+Wiring for **Hermes**, **OpenClaw**, **ZeroClaw**, **Claude Desktop**,
+**Claude Code** and **ChatGPT** — and the reasons behind the design — is in
+[mcp/README.md](mcp/README.md). Clients that dial in over the network rather
+than spawning a process (Claude's custom connectors, ChatGPT) get an HTTP
+transport that refuses to bind anywhere but loopback without a bearer token,
+because the API key lives in that process.
 
 ## Configuration
 

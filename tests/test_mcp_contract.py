@@ -103,6 +103,38 @@ check("it is marked destructive for the runtime",
 check("read tools are marked read-only",
       src.count("annotations=READS") >= 8)
 
+print("\nexposing the HTTP transport has to be a decision")
+http = src.split("def _http(", 1)[1] if "def _http(" in src else ""
+check("there is an HTTP transport at all", bool(http),
+      "ChatGPT cannot spawn a process, so it needs one")
+check("binding off loopback without a token is refused",
+      "not loopback and not BEARER" in http and "SystemExit(2)" in http,
+      "anything reaching that port inherits the API key")
+check("the refusal says what to do about it",
+      "ITVAULT_MCP_BEARER" in http and "tunnel" in http)
+check("a bearer gate exists and compares in constant time",
+      "class _Bearer" in src and "compare_digest" in src)
+check("the gate is raw ASGI, not BaseHTTPMiddleware",
+      "async def __call__(self, scope, receive, send)" in src and
+      "starlette.middleware" not in src and "BaseHTTPMiddleware(" not in src,
+      "the endpoint streams and BaseHTTPMiddleware buffers -- the file may "
+      "name it in a comment saying so, which is not the same as using it")
+check("it serves on /mcp, which is what ChatGPT requires",
+      "streamable_http_app" in src)
+
+print("\nevery runtime the docs claim is actually wired")
+readme = read(os.path.join(ROOT, "mcp", "README.md"))
+for runtime, needle in (("Hermes", "~/.hermes/config.yaml"),
+                        ("OpenClaw", "~/.openclaw/openclaw.json"),
+                        ("ZeroClaw", "~/.zeroclaw/config.toml"),
+                        ("Claude Desktop", "claude_desktop_config.json"),
+                        ("Claude Code", "claude mcp add"),
+                        ("ChatGPT", "Add custom connector")):
+    check("  %-15s has its own config" % runtime, needle in readme)
+missing_docs = sorted(set(re.findall(r"ITVAULT_[A-Z_]+", src)) -
+                      set(re.findall(r"ITVAULT_[A-Z_]+", readme)))
+check("every setting the code reads is documented", not missing_docs, missing_docs)
+
 print("\nthe key is a header, not part of a URL")
 check("the key is sent as X-Api-Key",
       '"X-Api-Key": KEY' in src)

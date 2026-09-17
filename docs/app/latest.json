@@ -1,6 +1,6 @@
 {
-  "versionCode": 23,
-  "versionName": "2.2.0",
+  "versionCode": 24,
+  "versionName": "2.2.1",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "IT-Vault now ships an MCP server, so an AI agent can run the register: find a device, see who has it, assign it, take it back, work the ticket queue. It acts with the permissions of the API key's own user and nothing more."
+  "notes": "The MCP server now wires up to Claude and ChatGPT as well as Hermes, OpenClaw and ZeroClaw. Clients that dial in over the network get an HTTP transport that refuses to bind off loopback without a bearer token."
 }

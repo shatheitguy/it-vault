@@ -67,10 +67,14 @@ answer is available to the agent itself, as the `whoami` tool.
 
 ## Wiring it to an agent
 
-All three runtimes below take the same stdio shape: a command, its arguments,
-and environment. **Point `command` at the real executable**, not at a shell —
-Hermes in particular refuses an MCP entry whose command is a shell
-interpreter with network egress in its arguments, and it is right to.
+Everything except ChatGPT takes the same stdio shape -- a command, its
+arguments, and environment -- in each runtime's own file. **Point `command`
+at the real executable**, not at a shell: Hermes refuses an MCP entry whose
+command is a shell interpreter with network egress in its arguments, and it
+is right to.
+
+ChatGPT cannot spawn a process at all, so it gets the HTTP transport; its
+section says what that costs.
 
 ### Hermes
 
@@ -130,22 +134,160 @@ args = []
 env = { ITVAULT_URL = "http://itvault.lan:5000", ITVAULT_API_KEY = "paste-the-key" }
 ```
 
-### An agent that is not on this machine
+### Claude Desktop
 
-Run it over HTTP instead of stdio:
+`claude_desktop_config.json` — on Windows `%APPDATA%\Claude\`, on macOS
+`~/Library/Application Support/Claude/`:
 
-```bash
-ITVAULT_URL=http://itvault.lan:5000 ITVAULT_API_KEY=… \
-ITVAULT_MCP_HOST=127.0.0.1 ITVAULT_MCP_PORT=8787 \
-itvault-mcp --http
+```json
+{
+  "mcpServers": {
+    "it-vault": {
+      "command": "itvault-mcp",
+      "args": [],
+      "env": {
+        "ITVAULT_URL": "http://itvault.lan:5000",
+        "ITVAULT_API_KEY": "paste-the-key"
+      }
+    }
+  }
+}
 ```
 
-Then point the runtime at `http://127.0.0.1:8787/mcp` with
-`transport = "http"`. **Bind it to loopback or a trusted network only.** The
-API key lives inside this process: anything that can reach the port inherits
-it, and there is no second authentication step in front of it. If it has to
-cross a network, put it behind something that authenticates — a reverse proxy
-with a token, or a WireGuard tunnel.
+Restart Claude Desktop; the tools appear under the tools icon. If `command`
+cannot be found, give the absolute path — a desktop app does not inherit the
+PATH your shell has (`where itvault-mcp` / `which itvault-mcp` tells you it).
+
+### Claude Code
+
+One command, from anywhere:
+
+```bash
+claude mcp add it-vault   --env ITVAULT_URL=http://itvault.lan:5000   --env ITVAULT_API_KEY=your-key   -- itvault-mcp
+```
+
+Add `-s user` to make it available in every project rather than this one.
+`claude mcp list` shows whether it connected.
+
+### Claude (claude.ai and the desktop app) — as a connector
+
+The Connectors dialog you see in Claude has two halves, and only one of them
+is yours to fill:
+
+- **Add** (top right) — a custom connector, which is what you want. Claude
+  dials your MCP server **from Anthropic's cloud**, so `localhost` is no use
+  here: it has to be reachable over the public internet on HTTPS.
+- **Discover / Directory** — a catalogue Anthropic curates. Nothing you write
+  puts an entry there; it is a submission and a review. Same for ChatGPT's
+  app directory. Everything below is the first half, which works today.
+
+Run the HTTP transport with a token:
+
+```bash
+export ITVAULT_URL=http://itvault.lan:5000
+export ITVAULT_API_KEY=your-key
+export ITVAULT_MCP_BEARER="$(openssl rand -hex 32)"
+itvault-mcp --http                     # 127.0.0.1:8787/mcp
+```
+
+Publish it on a name you own, without opening a port — you already run
+Cloudflare:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8787
+```
+
+Then **Settings → Connectors → Add custom connector**, paste
+`https://your-name/mcp`, and give it the token:
+
+- If your organisation has the **Request headers** section in that dialog,
+  add `Authorization: Bearer <your token>`. It is a beta and not every
+  organisation has it yet.
+- If you do not see that section, do not fall back to running it open.
+  Authenticate at the edge instead: a Cloudflare Access service token, or any
+  reverse proxy that checks a header of its own and injects the
+  `Authorization` header before passing the request on. The server still
+  refuses anything without the bearer, so the proxy is the only thing that
+  can reach it.
+
+The properly supported route is OAuth, which this server does not implement.
+It is worth doing if this ends up serving more than your own agents, and it
+is the only option that avoids a long-lived shared token.
+
+### ChatGPT
+
+ChatGPT is the odd one out: it speaks only HTTP, cannot spawn a local
+process, and wants a **public HTTPS URL ending in `/mcp`**. So this runs in
+HTTP mode, behind a token, behind TLS:
+
+```bash
+export ITVAULT_URL=http://itvault.lan:5000
+export ITVAULT_API_KEY=your-key
+export ITVAULT_MCP_BEARER="$(openssl rand -hex 32)"   # keep this
+itvault-mcp --http            # serves 127.0.0.1:8787/mcp
+```
+
+Put it behind something that terminates TLS on a name you own — a reverse
+proxy, or a tunnel — then in ChatGPT: **Settings → Apps & Connectors →
+Advanced → Developer mode**, then **Add custom connector**, with:
+
+- **URL** — `https://your-host/mcp` (the `/mcp` matters; without it the
+  connector fails to list tools)
+- **Authentication** — Token, and paste the `ITVAULT_MCP_BEARER` value
+
+Developer mode is on paid plans only.
+
+Two things this server does so that exposure is a decision rather than an
+accident:
+
+- Binding anywhere other than loopback **without** `ITVAULT_MCP_BEARER` is
+  refused, with an explanation, rather than served. The API key lives in this
+  process; anything that can reach the port inherits every permission it has.
+- With the token set, every request without a matching
+  `Authorization: Bearer` gets a 401 before it reaches any tool.
+
+Neither is a substitute for TLS. Over plain HTTP the token crosses the
+network in the clear, so terminate HTTPS in front of it, and prefer a tunnel
+to opening a port.
+
+### Anything else that speaks MCP
+
+There is nothing special about the runtimes above. A client that spawns a
+process wants `itvault-mcp`, with `ITVAULT_URL` and `ITVAULT_API_KEY` in its
+environment. A client that connects over the network wants:
+
+```bash
+ITVAULT_URL=http://itvault.lan:5000 ITVAULT_API_KEY=your-key ITVAULT_MCP_HOST=127.0.0.1 ITVAULT_MCP_PORT=8787 itvault-mcp --http
+```
+
+and a URL ending in `/mcp` — `http://127.0.0.1:8787/mcp` here. That is the
+whole interface.
+
+On loopback that is all there is to it. To reach it from anywhere else, set
+`ITVAULT_MCP_BEARER` and send it as `Authorization: Bearer <token>`: without
+that, binding off loopback is refused outright, because the API key lives
+inside this process and anything that can reach the port inherits every
+permission it has. Terminate TLS in front of it either way — a bearer token
+over plain HTTP is a bearer token on the wire.
+
+If a runtime refuses to start it, the usual causes, in order: `itvault-mcp`
+not on that program's PATH (give the absolute path), the key not reaching the
+process (check how that runtime passes environment), or the runtime blocking
+the command for looking like a shell wrapper. `itvault-mcp --selftest` in the
+same shell tells you which half is wrong.
+
+## Every setting
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `ITVAULT_URL` | — | Where IT-Vault is. Required. |
+| `ITVAULT_API_KEY` | — | The key every call is made with. Required. It decides what the agent can do. |
+| `ITVAULT_MCP_READONLY` | off | Refuses every write, whatever the key could do. |
+| `ITVAULT_MCP_ALLOW_DELETE` | off | Required for `trash_asset`. |
+| `ITVAULT_MCP_TIMEOUT` | `20` | Seconds to wait on IT-Vault before giving up. |
+| `ITVAULT_MCP_HOST` | `127.0.0.1` | HTTP transport only. Off loopback needs a bearer token. |
+| `ITVAULT_MCP_PORT` | `8787` | HTTP transport only. |
+| `ITVAULT_MCP_BEARER` | — | HTTP transport only. Requires `Authorization: Bearer <token>` on every request. |
 
 ## The tools
 
