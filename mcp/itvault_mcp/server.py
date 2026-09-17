@@ -56,6 +56,9 @@ KEY = os.environ.get("ITVAULT_API_KEY") or ""
 READONLY = (os.environ.get("ITVAULT_MCP_READONLY") or "").lower() in ("1", "true", "yes")
 ALLOW_DELETE = (os.environ.get("ITVAULT_MCP_ALLOW_DELETE") or "").lower() in ("1", "true", "yes")
 TIMEOUT = float(os.environ.get("ITVAULT_MCP_TIMEOUT") or 20)
+# Only used by the HTTP transport, where the server is reachable by
+# anything that can open a socket to it. See _http().
+BEARER = (os.environ.get("ITVAULT_MCP_BEARER") or "").strip()
 
 # One "HTTP Request: GET ..." line per call, in the agent's own log, for
 # no benefit. Warnings and errors still come through.
@@ -504,16 +507,77 @@ def main() -> None:
         raise SystemExit(0)
 
     if "--http" in sys.argv:
-        # For agents that connect over HTTP rather than spawning a process.
-        # Bind to loopback or a trusted network only: the API key lives in
-        # this process, so anything that can reach the port inherits it.
-        server.run(
-            transport="streamable-http",
-            host=os.environ.get("ITVAULT_MCP_HOST", "127.0.0.1"),
-            port=int(os.environ.get("ITVAULT_MCP_PORT", "8787")),
-        )
+        _http()
     else:
         server.run()
+
+
+class _Bearer:
+    """Require `Authorization: Bearer <token>` on the HTTP transport.
+
+    Written as raw ASGI rather than a Starlette BaseHTTPMiddleware because
+    this sits in front of a streaming endpoint, and BaseHTTPMiddleware
+    buffers.
+    """
+
+    def __init__(self, app, token: str):
+        self.app = app
+        self.expected = f"Bearer {token}".encode()
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            return await self.app(scope, receive, send)
+        got = dict(scope.get("headers") or {}).get(b"authorization", b"")
+        # constant-time compare: this is a bearer token on an open port
+        import hmac
+        if not hmac.compare_digest(got, self.expected):
+            body = b'{"error":"unauthorized"}'
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(body)).encode())]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        return await self.app(scope, receive, send)
+
+
+def _http() -> None:
+    """Serve over HTTP for an agent that cannot spawn a process.
+
+    ChatGPT is the reason this exists: it speaks only HTTP and needs a public
+    HTTPS URL ending in /mcp, which is where this serves.
+
+    The API key lives inside this process, so anything that can reach the
+    port inherits every permission that key has. On loopback that is the
+    machine's own business. Off loopback it is the internet's, so binding
+    anywhere else without ITVAULT_MCP_BEARER is refused rather than served --
+    a wrong default here is somebody else's asset register.
+    """
+    import sys
+
+    host = os.environ.get("ITVAULT_MCP_HOST", "127.0.0.1")
+    port = int(os.environ.get("ITVAULT_MCP_PORT", "8787"))
+    loopback = host in ("127.0.0.1", "::1", "localhost")
+
+    if not loopback and not BEARER:
+        print(
+            f"refusing to serve on {host}: anything that can reach that "
+            f"address would get full use of the API key this process holds.\n"
+            f"Set ITVAULT_MCP_BEARER to a long random token and send it as "
+            f"Authorization: Bearer <token>, or bind to 127.0.0.1 and put a "
+            f"tunnel in front.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    app = server.streamable_http_app(host=host)
+    if BEARER:
+        app = _Bearer(app, BEARER)
+    else:
+        print("serving on loopback with no bearer token; anything on this "
+              "machine can use it", file=sys.stderr)
+
+    import uvicorn
+    uvicorn.run(app, host=host, port=port, log_level="warning")
 
 
 if __name__ == "__main__":

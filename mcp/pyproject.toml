@@ -13,6 +13,8 @@ authors = [{ name = "Sharqan Ahamed" }]
 dependencies = [
   "mcp>=1.2",
   "httpx>=0.27",
+  # the HTTP transport serves the Starlette app behind a bearer gate
+  "uvicorn>=0.30",
 ]
 
 [project.scripts]
