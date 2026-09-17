@@ -1,6 +1,6 @@
 {
-  "versionCode": 30,
-  "versionName": "2.5.1",
+  "versionCode": 31,
+  "versionName": "2.5.2",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The acknowledgement email now prints the code as text under the button, and the sign page asks for it -- so a link your mail system blocks is no longer a dead end. The name field looks like the signature pad, because people were signing with it empty."
+  "notes": "Nothing but you overwrites what you typed. A field you edit is yours: the directory sync stops writing it, so a job title no longer reverts half an hour later, and a directory with no answer for a field no longer empties it. Partial updates to an asset or an employee only touch the fields they carry. Every employee change is in the audit log with its previous value, and an update takes a full backup before it starts."
 }

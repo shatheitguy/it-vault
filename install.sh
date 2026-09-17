@@ -598,6 +598,39 @@ _db_container_env() {
         "$DB_CONTAINER" 2>/dev/null | sed -n "s/^$1=//p" | head -n 1
 }
 
+# A full backup, taken by the running app, before anything is replaced.
+#
+# An update does not touch the volumes, so this is not for the update going
+# wrong -- it is for everything else. The report that led to it was "after
+# update many users' job designation are empty": two write paths were
+# clearing fields nobody had asked them to clear, the damage accumulated
+# quietly over weeks, and it surfaced after an update because that is when
+# people look. There was no snapshot from before to compare against or
+# restore from.
+#
+# It writes into the backups volume, which the new container mounts at the
+# same path, so it is in Backup/Restore the moment the app comes back up.
+snapshot_before_update() {
+    $DK inspect "$NAME" >/dev/null 2>&1 || return 0
+    if [ -n "$DRY" ]; then
+        say "    docker exec $NAME python -c \"import app; app._run_backup('all')\""
+        return 0
+    fi
+    step "Taking a full backup first"
+    # The filename is all it prints; scrub anything else off the line so a
+    # stray carriage return from the exec does not end up in the message.
+    _snap="$($DK exec "$NAME" python -c 'import app; print(app._run_backup("all"))' 2>/dev/null | tail -n 1 | tr -dc 'A-Za-z0-9._-')"
+    case "$_snap" in
+        itvault_backup_*)
+            say "    Saved ${B}$_snap${N} -- it is in Backup/Restore when the app comes back."
+            ;;
+        *)
+            warn "Could not take a backup first; the app container did not answer."
+            say "    Continuing: an update replaces the container, not the volumes."
+            ;;
+    esac
+}
+
 # Replace the app container with the new image, reusing this install's own
 # settings. Volumes are never touched, so assets, tickets, branding and the
 # database all stay exactly where they are.
@@ -653,6 +686,10 @@ update_in_place() {
     case "$PORT" in
         ''|*[!0-9]*) die "Could not work out which port to publish (got '$PORT'). Nothing was changed." ;;
     esac
+
+    # Everything above is settled and nothing has been removed yet: the best
+    # moment to snapshot, because the running app can still be asked to do it.
+    snapshot_before_update
 
     # Before the container is recreated: if an older compose layout left a
     # prefixed twin holding the real data, adopt it now, while the volume this

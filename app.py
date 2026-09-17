@@ -1783,6 +1783,18 @@ def migrate_schema():
     except Exception as e:
         print("[itvault] could not create SignLinks:", e, flush=True)
 
+    # Which of an employee's fields a person has edited by hand. Empty for
+    # every existing row, which is the right default: nothing is claimed
+    # until somebody claims it by typing in it.
+    try:
+        cur.execute("SELECT manual_fields FROM Employees LIMIT 1")
+    except Exception:
+        try:
+            cur.execute("ALTER TABLE Employees ADD COLUMN manual_fields VARCHAR(255) DEFAULT ''")
+            print("[itvault] Employees.manual_fields added -- hand-typed fields are now protected from the directory sync", flush=True)
+        except Exception as e:
+            print("[itvault] could not add Employees.manual_fields:", e, flush=True)
+
     # The password column was VARCHAR(100), which fitted the old salt$sha256
     # exactly and cannot hold a PBKDF2 hash at 118 characters. Without this,
     # MySQL refuses the write: nobody's hash upgrades on login, and creating a
@@ -2609,17 +2621,67 @@ def create_employee():
 @app.route("/api/employees/<e_id>", methods=["PUT"])
 @auth_required(module="directory", level="write")
 def update_employee(e_id):
+    """Change an employee, one field at a time if that is all that was sent.
+
+    This used to write all six columns from `data.get(col) or ""`, so a client
+    that omitted a field cleared it. The web form sends the whole record, so
+    it never showed there -- but the phone app, an import, and an agent
+    holding an API key all send only what they changed, and silently emptying
+    somebody's job title because the request did not mention it is data loss
+    dressed as an update.
+
+    Clearing a field on purpose still works: send it as "". The difference
+    between an empty string and an absent key is exactly what the old code
+    threw away.
+
+    A field somebody changes here also becomes theirs: it is recorded in
+    Employees.manual_fields and the directory sync stops writing it, so the
+    value does not revert to whatever AD still holds half an hour later.
+    Every change is written to the audit log, field by field, with what it
+    was before.
+    """
     data = request.get_json(force=True) or {}
+    editable = ("EmployeeID", "EmpCode", "EmployeeName", "Designation",
+                "Department", "Email")
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id FROM Employees WHERE _id=%s", [e_id])
-    if not cur.fetchone():
+    cur.execute("SELECT `%s`, manual_fields FROM Employees WHERE _id=%%s"
+                % "`, `".join(editable), [e_id])
+    before = cur.fetchone()
+    if not before:
         c.close(); return jsonify({"error": "not found"}), 404
-    cur.execute("""UPDATE Employees SET EmployeeID=%s, EmpCode=%s, EmployeeName=%s, Designation=%s, Department=%s, Email=%s, updated_at=NOW()
-                   WHERE _id=%s""",
-                (data.get("EmployeeID") or "", data.get("EmpCode") or "", data.get("EmployeeName") or "", data.get("Designation") or "",
-                 data.get("Department") or "", data.get("Email") or "", e_id))
+    sets, vals, changed = [], [], []
+    for col in editable:
+        if col not in data:
+            continue
+        new = "" if data[col] is None else str(data[col])
+        sets.append("`%s`=%%s" % col)
+        vals.append(new)
+        if new != ("" if before.get(col) is None else str(before[col])):
+            changed.append((col, before.get(col) or "", new))
+    if not sets:
+        c.close()
+        return jsonify({"ok": True, "unchanged": True})
+    # Whatever they actually changed is theirs now, and the directory sync
+    # stops writing it. Fields they merely re-sent unchanged are not claimed:
+    # the web form posts the whole record every time, and treating that as
+    # ownership would freeze every employee against AD on first edit.
+    claimed = [col for col, _o, _n in changed if col in EMPLOYEE_SYNC_FIELDS]
+    if claimed:
+        sets.append("manual_fields=%s")
+        vals.append(_manual_add(before.get("manual_fields"), claimed))
+    sets.append("updated_at=NOW()")
+    vals.append(e_id)
+    cur.execute("UPDATE Employees SET " + ", ".join(sets) + " WHERE _id=%s", vals)
     c.commit(); c.close()
-    return jsonify({"ok": True})
+    # Field by field, in the log, permanently. If a value ever does change
+    # under somebody again, this says when and who -- which is the question
+    # that could not be answered the last time it happened.
+    if changed:
+        audit(session.get("user"), "EMPLOYEE_UPDATE", "",
+              "; ".join("%s: %s -> %s" % (col, old or "(empty)", new or "(empty)")
+                        for col, old, new in changed))
+    return jsonify({"ok": True, "changed": [c for c, _o, _n in changed],
+                    "owned": claimed})
 
 @app.route("/api/employees/<e_id>", methods=["DELETE"])
 @auth_required(module="directory", level="write")
@@ -2658,6 +2720,47 @@ def ldap_import_employees():
     c.commit(); c.close()
     return jsonify({"ok": True, "imported": len(imported), "employees": imported})
 
+# Fields a person typed into IT-Vault, per employee, as a comma-separated
+# list of column names in Employees.manual_fields.
+#
+# The directory sync is not the only writer of an employee row and it is not
+# the most authoritative one. Somebody types a job title in because AD has
+# the old one, or has none; half an hour later the sync runs and puts AD's
+# answer back. From the outside that looks exactly like what was reported --
+# "recently added position and employee details changed to previous after
+# update" -- and no amount of retyping fixes it, because the next sync undoes
+# that too.
+#
+# So a field becomes the user's the moment they change it, and the sync
+# leaves it alone from then on. AD still fills in everything nobody has
+# touched, which is almost everything.
+EMPLOYEE_SYNC_FIELDS = ("EmployeeName", "Designation", "Department", "Email")
+
+
+def _manual_set(raw):
+    """The set of column names a person has taken ownership of."""
+    return {p.strip().lower() for p in (raw or "").split(",") if p.strip()}
+
+
+def _manual_add(raw, cols):
+    """[raw] plus [cols], canonically spelled and in a stable order."""
+    have = _manual_set(raw) | {c.lower() for c in cols}
+    return ",".join(c for c in EMPLOYEE_SYNC_FIELDS if c.lower() in have)
+
+
+def _ldap_fields_to_write(manual_raw, values):
+    """Of [values], the (column, value) pairs a directory sync may write.
+
+    Two exclusions, and the order does not matter because they compose:
+    a value AD did not give us (it answers "" for an attribute a user does
+    not have, and writing that empties the column), and a column somebody
+    has edited by hand.
+    """
+    locked = _manual_set(manual_raw)
+    return [(col, val) for col, val in values
+            if (val or "").strip() and col.lower() not in locked]
+
+
 def ldap_sync_all(row):
     """Pull ALL user objects from AD (paged) and upsert into Employees. Returns summary dict."""
     import uuid
@@ -2671,7 +2774,7 @@ def ldap_sync_all(row):
     entry_gen = lc.extend.standard.paged_search(base_dn, sf, attributes=attrs,
                                                 paged_size=500, generator=True)
     seen = set()
-    added = updated = 0
+    added = updated = 0; kept = 0
     for e in entry_gen:
         if e.get("type") != "searchResEntry":
             continue
@@ -2697,12 +2800,39 @@ def ldap_sync_all(row):
         email = _v("mail") or _v("userPrincipalName")
         dept = _v("department")
         desig = _v("title")
-        cur.execute("SELECT _id FROM Employees WHERE EmployeeID=%s", (sam,))
+        cur.execute("SELECT _id, manual_fields FROM Employees WHERE EmployeeID=%s", (sam,))
         existing = cur.fetchone()
         if existing:
-            cur.execute("UPDATE Employees SET EmployeeName=%s, Designation=%s, Department=%s, Email=%s, source='ldap' WHERE _id=%s",
-                        (name, desig, dept, email, existing["_id"]))
-            updated += 1
+            # Only the fields Active Directory actually answered with.
+            #
+            # This wrote all four unconditionally, and AD returns an empty
+            # string for an attribute a person does not have -- so every sync
+            # wiped the Designation and Department somebody had typed into
+            # IT-Vault, for everyone whose AD record has no title or
+            # department. The auto-sync runs every thirty minutes, so work
+            # done in the afternoon was gone by the evening, and it looked
+            # like an update had eaten it.
+            #
+            # AD is authoritative for what AD knows. It is not authoritative
+            # for what it does not know.
+            writable = _ldap_fields_to_write(
+                existing.get("manual_fields"),
+                (("EmployeeName", name), ("Designation", desig),
+                 ("Department", dept), ("Email", email)))
+            sets, vals = [], []
+            for col, value in writable:
+                sets.append("`%s`=%%s" % col)
+                vals.append(value)
+            if sets:
+                sets.append("source='ldap'")
+                vals.append(existing["_id"])
+                cur.execute("UPDATE Employees SET " + ", ".join(sets) + " WHERE _id=%s", vals)
+                updated += 1
+            else:
+                # In AD, but nothing AD said may be written here: either it
+                # answered with nothing, or a person owns every field it
+                # answered about. Leave the row exactly as they left it.
+                kept += 1
         else:
             cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source)
                            VALUES (%s,%s,%s,%s,%s,%s,%s,'ldap')""",
@@ -2713,7 +2843,14 @@ def ldap_sync_all(row):
     except Exception:
         pass
     c.commit(); c.close()
-    return {"added": added, "updated": updated, "total": len(seen)}
+    # One row per sync, not one per employee: a thousand-user directory every
+    # thirty minutes would bury everything else in the log. What matters is
+    # that a sync ran, and how much it touched.
+    if added or updated:
+        audit("ldap", "LDAP_SYNC", "",
+              "%d added, %d updated, %d left as entered, %d in directory"
+              % (added, updated, kept, len(seen)))
+    return {"added": added, "updated": updated, "total": len(seen), "kept": kept}
 
 @app.route("/api/employees/ldap-sync", methods=["POST"])
 @auth_required(module="directory", level="write")
@@ -2908,8 +3045,25 @@ def update_asset(a_id):
     elif became_returned:
         data["ReceivedBy"] = ""
         data["NotesReceived"] = ""
-    sets = ", ".join(f"`{col}`=%s" for col in COLUMNS)
-    vals = [coerce_val(col, data.get(col)) for col in COLUMNS] + [a_id]
+    # Only the columns the caller actually sent.
+    #
+    # Same fault as the employee form had: writing every column from
+    # data.get(col) means a request that omits a field clears it. The web
+    # form posts the whole asset so it never showed there, but the phone
+    # app, an import and an agent holding an API key send what they changed
+    # -- and a status update that also wiped the serial number, the warranty
+    # and the invoice reference is not an update.
+    #
+    # Clearing a field on purpose still works: send it as "". The MCP server
+    # has been carrying a read-modify-write around this since it was written
+    # (its _merge_put) because the endpoint could not be trusted with a
+    # partial body; now it can.
+    written = [col for col in COLUMNS if col in data]
+    if not written:
+        c.close()
+        return jsonify({"ok": True, "unchanged": True})
+    sets = ", ".join(f"`{col}`=%s" for col in written)
+    vals = [coerce_val(col, data.get(col)) for col in written] + [a_id]
     cur.execute(f"UPDATE Assets SET {sets}, UpdatedAt=NOW() WHERE _id=%s", vals)
     if became_checked_out:
         cur.execute("INSERT INTO Checkouts (asset_id, username, checkout_date, expected_checkin, note) VALUES (%s,%s,%s,%s,%s)",
@@ -2921,7 +3075,7 @@ def update_asset(a_id):
             cur.execute("UPDATE Checkouts SET checkin_date=%s WHERE id=%s", (nowstr(), co["id"]))
     # history log (GLPI-style: every changed field recorded)
     hist = []
-    for col in COLUMNS:
+    for col in written:
         nv = str(data.get(col) or "")
         ov = str(old.get(col) or "")
         if nv != ov:
@@ -3671,27 +3825,13 @@ def _send_simple_email(to_email, subject, body, html_body=None):
     except Exception as e:
         print("email send error:", e); return False
 
-def _button_email_html(heading, button_label, button_url, code="", code_url=""):
+def _button_email_html(heading, button_label, button_url):
     """Self-contained, inline-styled HTML for a transactional email: one
     line of context and a call-to-action button, nothing else -- no card,
     no branded header, no details table. No external stylesheet or CSS
     variables -- most mail clients (Outlook especially) strip <style>
     blocks and don't support var(), so every color here is a literal hex
     matching the app's red accent."""
-    # Printed under the button rather than instead of it: a gateway that
-    # rewrites the link leaves this alone, because it is not a link.
-    from html import escape as _e
-    code_block = ""
-    if code:
-        code_block = (
-            '<p style="font-size:12px;color:#777777;margin:22px 0 0;line-height:1.7;">'
-            'Button blocked by your mail system? Go to '
-            f'<span style="color:#111111">{_e(code_url)}</span> and enter this code:'
-            '</p>'
-            '<p style="font-family:ui-monospace,Consolas,monospace;font-size:20px;'
-            'letter-spacing:3px;color:#111111;margin:8px 0 0;font-weight:700;">'
-            f'{_e(code.upper())}</p>'
-        )
     return f"""<!doctype html><html><head><meta charset="utf-8"></head>
 <body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:480px;margin:0 auto;text-align:center;">
@@ -3699,7 +3839,6 @@ def _button_email_html(heading, button_label, button_url, code="", code_url=""):
     <a href="{button_url}" style="display:inline-block;padding:13px 32px;background:#ff3b30;
        color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;border-radius:8px;
        letter-spacing:.3px;">{button_label}</a>
-    {code_block}
   </div>
 </body></html>"""
 
@@ -6045,24 +6184,16 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False, reminder
             # does not immediately invalidate the link it just mailed.
             if not sign_url:
                 _tk, sign_url = _issue_sign_link(aid, asset.get("Name", ""))
-            # The code in words, as well as the link.
-            #
-            # Corporate mail security rewrites links and sometimes
-            # refuses them outright -- one install's gateway blocked
-            # this one, so the mail arrived and the acknowledgement
-            # never happened. A code the reader can type into the sign
-            # page is the way round that, and it costs one line. The
-            # page asks for it when opened with no code.
-            code = (sign_url.rstrip("/").rsplit("/", 1)[-1]
-                    if "/s/" in sign_url else "")
+            # One link and one button, the way it was. The short /s/
+            # address is what makes this survivable: a gateway rewrites
+            # any link it likes, and this one is short enough to come
+            # back out the other side intact. Printing the code beside
+            # it as well only made the mail look like a hoop to jump
+            # through. Anyone who does land on the sign page without a
+            # code is still asked for one there.
             body += f"\n{ask}\n{sign_url}\n"
-            if code:
-                body += (f"\nIf that link does not open -- some mail "
-                         f"systems block them -- go to {_public_base()}sign "
-                         f"and enter this code:\n\n    {code.upper()}\n")
             html_body = _button_email_html(
-                head, "Review &amp; Sign Acknowledgement", sign_url,
-                code=code, code_url=f"{_public_base()}sign")
+                head, "Review &amp; Sign Acknowledgement", sign_url)
         except Exception as e:
             print("sign link build error:", e)
     return _send_simple_email(to, subj, body, html_body=html_body)
@@ -6506,10 +6637,25 @@ def audit_log():
 def clear_audit_log():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT COUNT(*) AS n FROM AuditLog"); n = cur.fetchone()["n"]
+    c.close()
+    # A full backup first, the way the factory reset does it. The log is the
+    # only record of who changed what, and "clear" is one click next to a
+    # count; this makes it an archive rather than a deletion, so the history
+    # is still recoverable afterwards.
+    saved = None
+    if n:
+        try:
+            saved = _run_backup("all")
+        except Exception as e:
+            print("[itvault] audit clear: backup failed, not clearing:", e, flush=True)
+            return jsonify({"error": f"Could not back the log up first, so nothing was cleared: {e}"}), 500
+    c = conn(); cur = c.cursor()
     cur.execute("DELETE FROM AuditLog")
     c.commit(); c.close()
-    audit(session.get("user"), "AUDIT_LOG_CLEARED", "", f"{n} entr{'y' if n==1 else 'ies'} removed")
-    return jsonify({"ok": True, "deleted": n})
+    audit(session.get("user"), "AUDIT_LOG_CLEARED", "",
+          f"{n} entr{'y' if n==1 else 'ies'} archived to {saved}" if saved
+          else "log was already empty")
+    return jsonify({"ok": True, "deleted": n, "backup_file": saved})
 
 # ---------- dashboard stats ----------
 @app.route("/api/dashboard")
