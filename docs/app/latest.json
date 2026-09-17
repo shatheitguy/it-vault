@@ -1,6 +1,6 @@
 {
-  "versionCode": 21,
-  "versionName": "2.1.0",
+  "versionCode": 22,
+  "versionName": "2.1.1",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
   "notes": "Every screen now opens from the phone's own copy and refreshes underneath, instead of showing a spinner over data it already had. Assets, contracts, tickets, the directory and the dashboard all paint instantly; the dropdown lists forms are built from are cached and warmed at start-up."
 }

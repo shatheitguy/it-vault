@@ -136,8 +136,14 @@ ART
     esac
 }
 
-BANNER_SUB1='             IT Asset register + Helpdesk'
-BANNER_SUB2='               powered by Sha The IT Guy'
+# Kept whole for the flat path, and split so the animated one can type
+# them on a word at a time (word splitting would eat the indent).
+BANNER_PAD1='             '
+BANNER_PAD2='               '
+BANNER_TXT1='IT Asset register + Helpdesk'
+BANNER_TXT2='powered by Sha The IT Guy'
+BANNER_SUB1="${BANNER_PAD1}${BANNER_TXT1}"
+BANNER_SUB2="${BANNER_PAD2}${BANNER_TXT2}"
 
 # IT-Vault's accent is #ff3b30, so the banner is red rather than the green it
 # used to be. The reveal ramps from a dark ember to that accent, which reads
@@ -175,31 +181,62 @@ banner() {
         return
     fi
 
-    # dark ember -> the accent, one shade per line as it is revealed
-    _ramp='88 124 160 196 203 203'
+    # Every line is written to the terminal exactly once, and only ever
+    # rewritten in place with a carriage return. That is the rule here.
+    #
+    # The obvious way to animate a block of art is to redraw it: move the
+    # cursor back up over it and paint the next frame. On screen that looks
+    # like one banner. In scrollback, and in any captured install log, it
+    # leaves every frame behind -- the install output used to show the banner
+    # three times. A \r rewrite stays inside one line of the buffer, so what
+    # survives is the last thing written to it, which is what we want.
+    #
+    # So each line powers up where it is: ember, hotter, a cyan tear on the
+    # way (the same RGB-split glitch the app's own start-up screen uses), then
+    # it settles on the accent. Then a rule sweeps out underneath, drawn by
+    # appending one character at a time, and the two subtitles type on.
+    # Four frames, not more: every frame costs a `sleep`, and a `sleep` is a
+    # process. On a host where spawning one takes 50ms -- which is any busy
+    # box, and every Windows shell -- a five-frame ramp over six lines turned
+    # a banner into a three-second wait. Four frames read the same and the
+    # whole thing lands under a second where it matters.
+    _pulse='52 88 45 196'
     printf '\n'
-    _i=0
     banner_art | while IFS= read -r _line; do
-        _i=$((_i + 1))
-        _c=0; _n=0
-        for _s in $_ramp; do
-            _n=$((_n + 1))
-            [ "$_n" -eq "$_i" ] && _c="$_s"
+        for _c in $_pulse; do
+            printf '\r\033[38;5;%sm%s\033[0m' "$_c" "$_line"
+            sleep 0.012
         done
-        [ "$_c" -eq 0 ] && _c=203
-        printf '\033[38;5;%sm%s\033[0m\n' "$_c" "$_line"
-        sleep 0.03
+        printf '\r\033[1;38;5;203m%s\033[0m\n' "$_line"
     done
 
-    # No second pass over the finished block. Redrawing it needed the cursor
-    # moved back up over the art, which renders as one banner on screen but
-    # leaves every frame behind in scrollback and in any captured log -- the
-    # install output showed the banner three times. The reveal above is
-    # animation enough and only ever writes each line once.
+    # the rule: appended, never rewritten, so it sweeps and leaves one line
+    printf '  '
+    _n=0
+    while [ "$_n" -lt 55 ]; do
+        printf '\033[38;5;203m\342\224\200\033[0m'
+        _n=$((_n + 1))
+        [ $((_n % 12)) -eq 0 ] && sleep 0.02
+    done
+    printf '\n'
 
-    printf '\033[2m%s\033[0m\n' "$BANNER_SUB1"
-    sleep 0.04
-    printf '\033[38;5;203m%s\033[0m\n\n' "$BANNER_SUB2"
+    printf '\033[2m%s' "$BANNER_PAD1"
+    _first=1
+    for _w in $BANNER_TXT1; do
+        [ "$_first" -eq 1 ] && _first=0 || printf ' '
+        printf '%s' "$_w"
+        sleep 0.03
+    done
+    printf '\033[0m\n'
+
+    printf '\033[38;5;203m%s' "$BANNER_PAD2"
+    _first=1
+    for _w in $BANNER_TXT2; do
+        [ "$_first" -eq 1 ] && _first=0 || printf ' '
+        printf '%s' "$_w"
+        sleep 0.025
+    done
+    printf '\033[0m\n\n'
 }
 
 warn() { printf '%s !%s  %s\n' "$Y" "$N" "$*"; }
