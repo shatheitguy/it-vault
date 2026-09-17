@@ -7,10 +7,10 @@ on:
   push:
     # Both names: the default branch was renamed, and a workflow that names
     # only the old one silently stops publishing.
-    branches: [ "main", "main-fresh" ]
+    branches: [ "main" ]
     tags: [ "v*.*.*" ]
   pull_request:
-    branches: [ "main", "main-fresh" ]
+    branches: [ "main" ]
 
 env:
   REGISTRY: ghcr.io

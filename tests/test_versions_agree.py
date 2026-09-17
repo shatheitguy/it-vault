@@ -88,11 +88,12 @@ check("it still tags latest on the default branch",
       "type=raw,value=latest,enable={{is_default_branch}}" in wf)
 check("it triggers on v*.*.* tags", 'tags: [ "v*.*.*" ]' in wf)
 # a workflow that names a branch which is no longer the default silently stops
-# publishing -- which is exactly what happened when main was replaced
+# publishing -- which is exactly what happened when main was replaced by
+# main-fresh, and again in reverse when main became the only branch
 m = re.search(r"push:\s*\r?\n\s*#[^\n]*\r?\n(?:\s*#[^\n]*\r?\n)*\s*branches:\s*\[([^\]]*)\]", wf)
 branches = m.group(1) if m else ""
 check("it triggers on the current default branch",
-      "main-fresh" in branches, branches.strip() or "no branches found")
+      "main" in branches, branches.strip() or "no branches found")
 
 print()
 print("5. The project site's structured data agrees")
