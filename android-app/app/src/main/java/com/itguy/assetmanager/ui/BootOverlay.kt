@@ -110,6 +110,18 @@ object BootOverlay {
         step("SYNCING TICKETS") {
             ApiClient.api().listTickets().body()?.let { OfflineCache.saveTickets(it) }
         }
+        // The dropdowns every form is built from. Small, they change about
+        // once a month, and without them a form cannot draw itself from the
+        // cache at all -- which is what made opening a record wait on the
+        // network even when the record itself was already here.
+        step("SYNCING LISTS") {
+            ApiClient.api().categories().body()?.let { OfflineCache.saveCategories(it) }
+            ApiClient.api().manufacturers().body()?.let { OfflineCache.saveManufacturers(it) }
+            ApiClient.api().models().body()?.let { OfflineCache.saveModels(it) }
+            ApiClient.api().locations().body()?.let { OfflineCache.saveLocations(it) }
+            ApiClient.api().departments().body()?.let { OfflineCache.saveDepartments(it) }
+            ApiClient.api().contractTypes().body()?.let { OfflineCache.saveContractTypes(it) }
+        }
         return reached
     }
 

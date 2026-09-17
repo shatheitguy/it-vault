@@ -1,6 +1,6 @@
 {
-  "versionCode": 20,
-  "versionName": "2.0.5",
+  "versionCode": 21,
+  "versionName": "2.1.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The connect screen is actually on screen now -- it was being torn down a few milliseconds after it appeared -- with a stronger glitch and a sweep over the mark. The asset sheet fetches your letterhead and prints it inside the document, so it survives Android's printer and works against any server version."
+  "notes": "Every screen now opens from the phone's own copy and refreshes underneath, instead of showing a spinner over data it already had. Assets, contracts, tickets, the directory and the dashboard all paint instantly; the dropdown lists forms are built from are cached and warmed at start-up."
 }

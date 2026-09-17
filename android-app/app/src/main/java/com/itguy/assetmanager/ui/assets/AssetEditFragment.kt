@@ -17,6 +17,7 @@ import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.itguy.assetmanager.data.ApiClient
+import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Repository
 import com.itguy.assetmanager.data.model.*
 import com.itguy.assetmanager.databinding.FragmentAssetEditBinding
@@ -128,8 +129,41 @@ class AssetEditFragment : Fragment() {
         }
     }
 
+    /**
+     * Fill the form from what is already on the phone, then quietly catch up
+     * with the server.
+     *
+     * It used to do neither of those things: five reference lists and the
+     * asset itself, all awaited over the network before a single field was
+     * drawn, so opening a record you had opened five minutes ago still meant
+     * watching a spinner. The asset was in the cache the whole time; only the
+     * dropdowns were not, and dropdowns that change once a month have no
+     * business on the critical path of opening a record.
+     *
+     * So: cache first, painted immediately and with no spinner when there is
+     * something to paint. Then the same fetch as before, which overwrites the
+     * fields only if the record actually differs -- a redraw under someone's
+     * fingers while they are typing is worse than being a few seconds stale.
+     */
     private fun loadReferenceDataAndAsset() {
-        b.formProgress.visibility = View.VISIBLE
+        val cache = OfflineCache
+        val cachedAsset = assetId?.let { id -> cache.loadAssets()?.find { it.id == id } }
+        var painted = false
+
+        // ---- what we already have, on screen now
+        categories = cache.loadCategories().orEmpty()
+        manufacturers = cache.loadManufacturers().orEmpty()
+        models = cache.loadModels().orEmpty()
+        locations = cache.loadLocations().orEmpty()
+        employees = cache.loadEmployees().orEmpty()
+        if (cachedAsset != null) {
+            current = cachedAsset
+            bindAll()
+            painted = true
+        }
+        b.formProgress.visibility = if (painted) View.GONE else View.VISIBLE
+
+        // ---- and the server's version, behind it
         lifecycleScope.launch {
             try {
                 val api = ApiClient.api()
@@ -138,20 +172,22 @@ class AssetEditFragment : Fragment() {
                 // fall back to the value already on the record.
                 suspend fun <T> safe(block: suspend () -> List<T>): List<T> =
                     try { block() } catch (e: Exception) { emptyList() }
-                categories = safe { api.categories().body().orEmpty() }
-                manufacturers = safe { api.manufacturers().body().orEmpty() }
-                models = safe { api.models().body().orEmpty() }
-                locations = safe { api.locations().body().orEmpty() }
-                employees = safe { api.listEmployees().body().orEmpty() }.ifEmpty {
-                    com.itguy.assetmanager.data.OfflineCache.loadEmployees().orEmpty()
-                }
 
-                current = if (assetId != null) {
-                    // editing: server copy if reachable, else the cached one
-                    try { api.getAsset(assetId!!).body() }
-                    catch (e: Exception) { null }
-                    ?: com.itguy.assetmanager.data.OfflineCache.loadAssets()?.find { it.id == assetId }
-                    ?: Asset()
+                safe { api.categories().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { categories = it; cache.saveCategories(it) }
+                safe { api.manufacturers().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { manufacturers = it; cache.saveManufacturers(it) }
+                safe { api.models().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { models = it; cache.saveModels(it) }
+                safe { api.locations().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { locations = it; cache.saveLocations(it) }
+                safe { api.listEmployees().body().orEmpty() }
+                    .takeIf { it.isNotEmpty() }?.let { employees = it; cache.saveEmployees(it) }
+
+                val fresh = if (assetId != null) {
+                    try { api.getAsset(assetId!!).body() } catch (e: Exception) { null }
+                        ?: cachedAsset
+                        ?: Asset()
                 } else Asset(
                     AssetTag = try { api.nextAssetTag().body()?.tag.orEmpty() } catch (e: Exception) { "" },
                     Name = arguments?.getString("prefillName").orEmpty(),
@@ -161,19 +197,32 @@ class AssetEditFragment : Fragment() {
                 )
 
                 if (_b == null) return@launch
-                bindStatusSpinner()
-                bindCategorySpinner()
-                bindLocationSpinner()
-                bindManufacturerSpinner()
-                bindModelSpinner(current.Manufacturer)
-                bindEmployeeSpinner()
-                populatePlainFields()
+                // Repainting an identical record would move the cursor and
+                // drop anything half-typed for no gain at all.
+                if (!painted || fresh != current) {
+                    current = fresh
+                    bindAll()
+                }
             } catch (e: Exception) {
-                if (_b != null) { b.formError.text = "Could not load form: ${e.message}"; b.formError.visibility = View.VISIBLE }
+                if (_b != null && !painted) {
+                    b.formError.text = "Could not load form: ${e.message}"
+                    b.formError.visibility = View.VISIBLE
+                }
             } finally {
                 _b?.formProgress?.visibility = View.GONE
             }
         }
+    }
+
+    /** Every spinner and field, from whatever [current] holds right now. */
+    private fun bindAll() {
+        bindStatusSpinner()
+        bindCategorySpinner()
+        bindLocationSpinner()
+        bindManufacturerSpinner()
+        bindModelSpinner(current.Manufacturer)
+        bindEmployeeSpinner()
+        populatePlainFields()
     }
 
     private fun populatePlainFields() {
