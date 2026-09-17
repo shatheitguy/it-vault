@@ -8620,13 +8620,11 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                                 spaceBefore=6, spaceAfter=14)
     story.append(Paragraph(escape(_pdf_text(asset.get("AssetTag") or "—")), tag_style))
 
-    # Same field set/order/labels as the web "print asset" page, so the
-    # emailed PDF and a manual print of the same asset read the same way.
-    currency = asset.get("_currency") or "AED"
-    try:
-        price_str = f"{currency} {float(asset.get('Price') or 0):.2f}"
-    except (TypeError, ValueError):
-        price_str = f"{currency} 0.00"
+    # The web "print asset" page's field set and order, with one deliberate
+    # difference: no price. This sheet is what someone signs to say they have
+    # the thing, and it is handed to them and mailed to their inbox -- what
+    # the organisation paid for it is nobody's business on that copy. The
+    # price is still on the asset record and on the internal printout.
     rows = [
         ["Asset ID", asset.get("AssetTag") or "—"],
         ["Asset Name", asset.get("Name") or "—"],
@@ -8634,7 +8632,6 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
         ["Serial", asset.get("Serial") or "—"],
         ["Location", asset.get("Location") or "—"],
         ["Status", asset.get("Status") or "—"],
-        ["Price", price_str],
         ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0) + " months"],
         ["Signed Date", asset.get("NotesReceived") or "—"],
         ["Notes", asset.get("Notes") or "—"],
@@ -8786,8 +8783,6 @@ def approve_asset():
                 full_asset["Department"] = er.get("Department") or ""
                 full_asset["Designation"] = er.get("Designation") or ""
                 full_asset["Email"] = er.get("Email") or ""
-        ccur.execute("SELECT currency FROM Settings WHERE id=1"); srow = ccur.fetchone() or {}
-        full_asset["_currency"] = srow.get("currency") or "AED"
         cc.close()
         if full_asset:
             emailed = _email_signed_asset_pdf(full_asset, name, sigData)
