@@ -95,7 +95,27 @@ check("it triggers on the current default branch",
       "main-fresh" in branches, branches.strip() or "no branches found")
 
 print()
-print("5. Nothing states a stale version anywhere else")
+print("5. The project site's structured data agrees")
+# The page tells search engines which version this is, in a block no human
+# reads and so nobody thinks to update. It goes stale silently, which is the
+# same failure this whole file exists for.
+ld = re.search(r'<script type="application/ld\+json">(.*?)</script>',
+               read("docs", "index.html"), re.S)
+check("docs/index.html carries SoftwareApplication data", ld is not None)
+if ld:
+    try:
+        data = json.loads(ld.group(1))
+    except ValueError as e:
+        data = {}
+        check("its JSON-LD parses", False, e)
+    else:
+        check("its JSON-LD parses", True)
+    check("VERSION == JSON-LD softwareVersion",
+          version == data.get("softwareVersion"),
+          "%s vs %s" % (version, data.get("softwareVersion")))
+
+print()
+print("6. Nothing states a stale version anywhere else")
 for path in ("README.md", "docs/index.html"):
     full = os.path.join(ROOT, path)
     if not os.path.exists(full):

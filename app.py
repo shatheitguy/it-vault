@@ -3456,6 +3456,11 @@ def _send_simple_email(to_email, subject, body, html_body=None):
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
         if html_body:
+            # The footer goes inside <body>: some clients drop anything
+            # after </body>, and Gmail clips it.
+            _f = _email_footer_html(bn)
+            html_body = (html_body.replace("</body>", _f + "</body>", 1)
+                         if "</body>" in html_body else html_body + _f)
             # a plain-text link (what mail clients were rendering before)
             # still auto-links, but reads like any other line of text -- an
             # HTML alternative with a real styled button is what makes it
@@ -3475,7 +3480,8 @@ def _button_email_html(heading, button_label, button_url):
     variables -- most mail clients (Outlook especially) strip <style>
     blocks and don't support var(), so every color here is a literal hex
     matching the app's red accent."""
-    return f"""<!doctype html><html><body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
+    return f"""<!doctype html><html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:28px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:480px;margin:0 auto;text-align:center;">
     <p style="font-size:15px;color:#111111;margin:0 0 20px;">{heading}</p>
     <a href="{button_url}" style="display:inline-block;padding:13px 32px;background:#ff3b30;
@@ -5875,11 +5881,52 @@ def notify_person_contract_assigned(employee_id, contract):
             f"End Date: {contract.get('end_date') or '—'}\n")
     return _send_simple_email(to, f"Contract assigned to you: {contract.get('name','')}", body)
 
+# Where the footer's two links point. Constants because they appear in both
+# the text and the HTML footer, and a link that rots in one of them is worse
+# than no link at all.
+PROJECT_URL = "https://github.com/shatheitguy/it-vault"
+AUTHOR_URL = "https://shatheitguy.in"
+AUTHOR_NAME = "Sha The IT Guy"
+
+
 def _email_footer(app_name):
-    """Small signature line appended to every outgoing email (notifications,
-    OTP codes, alerts) -- keeps the sender's own brand name in the subject/body
-    while still crediting the tool, unobtrusively, on its own short line."""
-    return f"\n\n—\n{app_name} · Powered by Sha The IT Guy"
+    """The signature at the foot of every outgoing email, as plain text.
+
+    Two lines, and the order is the point: the organisation's own name
+    first, because to whoever opens this the mail is from them -- then,
+    under it, what sent it and which version. Text mail has no font sizes,
+    so "smaller" is carried by the order and the separator.
+
+    The URLs are spelled out because a text part cannot hyperlink, and a
+    reader who wants the project or the author should not have to go
+    looking for them.
+    """
+    return (f"\n\n—\n{app_name}\n"
+            f"IT-Vault v{APP_VERSION} · {PROJECT_URL} · {AUTHOR_NAME} · {AUTHOR_URL}")
+
+
+def _email_footer_html(app_name):
+    """The same footer for an HTML part, where the sizes can be real.
+
+    12px for the organisation, 10px and grey for the line beneath it, a
+    hairline rule above the lot. Every style is inline and every colour a
+    literal hex: mail clients strip <style> blocks, and Outlook does not
+    support var().
+    """
+    from html import escape as _e
+    return (
+        '<div style="margin:32px auto 0;max-width:480px;padding-top:12px;'
+        'border-top:1px solid #eeeeee;text-align:center;'
+        'font-family:Arial,Helvetica,sans-serif;">'
+        f'<div style="font-size:12px;color:#555555;line-height:1.5;">{_e(app_name)}</div>'
+        '<div style="font-size:10px;color:#999999;line-height:1.6;">'
+        f'IT-Vault v{_e(APP_VERSION)} &middot; '
+        f'<a href="{PROJECT_URL}" style="color:#999999;text-decoration:underline;">GitHub</a> &middot; '
+        f'<a href="{AUTHOR_URL}" style="color:#999999;text-decoration:underline;">{_e(AUTHOR_NAME)}</a>'
+        '</div></div>'
+    )
+
+
 def _email_profile_addresses(subject, body):
     """Mail everyone who has an address on their profile.
 
@@ -8620,13 +8667,11 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
                                 spaceBefore=6, spaceAfter=14)
     story.append(Paragraph(escape(_pdf_text(asset.get("AssetTag") or "—")), tag_style))
 
-    # Same field set/order/labels as the web "print asset" page, so the
-    # emailed PDF and a manual print of the same asset read the same way.
-    currency = asset.get("_currency") or "AED"
-    try:
-        price_str = f"{currency} {float(asset.get('Price') or 0):.2f}"
-    except (TypeError, ValueError):
-        price_str = f"{currency} 0.00"
+    # The web "print asset" page's field set and order, with one deliberate
+    # difference: no price. This sheet is what someone signs to say they have
+    # the thing, and it is handed to them and mailed to their inbox -- what
+    # the organisation paid for it is nobody's business on that copy. The
+    # price is still on the asset record and on the internal printout.
     rows = [
         ["Asset ID", asset.get("AssetTag") or "—"],
         ["Asset Name", asset.get("Name") or "—"],
@@ -8634,7 +8679,6 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
         ["Serial", asset.get("Serial") or "—"],
         ["Location", asset.get("Location") or "—"],
         ["Status", asset.get("Status") or "—"],
-        ["Price", price_str],
         ["Warranty", str(asset.get("WarrantyMonths") if asset.get("WarrantyMonths") not in (None, "") else 0) + " months"],
         ["Signed Date", asset.get("NotesReceived") or "—"],
         ["Notes", asset.get("Notes") or "—"],
@@ -8786,8 +8830,6 @@ def approve_asset():
                 full_asset["Department"] = er.get("Department") or ""
                 full_asset["Designation"] = er.get("Designation") or ""
                 full_asset["Email"] = er.get("Email") or ""
-        ccur.execute("SELECT currency FROM Settings WHERE id=1"); srow = ccur.fetchone() or {}
-        full_asset["_currency"] = srow.get("currency") or "AED"
         cc.close()
         if full_asset:
             emailed = _email_signed_asset_pdf(full_asset, name, sigData)

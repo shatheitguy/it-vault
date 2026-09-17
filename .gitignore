@@ -23,6 +23,8 @@ itvault_spawn.py
 
 # --- python ---
 __pycache__/
+*.egg-info/
+*.egg-link
 *.pyc
 *.pyo
 .venv/

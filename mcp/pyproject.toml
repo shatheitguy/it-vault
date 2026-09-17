@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "itvault-mcp"
+version = "0.1.0"
+description = "IT-Vault as an MCP server, so an agent can run the asset register and helpdesk"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "Sharqan Ahamed" }]
+dependencies = [
+  "mcp>=1.2",
+  "httpx>=0.27",
+  # the HTTP transport serves the Starlette app behind a bearer gate
+  "uvicorn>=0.30",
+]
+
+[project.scripts]
+# A real executable on PATH, which is what the agent runtimes want in
+# `command`. Hermes in particular refuses a shell interpreter as the command.
+itvault-mcp = "itvault_mcp.server:main"
+
+[tool.setuptools.packages.find]
+include = ["itvault_mcp*"]
