@@ -65,7 +65,13 @@ class FakeSMTP:
 
 
 def token_of(url):
-    return parse_qs(urlparse(url).query).get("token", [""])[0]
+    """What to hand the verify endpoint, from either link shape.
+
+    Links are /s/<code> now; the ?token= form still exists for anything
+    issued before that and is still accepted, so both are resolved here.
+    """
+    q = parse_qs(urlparse(url).query).get("token", [""])[0]
+    return q or urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]
 
 
 def body_text(msg):
@@ -104,7 +110,11 @@ try:
     check("so emailing is not offered", j.get("can_email") is False, j.get("can_email"))
     check("and it says mail is not set up", j.get("smtp_ready") is False)
     first_url = j.get("url") or ""
-    check("the link is a /sign URL", "/sign?token=" in first_url, first_url[:60])
+    # A short code in the path, not a token in the query string: mail security
+    # rewrites long opaque query strings, and the one that matters here
+    # refused them outright.
+    check("the link is a short /s/<code> URL", "/s/" in first_url and "?" not in first_url,
+          first_url[:60])
 
     print()
     print("2. Sending is refused for a reason, not silently")
@@ -166,7 +176,7 @@ try:
         check("the asset is identified", "Resend test laptop" in str(msg["Subject"]),
               str(msg["Subject"]))
         text = body_text(msg)
-        check("the body carries a sign link", "/sign?token=" in text)
+        check("the body carries a sign link", "/s/" in text)
         check("it is the link handed back to the dialog",
               (j2.get("url") or "x") in text, j2.get("url"))
 

@@ -170,6 +170,20 @@ check("then it is refused too", j.get("ok") is False, j)
 check("because the asset is already signed for",
       "already been signed" in (j.get("error") or ""), j.get("error"))
 
+print()
+print("The link is short enough to survive mail security")
+# Trend Micro, Defender and Mimecast all rewrite links they consider risky,
+# and a couple of hundred characters of base64 on an uncategorised host is the
+# shape of a phishing link. One install's gateway refused it outright: the
+# mail arrived and the link did not.
+with A.app.test_request_context("http://itvault.example/"):
+    _tk, _url = A._issue_sign_link(aid, "Link length check")
+check("it is a path, not a query string", "?" not in _url, _url)
+check("and it is short", len(_url) < 60, "%d characters: %s" % (len(_url), _url))
+check("the code gives nothing away",
+      "Link" not in _url and aid not in _url,
+      "the token it replaced carried the asset name in decodable base64")
+
 c = A.conn(); cur = c.cursor()
 cur.execute("DELETE FROM Assets WHERE _id=%s", [aid])
 c.commit(); c.close()
