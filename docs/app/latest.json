@@ -1,6 +1,6 @@
 {
-  "versionCode": 24,
-  "versionName": "2.2.1",
+  "versionCode": 25,
+  "versionName": "2.2.2",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The MCP server now wires up to Claude and ChatGPT as well as Hermes, OpenClaw and ZeroClaw. Clients that dial in over the network get an HTTP transport that refuses to bind off loopback without a bearer token."
+  "notes": "The signed acknowledgement sheet no longer prints the price. It is the one printout that leaves the IT department, and what the asset cost is not the signer's business. The price stays on the record, the internal print and every export."
 }
