@@ -76,27 +76,78 @@ check("a brand name with markup in it cannot break the footer",
       "an organisation called <b>Something</b> would otherwise inject markup")
 
 print("\nit reaches every message")
-missing = []
-for m in re.finditer(r"set_content\(", src):
-    window = src[m.start():m.start() + 400]
-    if "_email_footer(" not in window:
-        line = src[:m.start()].count("\n") + 1
-        missing.append(line)
-check("every plain-text body appends it", not missing,
-      "app.py lines without it: %s" % missing)
-check("there are as many send sites as we think", src.count("set_content(") >= 8,
-      "%d found" % src.count("set_content("))
+# Six senders build their own EmailMessage in this file, and each one used to
+# set its own body. The ones that remembered got the plain-text footer; only
+# the acknowledgement mail ever had an HTML part, so only that one had links
+# -- which is why the signed-PDF mail arrived with the branding and the
+# credit as dead text. There is one signer now, and everything goes through
+# it.
+sites = src.count("_with_email_footer(")
+check("every sender goes through one signer", sites >= 9, "%d call sites" % sites)
+check("and only the signer sets a body", src.count("set_content(") == 1,
+      "%d bodies built by hand" % src.count("set_content("))
+check("the text footer is appended in exactly one place",
+      src.count("+ _email_footer(bn)") == 1,
+      "five senders appending it by hand is what left them with no HTML part")
 
-print("\nand the HTML alternative gets the HTML one")
-window = src[src.index("if html_body:"):][:700]
-check("the HTML part is given the HTML footer", "_email_footer_html(bn)" in window)
-check("it goes inside <body>", '"</body>"' in window,
-      "some clients drop what comes after </body>, and Gmail clips it")
-# Asked of the rendered email rather than of a fixed slice of the source: the
-# window was 600 characters, and adding the code block to that function pushed
-# the meta tag past it, failing a check about something that had not changed.
-check("the button template declares a charset",
-      '<meta charset="utf-8">' in A._button_email_html("h", "b", "https://x"))
+print("\nan attachment does not cost you the footer")
+from email.message import EmailMessage
+_m = EmailMessage()
+_m["Subject"] = "Signed asset acknowledgement"
+_m["From"] = "it@example.com"
+_m["To"] = "someone@example.com"
+A._with_email_footer(_m, BRAND, "The signed copy is attached as a PDF.")
+_m.add_attachment(b"%PDF-1.4", maintype="application", subtype="pdf",
+                  filename="IT-0042_signed.pdf")
+_parts = [p.get_content_type() for p in _m.walk()]
+check("the message is still multipart/mixed", _m.get_content_type() == "multipart/mixed")
+check("with both body parts inside it",
+      "text/plain" in _parts and "text/html" in _parts, _parts)
+check("and the PDF beside them", "application/pdf" in _parts, _parts)
+_html = [p.get_content() for p in _m.walk() if p.get_content_type() == "text/html"][0]
+check("the organisation is named", BRAND in _html)
+check("the project is a live link", '<a href="https://github.com/shatheitguy/it-vault"' in _html,
+      "this is the one the request was about: no hyperlink on the signed PDF mail")
+check("so is the author", '<a href="https://shatheitguy.in"' in _html)
+_text = [p.get_content() for p in _m.walk() if p.get_content_type() == "text/plain"][0]
+check("the text part still carries no URLs", "http" not in _text)
+check("a body with markup in it cannot inject any",
+      "&lt;b&gt;" in A._email_html_from_text("<b>x</b>"))
+check("line breaks survive into the HTML part",
+      "<br>" in A._email_html_from_text("one\ntwo"))
+
+print("\nand it is not an email-only idea")
+# A Telegram alert used to arrive as two bare lines with nothing saying which
+# system sent it. The medium does not get to decide that.
+_tg = A._chat_footer("html")
+check("Telegram gets real links",
+      '<a href="https://github.com/shatheitguy/it-vault">' in _tg
+      and '<a href="https://shatheitguy.in">' in _tg, _tg)
+check("the version is in it", A.APP_VERSION in _tg)
+check("the separator is an entity, not a raw character",
+      "&#183;" in _tg and "·" not in _tg,
+      "Telegram parses the text as HTML")
+tg_src = src[src.index("def _hb_send_telegram("):]
+tg_src = tg_src[:tg_src.index("\n\n_HB_SENDERS")]
+check("it is sent in HTML mode", '"parse_mode": "HTML"' in tg_src)
+check("and what came from the event is escaped first",
+      "_e(subject)" in tg_src and "_e(body)" in tg_src,
+      'an asset called "<Laptop>" would otherwise be refused by Telegram')
+
+_sl = A._chat_footer("mrkdwn")
+check("Slack gets links in its own markup",
+      "<https://github.com/shatheitguy/it-vault|IT-Vault v" in _sl
+      and "|Sha The IT Guy>" in _sl, _sl)
+check("a channel with no markup still gets the names",
+      "Sha The IT Guy" in A._chat_footer("text")
+      and "<" not in A._chat_footer("text"))
+check("every chat footer names the install",
+      all(A._brand_name() in A._chat_footer(m) for m in ("html", "mrkdwn", "text")))
+
+wh = src[src.index('payload = {"event": "notification"'):][:700]
+check("a webhook is told the same provenance, as fields",
+      '"version": APP_VERSION' in wh and '"author_url": AUTHOR_URL' in wh,
+      "whoever is on the other end should not have to parse it out of a string")
 
 print("\nthe version cannot go stale")
 check("the footer reads APP_VERSION rather than a literal",

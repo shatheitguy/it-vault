@@ -2299,7 +2299,10 @@ def _send_login_otp_email(username, to_email):
         msg["Subject"] = f"{bn}: your sign-in code is {code}"
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email
-        msg.set_content(f"Your {bn} sign-in verification code is: {code}\n\nThis code expires in 5 minutes. If you didn't request this, you can ignore this email." + _email_footer(bn))
+        _with_email_footer(msg, bn,
+                           f"Your {bn} sign-in verification code is: {code}\n\n"
+                           "This code expires in 5 minutes. If you didn't request "
+                           "this, you can ignore this email.")
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -2358,9 +2361,11 @@ def _send_password_reset_email(username, to_email, code):
         msg["Subject"] = f"{bn}: password reset code"
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
         msg["To"] = to_email
-        msg.set_content(f"Your {bn} password reset code is: {code}\n\nThis code expires in 10 minutes. "
-                         f"If you didn't request this, you can safely ignore this email -- your password "
-                         f"will not be changed." + _email_footer(bn))
+        _with_email_footer(msg, bn,
+                           f"Your {bn} password reset code is: {code}\n\n"
+                           "This code expires in 10 minutes. If you didn't request "
+                           "this, you can safely ignore this email -- your password "
+                           "will not be changed.")
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -3806,18 +3811,11 @@ def _send_simple_email(to_email, subject, body, html_body=None):
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
-        msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
-        if html_body:
-            # The footer goes inside <body>: some clients drop anything
-            # after </body>, and Gmail clips it.
-            _f = _email_footer_html(bn)
-            html_body = (html_body.replace("</body>", _f + "</body>", 1)
-                         if "</body>" in html_body else html_body + _f)
-            # a plain-text link (what mail clients were rendering before)
-            # still auto-links, but reads like any other line of text -- an
-            # HTML alternative with a real styled button is what makes it
-            # look like an action to take, not just a URL to notice.
-            msg.add_alternative(html_body, subtype="html")
+        msg["To"] = to_email
+        # A plain-text link still auto-links, but reads like any other line of
+        # text -- an HTML alternative with a real styled button is what makes
+        # it look like an action to take, not just a URL to notice.
+        _with_email_footer(msg, bn, body, html_body)
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -4284,6 +4282,40 @@ def _hb_channels_for(mon, all_channels):
     return [c for c in live if str(c["id"]) in want]
 
 
+def _brand_name():
+    """Whatever this install calls itself, for the foot of a message."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT app_name FROM Settings WHERE id=1")
+        row = cur.fetchone() or {}
+        c.close()
+        return (row.get("app_name") or "IT-Vault").strip() or "IT-Vault"
+    except Exception:
+        return "IT-Vault"
+
+
+def _chat_footer(markup):
+    """The email footer, in whatever markup a chat channel speaks.
+
+    A Telegram alert used to arrive as two bare lines with nothing saying
+    which system sent it, let alone who wrote it -- while the same event by
+    email carried the organisation's name, the version and two links. There
+    is no reason for the medium to decide that.
+
+    [markup] is "html" (Telegram), "mrkdwn" (Slack) or "text".
+    """
+    bn = _brand_name()
+    if markup == "html":
+        from html import escape as _e
+        return (f"\n\n{_e(bn)}\n"
+                f'<a href="{PROJECT_URL}">IT-Vault v{APP_VERSION}</a> &#183; '
+                f'<a href="{AUTHOR_URL}">{_e(AUTHOR_NAME)}</a>')
+    if markup == "mrkdwn":
+        return (f"\n\n{bn}\n"
+                f"<{PROJECT_URL}|IT-Vault v{APP_VERSION}> · <{AUTHOR_URL}|{AUTHOR_NAME}>")
+    return f"\n\n{bn}\nIT-Vault v{APP_VERSION} · {AUTHOR_NAME}"
+
+
 def _hb_send_email(cfg, subject, body):
     """An email channel can name its own address.
 
@@ -4319,7 +4351,7 @@ def _hb_send_slack(cfg, subject, body, payload):
     url = (cfg.get("url") or "").strip()
     if not url:
         raise Exception("Slack webhook URL is empty")
-    text = f"*{subject}*\n{body}"
+    text = f"*{subject}*\n{body}" + _chat_footer("mrkdwn")
     data = json.dumps({"text": text}).encode()
     req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Content-Type": "application/json"})
@@ -4334,7 +4366,14 @@ def _hb_send_telegram(cfg, subject, body, payload):
     chat = (cfg.get("chat_id") or "").strip()
     if not token or not chat:
         raise Exception("Telegram needs both a bot token and a chat id")
-    q = urllib.parse.urlencode({"chat_id": chat, "text": f"{subject}\n\n{body}"})
+    # HTML mode, so the footer's two links are links. Everything that came
+    # from the event is escaped first -- an asset called "<Laptop>" would
+    # otherwise be read as markup and Telegram would refuse the whole message.
+    from html import escape as _e
+    text = (f"<b>{_e(subject)}</b>\n\n{_e(body)}" + _chat_footer("html"))
+    q = urllib.parse.urlencode({"chat_id": chat, "text": text,
+                                "parse_mode": "HTML",
+                                "disable_web_page_preview": "true"})
     url = f"https://api.telegram.org/bot{token}/sendMessage?{q}"
     with urllib.request.urlopen(url, timeout=10) as r:
         return r.status < 400
@@ -5376,7 +5415,8 @@ def notify_ticket_resolved(ticket):
         body = (f"Your ticket has been resolved.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nStatus: {ticket.get('status','')}\n\nIf you need further assistance, reply to this email or submit a new ticket.")
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = _mail_from(settings.get("smtp_from") or settings.get("smtp_user"), bn)
-        msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
+        msg["To"] = ticket["requester_email"]
+        _with_email_footer(msg, bn, body)
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -5406,7 +5446,8 @@ def notify_ticket_replied(ticket, reply_author, reply_body):
         body = (f"Your ticket received a reply.\n\nCode: {ticket['code']}\nSubject: {ticket.get('subject','')}\nReply from: {reply_author}\n\n{reply_body[:500]}\n\nLogin to view full thread.")
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = _mail_from(settings.get("smtp_from") or settings.get("smtp_user"), bn)
-        msg["To"] = ticket["requester_email"]; msg.set_content(body + _email_footer(bn))
+        msg["To"] = ticket["requester_email"]
+        _with_email_footer(msg, bn, body)
         with smtplib.SMTP(settings["smtp_host"], int(settings.get("smtp_port", 587) or 587), timeout=10) as sv:
             if settings.get("smtp_user"): sv.starttls(); sv.login(settings["smtp_user"], settings.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -6290,6 +6331,47 @@ def _email_footer_html(app_name):
     )
 
 
+def _email_html_from_text(body):
+    """A plain-text notification wrapped as an HTML alternative.
+
+    Not decoration. The footer only has live links in the HTML part -- the
+    text part deliberately carries no URLs, because a mail gateway rewrites
+    what it can see and in plain text the reader sees the rewrite. A message
+    sent with no HTML part at all therefore arrived with the branding and the
+    credit as dead text, which is what happened to the signed acknowledgement
+    PDF: attachment, footer, no links anywhere.
+
+    So every message gets an HTML part now, and the footer that goes into it
+    is the same one the acknowledgement mail has always used.
+    """
+    from html import escape as _e
+    return ('<!doctype html><html><head><meta charset="utf-8"></head>'
+            '<body style="margin:0;padding:28px 16px;'
+            'font-family:Arial,Helvetica,sans-serif;background:#ffffff;">'
+            '<div style="max-width:480px;margin:0 auto;">'
+            '<div style="font-size:14px;line-height:1.7;color:#111111;">'
+            + _e(body).replace("\n", "<br>") +
+            '</div></div></body></html>')
+
+
+def _with_email_footer(msg, bn, body, html_body=None):
+    """Set an outgoing message's two parts, both signed off the same way.
+
+    One place, because there are six senders in this file and every one of
+    them used to build its own body: the ones that remembered the footer got
+    the text version, and only the acknowledgement mail ever had an HTML part,
+    so only that one had working links.
+    """
+    msg.set_content(body + _email_footer(bn))
+    html = html_body or _email_html_from_text(body)
+    # inside <body>: some clients drop what comes after </body>, Gmail clips it
+    foot = _email_footer_html(bn)
+    html = (html.replace("</body>", foot + "</body>", 1)
+            if "</body>" in html else html + foot)
+    msg.add_alternative(html, subtype="html")
+    return msg
+
+
 def _email_profile_addresses(subject, body):
     """Mail everyone who has an address on their profile.
 
@@ -6313,7 +6395,8 @@ def _email_profile_addresses(subject, body):
             else subject.replace("IT Guy", bn, 1))
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
-        msg["To"] = ", ".join(emails); msg.set_content(body + _email_footer(bn))
+        msg["To"] = ", ".join(emails)
+        _with_email_footer(msg, bn, body)
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -6408,7 +6491,13 @@ def send_notification(subject, body, kind=None):
     if kind and not _notify_enabled(kind):
         return False
     payload = {"event": "notification", "subject": subject, "message": body,
-               "kind": kind or "notification"}
+               "kind": kind or "notification",
+               # whoever is on the other end of a webhook gets the same
+               # provenance the email footer carries, as fields rather than
+               # as a line of text they would have to parse back out
+               "app": _brand_name(), "software": "IT-Vault",
+               "version": APP_VERSION, "project_url": PROJECT_URL,
+               "author": AUTHOR_NAME, "author_url": AUTHOR_URL}
     try:
         channels = [ch for ch in _hb_all_channels() if int(ch.get("enabled") or 0)]
     except Exception:
@@ -6465,7 +6554,8 @@ def notify_ticket_assigned(ticket, assignee_user):
                 f"Login to {s.get('app_name') or 'IT-Vault'} to update status and reply.\n")
         msg = EmailMessage(); msg["Subject"] = subj
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
-        msg["To"] = ", ".join(recipients); msg.set_content(body + _email_footer(bn))
+        msg["To"] = ", ".join(recipients)
+        _with_email_footer(msg, bn, body)
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))
             sv.send_message(msg)
@@ -6504,12 +6594,12 @@ def test_email():
         msg["Subject"] = f"{bn} · SMTP check ✅"
         msg["From"] = _mail_from(frm, bn)
         msg["To"] = to
-        msg.set_content(
+        _with_email_footer(
+            msg, bn,
             f"Yo — this is your SMTP test email from {bn}.\n\n"
             "If it landed in your inbox, your setup is locked in and ready to send "
             "real notifications. No cap. \U0001F680\n\n"
-            "Nothing else to do here — you're good to go." + _email_footer(bn)
-        )
+            "Nothing else to do here — you're good to go.")
         with smtplib.SMTP(host, port, timeout=10) as sv:
             if user:
                 sv.starttls(); sv.login(user, pw or "")
@@ -9244,7 +9334,11 @@ def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attac
         bn = s.get("app_name") or "IT-Vault"
         msg = EmailMessage(); msg["Subject"] = f"{bn}: {subject}"
         msg["From"] = _mail_from(s.get("smtp_from") or s.get("smtp_user"), bn)
-        msg["To"] = to_email; msg.set_content(body + _email_footer(bn))
+        msg["To"] = to_email
+        # Parts first, attachment second: add_attachment promotes the message
+        # to multipart/mixed and keeps the alternative pair inside it, which
+        # is how the PDF arrives next to a body that still has its links.
+        _with_email_footer(msg, bn, body)
         msg.add_attachment(attachment_bytes, maintype="application", subtype="pdf", filename=attachment_name)
         with smtplib.SMTP(s["smtp_host"], int(s.get("smtp_port", 587) or 587), timeout=10) as sv:
             if s.get("smtp_user"): sv.starttls(); sv.login(s["smtp_user"], s.get("smtp_pass", ""))

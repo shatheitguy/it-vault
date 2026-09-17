@@ -41,38 +41,23 @@
                 android:buttonTint="@color/accent" />
         </RadioGroup>
 
-        <TextView style="@style/SectionLabel" android:text="APP ICON" />
+        <!--
+          The three-way colour picker that used to be here is gone. Choosing
+          between a red tile, a white one and a grey one is not what anybody
+          wanted from "make the icon match our branding". None of the three
+          is their logo, because Android compiles the launcher icon into the
+          app and no setting can replace it. The shortcut below is the part
+          that actually carries their mark, so that is all this section
+          offers now.
+        -->
+        <TextView style="@style/SectionLabel" android:text="HOME SCREEN" />
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="8dp"
             android:textSize="12.5sp"
             android:textColor="@color/muted"
-            android:text="Android compiles the launcher icon into the app, so it cannot become your uploaded logo. Pick one of these, or pin a shortcut that does carry your logo." />
-        <RadioGroup
-            android:id="@+id/iconGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-            <RadioButton
-                android:id="@+id/iconDefault"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="@color/text"
-                android:text="Shield — the red tile" />
-            <RadioButton
-                android:id="@+id/iconLight"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="@color/text"
-                android:text="Light — the crest on white" />
-            <RadioButton
-                android:id="@+id/iconMono"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:textColor="@color/text"
-                android:text="Mono — greyscale on near-black" />
-        </RadioGroup>
+            android:text="Android compiles the app icon into the app, so it cannot become your uploaded logo. A pinned shortcut can: it sits on the home screen with your logo on it and opens straight into IT-Vault." />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/pinBrandBtn"
             style="@style/Widget.MaterialComponents.Button.OutlinedButton"
