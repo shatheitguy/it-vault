@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 
 /**
  * The row action menu from the web UI, as a native bottom sheet: Edit, Sign,
- * Print label, QR, Check-in/out, Delete. Reached by long-pressing an asset
+ * Print record, Print label, QR, Check-in/out, Delete. Reached by long-pressing an asset
  * row (tapping still opens Edit, as before).
  */
 class AssetActionsSheet : BottomSheetDialogFragment() {
@@ -42,6 +42,7 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
 
     /** Set by the host fragment so an action can refresh the list / navigate. */
     var onEdit: (() -> Unit)? = null
+    var onAssign: (() -> Unit)? = null
     var onChanged: (() -> Unit)? = null
 
     private val assetId get() = arguments?.getString(ARG_ID).orEmpty()
@@ -83,9 +84,18 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
         }
 
         row("✏️  Edit asset") { dismiss(); onEdit?.invoke() }
+        // Assigning is the thing people do most from a list, and it was only
+        // reachable by opening the asset and finding a button inside it.
+        if (!assetStatus.equals("Checked-Out", ignoreCase = true)) {
+            row("👤  Assign to employee") { dismiss(); onAssign?.invoke() }
+        }
         row("✍️  Sign / acknowledge") { shareSignLink() }
-        row("🖨️  Print label") { openLabel(printNow = true) }
-        row("🔳  QR label") { openLabel(printNow = false) }
+        // Two different printouts, and only the label was reachable from
+        // here: the tag you stick on the thing, and the A4 record of what the
+        // thing is and who has it. The web list prints both.
+        row("📄  Print asset record") { openRecord() }
+        row("🏷️  Print QR label") { openLabel(printNow = true) }
+        row("🔳  View QR label") { openLabel(printNow = false) }
 
         if (assetStatus.equals("Checked-Out", ignoreCase = true)) {
             row("📥  Check in") { checkIn() }
@@ -121,6 +131,15 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
                 toast("Could not create a sign link: ${e.message}")
             }
         }
+    }
+
+    /** The A4 record sheet. Built on the phone from the asset it already
+     * has, so it prints in a store room with no signal too. */
+    private fun openRecord() {
+        val id = assetId
+        if (id.isBlank()) { toast("This asset has no id yet"); return }
+        startActivity(RecordViewActivity.intent(requireContext(), id, assetTag, true))
+        dismiss()
     }
 
     private fun openLabel(printNow: Boolean) {
@@ -163,9 +182,15 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
 }
 
 /** Convenience so any fragment can pop the sheet in one line. */
-fun Fragment.showAssetActions(asset: Asset, onEdit: () -> Unit, onChanged: () -> Unit) {
+fun Fragment.showAssetActions(
+    asset: Asset,
+    onEdit: () -> Unit,
+    onChanged: () -> Unit,
+    onAssign: (() -> Unit)? = null,
+) {
     val sheet = AssetActionsSheet.newInstance(asset)
     sheet.onEdit = onEdit
     sheet.onChanged = onChanged
+    sheet.onAssign = onAssign ?: onEdit
     sheet.show(childFragmentManager, "asset_actions")
 }

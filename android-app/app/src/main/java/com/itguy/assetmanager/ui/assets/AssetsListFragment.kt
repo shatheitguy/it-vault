@@ -17,6 +17,7 @@ import com.itguy.assetmanager.ui.Refreshable
 import kotlinx.coroutines.launch
 
 class AssetsListFragment : Fragment(), Refreshable {
+
     private var _b: FragmentAssetsListBinding? = null
     private val b get() = _b!!
     private lateinit var adapter: AssetAdapter
@@ -41,7 +42,13 @@ class AssetsListFragment : Fragment(), Refreshable {
                             AssetEditFragment.newInstance(asset.id), "Edit Asset", addToBackStack = true
                         )
                     },
-                    onChanged = { refresh() }
+                    onChanged = { refresh() },
+                    onAssign = {
+                        (activity as? MainActivity)?.showFragment(
+                            AssetEditFragment.newInstance(asset.id, assignNow = true),
+                            "Assign Asset", addToBackStack = true
+                        )
+                    }
                 )
             }
         )
@@ -68,6 +75,10 @@ class AssetsListFragment : Fragment(), Refreshable {
     override fun refresh() { _b?.let { load(it.searchInput.text?.toString().orEmpty()) } }
 
     private fun load(query: String) {
+        // On screen first, from what the phone already has. The fetch below
+        // replaces it a moment later; until this, every visit to the list
+        // was a blank screen with a spinner on top of data we already held.
+        prepaintFromCache(query)
         lifecycleScope.launch {
             b.offlineBanner.visibility = View.GONE
             // Skip straight to cache if there's plainly no network -- avoids
@@ -91,15 +102,32 @@ class AssetsListFragment : Fragment(), Refreshable {
         }
     }
 
+    /**
+     * The cached rows, with no claim about being offline -- this runs before
+     * we have even tried the server, so "offline" would be a guess. Only
+     * [showFromCache] says that, and it only runs once a fetch has failed.
+     */
+    private fun prepaintFromCache(query: String) {
+        if (_b == null) return
+        val cached = OfflineCache.loadAssets() ?: return
+        adapter.submit(filterCached(cached, query))
+    }
+
+    private fun filterCached(cached: List<com.itguy.assetmanager.data.model.Asset>, query: String) =
+        if (query.isBlank()) cached else cached.filter {
+            it.Name.contains(query, true) || it.Type.contains(query, true) ||
+            it.Serial.contains(query, true) || it.Location.contains(query, true) ||
+            it.AssetTag.contains(query, true) ||
+            // the code a printed tag's QR carries, so a scan resolves
+            // from the cache with no network
+            (it.PublicCode.isNotBlank() && it.PublicCode.equals(query, true))
+        }
+
     private fun showFromCache(query: String, error: Exception?) {
         if (_b == null) return
         val cached = OfflineCache.loadAssets()
         if (cached != null) {
-            val filtered = if (query.isBlank()) cached else cached.filter {
-                it.Name.contains(query, true) || it.Type.contains(query, true) ||
-                it.Serial.contains(query, true) || it.Location.contains(query, true) ||
-                it.AssetTag.contains(query, true)
-            }
+            val filtered = filterCached(cached, query)
             adapter.submit(filtered)
             val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("assets"))
             b.offlineBanner.text = "📡 Offline — showing cached data from $age"

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The target frame: a thin box with the corners picked out, which is the
+     shape people already read as "put the code here". -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <stroke android:width="1dp" android:color="#55FFFFFF" />
+            <corners android:radius="18dp" />
+        </shape>
+    </item>
+    <item android:bottom="40dp" android:right="40dp">
+        <shape android:shape="rectangle">
+            <stroke android:width="3dp" android:color="#F43F5E" />
+            <corners android:radius="18dp" />
+        </shape>
+    </item>
+    <item android:top="40dp" android:left="40dp">
+        <shape android:shape="rectangle">
+            <stroke android:width="3dp" android:color="#F43F5E" />
+            <corners android:radius="18dp" />
+        </shape>
+    </item>
+</layer-list>

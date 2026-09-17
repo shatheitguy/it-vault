@@ -12,4 +12,9 @@
     <color name="muted">#98A2B4</color>
     <color name="outline">#29313E</color>
     <color name="bar_track">#1A222E</color>
+    <!-- the same five roles, at the web's dark values -->
+    <color name="stat_cyan">#39D0FF</color>
+    <color name="stat_green">#3DDC97</color>
+    <color name="stat_amber">#FFB454</color>
+    <color name="stat_red">#FF6B6B</color>
 </resources>
