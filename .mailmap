@@ -1,0 +1,13 @@
+# Commit identities, canonicalised.
+#
+# Git and GitHub both read this file when they work out who wrote a
+# repository: an address on the right is shown as the name and address on the
+# left. It is the supported way to say "these are the same person", and it
+# applies to co-authors as well as authors.
+#
+# One entry, and the reason for it: an assistant's co-author trailer put a
+# second face on the Contributors panel of a repository written by one person.
+# The trailers themselves are gone from the history, and this makes sure the
+# panel stays that way if one is ever added again by a tool that adds them by
+# default.
+Sharqan Ahamed <61654902+shatheitguy@users.noreply.github.com> <noreply@anthropic.com>
