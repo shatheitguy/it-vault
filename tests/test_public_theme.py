@@ -120,8 +120,13 @@ finally:
 print()
 print("5. An unthemed install still gets sensible colours")
 check("the engine keeps its own fallbacks", "'#ff3b30'" in A.PUBLIC_THEME_JS)
-check("an empty payload is valid to call with",
-      "json.dumps(brand_theme, default=str)" in SRC)
+# Still JSON, but through _js: json.dumps leaves "</script>" intact, and
+# a browser ends a script element at that sequence wherever it appears --
+# so an organisation name could close the tag and run code on the card.
+check("an empty payload is valid to call with", "_js(brand_theme)" in SRC)
+check("and it is escaped for the script element it lands in",
+      "def _js(" in SRC and "</script>" not in A._js("</script>"),
+      A._js("</script>"))
 
 print()
 if fails:

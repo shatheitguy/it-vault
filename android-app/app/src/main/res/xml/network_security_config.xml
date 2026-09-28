@@ -1,4 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plain HTTP stays possible, because IT-Vault is usually a box on the office
+  LAN with no certificate, and refusing cleartext outright would make the app
+  useless for most installs.
+
+  Restricting it here to private address ranges is not an option: Android's
+  domain-config takes host names and IP literals, not CIDR blocks, and the
+  server's address is typed by the user at run time rather than known when
+  this file is compiled. So the check lives in the app instead, at the point
+  the address is entered (see ServerUrl.warnIfPublicCleartext), where the
+  actual host is known and the person can be told what it means.
+
+  User-installed certificate authorities are deliberately not trusted. An app
+  that accepts them accepts a proxy someone put on the device to read its
+  traffic.
+-->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>

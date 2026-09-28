@@ -65,6 +65,39 @@ object ApiClient {
         chain.proceed(req.build())
     }
 
+    /**
+     * True when this address would send the API key over plain HTTP to
+     * somewhere that is not the local network.
+     *
+     * Cleartext has to stay possible: IT-Vault is usually a box on the office
+     * LAN with no certificate. But the API key is a standing credential for
+     * the whole register, and http:// to a public address puts it on the wire
+     * for every hop in between. Android's network security config cannot
+     * express "private ranges only" -- it takes host names, not CIDR -- so
+     * the check is here, where the address the person typed is known.
+     */
+    fun isPublicCleartext(raw: String): Boolean {
+        val url = normalize(raw)
+        if (!url.startsWith("http://")) return false
+        val host = url.removePrefix("http://").substringBefore('/')
+            .substringBefore(':').lowercase()
+        if (host == "localhost" || host.endsWith(".local") || host.endsWith(".lan") ||
+            host.endsWith(".internal") || host.endsWith(".home")) return false
+        val parts = host.split('.')
+        val octets = parts.mapNotNull { it.toIntOrNull() }
+        if (octets.size == 4 && parts.size == 4) {
+            val (a, bb, _, _) = octets
+            if (a == 10) return false
+            if (a == 127) return false
+            if (a == 192 && bb == 168) return false
+            if (a == 172 && bb in 16..31) return false
+            if (a == 169 && bb == 254) return false
+            return true            // a public IPv4 literal
+        }
+        // a bare hostname with no dots is a LAN name; anything else is public
+        return parts.size > 1
+    }
+
     fun normalize(raw: String): String {
         var v = raw.trim()
         if (!v.startsWith("http://") && !v.startsWith("https://")) v = "http://$v"

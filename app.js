@@ -4453,7 +4453,12 @@ async function loadProfile(){
   const g = id => document.getElementById(id);
   if (g('pDisplay')) g('pDisplay').value = p.display || '';
   if (g('p_email')) g('p_email').value = p.email || '';
-  if (g('pApiKey')) g('pApiKey').value = p.api_key || '';
+  // The server keeps a hash, not the key, so there is nothing to show
+  // here after the one moment it was generated.
+  if (g('pApiKey')) {
+    g('pApiKey').value = p.api_key_set ? '•'.repeat(24) + '  (stored)' : '';
+    g('pApiKey').placeholder = 'No key yet — generate one below';
+  }
   if (g('avatarPrev')) renderAvatarPreview(p);
   renderSidebarAvatar(p);
 
@@ -4486,9 +4491,13 @@ async function loadProfile(){
   };
   const regen = g('regenKey');
   if (regen) regen.onclick = async () => {
-    if (!confirm('Regenerate API key? The old key stops working immediately.')) return;
+    if (!confirm('Regenerate API key? The old key stops working immediately, '
+                 + 'and the new one is shown once — copy it before you leave this page.')) return;
     const j = await api_json('/api/profile/apikey', { method:'POST' });
-    if (j && j.api_key){ g('pApiKey').value = j.api_key; toast('✓ NEW API KEY'); }
+    if (j && j.api_key){
+      g('pApiKey').value = j.api_key;
+      toast('✓ NEW API KEY — COPY IT NOW, IT IS NOT SHOWN AGAIN');
+    }
     else { toast('✕ ' + ((j && j.error) || 'failed')); }
   };
   const copy = g('copyKey');
