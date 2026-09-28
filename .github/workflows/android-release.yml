@@ -1,21 +1,40 @@
-name: Android Release
+name: Android build check
 
-# Build + sign the APK and publish a GitHub Release whenever a v* tag is pushed.
-# Requires these repo secrets (Settings -> Secrets and variables -> Actions):
-#   KEYSTORE_BASE64    base64 -w0 of your release.keystore
-#   KEYSTORE_PASSWORD  keystore store password
-#   KEY_ALIAS          key alias (e.g. itvault)
-#   KEY_PASSWORD       key password
-# After the release publishes, bump docs/app/latest.json so installed apps see it.
+# Builds the Android app on every tag and on every change to android-app/, so
+# a phone-side break is caught here rather than at release time.
+#
+# It does NOT publish. This used to try: it restored a keystore from secrets,
+# signed an APK and created the GitHub Release itself. Three things were wrong
+# with that. The secrets were never set, so it published releases with no APK
+# attached. It fought with the release that is cut by hand with the notes
+# somebody wrote. And it meant the app's signing key would have to live in a
+# GitHub secret -- the key that lets an update install over an existing
+# install, for an app people already have. That is a decision worth making
+# deliberately, not by inheriting a workflow template.
+#
+# So: the release APK is still built and signed on the maintainer's machine
+# (see RELEASING.md) and uploaded with `gh release upload`. What runs here is
+# the compile, which is the part a person should not have to remember.
+#
+# Without keystore.properties the Gradle config simply omits the signing
+# config, so assembleRelease produces an unsigned APK -- which is exactly what
+# is wanted for a build check: it proves the code, resources and manifest are
+# all still valid.
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: [ 'v*' ]
+    branches: [ 'main' ]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android-release.yml'
+  pull_request:
+    paths:
+      - 'android-app/**'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -28,55 +47,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # packages: '' on purpose. The action's default is "tools
+      # platform-tools", and `tools` was retired from the SDK repository --
+      # sdkmanager exits 1 with "Failed to find package 'tools'", which is
+      # what failed this job on every run for months. The runner image already
+      # has the SDK and Gradle fetches the platform it needs.
       - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
 
       - uses: gradle/actions/setup-gradle@v4
 
-      # Without this the whole job dies at the build step and no Release is
-      # created at all -- and the web app's update check, the phone's updater
-      # and the README download badge all resolve against Releases. A tag
-      # should always produce the release; the APK is what goes missing when
-      # the secrets are not set up, and the warning says so.
-      - name: Do we have signing secrets?
-        id: signing
-        env:
-          KS: ${{ secrets.KEYSTORE_BASE64 }}
-        run: |
-          if [ -n "$KS" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::No KEYSTORE_BASE64 secret -- publishing the release without an APK. Build and upload IT-Vault.apk by hand (see RELEASING.md)."
-          fi
-
-      - name: Restore keystore
-        if: steps.signing.outputs.ready == 'true'
-        working-directory: android-app
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > release.keystore
-          cat > keystore.properties <<EOF
-          storeFile=release.keystore
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
-
-      - name: Build signed release APK
-        if: steps.signing.outputs.ready == 'true'
+      - name: Build the app (unsigned)
         working-directory: android-app
         run: ./gradlew assembleRelease --no-daemon
 
-      - name: Stage APK as IT-Vault.apk
-        if: steps.signing.outputs.ready == 'true'
-        run: cp android-app/app/build/outputs/apk/release/app-release.apk IT-Vault.apk
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      # Handy for checking a change on a device without a full release, and it
+      # is unmistakably not the published build: a different signature means a
+      # phone will refuse to install it over a real one.
+      - name: Keep the unsigned APK for inspection
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{ steps.signing.outputs.ready == 'true' && 'IT-Vault.apk' || '' }}
-          generate_release_notes: true
-
-      - name: Clean up secrets on runner
-        if: always()
-        working-directory: android-app
-        run: rm -f release.keystore keystore.properties
+          name: it-vault-unsigned-apk
+          path: android-app/app/build/outputs/apk/release/*.apk
+          retention-days: 14
+          if-no-files-found: error
