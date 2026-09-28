@@ -15,7 +15,7 @@
 #   --dry-run    print the plan, change nothing
 set -eu
 
-IMAGE="ghcr.io/shatheitguy/it-vault"
+IMAGE="ghcr.io/shatheitguy/itvault"
 NAME="${ITVAULT_NAME:-itvault}"
 PURGE=""
 PURGE_DB=""

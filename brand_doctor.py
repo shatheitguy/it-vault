@@ -79,7 +79,7 @@ expected = {
 missing = [name for name, attr in expected.items() if not hasattr(app, attr)]
 if missing:
     fail("this build predates the branding fixes", "missing: " + ", ".join(missing))
-    info("", "pull ghcr.io/shatheitguy/it-vault:latest and RECREATE the container")
+    info("", "pull ghcr.io/shatheitguy/itvault:latest and RECREATE the container")
     info("", "(docker restart reuses the old image)")
 else:
     ok("all branding fixes present in the running code")

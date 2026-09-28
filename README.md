@@ -4,7 +4,7 @@
 
 
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
-[![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/it-vault)
+[![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/itvault)
 [![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)
 [![Android APK](https://img.shields.io/badge/Android-download%20APK-red.svg?logo=android&logoColor=white)](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)
 
@@ -427,7 +427,7 @@ docker run -d --name itvault -p 5000:5000 \
   -v invoices_data:/app/invoices \
   -v backups_data:/app/backups \
   -e ITVAULT_DATA_DIR=/app/data \
-  ghcr.io/shatheitguy/it-vault:latest
+  ghcr.io/shatheitguy/itvault:latest
 ```
 
 Then open the setup wizard and enter your database details. `latest` follows
@@ -467,7 +467,7 @@ comes back on exactly the version it was already running. Updating means
 pulling the new image and recreating the container:
 
 ```bash
-docker pull ghcr.io/shatheitguy/it-vault:latest
+docker pull ghcr.io/shatheitguy/itvault:latest
 
 docker rm -f itvault
 docker run -d --name itvault --restart unless-stopped \
@@ -476,7 +476,7 @@ docker run -d --name itvault --restart unless-stopped \
   -v itvault_data:/app/data \
   -v invoices_data:/app/invoices \
   -v backups_data:/app/backups \
-  ghcr.io/shatheitguy/it-vault:latest
+  ghcr.io/shatheitguy/itvault:latest
 ```
 
 Removing the *container* is safe. Removing its *volumes* is not:

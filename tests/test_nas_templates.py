@@ -34,7 +34,7 @@ def read(*parts):
 
 
 app_src = read("app.py")
-IMAGE = "ghcr.io/shatheitguy/it-vault"
+IMAGE = "ghcr.io/shatheitguy/itvault"
 
 # What the app is actually willing to read, and where it actually writes.
 app_env = set(re.findall(r'(?:os\.environ\.get|_env)\(\s*"([A-Z][A-Z0-9_]+)"', app_src))

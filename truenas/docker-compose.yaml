@@ -42,7 +42,7 @@ services:
       start_period: 30s
 
   itvault:
-    image: ghcr.io/shatheitguy/it-vault:latest
+    image: ghcr.io/shatheitguy/itvault:latest
     container_name: itvault
     restart: unless-stopped
     depends_on:

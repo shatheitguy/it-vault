@@ -25,7 +25,7 @@
 #        --db-image (Docker only: database image, default mariadb:latest).
 set -eu
 
-IMAGE="ghcr.io/shatheitguy/it-vault"
+IMAGE="ghcr.io/shatheitguy/itvault"
 TAG="${ITVAULT_TAG:-latest}"
 NAME="${ITVAULT_NAME:-itvault}"
 PORT="${ITVAULT_PORT:-5000}"

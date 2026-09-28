@@ -1,6 +1,6 @@
 {
-  "versionCode": 33,
-  "versionName": "2.6.0",
+  "versionCode": 34,
+  "versionName": "2.6.1",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "A full security review, with every finding fixed. The most serious: the password-reset code was kept in the browser's own session cookie, so anyone could request a reset for any account, read the code out of their cookie and take it over -- codes now live on the server as hashes. Asset names and label text are escaped, so a scanned QR cannot run script. The public ticket lookup returns only what the page shows, and is rate limited. Invoices download instead of rendering, and are checked by content. API keys are stored hashed and shown once. On the phone: backups off, and a warning before a password goes to a public address over plain HTTP."
+  "notes": "Same software as 2.6.0 -- the security release -- published under a container package this repository owns. The old package was orphaned when the repository was recreated, so no image could be pushed and every Docker install stayed on 2.5.3 no matter how many times the installer ran. The image is now ghcr.io/shatheitguy/itvault; re-run install.sh and it switches across by itself."
 }
