@@ -31,7 +31,7 @@ services:
     # Pull the published image by default. Pin a release for anything real
     # (ITVAULT_TAG=1.6.0); "latest" moves under you. To build from a source
     # checkout instead, comment `image:` out and uncomment `build: .`.
-    image: ghcr.io/shatheitguy/it-vault:${ITVAULT_TAG:-latest}
+    image: ghcr.io/shatheitguy/itvault:${ITVAULT_TAG:-latest}
     # build: .
     container_name: itvault
     restart: unless-stopped

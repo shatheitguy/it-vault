@@ -14,7 +14,13 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Not ${{ github.repository }}, deliberately. That derives the
+  # package name from the repository name -- and the package of that
+  # name was orphaned when this repository was deleted and recreated,
+  # so every build since has been refused with permission_denied. A
+  # package the workflow creates is owned by this repository, which
+  # is what makes publishing work again.
+  IMAGE_NAME: shatheitguy/itvault
 
 jobs:
   build-and-push:

@@ -34,7 +34,7 @@ git push origin HEAD --tags
 Pushing the tag fires both workflows:
 
 - **`docker-publish.yml`** builds linux/amd64 + linux/arm64 and pushes
-  `ghcr.io/shatheitguy/it-vault` tagged `1.9.0`, `1.9`, the commit sha, and
+  `ghcr.io/shatheitguy/itvault` tagged `1.9.0`, `1.9`, the commit sha, and
   `latest` (the last only from the default branch).
 - **`android-release.yml`** builds and signs the APK and creates the GitHub
   Release.
@@ -76,7 +76,7 @@ existing install.
 
 ```bash
 # the image tags actually exist
-docker manifest inspect ghcr.io/shatheitguy/it-vault:1.9.0 > /dev/null && echo ok
+docker manifest inspect ghcr.io/shatheitguy/itvault:1.9.0 > /dev/null && echo ok
 # and the app reports the new version
-docker run --rm ghcr.io/shatheitguy/it-vault:1.9.0 cat VERSION
+docker run --rm ghcr.io/shatheitguy/itvault:1.9.0 cat VERSION
 ```
