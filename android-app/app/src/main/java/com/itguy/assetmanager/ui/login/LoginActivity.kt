@@ -89,6 +89,9 @@ class LoginActivity : AppCompatActivity() {
         shakeCard()
     }
 
+    /** Set once the person has been told about an unencrypted address. */
+    private var cleartextAccepted = false
+
     private fun attemptLogin() {
         val serverRaw = b.serverInput.text?.toString().orEmpty()
         val user = b.userInput.text?.toString()?.trim().orEmpty()
@@ -99,6 +102,29 @@ class LoginActivity : AppCompatActivity() {
         if (user.isBlank() || pass.isBlank()) { showError("Enter username and password"); return }
 
         val base = ApiClient.normalize(serverRaw)
+        // Said once, before the password goes anywhere. Not a block: plenty
+        // of installs are reachable only over a VPN where this is fine, and
+        // the person in front of the phone knows which theirs is.
+        if (ApiClient.isPublicCleartext(serverRaw) && !cleartextAccepted) {
+            setBusy(false)
+            androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("This address is not encrypted")
+                .setMessage(
+                    "You are connecting to a public address over plain HTTP. " +
+                    "Your password and the key this app stores afterwards " +
+                    "travel unencrypted and can be read on the way.\n\n" +
+                    "If the server is on your own network or reached over a " +
+                    "VPN this is usually fine. Otherwise ask IT for an " +
+                    "https:// address."
+                )
+                .setPositiveButton("Connect anyway") { _, _ ->
+                    cleartextAccepted = true
+                    attemptLogin()
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+            return
+        }
         setBusy(true)
 
         lifecycleScope.launch {

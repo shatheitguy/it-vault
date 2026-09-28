@@ -1117,6 +1117,22 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # ITVAULT_COOKIE_SECURE says to insist on it.
 COOKIE_SECURE_ALWAYS = (_env("ITVAULT_COOKIE_SECURE") or "").lower() in ("1", "true", "yes")
 
+# Nothing bounded a request body before this. An invoice upload, a restore or
+# a ticket photo could be any size at all: one request was enough to fill the
+# invoices volume or take the process out of memory. Flask now refuses an
+# oversized body with 413 before a byte reaches a handler.
+#
+# 256 MB rather than something tighter because of one route: restoring a
+# backup means uploading the archive, and an archive carries every invoice
+# attachment the install has. A limit that protects the server by making
+# restore impossible is not protection. The genuinely unauthenticated bodies
+# -- a signature, a portal photo -- are capped far below this by their own
+# handlers. Raise or lower it with ITVAULT_MAX_UPLOAD_MB.
+try:
+    app.config["MAX_CONTENT_LENGTH"] = int(_env("ITVAULT_MAX_UPLOAD_MB") or 256) * 1024 * 1024
+except Exception:
+    app.config["MAX_CONTENT_LENGTH"] = 256 * 1024 * 1024
+
 # UniFi Controller integration -- cached device/client snapshot (see _unifi_refresh)
 _unifi_cache = {"ts": 0, "devices": [], "clients": [], "error": None}
 _UNIFI_CACHE_TTL = 20
@@ -1179,6 +1195,40 @@ def _secure_cookies(resp):
         if "secure" not in cookie.lower().replace("samesite", ""):
             cookie += "; Secure"
         resp.headers.add("Set-Cookie", cookie)
+    return resp
+
+
+@app.after_request
+def _security_headers(resp):
+    """The headers every response should have carried all along.
+
+    Nothing framed the app, so an admin session could be clickjacked through
+    an invisible iframe; nothing said nosniff outside two routes, so an
+    uploaded file's declared type was a suggestion; and there was no CSP at
+    all, which means a single escaping mistake had nothing standing behind
+    it.
+
+    The policy allows inline script and style because the pages are written
+    that way -- the label sheets, the sign page and the public card all build
+    their own markup. It still forbids objects, frames and any script from
+    another origin, which is what an injected payload actually needs.
+    """
+    resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+    resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    resp.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    if "Content-Security-Policy" not in resp.headers:
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob:; "
+            "connect-src 'self'; "
+            "object-src 'none'; "
+            "base-uri 'self'; "
+            "frame-ancestors 'self'; "
+            "form-action 'self'")
     return resp
 
 
@@ -1795,6 +1845,65 @@ def migrate_schema():
         except Exception as e:
             print("[itvault] could not add Employees.manual_fields:", e, flush=True)
 
+    # API keys were stored in the clear, so the Users table -- and every
+    # backup of it -- was a list of working credentials. The stored value is
+    # the key itself, so it can be hashed in place: the phones and scripts
+    # already holding one keep working, and the database stops holding
+    # anything replayable. Generated keys are 48 characters; a hash is 64, so
+    # the length says which is which.
+    try:
+        cur.execute("SELECT username, api_key FROM Users WHERE api_key<>''")
+        for _r in cur.fetchall() or []:
+            _k = _r.get("api_key") or ""
+            if len(_k) != 64:
+                cur.execute("UPDATE Users SET api_key=%s WHERE username=%s",
+                            (_api_key_hash(_k), _r["username"]))
+                print("[itvault] hashed the stored API key for %s" % _r["username"], flush=True)
+    except Exception as e:
+        print("[itvault] could not hash stored API keys:", e, flush=True)
+
+    # Ticket codes grew from six random hex characters to ten, which makes
+    # them 22 characters long in a column declared VARCHAR(20). Widening is
+    # free and leaves every existing code untouched.
+    try:
+        cur.execute("SELECT CHARACTER_MAXIMUM_LENGTH AS n FROM information_schema.COLUMNS "
+                    "WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='Tickets' AND COLUMN_NAME='code'")
+        row = cur.fetchone() or {}
+        if int(row.get("n") or 0) < 32:
+            cur.execute("ALTER TABLE Tickets MODIFY code VARCHAR(32)")
+            print("[itvault] widened Tickets.code for longer ticket codes", flush=True)
+    except Exception as e:
+        print("[itvault] could not widen Tickets.code:", e, flush=True)
+
+    # One-time codes: password resets, the emailed sign-in code, and the
+    # secret being enrolled into an authenticator app.
+    #
+    # These used to live in the Flask session, which is signed but NOT
+    # encrypted -- the payload is base64 in a cookie its holder can read. So
+    # anyone could ask for a password reset of any account, admin included,
+    # read the code out of their own cookie and set a new password without
+    # ever seeing the victim's mailbox. The emailed 2FA code had the same
+    # shape, which made "two factor" one factor for anyone holding a
+    # password.
+    #
+    # Only a hash is stored, peppered with the instance secret so a stolen
+    # table is not a million-guess dictionary; the session carries nothing
+    # but an opaque handle.
+    try:
+        cur.execute("""CREATE TABLE IF NOT EXISTS AuthCodes (
+            id VARCHAR(48) PRIMARY KEY,
+            purpose VARCHAR(24) NOT NULL,
+            username VARCHAR(80) NOT NULL,
+            code_hash CHAR(64) NOT NULL DEFAULT '',
+            payload VARCHAR(255) NOT NULL DEFAULT '',
+            attempts INT NOT NULL DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME NOT NULL,
+            INDEX idx_authcodes_exp (expires_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+    except Exception as e:
+        print("[itvault] could not create AuthCodes:", e, flush=True)
+
     # The password column was VARCHAR(100), which fitted the old salt$sha256
     # exactly and cannot hold a PBKDF2 hash at 118 characters. Without this,
     # MySQL refuses the write: nobody's hash upgrades on login, and creating a
@@ -2248,6 +2357,125 @@ def login():
     audit("-", "LOGIN_FAILED", u or "?", _client_ip())
     return jsonify({"ok": False, "error": "Invalid credentials"}), 401
 
+# ---------- one-time codes, kept where the client cannot read them ----------
+#
+# Everything here exists because Flask's session is signed, not encrypted.
+# A value put in it is a value the browser can read. A one-time code is only
+# a second factor while the person holding it is the person who received the
+# email, so it belongs on the server.
+CODE_MAX_ATTEMPTS = 5
+
+
+def _code_hash(code):
+    """SHA-256, peppered with this instance's secret.
+
+    Six digits is a million possibilities: a bare hash of one is a lookup
+    table, and the table is small enough to build on a laptop. The pepper
+    means a stolen AuthCodes table is worth nothing without the secret key
+    file, which lives outside the database.
+    """
+    return hmac.new(SECRET.encode(), (code or "").encode(), hashlib.sha256).hexdigest()
+
+
+def _issue_auth_code(purpose, username, ttl_s, digits=6):
+    """Mint a one-time code. Returns (handle, code): the handle goes in the
+    session, the code goes to the person, and only the hash is stored."""
+    handle = secrets.token_urlsafe(24)[:48]
+    code = ("%0" + str(digits) + "d") % secrets.randbelow(10 ** digits)
+    c = conn(); cur = c.cursor()
+    try:
+        cur.execute("DELETE FROM AuthCodes WHERE expires_at < NOW()")
+        # one live code per purpose per account: asking for a second reset
+        # retires the first, so an old email cannot be replayed
+        cur.execute("DELETE FROM AuthCodes WHERE purpose=%s AND username=%s",
+                    (purpose, username))
+        cur.execute("INSERT INTO AuthCodes (id, purpose, username, code_hash, expires_at) "
+                    "VALUES (%s,%s,%s,%s, DATE_ADD(NOW(), INTERVAL %s SECOND))",
+                    (handle, purpose, username, _code_hash(code), int(ttl_s)))
+        c.commit()
+    finally:
+        c.close()
+    return handle, code
+
+
+def _stash_secret(purpose, username, payload, ttl_s):
+    """The same store, for a value that is not a code: the TOTP secret being
+    enrolled. It is read back once, by handle, and never sent to the client
+    twice."""
+    handle = secrets.token_urlsafe(24)[:48]
+    c = conn(); cur = c.cursor()
+    try:
+        cur.execute("DELETE FROM AuthCodes WHERE expires_at < NOW()")
+        cur.execute("DELETE FROM AuthCodes WHERE purpose=%s AND username=%s",
+                    (purpose, username))
+        cur.execute("INSERT INTO AuthCodes (id, purpose, username, payload, expires_at) "
+                    "VALUES (%s,%s,%s,%s, DATE_ADD(NOW(), INTERVAL %s SECOND))",
+                    (handle, purpose, username, payload, int(ttl_s)))
+        c.commit()
+    finally:
+        c.close()
+    return handle
+
+
+def _read_secret(handle, purpose, username=None):
+    """The stashed value, or None. Does not consume it -- confirming a TOTP
+    enrolment reads the same secret it is about to store."""
+    if not handle:
+        return None
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT username, payload FROM AuthCodes WHERE id=%s AND purpose=%s "
+                "AND expires_at > NOW()", (handle, purpose))
+    row = cur.fetchone(); c.close()
+    if not row:
+        return None
+    if username is not None and row["username"] != username:
+        return None
+    return row.get("payload") or None
+
+
+def _drop_auth_code(handle):
+    if not handle:
+        return
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("DELETE FROM AuthCodes WHERE id=%s", [handle])
+        c.commit(); c.close()
+    except Exception:
+        pass
+
+
+def _check_auth_code(handle, purpose, code, username=None):
+    """(username, error). Consumes the code on success, counts the failures.
+
+    The count is the point: six digits is a million guesses, and nothing
+    used to be counting them.
+    """
+    if not handle:
+        return None, "This code has expired -- please request a new one."
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT username, code_hash, attempts FROM AuthCodes "
+                "WHERE id=%s AND purpose=%s AND expires_at > NOW()", (handle, purpose))
+    row = cur.fetchone()
+    if not row:
+        c.close()
+        return None, "This code has expired -- please request a new one."
+    if username is not None and row["username"] != username:
+        c.close()
+        return None, "This code has expired -- please request a new one."
+    if int(row.get("attempts") or 0) >= CODE_MAX_ATTEMPTS:
+        cur.execute("DELETE FROM AuthCodes WHERE id=%s", [handle])
+        c.commit(); c.close()
+        return None, "Too many wrong codes. Please request a new one."
+    if not hmac.compare_digest(row.get("code_hash") or "", _code_hash(code)):
+        cur.execute("UPDATE AuthCodes SET attempts=attempts+1 WHERE id=%s", [handle])
+        c.commit(); c.close()
+        return None, "Invalid code"
+    user = row["username"]
+    cur.execute("DELETE FROM AuthCodes WHERE id=%s", [handle])
+    c.commit(); c.close()
+    return user, None
+
+
 def _pending_2fa_user():
     """Validates the short-lived pending-2FA session set by login() when a user has
     TOTP or email-OTP enabled. Returns the username, or None if there's no valid
@@ -2283,8 +2511,8 @@ def _mail_from(addr, brand):
 def _send_login_otp_email(username, to_email):
     if not to_email:
         return False
-    code = f"{secrets.randbelow(1000000):06d}"
-    session["pending_2fa_email_code"] = code
+    handle, code = _issue_auth_code("login2fa", username, 300)
+    session["pending_2fa_id"] = handle
     session["pending_2fa_email_sent_at"] = time.time()
     import smtplib
     from email.message import EmailMessage
@@ -2335,12 +2563,18 @@ def verify_login_2fa():
     if method == "totp" and row.get("totp_enabled") and row.get("totp_secret"):
         ok = pyotp.TOTP(row["totp_secret"]).verify(code, valid_window=1)
     elif method == "email" and row.get("email_otp_enabled"):
-        ok = bool(code) and code == session.get("pending_2fa_email_code")
+        who, err = _check_auth_code(session.get("pending_2fa_id"), "login2fa", code,
+                                    username=u)
+        ok = bool(who)
+        if err:
+            email_err = err
     if not ok:
-        return jsonify({"ok": False, "error": "Invalid or expired code"}), 401
+        return jsonify({"ok": False,
+                        "error": locals().get("email_err") or "Invalid or expired code"}), 401
     remember = bool(session.get("pending_2fa_remember"))
+    _drop_auth_code(session.get("pending_2fa_id"))
     for k in ("pending_2fa_user", "pending_2fa_role", "pending_2fa_display", "pending_2fa_exp",
-              "pending_2fa_email_code", "pending_2fa_email_sent_at", "pending_2fa_remember"):
+              "pending_2fa_id", "pending_2fa_email_sent_at", "pending_2fa_remember"):
         session.pop(k, None)
     _start_session(row["username"], row["role"], row["display"], remember)
     return jsonify({"ok": True, "role": row["role"]})
@@ -2385,14 +2619,22 @@ def forgot_password_request():
         return jsonify({"error": "username or email required"}), 400
     if session.get("pwreset_sent_at") and time.time() - session["pwreset_sent_at"] < 20:
         return jsonify({"error": "please wait a few seconds before requesting another code"}), 429
+    # Per address as well as per session: a session throttle is no throttle
+    # at all against someone who simply drops the cookie.
+    if not _public_throttle("pwreset:" + _client_ip(), limit=10, window=900):
+        return jsonify({"error": "Too many reset requests from here just now. "
+                                 "Please wait a few minutes."}), 429
     c = conn(); cur = c.cursor()
     cur.execute("SELECT username, email FROM Users WHERE username=%s OR email=%s", [ident, ident])
     row = cur.fetchone(); c.close()
     if row and row.get("email"):
-        code = f"{secrets.randbelow(1000000):06d}"
+        # The code goes to the mailbox and its hash to the database. The
+        # cookie gets a handle, which is worth nothing on its own -- this is
+        # the whole fix for "request a reset of any account, read the code
+        # out of your own cookie, take the account".
+        handle, code = _issue_auth_code("pwreset", row["username"], 600)
         session.clear()
-        session["pwreset_user"] = row["username"]
-        session["pwreset_code"] = code
+        session["pwreset_id"] = handle
         session["pwreset_exp"] = time.time() + 600
         session["pwreset_sent_at"] = time.time()
         session.permanent = True
@@ -2403,21 +2645,30 @@ def forgot_password_request():
 def forgot_password_reset():
     """Step 2: verify the emailed code and set a new password. Signs the user
     in on success, same as completing 2FA."""
-    u = session.get("pwreset_user")
-    if not u or time.time() > session.get("pwreset_exp", 0):
+    handle = session.get("pwreset_id")
+    if not handle or time.time() > session.get("pwreset_exp", 0):
         return jsonify({"error": "Reset code expired -- please request a new one"}), 400
+    if not _public_throttle("pwverify:" + _client_ip(), limit=20, window=900):
+        return jsonify({"error": "Too many attempts from here just now. "
+                                 "Please wait a few minutes."}), 429
     d = request.get_json(force=True, silent=True) or {}
     code = (d.get("code") or "").strip()
     new_pw = d.get("new_password") or ""
-    if not code or code != session.get("pwreset_code"):
-        return jsonify({"error": "Invalid code"}), 401
+    # The password is checked first, deliberately. Spending the code and then
+    # refusing the password would leave someone holding a dead code and a
+    # message about length, with nothing to do but request another one.
     if not new_pw:
         return jsonify({"error": "New password required"}), 400
+    if len(new_pw) < 8:
+        return jsonify({"error": "New password must be at least 8 characters"}), 400
+    u, err = _check_auth_code(handle, "pwreset", code)
+    if err:
+        return jsonify({"error": err}), 401
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Users SET password=%s WHERE username=%s", (hash_pw(new_pw), u))
     c.commit()
     cur.execute("SELECT username, role, display FROM Users WHERE username=%s", [u]); row = cur.fetchone(); c.close()
-    for k in ("pwreset_user", "pwreset_code", "pwreset_exp", "pwreset_sent_at"):
+    for k in ("pwreset_id", "pwreset_exp", "pwreset_sent_at"):
         session.pop(k, None)
     if row:
         _start_session(row["username"], row["role"], row["display"], remember=False)
@@ -2446,7 +2697,11 @@ def me():
                     "perms": _role_perms(session["role"]),
                     "features": sorted(_role_features(session["role"])),
                     "display": row.get("display", ""), "email": row.get("email", ""),
-                    "avatar": row.get("avatar", ""), "api_key": row.get("api_key", ""),
+                    "avatar": row.get("avatar", ""),
+                    # Only whether one exists. The value is a hash now, and a
+                    # hash in a field labelled "your API key" is worse than
+                    # nothing -- it looks copyable and is not.
+                    "api_key_set": bool(row.get("api_key")),
                     "last_login": row.get("last_login", ""),
                     "theme": s.get("theme", "dark"),
                     "theme_preset": s.get("theme_preset", "deepdark"), "bg_type": s.get("bg_type","solid"),
@@ -2460,6 +2715,17 @@ def me():
                     "ldap_server": s.get("ldap_server", ""), "ldap_domain": s.get("ldap_domain", ""),
                     "ldap_bind_user": s.get("ldap_bind_user", ""), "ldap_base_dn": s.get("ldap_base_dn", "")})
 
+def _api_key_hash(key):
+    """What gets stored for an API key.
+
+    The keys are 192 bits of randomness, so a plain SHA-256 is enough -- there
+    is nothing to guess. The point is that the database no longer holds
+    anything that can be replayed: a leaked backup, or a look at the Users
+    table, used to hand over working keys for every account that had one.
+    """
+    return hashlib.sha256((key or "").encode()).hexdigest()
+
+
 def _user_from_api_key(key):
     """Resolve a persistent per-user API key (Settings > My Account) to its
     owner. Used so the native mobile client can stay logged in indefinitely
@@ -2468,7 +2734,8 @@ def _user_from_api_key(key):
     if not key:
         return None
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT username, role FROM Users WHERE api_key=%s AND api_key<>''", [key])
+    cur.execute("SELECT username, role FROM Users WHERE api_key=%s AND api_key<>''",
+                [_api_key_hash(key)])
     row = cur.fetchone(); c.close()
     return row
 
@@ -2494,6 +2761,12 @@ def _resolve_session_from_api_key():
     if row:
         session["user"] = row["username"]
         session["role"] = row["role"]
+        # For this request only. Saving it would hand back a session cookie,
+        # and from then on the caller is signed in whatever happens to the
+        # key -- so regenerating a key did not lock out anything that had
+        # kept the cookie. Every request carrying a key is re-checked
+        # instead, which is what makes revocation immediate.
+        session.modified = False
     return row
 
 def auth_required(role=None, module=None, level="write"):
@@ -3714,7 +3987,10 @@ def twofa_status():
 @auth_required()
 def twofa_totp_setup():
     secret = pyotp.random_base32()
-    session["totp_pending_secret"] = secret
+    # Server-side for the same reason as the codes: a session value is a
+    # cookie value. This one is the user's own secret, so reading it is not
+    # a breach -- but it does not belong in a cookie either.
+    session["totp_enroll_id"] = _stash_secret("totp_enroll", session["user"], secret, 900)
     c = conn(); cur = c.cursor()
     cur.execute("SELECT app_name FROM Settings WHERE id=1"); s = cur.fetchone() or {}
     c.close()
@@ -3729,7 +4005,7 @@ def twofa_totp_setup():
 @app.route("/api/2fa/totp/confirm", methods=["POST"])
 @auth_required()
 def twofa_totp_confirm():
-    secret = session.get("totp_pending_secret")
+    secret = _read_secret(session.get("totp_enroll_id"), "totp_enroll", session["user"])
     if not secret: return jsonify({"error": "start setup first"}), 400
     d = request.get_json(force=True, silent=True) or {}
     code = (d.get("code") or "").strip()
@@ -3738,7 +4014,8 @@ def twofa_totp_confirm():
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Users SET totp_secret=%s, totp_enabled=1 WHERE username=%s", (secret, session["user"]))
     c.commit(); c.close()
-    session.pop("totp_pending_secret", None)
+    _drop_auth_code(session.get("totp_enroll_id"))
+    session.pop("totp_enroll_id", None)
     return jsonify({"ok": True})
 
 @app.route("/api/2fa/totp/disable", methods=["POST"])
@@ -3759,8 +4036,8 @@ def twofa_email_otp_enable():
     email = row.get("email") or ""
     if not email: return jsonify({"error": "Set an email on your profile first"}), 400
     if not s.get("smtp_host"): return jsonify({"error": "SMTP is not configured -- ask an admin to set it up in Settings"}), 400
-    code = f"{secrets.randbelow(1000000):06d}"
-    session["email_otp_pending_code"] = code
+    handle, code = _issue_auth_code("enroll_email", session["user"], 600)
+    session["email_otp_enroll_id"] = handle
     session["email_otp_pending_sent_at"] = time.time()
     ok = _send_simple_email(email, "Confirm email sign-in codes", f"Your verification code is: {code}\n\nEnter this code to confirm email sign-in codes for your account.")
     if not ok: return jsonify({"error": "Could not send email -- check SMTP settings"}), 400
@@ -3769,16 +4046,17 @@ def twofa_email_otp_enable():
 @app.route("/api/2fa/email-otp/confirm", methods=["POST"])
 @auth_required()
 def twofa_email_otp_confirm():
-    pending = session.get("email_otp_pending_code")
-    if not pending: return jsonify({"error": "start enabling email codes first"}), 400
+    handle = session.get("email_otp_enroll_id")
+    if not handle: return jsonify({"error": "start enabling email codes first"}), 400
     d = request.get_json(force=True, silent=True) or {}
     code = (d.get("code") or "").strip()
-    if code != pending:
-        return jsonify({"error": "Invalid code"}), 400
+    who, err = _check_auth_code(handle, "enroll_email", code, username=session["user"])
+    if err:
+        return jsonify({"error": err}), 400
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Users SET email_otp_enabled=1 WHERE username=%s", [session["user"]])
     c.commit(); c.close()
-    session.pop("email_otp_pending_code", None); session.pop("email_otp_pending_sent_at", None)
+    session.pop("email_otp_enroll_id", None); session.pop("email_otp_pending_sent_at", None)
     return jsonify({"ok": True})
 
 @app.route("/api/2fa/email-otp/disable", methods=["POST"])
@@ -3864,7 +4142,8 @@ def profile():
     cur.execute("SELECT username, display, email, role, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]]); u = cur.fetchone() or {}
     c.close()
     return jsonify({"user": u.get("username"), "display": u.get("display", ""), "email": u.get("email", ""), "role": u.get("role", ""),
-                    "avatar": u.get("avatar", ""), "api_key": u.get("api_key", ""), "last_login": u.get("last_login", "")})
+                    "avatar": u.get("avatar", ""), "api_key_set": bool(u.get("api_key")),
+                    "last_login": u.get("last_login", "")})
 
 @app.route("/api/profile/avatar", methods=["POST"])
 @auth_required()
@@ -3883,11 +4162,21 @@ def profile_avatar():
 @app.route("/api/profile/apikey", methods=["POST"])
 @auth_required()
 def profile_apikey():
+    """A new API key: returned once here, stored only as a hash.
+
+    This is the one moment the key exists in readable form. The phone stores
+    it, or the person copies it; after that nothing in the database can be
+    replayed, which is the point -- a backup file used to carry working keys
+    for every account that had one.
+    """
     new_key = secrets.token_hex(24)
     c = conn(); cur = c.cursor()
-    cur.execute("UPDATE Users SET api_key=%s WHERE username=%s", (new_key, session["user"]))
+    cur.execute("UPDATE Users SET api_key=%s WHERE username=%s",
+                (_api_key_hash(new_key), session["user"]))
     c.commit(); c.close()
-    return jsonify({"api_key": new_key})
+    audit(session.get("user"), "API_KEY", "", "new API key generated")
+    return jsonify({"api_key": new_key,
+                    "note": "Copy it now -- it is not shown again."})
 
 # ---------- test DB / LDAP connections ----------
 @app.route("/api/test-db", methods=["POST"])
@@ -4333,6 +4622,42 @@ def _hb_send_email(cfg, subject, body):
     return ok
 
 
+# Addresses a monitor is never allowed to be pointed at. On a cloud host,
+# 169.254.169.254 answers with instance credentials to anything that asks --
+# so "monitor this URL every minute" would be a way to read them out through
+# the check's own response body. Monitoring a private LAN address is the
+# point of the feature and stays allowed.
+BLOCKED_MONITOR_HOSTS = ("169.254.169.254", "metadata.google.internal",
+                         "metadata.goog", "100.100.100.200", "fd00:ec2::254")
+
+
+def _monitor_target_allowed(target):
+    """(ok, reason). Rejects the cloud metadata endpoints, nothing else."""
+    host = (target or "").strip().lower()
+    for scheme in ("http://", "https://"):
+        if host.startswith(scheme):
+            host = host[len(scheme):]
+    host = host.split("/")[0].split("?")[0]
+    if "@" in host:
+        host = host.rsplit("@", 1)[-1]
+    if host.startswith("["):
+        host = host[1:].split("]")[0]
+    else:
+        host = host.split(":")[0]
+    if host in BLOCKED_MONITOR_HOSTS:
+        return False, ("That address is a cloud metadata endpoint, which "
+                       "answers with this host's own credentials. It cannot "
+                       "be monitored.")
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_link_local:
+            return False, ("Link-local addresses cannot be monitored -- that "
+                           "range carries cloud instance credentials.")
+    except ValueError:
+        pass
+    return True, ""
+
+
 def _hb_send_webhook(cfg, subject, body, payload):
     import urllib.request
     url = (cfg.get("url") or "").strip()
@@ -4572,6 +4897,9 @@ def _hb_monitor_body(d, existing=None):
     target = (d.get("target", ex.get("target")) or "").strip()
     if not target:
         return None, "target is required"
+    ok, why = _monitor_target_allowed(target)
+    if not ok:
+        return None, why
     port = d.get("port", ex.get("port"))
     try:
         port = int(port) if port not in (None, "", 0, "0") else None
@@ -5316,7 +5644,10 @@ TICKET_STATUSES = ["Open", "In Progress", "Pending", "Resolved", "Closed"]
 TICKET_CATEGORIES = ["Hardware", "Software", "Network", "Access/Permissions", "Email/Communication", "Printer", "CCTV/Security", "Other"]
 
 def ticket_code():
-    return "TK-" + datetime.now().strftime("%Y%m%d") + "-" + secrets.token_hex(3).upper()
+    # Ten hex characters, not six. The date in front is public knowledge, so
+    # the random part is the whole of the secret: six characters is 16.7
+    # million, which a script works through in hours. Ten is 1.1 trillion.
+    return "TK-" + datetime.now().strftime("%Y%m%d") + "-" + secrets.token_hex(5).upper()
 
 def sla_hours_for(priority):
     """Return SLA hours based on priority and Settings policy."""
@@ -5627,13 +5958,35 @@ def portal_link():
         url += "?t=" + s["portal_token"]
     return jsonify({"url": url, "token": s.get("portal_token") or "", "app_name": s.get("app_name") or "IT-Vault"})
 
+# What the status page actually shows. The lookup used to answer with
+# SELECT *, so a code also bought the requester's name and email address, the
+# asset the ticket points at, who created it and the SLA it is measured
+# against -- none of which the page renders, all of which went to anyone who
+# had a code.
+PORTAL_TICKET_FIELDS = ("code", "subject", "status", "priority", "category",
+                        "assignee", "due_date", "created_at", "updated_at")
+PORTAL_REPLY_FIELDS = ("author", "author_role", "body", "created_at")
+
+
 @app.route("/api/portal/status", methods=["POST"])
 def portal_status():
-    """Public ticket status lookup by code only."""
+    """Public ticket status lookup by code only.
+
+    Two things make this safe to leave open: the answer is limited to what
+    the page draws, and guessing is rate-limited. A code is the only key,
+    and until recently it was six hex characters inside a date prefix --
+    about sixteen million per day, which is a weekend of guessing for
+    somebody with a script and no limit in their way.
+    """
     d = request.get_json(force=True) or {}
     code = (d.get("code") or "").strip().upper()
     if not code:
         return jsonify({"error": "Ticket code required"}), 400
+    # the page polls itself every 15 seconds, so the ceiling has to clear a
+    # few tabs left open while still being useless for enumeration
+    if not _public_throttle("portal:" + _client_ip(), limit=240, window=900):
+        return jsonify({"error": "Too many lookups from here just now. "
+                                 "Please wait a few minutes."}), 429
     c = conn(); cur = c.cursor()
     cur.execute("SELECT * FROM Tickets WHERE code=%s", [code])
     t = cur.fetchone()
@@ -5643,7 +5996,9 @@ def portal_status():
     reps = cur.fetchall()
     atts = _attachment_rows(cur, t["id"])
     c.close()
-    return jsonify({"ticket": dict(t), "replies": [dict(r) for r in reps], "attachments": atts})
+    ticket = {k: t.get(k) for k in PORTAL_TICKET_FIELDS}
+    replies = [{k: r.get(k) for k in PORTAL_REPLY_FIELDS} for r in reps]
+    return jsonify({"ticket": ticket, "replies": replies, "attachments": atts})
 
 @app.route("/api/tickets/<int:ticket_id>", methods=["GET","PUT","DELETE"])
 @auth_required(module="tickets", level="read")
@@ -6163,6 +6518,48 @@ def _logo_data_uri():
     return ""
 
 # ---------- email notifications ----------
+def _h(v):
+    """A value on its way into HTML, escaped.
+
+    The public asset page and the label pages built their markup with
+    f-strings straight out of the database. An asset called
+    `<script>...</script>` therefore ran in the browser of whoever scanned
+    the tag -- and every tag printed carries that page's address. The same
+    values also arrive from Active Directory, so it was not only staff who
+    could set them.
+
+    Escaped once, at the point the value is read, so nothing downstream has
+    to remember. Double-escaping is the other failure mode: `&amp;amp;` in a
+    company name is nobody's idea of fixed.
+    """
+    from html import escape
+    return escape("" if v is None else str(v), quote=True)
+
+
+def _js(value):
+    """A value being written into a <script> element.
+
+    json.dumps quotes and escapes for JavaScript, but it leaves
+    "</script>" alone -- and a browser ends a script element at that
+    sequence wherever it appears, string literal or not. So an
+    organisation named "</script><img onerror=...>" would run code on the
+    public card even with every HTML context on the page escaped.
+
+    Escaping the slash fixes it: the same string to JavaScript, not a tag
+    to the parser. The two line separators are escaped for the same
+    reason -- they end a statement in older JavaScript engines.
+    """
+    return (json.dumps(value, default=str)
+            .replace("</", "<\\/")
+            .replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
+
+
+def _h_row(d):
+    """Every string in a record, escaped, for rendering."""
+    return {k: (_h(v) if isinstance(v, str) else v) for k, v in d.items()}
+
+
 def brand_name():
     try:
         c = conn(); cur = c.cursor()
@@ -6205,13 +6602,13 @@ def notify_person_asset_assigned(employee_id, asset, checked_out=False, reminder
         lead = (f"This is a reminder that asset {what} is assigned to you "
                 "and still needs your acknowledgement.")
         subj = f"Reminder: please acknowledge asset {name or tag}"
-        head = (f"Asset <b>{tag}</b>{(' (' + name + ')') if name else ''} is "
-                f"assigned to you and still needs your acknowledgement.<br>{ask}")
+        head = (f"Asset <b>{_h(tag)}</b>{(' (' + _h(name) + ')') if name else ''} is "
+                f"assigned to you and still needs your acknowledgement.<br>{_h(ask)}")
     else:
         lead = f"We have deployed asset {what} to you."
         subj = f"Asset {verb}: {name or tag}"
-        head = (f"We have deployed asset <b>{tag}</b>"
-                f"{(' (' + name + ')') if name else ''} to you.<br>{ask}")
+        head = (f"We have deployed asset <b>{_h(tag)}</b>"
+                f"{(' (' + _h(name) + ')') if name else ''} to you.<br>{_h(ask)}")
     body = f"{lead}\n"
     html_body = None
     aid = asset.get("_id")
@@ -6892,6 +7289,7 @@ def _public_base():
 
 
 @app.route("/label/<a_id>")
+@auth_required(module="assets", level="read")
 def label_page(a_id):
     # the address this request came in on -- the same one the portal and
     # the signature links use, and the only one a phone can be sure of
@@ -6900,7 +7298,9 @@ def label_page(a_id):
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone(); c.close()
     if not a: return "Asset not found", 404
-    asset = row_to_dict(a)
+    # Escaped at the source: this record is only ever rendered into HTML from
+    # here on, and doing it once beats remembering it at thirty f-strings.
+    asset = _h_row(row_to_dict(a))
     # QR / label config from Settings
     try:
         sc = conn(); scur = sc.cursor()
@@ -6912,12 +7312,12 @@ def label_page(a_id):
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
-        app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
-        logo_text = (srow.get("logo_text") or app_name) if srow else app_name
+        app_name = _h((srow.get("app_name") or "IT-Vault") if srow else "IT-Vault")
+        logo_text = _h((srow.get("logo_text") or app_name) if srow else app_name)
         label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
-        label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
+        label_caption = _h((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
         label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
-        label_contact = ((srow.get("company_phone") or "") if srow else "")
+        label_contact = _h((srow.get("company_phone") or "") if srow else "")
         label_logo_scale = LOGO_SIZES.get((srow.get("label_logo_size") or "md") if srow else "md", 1.0)
         lbl_name = bool(srow.get("label_show_name")) if srow else False
         lbl_con = bool(srow.get("label_show_contact")) if srow else False
@@ -6952,7 +7352,7 @@ def label_page(a_id):
             [("qr0", asset.get("AssetTag") or asset["_id"][:12],
               f"{base}p/{_pcode}" if _pcode else f"{base}asset/{asset['_id']}",
               asset.get("Name") or "")],
-            lw_mm, lh_mm, label_caption, brand_name(),
+            lw_mm, lh_mm, label_caption, _h(brand_name()),
             _model_logo(label_model, _logo), label_color, label_contact,
             f"Label {asset['Name']}", logo_scale=label_logo_scale,
             show_name=lbl_name, show_contact=lbl_con, show_asset=lbl_asset)
@@ -6970,7 +7370,7 @@ def label_page(a_id):
                           (3.0 if compact else 5.0) * label_logo_scale), 2)
     _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
     brand_mm, brand_lines = _brand_fit(
-        brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
+        _h(brand_name()), _stack_mm - LOGO_RESERVE_MM - 1.0,
         2.5 if compact else 3.0, min_mm=1.6)
     # A compact tag used to have no header at all -- the brand line is now
     # always drawn, so budgeting it at zero clipped the bottom field off.
@@ -7151,6 +7551,7 @@ def label_page(a_id):
 </body></html>"""
 
 @app.route("/labels")
+@auth_required(module="assets", level="read")
 def labels_page():
     # Batch version of /label/<id> -- prints one QR label per selected asset on a
     # single page (?ids=a,b,c), in the order the caller passed them.
@@ -7164,7 +7565,7 @@ def labels_page():
     rows = cur.fetchall(); c.close()
     if not rows:
         return "No matching assets found", 404
-    by_id = {r["_id"]: row_to_dict(r) for r in rows}
+    by_id = {r["_id"]: _h_row(row_to_dict(r)) for r in rows}
     ordered = [by_id[i] for i in ids if i in by_id]
     # QR / label config from Settings (shared by every label on this sheet)
     try:
@@ -7177,11 +7578,11 @@ def labels_page():
         qr_size = int(srow.get("qr_size") or 160) if srow else 160
         label_size = (srow.get("label_size") or "50.8x50.8")
         show_logo = bool(srow.get("label_logo", 1)) if srow else True
-        app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
+        app_name = _h((srow.get("app_name") or "IT-Vault") if srow else "IT-Vault")
         label_model = ((srow.get("label_model") or "detail") if srow else "detail").lower()
-        label_caption = ((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
+        label_caption = _h((srow.get("label_caption") or "Asset No.") if srow else "Asset No.")
         label_color = ((srow.get("label_color") or "#000000") if srow else "#000000")
-        label_contact = ((srow.get("company_phone") or "") if srow else "")
+        label_contact = _h((srow.get("company_phone") or "") if srow else "")
         label_logo_scale = LOGO_SIZES.get((srow.get("label_logo_size") or "md") if srow else "md", 1.0)
         lbl_name = bool(srow.get("label_show_name")) if srow else False
         lbl_con = bool(srow.get("label_show_contact")) if srow else False
@@ -7209,7 +7610,7 @@ def labels_page():
                            f"{base}p/{_pc}" if _pc else f"{base}asset/{_a['_id']}",
                            _a.get("Name") or ""))
         return _model_page(label_model, _items, lw_mm, lh_mm, label_caption,
-                           brand_name(), _model_logo(label_model, _logo),
+                           _h(brand_name()), _model_logo(label_model, _logo),
                            label_color, label_contact,
                            f"Print {len(ordered)} Labels", sheet=True,
                            logo_scale=label_logo_scale, show_name=lbl_name,
@@ -7228,7 +7629,7 @@ def labels_page():
                           (3.0 if compact else 5.0) * label_logo_scale), 2)
     _stack_mm = (lw_mm - 2 * pad_mm) * 0.54 - (0.5 if compact else 1.0)
     brand_mm, brand_lines = _brand_fit(
-        brand_name(), _stack_mm - LOGO_RESERVE_MM - 1.0,
+        _h(brand_name()), _stack_mm - LOGO_RESERVE_MM - 1.0,
         2.5 if compact else 3.0, min_mm=1.6)
     # A compact tag used to have no header at all -- the brand line is now
     # always drawn, so budgeting it at zero clipped the bottom field off.
@@ -7518,9 +7919,10 @@ def asset_public(a_id):
             ("Given By (Staff)", processed_by or "—"),
             ("Warranty", str(asset.get("WarrantyMonths") or 12) + " mo"), ("Purchase", asset.get("PurchaseDate") or "—"),
             ("Note", asset.get("Note") or "—")]
-    rows_html = "".join(f"<tr><td class='k'>{k}</td><td class='v'>{('' if v is None else v)}</td></tr>" for k,v in rows)
+    rows_html = "".join(f"<tr><td class='k'>{_h(k)}</td><td class='v'>{_h(v)}</td></tr>"
+                        for k, v in rows)
     logo_html = f'<img class=logo src="{logo_uri}" alt="">' if logo_uri else ""
-    contact_bits = [c for c in [company_phone, company_address] if c]
+    contact_bits = [_h(c) for c in [company_phone, company_address] if c]
     contact_html = " &nbsp;·&nbsp; ".join(contact_bits) if contact_bits else "—"
 
     # Who is looking decides what this page is.
@@ -7537,19 +7939,19 @@ def asset_public(a_id):
     staff_view = bool(session.get("user"))
     card_cls = "" if staff_view else "pubcard"
     if staff_view:
-        page_title = f"Asset {asset['Name']}"
-        head_html = f'<div class=head>{logo_html}<span class=brand>{app_name}</span></div>'
+        page_title = f"Asset {_h(asset['Name'])}"
+        head_html = f'<div class=head>{logo_html}<span class=brand>{_h(app_name)}</span></div>'
         main_html = f"""
- <div class=assetid-badge>{tag_txt}</div>
- <div class=title>{asset['Name']}</div>
+ <div class=assetid-badge>{_h(tag_txt)}</div>
+ <div class=title>{_h(asset['Name'])}</div>
  <table>{rows_html}</table>
  <div class=contact>📞 Organization Contact: <b>{contact_html}</b></div>
  <a class=btn href="{base}label/{asset['_id']}">🖨 Open Printable Tag</a>
- <div class=foot>Scanned from {app_name} • {base}</div>"""
+ <div class=foot>Scanned from {_h(app_name)} • {_h(base)}</div>"""
         lf_script = ""
     else:
         # the tab title is part of what leaks: it lands in browser history
-        page_title = f"{app_name} — Property tag"
+        page_title = f"{_h(app_name)} — Property tag"
         head_html = (f'<div class=phead><img class=plogo src="{logo_uri}" alt=""></div>'
                      if logo_uri else "")
         phone = (company_phone or "").strip()
@@ -7570,8 +7972,8 @@ def asset_public(a_id):
             contact=f"<div class=pcall>{call}</div>")
         # the code this page was reached by -- never the asset tag, or the
         # form would be a way back to the sequence the QR stopped exposing
-        lf_script = ("<script>var ASSET_REF=" + json.dumps(_asset_public_code(asset["_id"]))
-                     + ",OWNER=" + json.dumps(app_name) + ";"
+        lf_script = ("<script>var ASSET_REF=" + _js(_asset_public_code(asset["_id"]))
+                     + ",OWNER=" + _js(app_name) + ";"
                      + LOSTFOUND_PUBLIC_JS + "</script>")
     # Rendered into the document rather than fetched on load: a QR is
     # scanned on a phone on mobile data, and a round trip before the
@@ -7579,7 +7981,7 @@ def asset_public(a_id):
     # is the acknowledgement page's engine, shared so the two cannot drift.
     theme_script = ("<script>" + PUBLIC_THEME_JS
                     + "applySignTheme("
-                    + json.dumps(brand_theme, default=str) + ");</script>")
+                    + _js(brand_theme) + ");</script>")
     return f"""<!doctype html><html lang="en"><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>{page_title}</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -7715,6 +8117,11 @@ def _model_page(model, items, lw_mm, lh_mm, caption, brand, logo_html, color,
     items: [(qr_id, id_value, qr_target)]. Shared by the single label and the
     print sheet, so a sheet and a one-off tag of the same asset come off the
     printer identical.
+
+    Every string reaching this function is already HTML-escaped by its
+    caller -- the records through _h_row, the settings and the brand through
+    _h. Escaping again here would print `&amp;amp;` on a tag belonging to a
+    company with an ampersand in its name.
 
     Each model is a different tag, not a different skin. They put the code,
     the owner's name, the number and the instruction in different places
@@ -8149,9 +8556,45 @@ LOSTFOUND_PUBLIC_JS = """
 _PUBLIC_HITS = {}
 
 
+# Addresses that are allowed to speak for someone else. X-Forwarded-For is a
+# header, which means it is whatever the client typed: taking it at face
+# value let anyone defeat the login throttle and the lost-and-found limit by
+# sending a different one each time. Behind a reverse proxy the header is the
+# only way to see the real client, so the proxy's own address has to be named
+# -- ITVAULT_TRUSTED_PROXIES=10.0.0.5,10.0.0.6, or "*" to keep the old
+# behaviour on a setup that needs it.
+TRUSTED_PROXIES = [p.strip() for p in (_env("ITVAULT_TRUSTED_PROXIES") or "").split(",") if p.strip()]
+
+
+def _peer_is_trusted_proxy():
+    if not TRUSTED_PROXIES:
+        return False
+    peer = request.remote_addr or ""
+    if "*" in TRUSTED_PROXIES:
+        return True
+    if peer in TRUSTED_PROXIES:
+        return True
+    for entry in TRUSTED_PROXIES:
+        if "/" in entry:
+            try:
+                if ipaddress.ip_address(peer) in ipaddress.ip_network(entry, strict=False):
+                    return True
+            except Exception:
+                continue
+    return False
+
+
 def _client_ip():
-    fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
-    return (fwd or request.remote_addr or "?")[:45]
+    """Who this request is really from, as far as anything can tell.
+
+    Only a proxy this install was told to trust may rewrite that with
+    X-Forwarded-For. Everyone else is the address the socket came from.
+    """
+    if _peer_is_trusted_proxy():
+        fwd = (request.headers.get("X-Forwarded-For") or "").split(",")[0].strip()
+        if fwd:
+            return fwd[:45]
+    return (request.remote_addr or "?")[:45]
 
 
 def _public_throttle(key, limit=5, window=3600):
@@ -8366,6 +8809,17 @@ def upload_invoice(a_id):
     ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
     if ext not in ALLOWED_EXT:
         return jsonify({"error": "only PDF/image allowed"}), 400
+    # The extension says what it is called. This says what it is: a PDF
+    # starts %PDF, and every image type we accept has a signature. Anything
+    # else -- an HTML file named invoice.gif, say -- is refused here rather
+    # than being stored and served back later.
+    head = f.stream.read(32)
+    f.stream.seek(0)
+    if ext == "pdf":
+        if not head.startswith(b"%PDF"):
+            return jsonify({"error": "that file is not a PDF"}), 400
+    elif not _sniff_image(head)[0]:
+        return jsonify({"error": "that file is not an image"}), 400
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, InvoiceFile FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
@@ -8403,7 +8857,16 @@ def serve_invoice(fn):
     fn = os.path.basename(fn)
     full = os.path.join(INVOICE_DIR, fn)
     if not os.path.exists(full): return "not found", 404
-    return send_from_directory(INVOICE_DIR, fn, mimetype=_mtype.guess_type(fn)[0] or "application/octet-stream")
+    # As an attachment, with the type nailed down and sniffing switched off.
+    # Upload checks the extension; the extension is not the content, so a
+    # file uploaded as .gif whose body is HTML used to be rendered by the
+    # browser in this app's own origin -- which is a session, not a picture.
+    resp = make_response(send_from_directory(
+        INVOICE_DIR, fn, as_attachment=True,
+        mimetype=_mtype.guess_type(fn)[0] or "application/octet-stream"))
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Content-Security-Policy"] = "default-src 'none'; sandbox"
+    return resp
 
 # ---------- signature link ----------
 import base64, hmac, hashlib, json as _json
@@ -9028,6 +9491,16 @@ def sign_page_short(code):
     """
     return SIGNATURE_HTML
 
+def _sign_throttle_ok():
+    """False when this address has tried too many signature links.
+
+    The lifecycle was already sound -- seven days, single use, rotated on
+    reissue -- but nothing counted wrong codes, and a hit exposes an asset
+    and the right to sign for it.
+    """
+    return _public_throttle("sign:" + _client_ip(), limit=60, window=900)
+
+
 def _sign_link_asset(cur, tk):
     """Resolve a sign link to an asset id. Returns (asset_id, error).
 
@@ -9068,7 +9541,7 @@ def _sign_link_asset(cur, tk):
         if not held:
             return None, ("This link has already been used -- the acknowledgement "
                           "is on record. Ask IT if you need to sign again.")
-        if sent != held:
+        if not hmac.compare_digest(sent, held):
             return None, ("This link is no longer valid because a newer one was "
                           "issued. Please use the most recent email.")
     elif (row.get("SignatureData") or "").strip():
@@ -9080,6 +9553,9 @@ def _sign_link_asset(cur, tk):
 @app.route("/api/assets/sign/verify")
 def verify_sign():
     tk = request.args.get("token","")
+    if not _sign_throttle_ok():
+        return jsonify({"ok": False, "error": "Too many attempts from here just "
+                                              "now. Please wait a few minutes."}), 429
     c = conn(); cur = c.cursor()
     aid, err = _sign_link_asset(cur, tk)
     if err:
@@ -9384,6 +9860,9 @@ def _email_signed_asset_pdf(asset, signer_name, sig_data_url):
 def approve_asset():
     d = request.get_json(force=True) or {}
     tk = d.get("token",""); name = d.get("name","").strip()
+    if not _sign_throttle_ok():
+        return jsonify({"error": "Too many attempts from here just now. "
+                                 "Please wait a few minutes."}), 429
     if not name: return jsonify({"error": "approver name required"}), 400
     c = conn(); cur = c.cursor()
     aid, err = _sign_link_asset(cur, tk)
@@ -9396,6 +9875,16 @@ def approve_asset():
     receivedBy = name
     notesReceived = datetime.now().strftime("%Y-%m-%d")
     sigData = (d.get("data") or "").strip()
+    # What arrives here is drawn on a canvas and sent as a data URI. Nothing
+    # checked that, and nothing bounded it: the column holds 64 KB, so a
+    # larger payload was a failed write at best, and any string at all was
+    # accepted as somebody's signature.
+    if sigData:
+        if not re.match(r"^data:image/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=\s]+$", sigData):
+            return jsonify({"error": "That signature could not be read. Please sign again."}), 400
+        if len(sigData) > 300_000:
+            return jsonify({"error": "That signature image is too large."}), 400
+    name = name[:120]
     # SignNonce is cleared in the same statement that records the signature,
     # so the link dies exactly when the acknowledgement lands -- not a moment
     # before, and never twice.
@@ -10155,7 +10644,17 @@ def update_apply():
 
 @app.route("/api/backup")
 @feature_required("tools.backup")
+@auth_required([ROLE_ADMIN])
 def backup():
+    """Download a backup. Admin only, deliberately.
+
+    The archive carries every password hash, the SMTP password, the LDAP bind
+    password and every captured signature. A role with "tools.backup" could
+    take all of that off the server over HTTP -- which made the feature flag
+    a way to hand out the credentials of everyone who has ever logged in.
+    Running the schedule is unchanged; taking a copy away is not the same
+    act as running one.
+    """
     scope = (request.args.get("scope") or "all").lower()
     if scope not in ("config", "assets", "all"):
         scope = "all"

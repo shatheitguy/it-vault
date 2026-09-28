@@ -482,8 +482,71 @@ it-vault/
 
 ## 13. Security Notes
 
-Current as of 2.4.0. Where something changed recently it says so, because the
+Current as of 2.6.0. Where something changed recently it says so, because the
 old behaviour is what you will find written down elsewhere.
+
+### 13.0 What the 2.6.0 audit changed
+
+A full review of the server, the web client, the phone app, the MCP server and
+the container. The findings and their fixes, worst first:
+
+**One-time codes left the cookie.** The password-reset code was stored in the
+Flask session, which is signed but not encrypted -- so the attacker who
+*asked* for the reset could decode their own cookie, read the six digits the
+victim had been emailed, and set a new password on any account, including the
+only admin. The emailed two-factor code had the same shape, which made "two
+factor" one factor for anyone holding a password. Codes now live in an
+`AuthCodes` table as a SHA-256 hash peppered with the instance secret; the
+session carries an opaque handle, attempts are capped at five, and expiry is
+enforced in SQL. The same applies to the secret being enrolled into an
+authenticator app.
+
+**Pages escape what people typed.** The public asset page and both label
+pages built their HTML by interpolating database values directly, so an asset
+name containing a `<script>` tag ran in the browser of whoever scanned the QR
+code -- and that address is printed on every label. Values are escaped once,
+where they are read; the shared tag renderer documents that its inputs arrive
+escaped so nothing escapes twice. The same treatment covers the settings
+strings printed on a tag, the portal's own status view, and the one place a
+value was written into a `<script>` element, where JSON quoting is not enough
+because `</script>` ends the element wherever it appears.
+
+**The ticket portal answers with less.** A status lookup returned the whole
+row -- requester email, assignee, who created it, the linked asset -- to
+anyone with a code. It now returns only the nine fields the page renders, the
+endpoint is rate limited per address, and new ticket codes carry ten random
+hex characters instead of six.
+
+**Uploads and downloads.** An invoice is served as an attachment with a fixed
+type, `nosniff` and a sandbox policy, and an upload is checked by its content
+rather than its extension -- an HTML file named `invoice.gif` is refused.
+Every request body is capped (`ITVAULT_MAX_UPLOAD_MB`, 64 by default).
+
+**Credentials at rest.** API keys are stored as hashes and shown once, at
+generation; an existing key is hashed in place on upgrade, so phones and
+scripts holding one keep working. A key no longer mints a session cookie
+either, so regenerating it locks out the old one immediately. Taking a backup
+away from the server is admin-only, because the archive contains every
+password hash, the SMTP password and the LDAP bind password.
+
+**Rate limits that cannot be stepped around.** `X-Forwarded-For` is only
+believed from an address named in `ITVAULT_TRUSTED_PROXIES` -- otherwise it is
+a header the client typed, and the login throttle was one header away from
+useless. Signature-link codes are counted too.
+
+**Headers.** Every response now carries `nosniff`, `X-Frame-Options`,
+`Referrer-Policy`, `Cross-Origin-Opener-Policy` and a Content-Security-Policy
+that forbids objects and pins where forms may post and who may frame the app.
+
+**Smaller things.** The label pages require an account, like the record page
+showing the same data. A signature must be an image data URI under 300 KB. A
+Heartbeat monitor cannot be pointed at a cloud metadata address. Dependencies
+have version ceilings. On Android, `allowBackup` is off, and the app warns
+before sending a password to a public address over plain HTTP.
+
+`tests/test_auth_codes.py`, `tests/test_render_escaping.py` and
+`tests/test_hardening.py` hold all of it -- each drives the real route rather
+than reading the source, and the first two run the original attack.
 
 **Passwords** are stored as PBKDF2-HMAC-SHA256 at 600,000 rounds, salted per
 password, with the round count inside the stored value so it can be raised

@@ -376,38 +376,46 @@
   var pollTimer = null;
   var lastReplyCount = null;
   function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer = null; } }
+  // Everything below is built as a string and handed to innerHTML, and
+  // the subject, the assignee and every reply are typed by somebody. A
+  // reply saying <img src=x onerror=...> ran in the visitor's browser.
+  function esc(v){
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
   function renderStatus(t, reps, atts, opts){
     opts = opts || {};
     var result = document.getElementById('statusResult');
-    var prioClass = t.priority || 'Normal';
-    var statusClass = 's_' + (t.status||'').replace(' ','');
+    var prioClass = esc(t.priority || 'Normal');
+    var statusClass = 's_' + esc((t.status||'').replace(' ',''));
     var newReplies = (lastReplyCount != null && reps.length > lastReplyCount);
     lastReplyCount = reps.length;
     var html = '<div class="status-view show">' +
       '<div class="live-badge"' + (opts.silent ? '' : '') + '><span class="live-dot"></span>Live — auto-refreshing</div>' +
-      '<div class="status-row"><b>Code</b><span>'+t.code+'</span></div>' +
-      '<div class="status-row"><b>Subject</b><span>'+(t.subject||'')+'</span></div>' +
-      '<div class="status-row"><b>Status</b><span class="badge '+statusClass+'">'+t.status+'</span></div>' +
-      '<div class="status-row"><b>Priority</b><span class="prio '+prioClass+'">'+t.priority+'</span></div>' +
-      '<div class="status-row"><b>Category</b><span>'+(t.category||'—')+'</span></div>' +
-      '<div class="status-row"><b>Assignee</b><span>'+(t.assignee||'—')+'</span></div>' +
-      '<div class="status-row"><b>Due</b><span>'+(t.due_date||'—')+'</span></div>' +
-      '<div class="status-row"><b>Created</b><span>'+(t.created_at||'')+'</span></div>' +
-      '<div class="status-row"><b>Updated</b><span>'+(t.updated_at||'')+'</span></div>';
+      '<div class="status-row"><b>Code</b><span>'+esc(t.code)+'</span></div>' +
+      '<div class="status-row"><b>Subject</b><span>'+esc(t.subject||'')+'</span></div>' +
+      '<div class="status-row"><b>Status</b><span class="badge '+statusClass+'">'+esc(t.status)+'</span></div>' +
+      '<div class="status-row"><b>Priority</b><span class="prio '+prioClass+'">'+esc(t.priority)+'</span></div>' +
+      '<div class="status-row"><b>Category</b><span>'+esc(t.category||'—')+'</span></div>' +
+      '<div class="status-row"><b>Assignee</b><span>'+esc(t.assignee||'—')+'</span></div>' +
+      '<div class="status-row"><b>Due</b><span>'+esc(t.due_date||'—')+'</span></div>' +
+      '<div class="status-row"><b>Created</b><span>'+esc(t.created_at||'')+'</span></div>' +
+      '<div class="status-row"><b>Updated</b><span>'+esc(t.updated_at||'')+'</span></div>';
     if(atts && atts.length){
       html += '<div class="replies"><b style="color:var(--mut);font-size:12px;text-transform:uppercase">Photos ('+atts.length+')</b><div class="atts">';
       atts.forEach(function(a){
         // served through the ticket code, which is the same key that got the
         // visitor this far -- opening in a new tab lets them see it full size
         var u = '/api/portal/attachments/'+encodeURIComponent(t.code)+'/'+a.id;
-        html += '<a href="'+u+'" target="_blank" rel="noopener" title="'+(a.filename||'photo')+'"><img src="'+u+'" alt=""></a>';
+        html += '<a href="'+u+'" target="_blank" rel="noopener" title="'+esc(a.filename||'photo')+'"><img src="'+u+'" alt=""></a>';
       });
       html += '</div></div>';
     }
     if(reps.length) {
       html += '<div class="replies"><b style="color:var(--mut);font-size:12px;text-transform:uppercase">Replies ('+reps.length+')</b>';
       reps.forEach(function(rp){
-        html += '<div class="reply"><div class="meta">'+rp.author+' · '+(rp.author_role||'')+' · '+(rp.created_at||'')+'</div><div>'+rp.body+'</div></div>';
+        html += '<div class="reply"><div class="meta">'+esc(rp.author)+' · '+esc(rp.author_role||'')+' · '+esc(rp.created_at||'')+'</div><div>'+esc(rp.body)+'</div></div>';
       });
       html += '</div>';
     } else {

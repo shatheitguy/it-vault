@@ -1,6 +1,6 @@
 {
-  "versionCode": 32,
-  "versionName": "2.5.3",
+  "versionCode": 33,
+  "versionName": "2.6.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The start-up screen now shows your organisation's name under your logo instead of IT-Vault. The app-icon colour picker is gone -- none of those three tiles was your logo; the home-screen shortcut, which does carry it, is still there. Every message is signed off the same way: the emailed signed-acknowledgement PDF, the sign-in code, password resets, ticket mail and the SMTP check all carry your name and live links, and so do Telegram and Slack alerts."
+  "notes": "A full security review, with every finding fixed. The most serious: the password-reset code was kept in the browser's own session cookie, so anyone could request a reset for any account, read the code out of their cookie and take it over -- codes now live on the server as hashes. Asset names and label text are escaped, so a scanned QR cannot run script. The public ticket lookup returns only what the page shows, and is rate limited. Invoices download instead of rendering, and are checked by content. API keys are stored hashed and shown once. On the phone: backups off, and a warning before a password goes to a public address over plain HTTP."
 }
