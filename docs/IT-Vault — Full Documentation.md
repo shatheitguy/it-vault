@@ -61,10 +61,9 @@ MariaDB on 127.0.0.1:3306  (you provide it; install it as a service so it
 **Unraid** — Community Applications, search IT-Vault. Install MariaDB first
 (the CA template is fine), create an empty database and a user for it, then
 fill in the database fields or leave them empty and let the first-run wizard
-ask. The template is published from
-[shatheitguy/unraid-templates](https://github.com/shatheitguy/unraid-templates);
-its source lives in `unraid/it-vault.xml` in this repository, where the test
-suite checks it against the code.
+ask. The template lives in
+[shatheitguy/unraid-templates](https://github.com/shatheitguy/unraid-templates),
+the one repository for all of my Unraid templates.
 
 **TrueNAS** (24.10 and later, which runs Docker Compose) — Apps → Discover
 Apps → Custom App → Install via YAML, and paste

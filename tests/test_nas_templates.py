@@ -1,4 +1,4 @@
-"""The Unraid and TrueNAS templates still describe this app.
+"""The NAS templates (TrueNAS here, Unraid in unraid-templates) still describe this app.
 
 A NAS template is a copy of the app's configuration living outside the app,
 and copies rot: a variable gets renamed here, a path moves there, and the
@@ -40,13 +40,19 @@ IMAGE = "ghcr.io/shatheitguy/itvault"
 app_env = set(re.findall(r'(?:os\.environ\.get|_env)\(\s*"([A-Z][A-Z0-9_]+)"', app_src))
 APP_PATHS = ("/app/data", "/app/invoices", "/app/backups")
 
+# The Unraid template lives in shatheitguy/unraid-templates, one repository for
+# every app's template. If a checkout of it sits next to this one, check it too.
 print("\nthe Unraid template")
-try:
-    tpl = ET.fromstring(read("unraid", "it-vault.xml"))
-    parsed = True
-except ET.ParseError as e:
-    tpl, parsed = None, False
-    check("it is valid XML", False, e)
+TPL_PATH = os.path.join(ROOT, "..", "unraid-templates", "it-vault.xml")
+tpl, parsed = None, False
+if not os.path.exists(TPL_PATH):
+    print("  (../unraid-templates not checked out -- skipped)")
+else:
+    try:
+        tpl = ET.fromstring(io.open(TPL_PATH, encoding="utf-8-sig").read())
+        parsed = True
+    except ET.ParseError as e:
+        check("it is valid XML", False, e)
 
 if parsed:
     check("it is valid XML", True)
