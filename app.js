@@ -3172,17 +3172,18 @@ async function loadCatalog(){
 }
 async function loadCatContractTypes(){
   const r=await api('/api/contract-types'); const list=r?await r.json():[];
-  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>`<tr><td>${esc(t.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('contract-types','${t.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>`<tr><td>${esc(t.name)}</td><td class="col-del">${catActions('contract-types',t)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   document.getElementById('ctTypeCatCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatCategories(){
   const r=await api('/api/categories'); const list=r?await r.json():[];
-  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('categories','${c.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td class="col-del">${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   document.getElementById('catCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatManufacturers(){
   const r=await api('/api/manufacturers'); const list=r?await r.json():[];
-  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('manufacturers','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td class="col-del">${catActions('manufacturers',m)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  CAT_MFRS=list;
   document.getElementById('mfrCatCount').textContent=list.length?`(${list.length})`:'';
   const sel=document.getElementById('modMfrSelect');
   const cur=sel.value;
@@ -3190,9 +3191,72 @@ async function loadCatManufacturers(){
 }
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
-  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.manufacturer||'—')}</td><td class="col-del"><button class="btn sm danger" onclick="delCatalogItem('models','${m.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.manufacturer||'—')}</td><td class="col-del">${catActions('models',m)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  CAT_MODELS=list;
   document.getElementById('modCatCount').textContent=list.length?`(${list.length})`:'';
 }
+// Every catalogue row's buttons. The row's own values are stashed by id so
+// the editor does not have to re-fetch a list it has just drawn.
+let CAT_ROWS={}, CAT_MFRS=[], CAT_MODELS=[];
+function catActions(kind,row){
+  CAT_ROWS[kind+':'+row.id]=row;
+  return `<button class="btn sm ghost" onclick="editCatalogItem('${kind}','${row.id}')">EDIT</button>`
+       + ` <button class="btn sm danger" onclick="delCatalogItem('${kind}','${row.id}')">DEL</button>`;
+}
+
+const CAT_LABELS={
+  'categories':['CATEGORY','Category name','Renaming it updates every asset in this category.'],
+  'manufacturers':['MANUFACTURER','Manufacturer name','Renaming it updates every asset made by them.'],
+  'models':['MODEL','Model name','Renaming it updates every asset of this model. Changing the manufacturer corrects the catalogue only — assets keep the manufacturer they were saved with.'],
+  'contract-types':['CONTRACT TYPE','Type name','Renaming it updates every contract of this type.']
+};
+
+function editCatalogItem(kind,id){
+  const row=CAT_ROWS[kind+':'+id]; if(!row) return;
+  const [title,label,hint]=CAT_LABELS[kind]||['ENTRY','Name',''];
+  const g=x=>document.getElementById(x);
+  g('catEditTitle').textContent='RENAME '+title;
+  g('catEditLabel').textContent=label;
+  g('catEditHint').textContent=hint;
+  g('catEditName').value=row.name||'';
+  const wrap=g('catEditMfrWrap');
+  if(kind==='models'){
+    wrap.style.display='';
+    g('catEditMfr').innerHTML='<option value="">-- none --</option>'
+      +CAT_MFRS.map(m=>`<option value="${m.id}" ${String(m.id)===String(row.manufacturer_id)?'selected':''}>${esc(m.name)}</option>`).join('');
+  } else {
+    wrap.style.display='none';
+  }
+  g('catEditModal').dataset.kind=kind;
+  g('catEditModal').dataset.id=id;
+  g('catEditModal').classList.add('show');
+  setTimeout(()=>g('catEditName').focus(),50);
+}
+window.editCatalogItem=editCatalogItem;
+
+async function saveCatalogEdit(){
+  const m=document.getElementById('catEditModal');
+  const kind=m.dataset.kind, id=m.dataset.id;
+  const name=document.getElementById('catEditName').value.trim();
+  if(!name){toast('✕ name required');return;}
+  const body={id:id,name:name};
+  if(kind==='models') body.manufacturer_id=document.getElementById('catEditMfr').value||null;
+  const r=await api('/api/'+kind,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=r?await r.json().catch(()=>({})):{};
+  if(r&&r.ok){
+    m.classList.remove('show');
+    // the count is the point: a rename that rewrote forty assets should say so
+    toast(j.updated ? `✓ RENAMED — ${j.updated} record${j.updated===1?'':'s'} updated` : '✓ RENAMED');
+    loadCatalog();
+    if(typeof loadLists==='function') loadLists();
+  } else {
+    toast('✕ '+(j.error||'failed'));
+  }
+}
+document.getElementById('catEditSave').onclick=saveCatalogEdit;
+document.getElementById('catEditCancel').onclick=()=>document.getElementById('catEditModal').classList.remove('show');
+document.getElementById('catEditName').addEventListener('keydown',e=>{ if(e.key==='Enter') saveCatalogEdit(); });
+
 async function delCatalogItem(kind,id){
   if(!confirm('Delete this '+kind.slice(0,-1)+'? Assets already using it keep their saved value.'))return;
   const r=await api('/api/'+kind,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
