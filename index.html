@@ -254,7 +254,24 @@
       </div>
     </div>
 
-    <!-- Ticket detail modal -->
+    <!-- Rename a catalogue entry.
+     Deleting was the only thing the catalogue offered, and a delete leaves
+     the old spelling on every asset that carries it. One field, and for a
+     model its maker as well. -->
+<div class="modal" id="catEditModal"><div class="modal-box" style="width:min(460px,94vw);max-width:460px">
+  <h3 id="catEditTitle">RENAME</h3>
+  <div class="modal-scroll">
+    <div class="field2"><label id="catEditLabel">Name</label><input id="catEditName" autocomplete="off"></div>
+    <div class="field2" id="catEditMfrWrap" style="display:none">
+      <label>Manufacturer</label>
+      <select id="catEditMfr"><option value="">-- none --</option></select>
+    </div>
+    <p class="sec-hint" id="catEditHint" style="margin:10px 0 0"></p>
+  </div>
+  <div class="m-actions"><button class="btn ghost" id="catEditCancel">CANCEL</button><button class="btn" id="catEditSave">SAVE</button></div>
+</div></div>
+
+<!-- Ticket detail modal -->
     <!-- New Ticket modal (styled like Add Asset) -->
     <div class="modal" id="tkFormModal"><div class="modal-box" style="width:min(640px,94vw);max-width:640px">
       <h3 id="tkFormTitle">NEW TICKET</h3>

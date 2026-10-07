@@ -3442,7 +3442,99 @@ def empty_trash():
     audit(session.get("user"), "EMPTY_TRASH", "", f"{len(rows)} asset(s) permanently deleted")
     return jsonify({"ok": True, "deleted": len(rows)})
 
-@app.route("/api/manufacturers", methods=["GET", "POST", "DELETE"])
+# Renaming a catalogue entry, and the records that spell it out.
+#
+# Assets do not point at Categories or Manufacturers by id -- they carry the
+# name as text, which is what makes an exported sheet readable and an import
+# possible. The cost is that renaming the list entry alone would leave every
+# asset showing the old word, and the old word would no longer be in the
+# dropdown: open one of those assets, save it, and the value quietly changes
+# to whatever is selected instead. So a rename updates the rows that carry it.
+#
+# Which is also why this is a rename and not a delete-and-add. Deleting was
+# the only thing on offer, and it left the spelling behind on every asset.
+CATALOG_LISTS = {
+    # kind: (table, [(table carrying the text, column)])
+    "categories":     ("Categories",    [("Assets", "Type")]),
+    "manufacturers":  ("Manufacturers", [("Assets", "Manufacturer")]),
+    "models":         ("Models",        [("Assets", "Model")]),
+    "contract-types": ("ContractTypes", [("Contracts", "type")]),
+    "departments":    ("Departments",   [("Assets", "Department"),
+                                         ("Employees", "Department")]),
+    "designations":   ("Designations",  [("Employees", "Designation")]),
+    "locations":      ("Locations",     [("Assets", "Location")]),
+}
+
+
+def _rename_catalog_entry(cur, kind, item_id, new_name):
+    """(result, error). Renames the entry and carries the new name across.
+
+    The uniqueness of the list is the reason for the duplicate check: the
+    tables have a UNIQUE name and the insert path uses INSERT IGNORE, so a
+    collision here would otherwise surface as a 500 rather than as "there is
+    already one called that".
+    """
+    table, carriers = CATALOG_LISTS[kind]
+    new_name = (new_name or "").strip()
+    if not new_name:
+        return None, "name required"
+    if len(new_name) > 160:
+        return None, "that name is too long"
+    cur.execute("SELECT name FROM `%s` WHERE id=%%s" % table, [item_id])
+    row = cur.fetchone()
+    if not row:
+        return None, "that entry no longer exists"
+    old_name = row["name"] or ""
+    if old_name == new_name:
+        return {"renamed": False, "updated": 0, "name": new_name}, None
+    cur.execute("SELECT id FROM `%s` WHERE name=%%s AND id<>%%s" % table,
+                (new_name, item_id))
+    if cur.fetchone():
+        return None, "there is already one called %s" % new_name
+    cur.execute("UPDATE `%s` SET name=%%s WHERE id=%%s" % table, (new_name, item_id))
+    updated = 0
+    if old_name:
+        for carrier, column in carriers:
+            try:
+                cur.execute("UPDATE `%s` SET `%s`=%%s WHERE `%s`=%%s"
+                            % (carrier, column, column), (new_name, old_name))
+                updated += cur.rowcount or 0
+            except Exception as e:
+                # a carrier column that does not exist on this schema is not a
+                # reason to fail the rename
+                print("[itvault] rename: could not update %s.%s: %s"
+                      % (carrier, column, e), flush=True)
+    return {"renamed": True, "updated": updated,
+            "name": new_name, "was": old_name}, None
+
+
+def _catalog_rename_request(kind):
+    """The PUT half of a catalogue route. Returns a Flask response."""
+    d = request.get_json(force=True, silent=True) or {}
+    item_id = d.get("id")
+    if not item_id:
+        return jsonify({"error": "id required"}), 400
+    c = conn(); cur = c.cursor()
+    try:
+        res, err = _rename_catalog_entry(cur, kind, item_id, d.get("name"))
+        if err:
+            c.close()
+            return jsonify({"error": err}), 400
+        c.commit()
+    finally:
+        try:
+            c.close()
+        except Exception:
+            pass
+    if res.get("renamed"):
+        audit(session.get("user"), "CATALOG_RENAME", "",
+              "%s: %s -> %s (%d record%s updated)"
+              % (kind, res.get("was") or "(empty)", res["name"], res["updated"],
+                 "" if res["updated"] == 1 else "s"))
+    return jsonify({"ok": True, **res})
+
+
+@app.route("/api/manufacturers", methods=["GET", "POST", "PUT", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def manufacturers_api():
     c = conn(); cur = c.cursor()
@@ -3454,12 +3546,15 @@ def manufacturers_api():
         if not n: return jsonify({"error": "name required"}), 400
         cur.execute("INSERT IGNORE INTO Manufacturers (name) VALUES (%s)", [n]); c.commit(); c.close()
         return jsonify({"ok": True})
+    if request.method == "PUT":
+        c.close()
+        return _catalog_rename_request("manufacturers")
     if request.method == "DELETE":
         mid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM Manufacturers WHERE id=%s", [mid]); c.commit(); c.close()
         return jsonify({"ok": True})
 
-@app.route("/api/categories", methods=["GET", "POST", "DELETE"])
+@app.route("/api/categories", methods=["GET", "POST", "PUT", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def categories_api():
     c = conn(); cur = c.cursor()
@@ -3471,12 +3566,15 @@ def categories_api():
         if not n: return jsonify({"error": "name required"}), 400
         cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [n]); c.commit(); c.close()
         return jsonify({"ok": True})
+    if request.method == "PUT":
+        c.close()
+        return _catalog_rename_request("categories")
     if request.method == "DELETE":
         cid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM Categories WHERE id=%s", [cid]); c.commit(); c.close()
         return jsonify({"ok": True})
 
-@app.route("/api/contract-types", methods=["GET", "POST", "DELETE"])
+@app.route("/api/contract-types", methods=["GET", "POST", "PUT", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def contract_types_api():
     c = conn(); cur = c.cursor()
@@ -3488,6 +3586,9 @@ def contract_types_api():
         if not n: return jsonify({"error": "name required"}), 400
         cur.execute("INSERT IGNORE INTO ContractTypes (name) VALUES (%s)", [n]); c.commit(); c.close()
         return jsonify({"ok": True})
+    if request.method == "PUT":
+        c.close()
+        return _catalog_rename_request("contract-types")
     if request.method == "DELETE":
         cid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM ContractTypes WHERE id=%s", [cid]); c.commit(); c.close()
@@ -3527,7 +3628,7 @@ def designations_api():
         cur.execute("DELETE FROM Designations WHERE id=%s", [did]); c.commit(); c.close()
         return jsonify({"ok": True})
 
-@app.route("/api/models", methods=["GET", "POST", "DELETE"])
+@app.route("/api/models", methods=["GET", "POST", "PUT", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def models_api():
     c = conn(); cur = c.cursor()
@@ -3542,6 +3643,29 @@ def models_api():
         if not n: return jsonify({"error": "name required"}), 400
         cur.execute("INSERT IGNORE INTO Models (name, manufacturer_id) VALUES (%s, %s)", [n, mid]); c.commit(); c.close()
         return jsonify({"ok": True})
+    if request.method == "PUT":
+        # A model has a maker as well as a name, and either can be wrong. The
+        # assets keep whatever manufacturer they were saved with: moving a
+        # model between makers in the catalogue is a correction to the
+        # catalogue, and rewriting history on existing assets from it would
+        # be a guess.
+        d = request.get_json(force=True, silent=True) or {}
+        mid = d.get("id")
+        if not mid:
+            c.close(); return jsonify({"error": "id required"}), 400
+        res, err = _rename_catalog_entry(cur, "models", mid, d.get("name"))
+        if err:
+            c.close(); return jsonify({"error": err}), 400
+        if "manufacturer_id" in d:
+            cur.execute("UPDATE Models SET manufacturer_id=%s WHERE id=%s",
+                        [d.get("manufacturer_id") or None, mid])
+        c.commit(); c.close()
+        if res.get("renamed"):
+            audit(session.get("user"), "CATALOG_RENAME", "",
+                  "models: %s -> %s (%d asset%s updated)"
+                  % (res.get("was") or "(empty)", res["name"], res["updated"],
+                     "" if res["updated"] == 1 else "s"))
+        return jsonify({"ok": True, **res})
     if request.method == "DELETE":
         mid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM Models WHERE id=%s", [mid]); c.commit(); c.close()
