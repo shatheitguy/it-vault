@@ -555,11 +555,10 @@ pin a version in `.env` (`ITVAULT_TAG=1.6.1`) and bump it when you choose.
 
 **Unraid** — in Community Applications, search for IT-Vault. The template
 lives in
-[shatheitguy/unraid-templates](https://github.com/shatheitguy/unraid-templates);
-the copy in [`unraid/`](unraid/it-vault.xml) here is the source it is made
-from, checked against the code by the test suite. It is a separate repository
-because CA scans a whole repository for templates, and this one is full of XML
-that belongs to the Android app.
+[shatheitguy/unraid-templates](https://github.com/shatheitguy/unraid-templates),
+the one repository for all of my Unraid templates. It is separate because CA
+scans a whole repository for templates, and this one is full of XML that
+belongs to the Android app.
 
 **TrueNAS** — Apps → Discover Apps → Custom App → Install via YAML, and paste
 [`truenas/docker-compose.yaml`](truenas/docker-compose.yaml). That one brings
