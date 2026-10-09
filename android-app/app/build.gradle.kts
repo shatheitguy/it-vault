@@ -24,8 +24,8 @@ android {
         // 11). The in-app updater offers an update on versionCode alone,
         // so it has to clear both -- keeping either side's number would
         // leave a build that will not install over the other.
-        versionCode = 34
-        versionName = "2.6.1"
+        versionCode = 35
+        versionName = "2.6.2"
     }
 
     signingConfigs {

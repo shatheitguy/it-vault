@@ -1,6 +1,6 @@
 {
-  "versionCode": 34,
-  "versionName": "2.6.1",
+  "versionCode": 35,
+  "versionName": "2.6.2",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Same software as 2.6.0 -- the security release -- published under a container package this repository owns. The old package was orphaned when the repository was recreated, so no image could be pushed and every Docker install stayed on 2.5.3 no matter how many times the installer ran. The image is now ghcr.io/shatheitguy/itvault; re-run install.sh and it switches across by itself."
+  "notes": "Filter the assets list on the phone -- status, category, location and manufacturer, built from your own data and working offline. And on the web, a Product Catalog entry can be renamed instead of only deleted: the new name carries onto every asset that spells out the old one, so fixing a typo no longer means every asset keeps the mistake."
 }
