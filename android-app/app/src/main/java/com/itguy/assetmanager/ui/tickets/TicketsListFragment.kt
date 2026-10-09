@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.tickets
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -149,7 +148,7 @@ class TicketsListFragment : Fragment(), Refreshable {
 
     private fun openCreateDialog() {
         val d = DialogTicketNewBinding.inflate(layoutInflater)
-        MaterialAlertDialogBuilder(requireContext()).setTitle("New ticket").setView(d.root)
+        com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle("New ticket").setView(d.root)
             .setPositiveButton("Create") { _, _ ->
                 val subj = d.newSubject.text?.toString()?.trim().orEmpty()
                 if (subj.isBlank()) return@setPositiveButton

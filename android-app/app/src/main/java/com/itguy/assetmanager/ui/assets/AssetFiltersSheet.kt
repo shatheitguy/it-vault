@@ -118,7 +118,7 @@ class AssetFiltersSheet : BottomSheetDialogFragment() {
                 val checked = get()?.let { cur ->
                     values.indexOfFirst { it.equals(cur, true) }.let { if (it < 0) 0 else it + 1 }
                 } ?: 0
-                com.google.android.material.dialog.MaterialAlertDialogBuilder(ctx)
+                com.itguy.assetmanager.ui.BrandDialog(ctx)
                     .setTitle(label)
                     .setSingleChoiceItems(items, checked) { dlg, which ->
                         set(if (which == 0) null else items[which])

@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.contracts
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.app.DatePickerDialog
 import android.content.Context
 import android.print.PrintAttributes
@@ -196,7 +195,7 @@ class ContractEditFragment : Fragment() {
 
     private fun promptNewType() {
         val edit = EditText(requireContext())
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("New contract type")
             .setView(edit)
             .setPositiveButton("Add") { _, _ ->
@@ -286,7 +285,7 @@ class ContractEditFragment : Fragment() {
 
     private fun promptNewValue(title: String, onValue: (String) -> Unit) {
         val edit = EditText(requireContext())
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle(title)
             .setView(edit)
             .setPositiveButton("Add") { _, _ ->
@@ -353,7 +352,7 @@ class ContractEditFragment : Fragment() {
     }
 
     private fun confirmDelete() {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Delete this contract?")
             .setMessage("This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->

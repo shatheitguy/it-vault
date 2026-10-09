@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.assets
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
@@ -284,7 +283,7 @@ class AssetEditFragment : Fragment() {
         layout.addView(expectedField)
         layout.addView(noteField)
 
-        MaterialAlertDialogBuilder(ctx)
+        com.itguy.assetmanager.ui.BrandDialog(ctx)
             .setTitle("Check Out Asset")
             .setView(layout)
             .setPositiveButton("Check Out") { _, _ ->
@@ -312,7 +311,7 @@ class AssetEditFragment : Fragment() {
 
     private fun confirmCheckin() {
         val id = assetId ?: return
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Check in this asset?")
             .setPositiveButton("Check In") { _, _ ->
                 lifecycleScope.launch {
@@ -473,7 +472,7 @@ class AssetEditFragment : Fragment() {
 
     private fun removeInvoice() {
         val id = assetId ?: return
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Remove invoice file?")
             .setPositiveButton("Remove") { _, _ ->
                 lifecycleScope.launch {
@@ -602,7 +601,7 @@ class AssetEditFragment : Fragment() {
 
     private fun promptNewValue(onValue: (String) -> Unit) {
         val edit = EditText(requireContext())
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("New value")
             .setView(edit)
             .setPositiveButton("Add") { _, _ ->
@@ -689,7 +688,7 @@ class AssetEditFragment : Fragment() {
     }
 
     private fun confirmDelete() {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Delete asset?")
             .setMessage("This moves it to Trash.")
             .setPositiveButton("Delete") { _, _ ->

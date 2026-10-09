@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.employees
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -128,7 +127,7 @@ class EmployeeEditFragment : Fragment() {
 
     private fun promptNewValue(onValue: (String) -> Unit) {
         val edit = EditText(requireContext())
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("New value")
             .setView(edit)
             .setPositiveButton("Add") { _, _ ->
@@ -185,7 +184,7 @@ class EmployeeEditFragment : Fragment() {
 
     private fun confirmDelete() {
         val id = employeeId ?: return
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Delete this employee?")
             .setMessage("This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->

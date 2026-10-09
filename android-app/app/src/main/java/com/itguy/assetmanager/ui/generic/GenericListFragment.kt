@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.generic
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -82,7 +81,7 @@ class GenericListFragment : Fragment(), Refreshable {
 
     private fun promptName(title: String, onValue: (String) -> Unit) {
         val edit = EditText(requireContext())
-        MaterialAlertDialogBuilder(requireContext()).setTitle(title).setView(edit)
+        com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle(title).setView(edit)
             .setPositiveButton("Add") { _, _ -> edit.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(onValue) }
             .setNegativeButton("Cancel", null).show()
     }
@@ -125,7 +124,7 @@ class GenericListFragment : Fragment(), Refreshable {
                         val list = ApiClient.api().trash().body().orEmpty()
                         val adapter = SimpleAdapter(onClick = { row ->
                             val a = row.payload as com.itguy.assetmanager.data.model.Asset
-                            MaterialAlertDialogBuilder(requireContext()).setTitle("Restore \"${a.Name}\"?")
+                            com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle("Restore \"${a.Name}\"?")
                                 .setPositiveButton("Restore") { _, _ -> lifecycleScope.launch { ApiClient.api().restoreAsset(a.id ?: return@launch); load() } }
                                 .setNegativeButton("Cancel", null).show()
                         })
