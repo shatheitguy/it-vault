@@ -1,9 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The directory, and the reference lists that share this screen. Same search
+  field and same row cards as every other list.
+-->
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/page">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -14,53 +18,63 @@
             android:id="@+id/tabs"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:background="@color/card"
+            android:visibility="gone"
             app:tabIndicatorColor="@color/accent"
             app:tabSelectedTextColor="@color/accent"
-            app:tabTextColor="@color/muted"
-            android:background="@color/surface"
-            android:visibility="gone" />
+            app:tabTextColor="@color/text_soft" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/searchWrap"
+            style="@style/Field"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="12dp"
-            style="@style/DarkInputLayout"
-            android:hint="Search…">
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="10dp"
+            android:hint="Search…"
+            app:startIconDrawable="@drawable/ic_search"
+            app:startIconTint="@color/text_faint">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/searchInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text" />
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:textColor="@color/text_strong" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <TextView
             android:id="@+id/offlineBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="8dp"
-            android:background="@color/surface"
-            android:padding="8dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/card_soft"
+            android:gravity="center"
+            android:padding="9dp"
             android:textColor="@color/accent"
             android:textSize="12sp"
-            android:gravity="center"
             android:visibility="gone" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recycler"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:paddingBottom="80dp"
-            android:clipToPadding="false" />
+            android:clipToPadding="false"
+            android:paddingTop="6dp"
+            android:paddingBottom="96dp" />
 
         <TextView
             android:id="@+id/emptyText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="40dp"
             android:gravity="center"
-            android:textColor="@color/muted"
+            android:padding="40dp"
+            android:textColor="@color/text_faint"
             android:visibility="gone" />
     </LinearLayout>
 
@@ -70,6 +84,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="20dp"
+        android:contentDescription="Add"
         app:backgroundTint="@color/accent"
         app:srcCompat="@drawable/ic_add"
         app:tint="@color/on_accent" />

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The drawer's icons and labels: the accent on the row you are on, soft grey
+  on the rest.
+
+  Every icon used to carry its own hard-coded colour — a purple document, a
+  green pair of people, a teal clock — so the drawer read as nine unrelated
+  stickers rather than one list. One tint, two states, and the selected row is
+  the only thing with any colour in it.
+
+  MainActivity replaces this at run time with the install's own accent; these
+  are what is shown until the server's branding has been read.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/accent" android:state_checked="true" />
+    <item android:color="@color/text_soft" />
+</selector>

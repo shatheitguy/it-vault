@@ -28,6 +28,47 @@
         <item name="materialButtonStyle">@style/Button.IT</item>
         <item name="materialCardViewStyle">@style/Card</item>
         <item name="floatingActionButtonStyle">@style/FabPrimary</item>
+        <item name="materialAlertDialogTheme">@style/DialogTheme</item>
+        <item name="alertDialogTheme">@style/DialogTheme</item>
+    </style>
+
+    <!-- A dialog is a card that happens to be on top.
+         Without this it keeps the platform's own surface, which in dark mode
+         is a flat mid-grey: the fields inside it are drawn from our palette
+         and ended up looking like they belonged to a different screen. -->
+    <style name="DialogTheme" parent="ThemeOverlay.Material3.MaterialAlertDialog">
+        <item name="alertDialogStyle">@style/DialogBody</item>
+        <item name="android:windowMinWidthMajor">88%</item>
+        <item name="android:windowMinWidthMinor">88%</item>
+        <item name="colorSurface">@color/card</item>
+        <item name="android:colorBackground">@color/card</item>
+        <item name="materialAlertDialogTitleTextStyle">@style/DialogTitle</item>
+        <item name="buttonBarPositiveButtonStyle">@style/DialogButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/DialogButton</item>
+        <item name="buttonBarNeutralButtonStyle">@style/DialogButton</item>
+    </style>
+
+    <style name="DialogBody" parent="MaterialAlertDialog.Material3">
+        <item name="backgroundTint">@color/card</item>
+        <item name="shapeAppearanceOverlay">@style/DialogShape</item>
+    </style>
+
+    <style name="DialogShape">
+        <item name="cornerFamily">rounded</item>
+        <item name="cornerSize">26dp</item>
+    </style>
+
+    <style name="DialogTitle" parent="MaterialAlertDialog.Material3.Title.Text">
+        <item name="android:textColor">@color/text_strong</item>
+        <item name="android:textSize">19sp</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+
+    <style name="DialogButton" parent="Widget.Material3.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/accent</item>
+        <item name="android:textAllCaps">false</item>
+        <item name="android:textSize">14.5sp</item>
+        <item name="android:textStyle">bold</item>
     </style>
 
     <!-- FAB: white glyph on the accent circle. Without an explicit tint, M3 tints the
@@ -84,24 +125,31 @@
         <item name="android:letterSpacing">-0.01</item>
     </style>
 
+    <!-- The heading over a group of fields. It used to be accent-coloured
+         capitals with letter spacing, which shouted the section name louder
+         than the screen's own title; it is now the same heading the cards on
+         every other screen use. Kept under its old name because six screens
+         this redesign has not reached yet still ask for it, and they should
+         improve too rather than drift. -->
     <style name="SectionLabel">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
         <item name="android:layout_marginTop">22dp</item>
-        <item name="android:layout_marginBottom">8dp</item>
-        <item name="android:textColor">@color/accent</item>
+        <item name="android:layout_marginBottom">2dp</item>
+        <item name="android:textColor">@color/text_strong</item>
         <item name="android:textStyle">bold</item>
-        <item name="android:textSize">12sp</item>
-        <item name="android:letterSpacing">0.08</item>
+        <item name="android:textSize">17sp</item>
     </style>
 
+    <!-- The label over a control that cannot float its own hint — a spinner,
+         a switch row. A field with a floating label needs none of this. -->
     <style name="FieldLabel">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>
-        <item name="android:layout_marginTop">10dp</item>
-        <item name="android:layout_marginBottom">4dp</item>
-        <item name="android:textColor">@color/muted</item>
-        <item name="android:textSize">12sp</item>
+        <item name="android:layout_marginTop">14dp</item>
+        <item name="android:layout_marginBottom">6dp</item>
+        <item name="android:textColor">@color/text_soft</item>
+        <item name="android:textSize">12.5sp</item>
     </style>
 
     <!-- Rounded, outlined "widget" panel (matches the web dashboard cards) -->
@@ -215,6 +263,37 @@
         <item name="android:textColor">@color/chip_idle_text</item>
         <item name="android:textSize">12.5sp</item>
         <item name="android:layout_marginEnd">8dp</item>
+    </style>
+
+    <!-- A spinner dressed as one of the fields beside it.
+         A TextInputLayout cannot wrap a Spinner, so the fill, the radius and
+         the height are repeated here rather than inherited. Everything a form
+         asks for now looks like the same kind of thing: the only visible
+         difference between typing a serial and choosing a status is the
+         little arrow. -->
+    <style name="Dropdown">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:background">@drawable/dropdown_bg</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingEnd">42dp</item>
+        <item name="android:popupBackground">@color/card</item>
+    </style>
+
+    <!-- The drawer's own two text sizes. A row reads as a destination, and
+         the group heading above it is small and quiet: it is a divider with a
+         word on it, not an item you can tap. -->
+    <style name="NavItemText" parent="TextAppearance.Material3.BodyLarge">
+        <item name="android:textSize">14.5sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0</item>
+    </style>
+
+    <style name="NavSubheader" parent="TextAppearance.Material3.LabelSmall">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.09</item>
+        <item name="android:textAllCaps">true</item>
     </style>
 
     <style name="WidgetTitle">

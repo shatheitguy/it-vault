@@ -1,54 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup and restore, in the same vocabulary as every other screen: a card for
+  the thing you do, a card-row list for what already exists.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/bg">
+    android:background="@color/page"
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp">
 
-        <TextView style="@style/FieldLabel" android:text="Backup scope" android:layout_marginTop="0dp" />
-        <Spinner android:id="@+id/scopeSpinner" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/createBackupBtn"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:backgroundTint="@color/accent"
-            android:text="⬇ CREATE &amp; DOWNLOAD BACKUP" />
+                <TextView style="@style/FieldLabel" android:layout_marginTop="0dp" android:text="What to include" />
+                <Spinner android:id="@+id/scopeSpinner" style="@style/Dropdown" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/restoreBtn"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="⬆ RESTORE FROM FILE"
-            android:textColor="@color/accent"
-            app:strokeColor="@color/accent"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/createBackupBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Create &amp; download backup" />
 
-        <TextView style="@style/SectionLabel" android:text="EXISTING BACKUPS" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/restoreBtn"
+                    style="@style/ButtonPillQuiet"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="Restore from a file" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView style="@style/SectionLabel" android:text="Existing backups" />
     </LinearLayout>
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingTop="8dp"
+        android:paddingBottom="24dp" />
 
     <TextView
         android:id="@+id/emptyText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="40dp"
         android:gravity="center"
-        android:textColor="@color/muted"
+        android:padding="40dp"
         android:text="No backups yet"
+        android:textColor="@color/text_faint"
         android:visibility="gone" />
 </LinearLayout>

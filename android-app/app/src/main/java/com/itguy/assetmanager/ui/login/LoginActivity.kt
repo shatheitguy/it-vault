@@ -151,7 +151,7 @@ class LoginActivity : AppCompatActivity() {
         // the person in front of the phone knows which theirs is.
         if (ApiClient.isPublicCleartext(serverRaw) && !cleartextAccepted) {
             setBusy(false)
-            androidx.appcompat.app.AlertDialog.Builder(this)
+            com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
                 .setTitle("This address is not encrypted")
                 .setMessage(
                     "You are connecting to a public address over plain HTTP. " +

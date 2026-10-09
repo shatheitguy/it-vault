@@ -113,10 +113,53 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // of the bundled red.
         com.itguy.assetmanager.data.Palette.apply(b.root)
         com.itguy.assetmanager.data.Palette.apply(header)
+        styleDrawer()
         com.itguy.assetmanager.data.Palette.apply(
             supportFragmentManager
                 .findFragmentById(com.itguy.assetmanager.R.id.fragmentContainer)?.view
         )
+    }
+
+    /**
+     * The drawer's selected row, in the install's own accent.
+     *
+     * The tints are declared in XML as a two-state colour list, which is
+     * enough until the server's branding arrives: a colour list is a
+     * resource, so the palette walker cannot reach inside it and swap the
+     * bundled red for theirs. Rebuilding it here is the one place that can.
+     *
+     * The pill behind the row has to be rebuilt too, for the same reason --
+     * it is a drawable, and the walker leaves drawables alone.
+     */
+    private fun styleDrawer() {
+        val p = com.itguy.assetmanager.data.Palette.serverColours() ?: return
+        val states = arrayOf(
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(),
+        )
+        val tint = android.content.res.ColorStateList(
+            states, intArrayOf(p.accent, p.muted))
+        b.navView.itemIconTintList = tint
+        b.navView.itemTextColor = tint
+
+        // inset from both edges, so it reads as a pill rather than a band
+        val d = resources.displayMetrics.density
+        fun px(v: Float) = (v * d).toInt()
+        fun pill(colour: Int): android.graphics.drawable.Drawable =
+            android.graphics.drawable.InsetDrawable(
+                android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = 100f
+                    setColor(colour)
+                },
+                px(12f), px(2f), px(12f), px(2f))
+        // the accent at a seventh of itself: enough to mark the row, never
+        // enough to make the label on it hard to read
+        val soft = (p.accent and 0x00FFFFFF) or 0x24000000
+        b.navView.itemBackground = android.graphics.drawable.StateListDrawable().apply {
+            addState(intArrayOf(android.R.attr.state_checked), pill(soft))
+            addState(intArrayOf(android.R.attr.state_pressed), pill(soft))
+            addState(intArrayOf(), pill(android.graphics.Color.TRANSPARENT))
+        }
     }
 
     /**

@@ -1,3 +1,29 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#14B8A6" android:pathData="M12,2a10,10 0 1,0 10,10h-2a8,8 0 1,1 -2.3,-5.7L15,9V3h-6l2.1,2.1A10,10 0 0,0 12,2z M11,7h2v6h-2z M11,14h2v2h-2z" />
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The audit log: what happened, and when. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3.5,12a8.5,8.5 0 1,0 2.6,-6.1" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M3.5,4.5v4h4" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M12,7.5V12l3,2" />
 </vector>

@@ -108,7 +108,9 @@ class AssetsListFragment : Fragment(), Refreshable {
     /** The button's count and the line under it, kept in step with [filters]. */
     private fun paintFilterChrome() {
         val b = _b ?: return
-        b.filterBtn.text = if (filters.isEmpty) "FILTER" else "FILTER (${filters.activeCount})"
+        // the count rides on the button, so "why is this list short" is
+        // answered before anyone has to open the sheet to find out
+        b.filterBtn.text = if (filters.isEmpty) "Filter" else "Filter · ${filters.activeCount}"
         val parts = listOfNotNull(
             filters.status?.takeIf { it.isNotBlank() },
             filters.type?.takeIf { it.isNotBlank() },
@@ -118,7 +120,7 @@ class AssetsListFragment : Fragment(), Refreshable {
         if (parts.isEmpty()) {
             b.filterSummary.visibility = View.GONE
         } else {
-            b.filterSummary.text = "Filtered: ${parts.joinToString(" · ")}  —  tap to clear"
+            b.filterSummary.text = "${parts.joinToString(" · ")}   ✕"
             b.filterSummary.visibility = View.VISIBLE
         }
     }

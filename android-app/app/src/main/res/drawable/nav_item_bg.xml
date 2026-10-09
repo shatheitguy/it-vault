@@ -1,14 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The pill behind the row you are on.
+
+  Inset from both edges so it reads as a pill rather than a band: without the
+  inset it runs into the side of the drawer and its rounded end is cut off.
+-->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_checked="true">
-        <shape android:shape="rectangle">
-            <corners android:radius="14dp" />
-            <solid android:color="@color/accent_container" />
-        </shape>
+        <inset
+            android:insetBottom="2dp"
+            android:insetLeft="12dp"
+            android:insetRight="12dp"
+            android:insetTop="2dp">
+            <shape android:shape="rectangle">
+                <corners android:radius="100dp" />
+                <solid android:color="@color/accent_container" />
+            </shape>
+        </inset>
+    </item>
+    <item android:state_pressed="true">
+        <inset
+            android:insetBottom="2dp"
+            android:insetLeft="12dp"
+            android:insetRight="12dp"
+            android:insetTop="2dp">
+            <shape android:shape="rectangle">
+                <corners android:radius="100dp" />
+                <solid android:color="@color/chip_idle" />
+            </shape>
+        </inset>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="14dp" />
             <solid android:color="@android:color/transparent" />
         </shape>
     </item>

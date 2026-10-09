@@ -1,6 +1,6 @@
 {
-  "versionCode": 36,
-  "versionName": "2.7.0",
+  "versionCode": 37,
+  "versionName": "2.7.1",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "A redesigned Android app. The sign-in screen, the dashboard, the asset list, the side menu and Settings have been rebuilt around cards, soft fields and pills, and they take their accent from your server's own branding rather than the bundled red. The dashboard leads with how much of the register is out with somebody, shows four of each list with a \"See all\" link to the screen that owns it, and the side menu no longer repeats what is already in the bottom bar. Dark mode is fixed: the new screens were falling back to the light palette and coming out white."
+  "notes": "The rest of the phone app, brought into line. Tickets and contracts are now the same cards as the asset list — a dot, two lines and a coloured pill — and every form behind them (asset, contract, person, ticket, monitor) is the same cards, the same soft fields and the same pill buttons. The side menu has a new set of icons and shows the install's own accent on the row you are on. Dark mode: fields were almost the same colour as the card they sat on, which made a form look empty; they are clearly a field now. Settings loses the home-screen shortcut offer. Contracts sort soonest-to-expire first and the filter pills carry their own counts."
 }

@@ -1,54 +1,92 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tickets, laid out like the asset list: a search field over a stack of cards.
+
+  Active and Closed used to be a TabLayout, which is a lot of chrome for a
+  two-way switch and looked like nothing else in the app. They are the same
+  pills as the filters elsewhere now, sitting beside the search field they are
+  used with.
+-->
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/page">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <com.google.android.material.tabs.TabLayout
-            android:id="@+id/tabs"
+        <com.google.android.material.textfield.TextInputLayout
+            style="@style/Field"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:tabIndicatorColor="@color/accent"
-            app:tabSelectedTextColor="@color/accent"
-            app:tabTextColor="@color/muted"
-            android:background="@color/surface">
-            <com.google.android.material.tabs.TabItem android:text="Active" />
-            <com.google.android.material.tabs.TabItem android:text="Closed" />
-        </com.google.android.material.tabs.TabLayout>
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="10dp"
+            android:hint="Search tickets…"
+            app:startIconDrawable="@drawable/ic_search"
+            app:startIconTint="@color/text_faint">
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/searchInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:textColor="@color/text_strong" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="2dp"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pillActive"
+                style="@style/Pill"
+                android:text="Active" />
+
+            <TextView
+                android:id="@+id/pillClosed"
+                style="@style/Pill"
+                android:text="Closed" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/offlineBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="8dp"
-            android:background="@color/surface"
-            android:padding="8dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/card_soft"
+            android:gravity="center"
+            android:padding="9dp"
             android:textColor="@color/accent"
             android:textSize="12sp"
-            android:gravity="center"
             android:visibility="gone" />
+
         <androidx.recyclerview.widget.RecyclerView
             android:id="@+id/recycler"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:paddingBottom="80dp"
-            android:clipToPadding="false" />
+            android:clipToPadding="false"
+            android:paddingTop="6dp"
+            android:paddingBottom="96dp" />
 
         <TextView
             android:id="@+id/emptyText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:padding="40dp"
             android:gravity="center"
-            android:textColor="@color/muted"
+            android:padding="40dp"
+            android:textColor="@color/text_faint"
             android:visibility="gone" />
     </LinearLayout>
 
@@ -58,6 +96,7 @@
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="20dp"
+        android:contentDescription="New ticket"
         app:backgroundTint="@color/accent"
         app:srcCompat="@drawable/ic_add"
         app:tint="@color/on_accent" />

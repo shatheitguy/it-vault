@@ -1,6 +1,7 @@
 package com.itguy.assetmanager.ui.lostfound
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -94,14 +95,14 @@ class LostFoundFragment : Fragment(), Refreshable {
         actions += "Change status" to { askStatus(r) }
         if (!r.finder_note.isNullOrBlank()) {
             actions += "Where it was found" to {
-                AlertDialog.Builder(requireContext())
+                MaterialAlertDialogBuilder(requireContext())
                     .setTitle("Where it was found")
                     .setMessage(r.finder_note)
                     .setPositiveButton("Close", null)
                     .show()
             }
         }
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("${r.ref ?: "LF-${r.id}"} · ${r.asset_name ?: ""}")
             .setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
             .setNegativeButton("Cancel", null)
@@ -110,7 +111,7 @@ class LostFoundFragment : Fragment(), Refreshable {
 
     private fun askStatus(r: LostFoundReport) {
         val labels = LostFoundStatus.ALL.map { it.uppercase() }.toTypedArray()
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("Status")
             .setItems(labels) { _, which ->
                 val next = LostFoundStatus.ALL[which]

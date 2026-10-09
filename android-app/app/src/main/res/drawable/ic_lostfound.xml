@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Backup and restore: a copy put somewhere safe. -->
+<!-- Lost and found: a tag with nobody's name on it. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -11,19 +11,12 @@
         android:strokeWidth="1.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M4.5,6.5c0,-1.4 3.4,-2.5 7.5,-2.5s7.5,1.1 7.5,2.5" />
+        android:pathData="M12.6,3.5H6a2.5,2.5 0 0,0 -2.5,2.5v6.6a2,2 0 0,0 0.6,1.4l7.3,7.3a1.5,1.5 0 0,0 2.1,0l6.1,-6.1a1.5,1.5 0 0,0 0,-2.1L12.6,3.5z" />
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="1.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M4.5,6.5v11c0,1.4 3.4,2.5 7.5,2.5s7.5,-1.1 7.5,-2.5v-11" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M4.5,12c0,1.4 3.4,2.5 7.5,2.5s7.5,-1.1 7.5,-2.5" />
+        android:pathData="M8.2,8.2h0.01" />
 </vector>

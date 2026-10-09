@@ -1,38 +1,72 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The top of the drawer.
+
+  It was a 176dp slab of the page colour with the logo sitting in the corner
+  of it, which made the drawer start with a grey box. The logo is now in a
+  rounded tile the way an app icon is shown everywhere else, the install's
+  name and who is signed in sit beside it, and a hairline separates the header
+  from the list instead of a change of colour.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="176dp"
+    android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:gravity="bottom"
-    android:background="@color/bg"
-    android:padding="20dp">
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="26dp"
+    android:paddingBottom="18dp">
 
-    <ImageView
-        android:id="@+id/navHeaderLogo"
-        android:layout_width="52dp"
-        android:layout_height="52dp"
-        android:layout_marginBottom="14dp"
-        android:background="@drawable/logo_circle_bg"
-        android:padding="10dp"
-        android:scaleType="fitCenter"
-        android:src="@mipmap/ic_launcher"
-        android:contentDescription="@string/app_name" />
-
-    <TextView
-        android:id="@+id/navHeaderBrand"
-        android:layout_width="wrap_content"
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/app_name"
-        android:textColor="@color/text"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:letterSpacing="-0.01" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/navHeaderUser"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="3dp"
-        android:textColor="@color/muted"
-        android:textSize="13sp" />
+        <ImageView
+            android:id="@+id/navHeaderLogo"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:background="@drawable/logo_tile_bg"
+            android:contentDescription="@string/app_name"
+            android:padding="7dp"
+            android:scaleType="fitCenter"
+            android:src="@mipmap/ic_launcher"
+            android:tag="keep-colours" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/navHeaderBrand"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="@string/app_name"
+                android:textColor="@color/text_strong"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/navHeaderUser"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="@color/text_soft"
+                android:textSize="12.5sp" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:layout_marginTop="18dp"
+        android:background="@color/divider" />
 </LinearLayout>

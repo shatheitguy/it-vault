@@ -1,6 +1,7 @@
 package com.itguy.assetmanager.ui.assets
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.app.DatePickerDialog
 import android.content.Intent
 import android.net.Uri
@@ -283,7 +284,7 @@ class AssetEditFragment : Fragment() {
         layout.addView(expectedField)
         layout.addView(noteField)
 
-        AlertDialog.Builder(ctx)
+        MaterialAlertDialogBuilder(ctx)
             .setTitle("Check Out Asset")
             .setView(layout)
             .setPositiveButton("Check Out") { _, _ ->
@@ -311,7 +312,7 @@ class AssetEditFragment : Fragment() {
 
     private fun confirmCheckin() {
         val id = assetId ?: return
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("Check in this asset?")
             .setPositiveButton("Check In") { _, _ ->
                 lifecycleScope.launch {
@@ -472,7 +473,7 @@ class AssetEditFragment : Fragment() {
 
     private fun removeInvoice() {
         val id = assetId ?: return
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("Remove invoice file?")
             .setPositiveButton("Remove") { _, _ ->
                 lifecycleScope.launch {
@@ -601,7 +602,7 @@ class AssetEditFragment : Fragment() {
 
     private fun promptNewValue(onValue: (String) -> Unit) {
         val edit = EditText(requireContext())
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("New value")
             .setView(edit)
             .setPositiveButton("Add") { _, _ ->
@@ -688,7 +689,7 @@ class AssetEditFragment : Fragment() {
     }
 
     private fun confirmDelete() {
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("Delete asset?")
             .setMessage("This moves it to Trash.")
             .setPositiveButton("Delete") { _, _ ->
