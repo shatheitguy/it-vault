@@ -1,6 +1,6 @@
 {
-  "versionCode": 38,
-  "versionName": "2.7.2",
+  "versionCode": 39,
+  "versionName": "2.7.3",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Buttons wear your branding. Every filled and tonal button in the app was still showing the bundled red on a branded install -- the Scan button, Save, Check now, Create backup, all of them -- and so was the dashboard's hero card and the selected pill in the bottom bar. They now take the accent from your server, like the rest of the app already did."
+  "notes": "Two colour fixes. The dashboard's hero card went back to the bundled red as soon as you left the screen and came back -- the repaint was turning a flat colour into a state list, and the card matched the wrong state. And the Deep scan switch on the network screen, along with any other switch, checkbox or radio button, now wears your server's accent too."
 }
