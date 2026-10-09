@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.settings
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -210,7 +209,7 @@ class SettingsFragment : Fragment() {
     }
 
     private fun confirmChangeServer() {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Change server?")
             .setMessage("You'll be logged out and asked to connect to a server again.")
             .setPositiveButton("Continue") { _, _ ->

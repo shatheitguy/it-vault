@@ -1,6 +1,6 @@
 {
-  "versionCode": 39,
-  "versionName": "2.7.3",
+  "versionCode": 40,
+  "versionName": "2.7.4",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Two colour fixes. The dashboard's hero card went back to the bundled red as soon as you left the screen and came back -- the repaint was turning a flat colour into a state list, and the card matched the wrong state. And the Deep scan switch on the network screen, along with any other switch, checkbox or radio button, now wears your server's accent too."
+  "notes": "The bottom bar follows your branding. Its five icons each carried one hard-coded colour of their own — an orange dashboard, a blue monitor, a pink QR code — so the bar showed five brands and none of them yours. They are the same outline icons as the side menu now, in your accent on the destination you are on. Dialog buttons too: Cancel, Save, Pause and Check now were still the bundled red, because a dialog is not a screen and nothing was reaching into it. Long-pressing an asset gives proper rows with real icons instead of a column of emoji. And the toolbar no longer keeps saying “Edit Asset” after you come back from editing one."
 }

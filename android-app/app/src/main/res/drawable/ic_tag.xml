@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Assets: the things on the register. -->
+<!-- A label or tag. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -11,19 +11,12 @@
         android:strokeWidth="1.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M3.5,5.5h17v10h-17z" />
+        android:pathData="M12.6,3.5H6a2.5,2.5 0 0,0 -2.5,2.5v6.6a2,2 0 0,0 0.6,1.4l7.3,7.3a1.5,1.5 0 0,0 2.1,0l6.1,-6.1a1.5,1.5 0 0,0 0,-2.1L12.6,3.5z" />
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="1.7"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
-        android:pathData="M8.5,19.5h7" />
-    <path
-        android:fillColor="#00000000"
-        android:strokeColor="#FFFFFFFF"
-        android:strokeWidth="1.7"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M12,15.5v4" />
+        android:pathData="M8.2,8.2h0.01" />
 </vector>

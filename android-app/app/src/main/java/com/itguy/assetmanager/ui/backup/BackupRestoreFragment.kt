@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.backup
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.app.DownloadManager
 import android.content.Context
 import android.net.Uri
@@ -83,7 +82,7 @@ class BackupRestoreFragment : Fragment(), Refreshable {
 
     private fun onBackupTapped(bkp: BackupItem) {
         val options = arrayOf("Download", "Delete")
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle(bkp.file)
             .setItems(options) { _, which ->
                 when (which) {
@@ -95,7 +94,7 @@ class BackupRestoreFragment : Fragment(), Refreshable {
     }
 
     private fun confirmDelete(bkp: BackupItem) {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Delete backup?")
             .setMessage(bkp.file)
             .setPositiveButton("Delete") { _, _ ->
@@ -122,7 +121,7 @@ class BackupRestoreFragment : Fragment(), Refreshable {
     }
 
     private fun uploadRestore(uri: Uri) {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Restore from this file?")
             .setMessage("This applies every statement in the backup file to the live database. Existing data with matching IDs will be overwritten.")
             .setPositiveButton("Restore") { _, _ ->

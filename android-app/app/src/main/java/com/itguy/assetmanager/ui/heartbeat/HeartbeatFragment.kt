@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.heartbeat
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -187,7 +186,7 @@ class HeartbeatFragment : Fragment(), Refreshable {
         m.last_error?.takeIf { it.isNotBlank() && st != "up" }?.let { lines += "\nReason: $it" }
         if ((m.notify ?: 1) == 0) lines += "\nAlerts are switched off for this monitor."
 
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle(m.label)
             .setMessage(lines.joinToString("\n"))
             .setPositiveButton("Check now") { _, _ -> checkOne(m) }
@@ -197,7 +196,7 @@ class HeartbeatFragment : Fragment(), Refreshable {
     }
 
     private fun showMoreActions(m: HbMonitor) {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle(m.label)
             .setItems(arrayOf("Edit monitor", "Delete monitor")) { _, which ->
                 when (which) {
@@ -243,7 +242,7 @@ class HeartbeatFragment : Fragment(), Refreshable {
     }
 
     private fun confirmDelete(m: HbMonitor) {
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Delete ${m.label}?")
             .setMessage("The monitor and its history are removed. This cannot be undone.")
             .setPositiveButton("Delete") { _, _ ->
@@ -302,7 +301,7 @@ class HeartbeatFragment : Fragment(), Refreshable {
         }
         applyKind()
 
-        MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle(if (existing == null) "Add monitor" else "Edit monitor")
             .setView(d.root)
             .setPositiveButton("Save", null)          // wired below so it can validate

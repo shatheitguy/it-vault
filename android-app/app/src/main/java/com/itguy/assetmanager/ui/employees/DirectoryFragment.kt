@@ -1,7 +1,6 @@
 package com.itguy.assetmanager.ui.employees
 
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -155,7 +154,7 @@ class DirectoryFragment : Fragment(), Refreshable {
 
     private fun promptName(title: String, onValue: (String) -> Unit) {
         val edit = EditText(requireContext())
-        MaterialAlertDialogBuilder(requireContext()).setTitle(title).setView(edit)
+        com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle(title).setView(edit)
             .setPositiveButton("Add") { _, _ -> edit.text?.toString()?.trim()?.takeIf { it.isNotBlank() }?.let(onValue) }
             .setNegativeButton("Cancel", null).show()
     }

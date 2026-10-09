@@ -141,6 +141,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             states, intArrayOf(p.accent, p.muted))
         b.navView.itemIconTintList = tint
         b.navView.itemTextColor = tint
+        // The bottom bar is the same list of destinations in a different
+        // place, so it is the same two colours. Its icons used to carry one
+        // hard-coded colour each -- an orange dashboard, a blue monitor, a
+        // pink QR code -- which is five brands on one bar, none of them the
+        // customer's.
+        b.bottomNav.itemIconTintList = tint
+        b.bottomNav.itemTextColor = tint
 
         // inset from both edges, so it reads as a pill rather than a band
         val d = resources.displayMetrics.density
@@ -267,7 +274,15 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         // fragment's *actual* scrollable content instead.
         b.swipeRefresh.setOnChildScrollUpCallback { _, _ -> canCurrentFragmentScrollUp() }
 
-        supportFragmentManager.addOnBackStackChangedListener { updateDrawerLockState() }
+        supportFragmentManager.addOnBackStackChangedListener {
+            updateDrawerLockState()
+            // one title per screen, plus the root's: anything deeper than the
+            // back stack belongs to a screen that has been popped
+            while (titles.size > supportFragmentManager.backStackEntryCount + 1) {
+                titles.removeLast()
+            }
+            titles.lastOrNull()?.let { supportActionBar?.title = it }
+        }
 
         if (savedInstanceState == null) {
             showFragment(DashboardFragment(), "Dashboard")
@@ -305,8 +320,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
         drawerToggle.syncState()
     }
 
+    /**
+     * The title of each screen on the way in, so going back can undo it.
+     *
+     * Opening an asset set the toolbar to "Edit Asset" and coming back left
+     * it there: the list said Edit Asset above a list. Nothing was restoring
+     * it, because a back press pops a fragment and knows nothing about what
+     * the toolbar used to say.
+     */
+    private val titles = ArrayDeque<String>()
+
     fun showFragment(fragment: Fragment, title: String, addToBackStack: Boolean = false) {
         supportActionBar?.title = title
+        if (addToBackStack) titles.addLast(title)
+        else { titles.clear(); titles.addLast(title) }
         val tx = supportFragmentManager.beginTransaction()
             .setCustomAnimations(
                 com.itguy.assetmanager.R.anim.frag_enter,

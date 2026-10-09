@@ -2,19 +2,17 @@ package com.itguy.assetmanager.ui.assets
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import com.itguy.assetmanager.R
 import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.model.Asset
+import com.itguy.assetmanager.ui.ActionSheet
 import kotlinx.coroutines.launch
 
 /**
@@ -54,53 +52,42 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
         inflater: android.view.LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
         val ctx = requireContext()
-        val pad = (16 * resources.displayMetrics.density).toInt()
-
         val root = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(0, pad / 2, 0, pad)
+            setPadding(0, 0, 0, (10 * resources.displayMetrics.density).toInt())
         }
 
-        root.addView(TextView(ctx).apply {
-            text = listOf(assetTag, assetName).filter { it.isNotBlank() }.joinToString(" · ")
-                .ifBlank { "Asset" }
-            setPadding(pad, pad / 2, pad, pad / 2)
-            textSize = 15f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setTextColor(ContextCompat.getColor(ctx, R.color.text))
-        })
+        root.addView(ActionSheet.header(
+            ctx,
+            assetName.ifBlank { assetTag }.ifBlank { "Asset" },
+            assetTag.takeIf { it.isNotBlank() && assetName.isNotBlank() },
+        ))
+        root.addView(ActionSheet.divider(ctx))
 
-        fun row(label: String, onTap: () -> Unit) {
-            root.addView(TextView(ctx).apply {
-                text = label
-                textSize = 16f
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(pad, pad, pad, pad)
-                setTextColor(ContextCompat.getColor(ctx, R.color.text))
-                isClickable = true
-                setBackgroundResource(R.drawable.nav_item_bg)
-                setOnClickListener { onTap() }
-            })
-        }
-
-        row("✏️  Edit asset") { dismiss(); onEdit?.invoke() }
+        val rows = mutableListOf(
+            ActionSheet.Row("Edit asset", R.drawable.ic_edit) { dismiss(); onEdit?.invoke() },
+        )
         // Assigning is the thing people do most from a list, and it was only
         // reachable by opening the asset and finding a button inside it.
         if (!assetStatus.equals("Checked-Out", ignoreCase = true)) {
-            row("👤  Assign to employee") { dismiss(); onAssign?.invoke() }
+            rows += ActionSheet.Row("Assign to employee", R.drawable.ic_person) {
+                dismiss(); onAssign?.invoke()
+            }
+        } else {
+            rows += ActionSheet.Row("Check in", R.drawable.ic_checkin) { checkIn() }
         }
-        row("✍️  Sign / acknowledge") { shareSignLink() }
+        rows += ActionSheet.Row("Sign / acknowledge", R.drawable.ic_sign) { shareSignLink() }
         // Two different printouts, and only the label was reachable from
         // here: the tag you stick on the thing, and the A4 record of what the
         // thing is and who has it. The web list prints both.
-        row("📄  Print asset record") { openRecord() }
-        row("🏷️  Print QR label") { openLabel(printNow = true) }
-        row("🔳  View QR label") { openLabel(printNow = false) }
+        rows += ActionSheet.Row("Print asset record", R.drawable.ic_doc) { openRecord() }
+        rows += ActionSheet.Row("Print QR label", R.drawable.ic_tag) { openLabel(printNow = true) }
+        rows += ActionSheet.Row("View QR label", R.drawable.ic_qr) { openLabel(printNow = false) }
+        rows.forEach { root.addView(ActionSheet.row(ctx, it)) }
 
-        if (assetStatus.equals("Checked-Out", ignoreCase = true)) {
-            row("📥  Check in") { checkIn() }
-        }
-        row("🗑️  Delete asset") { confirmDelete() }
+        root.addView(ActionSheet.divider(ctx))
+        root.addView(ActionSheet.row(ctx, ActionSheet.Row(
+            "Delete asset", R.drawable.ic_trash, destructive = true) { confirmDelete() }))
 
         return root
     }
@@ -160,7 +147,7 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
     }
 
     private fun confirmDelete() {
-        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
+        com.itguy.assetmanager.ui.BrandDialog(requireContext())
             .setTitle("Delete asset?")
             .setMessage("${assetTag.ifBlank { assetName }} moves to Trash and can be restored from there.")
             .setNegativeButton("Cancel", null)

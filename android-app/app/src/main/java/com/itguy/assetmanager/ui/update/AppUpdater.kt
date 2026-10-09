@@ -2,7 +2,6 @@ package com.itguy.assetmanager.ui.update
 
 import android.app.Activity
 import androidx.appcompat.app.AlertDialog
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -142,7 +141,7 @@ object AppUpdater {
             append("New: v${m.versionName}")
             if (m.notes.isNotBlank()) append("\n\n${m.notes}")
         }
-        val dlg = MaterialAlertDialogBuilder(activity)
+        val dlg = com.itguy.assetmanager.ui.BrandDialog(activity)
             .setTitle("Update available")
             .setMessage(msg)
             .setPositiveButton("Update now") { _, _ -> startDownload(activity, m) }
@@ -168,7 +167,7 @@ object AppUpdater {
             setPadding(pad + pad, pad, pad + pad, pad / 2)
             addView(label); addView(bar)
         }
-        val progressDlg = MaterialAlertDialogBuilder(activity)
+        val progressDlg = com.itguy.assetmanager.ui.BrandDialog(activity)
             .setTitle("Updating IT-Vault")
             .setView(container)
             .setCancelable(false)
@@ -183,7 +182,7 @@ object AppUpdater {
             }.getOrNull()
             runCatching { progressDlg.dismiss() }
             if (file == null) {
-                if (!activity.isFinishing) MaterialAlertDialogBuilder(activity)
+                if (!activity.isFinishing) com.itguy.assetmanager.ui.BrandDialog(activity)
                     .setTitle("Download failed")
                     .setMessage("Couldn't download the update. Please try again in a moment.")
                     .setPositiveButton("OK", null).show()
@@ -228,7 +227,7 @@ object AppUpdater {
                 )
             }
             (ctx as? Activity)?.let {
-                if (!it.isFinishing) MaterialAlertDialogBuilder(it)
+                if (!it.isFinishing) com.itguy.assetmanager.ui.BrandDialog(it)
                     .setTitle("Allow installs")
                     .setMessage("Turn on \"Allow from this source\" for IT-Vault, then tap Update again to finish.")
                     .setPositiveButton("OK", null).show()
