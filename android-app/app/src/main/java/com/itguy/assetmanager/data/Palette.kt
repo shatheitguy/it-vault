@@ -278,19 +278,51 @@ object Palette {
      * Returns null when there is nothing to change, and otherwise a list that
      * keeps whatever the disabled state was.
      */
+    /**
+     * The states worth asking a tint about, most specific first.
+     *
+     * Enough to carry a switch, which is the widget with the most to say: its
+     * track and thumb are one colour checked and another unchecked, and
+     * another again when it is off limits.
+     */
+    private val PROBES = arrayOf(
+        intArrayOf(-android.R.attr.state_enabled),
+        intArrayOf(android.R.attr.state_enabled, android.R.attr.state_checked),
+        intArrayOf(android.R.attr.state_enabled, android.R.attr.state_selected),
+        intArrayOf(android.R.attr.state_enabled),
+    )
+
     private fun remap(
         csl: android.content.res.ColorStateList?, map: Map<Int, Int>,
     ): android.content.res.ColorStateList? {
         if (csl == null) return null
-        val enabled = csl.getColorForState(
-            intArrayOf(android.R.attr.state_enabled), csl.defaultColor)
-        val want = map[enabled] ?: return null
-        if (want == enabled) return null
-        val disabled = csl.getColorForState(
-            intArrayOf(-android.R.attr.state_enabled), csl.defaultColor)
+
+        // A tint that was one flat colour must come back one flat colour.
+        //
+        // Returning a state list here is what made the dashboard's hero card
+        // go back to the bundled red the second time it was opened. The list
+        // said "this colour unless the view is disabled", and whether a view
+        // counts as enabled is not something every widget agrees on -- a card
+        // is not a control, so a MaterialCardView's own fill was matching the
+        // disabled entry and painting itself the colour we were trying to
+        // replace. Nothing about a card's fill was ever state-dependent; it
+        // only became so because this function made it so.
+        if (!csl.isStateful) {
+            val want = map[csl.defaultColor] ?: return null
+            return if (want == csl.defaultColor) null
+            else android.content.res.ColorStateList.valueOf(want)
+        }
+
+        // A stateful tint keeps its states, each one repainted on its own.
+        // Reading only `defaultColor` is the trap this started in: a
+        // ColorStateList's default is its *last* entry, and Material writes a
+        // button's tint accent-first, disabled-grey-last.
+        val before = PROBES.map { csl.getColorForState(it, csl.defaultColor) }
+        val after = before.map { map[it] ?: it }
+        if (before == after) return null
         return android.content.res.ColorStateList(
-            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
-            intArrayOf(disabled, want),
+            PROBES + arrayOf(intArrayOf()),
+            (after + after.last()).toIntArray(),
         )
     }
 
@@ -315,6 +347,18 @@ object Palette {
             is com.google.android.material.card.MaterialCardView -> {
                 remap(v.cardBackgroundColor, behind)?.let { v.setCardBackgroundColor(it) }
                 remap(v.strokeColorStateList, behind)?.let { v.setStrokeColor(it) }
+            }
+            // A switch carries the accent on its track when it is on, which
+            // is as much "the brand colour" as a button's fill.
+            is androidx.appcompat.widget.SwitchCompat -> {
+                remap(v.thumbTintList, behind)?.let { v.thumbTintList = it }
+                remap(v.trackTintList, behind)?.let { v.trackTintList = it }
+                front[v.currentTextColor]?.let { v.setTextColor(it) }
+            }
+            // a checkbox or a radio button says the same thing with its tick
+            is android.widget.CompoundButton -> {
+                remap(v.buttonTintList, behind)?.let { v.buttonTintList = it }
+                front[v.currentTextColor]?.let { v.setTextColor(it) }
             }
             is com.google.android.material.button.MaterialButton -> {
                 // a button's outline and the glyph on it are as much "the
