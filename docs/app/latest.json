@@ -1,6 +1,6 @@
 {
-  "versionCode": 37,
-  "versionName": "2.7.1",
+  "versionCode": 38,
+  "versionName": "2.7.2",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The rest of the phone app, brought into line. Tickets and contracts are now the same cards as the asset list — a dot, two lines and a coloured pill — and every form behind them (asset, contract, person, ticket, monitor) is the same cards, the same soft fields and the same pill buttons. The side menu has a new set of icons and shows the install's own accent on the row you are on. Dark mode: fields were almost the same colour as the card they sat on, which made a form look empty; they are clearly a field now. Settings loses the home-screen shortcut offer. Contracts sort soonest-to-expire first and the filter pills carry their own counts."
+  "notes": "Buttons wear your branding. Every filled and tonal button in the app was still showing the bundled red on a branded install -- the Scan button, Save, Check now, Create backup, all of them -- and so was the dashboard's hero card and the selected pill in the bottom bar. They now take the accent from your server, like the rest of the app already did."
 }

@@ -258,6 +258,42 @@ object Palette {
      */
     const val KEEP = "keep-colours"
 
+    /**
+     * A tint list repainted by what it looks like when the view is *enabled*.
+     *
+     * Not by `defaultColor`, which is the trap this walked into for months.
+     * A ColorStateList's default is the colour of its last entry, and
+     * Material's own button tint is written
+     *
+     *     <item android:color="?attr/colorContainer" android:state_enabled="true"/>
+     *     <item android:alpha="..." android:color="?attr/colorOnSurface"/>
+     *
+     * -- the accent first, the disabled grey last. So every filled button in
+     * the app asked the palette to repaint a translucent grey that was never
+     * a palette colour, missed, and kept the bundled red while the FAB beside
+     * it (whose tint is a plain one-colour list) went to the install's own
+     * accent. Enabled is the state a control is in when anyone is looking at
+     * it, so that is the colour that decides.
+     *
+     * Returns null when there is nothing to change, and otherwise a list that
+     * keeps whatever the disabled state was.
+     */
+    private fun remap(
+        csl: android.content.res.ColorStateList?, map: Map<Int, Int>,
+    ): android.content.res.ColorStateList? {
+        if (csl == null) return null
+        val enabled = csl.getColorForState(
+            intArrayOf(android.R.attr.state_enabled), csl.defaultColor)
+        val want = map[enabled] ?: return null
+        if (want == enabled) return null
+        val disabled = csl.getColorForState(
+            intArrayOf(-android.R.attr.state_enabled), csl.defaultColor)
+        return android.content.res.ColorStateList(
+            arrayOf(intArrayOf(-android.R.attr.state_enabled), intArrayOf()),
+            intArrayOf(disabled, want),
+        )
+    }
+
     private fun walk(v: View, behind: Map<Int, Int>, front: Map<Int, Int>) {
         if (v.tag == KEEP) return
 
@@ -268,24 +304,33 @@ object Palette {
         (v.background as? ColorDrawable)?.color?.let { cur ->
             behind[cur]?.let { v.setBackgroundColor(it) }
         }
-        v.backgroundTintList?.defaultColor?.let { cur ->
-            behind[cur]?.let { v.backgroundTintList = android.content.res.ColorStateList.valueOf(it) }
-        }
+        remap(v.backgroundTintList, behind)?.let { v.backgroundTintList = it }
 
         when (v) {
+            // A MaterialCardView's fill is neither a ColorDrawable nor a
+            // background tint -- it is a shape drawable the card owns -- so
+            // the two lines above cannot see it. The dashboard's hero card
+            // asks for @color/accent and was still showing the bundled red on
+            // a branded install, which is as visible as a miss gets.
+            is com.google.android.material.card.MaterialCardView -> {
+                remap(v.cardBackgroundColor, behind)?.let { v.setCardBackgroundColor(it) }
+                remap(v.strokeColorStateList, behind)?.let { v.setStrokeColor(it) }
+            }
+            is com.google.android.material.button.MaterialButton -> {
+                // a button's outline and the glyph on it are as much "the
+                // brand colour" as its fill, and each is its own state list
+                remap(v.strokeColor, front)?.let { v.strokeColor = it }
+                remap(v.iconTint, front)?.let { v.iconTint = it }
+                remap(v.textColors, front)?.let { v.setTextColor(it) }
+            }
             is TextView -> {
                 front[v.currentTextColor]?.let { v.setTextColor(it) }
                 front[v.currentHintTextColor]?.let { v.setHintTextColor(it) }
-                v.compoundDrawableTintList?.defaultColor?.let { cur ->
-                    front[cur]?.let {
-                        v.compoundDrawableTintList =
-                            android.content.res.ColorStateList.valueOf(it)
-                    }
+                remap(v.compoundDrawableTintList, front)?.let {
+                    v.compoundDrawableTintList = it
                 }
             }
-            is ImageView -> v.imageTintList?.defaultColor?.let { cur ->
-                front[cur]?.let { v.imageTintList = android.content.res.ColorStateList.valueOf(it) }
-            }
+            is ImageView -> remap(v.imageTintList, front)?.let { v.imageTintList = it }
         }
 
         if (v is ViewGroup) {

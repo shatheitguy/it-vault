@@ -160,6 +160,13 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             addState(intArrayOf(android.R.attr.state_pressed), pill(soft))
             addState(intArrayOf(), pill(android.graphics.Color.TRANSPARENT))
         }
+
+        // The bottom bar's selected pill is the same decision, and is also a
+        // resource the walker cannot reach into. The icons themselves keep
+        // their own colours: each one means a different destination, which is
+        // what a colour per icon is for.
+        b.bottomNav.itemActiveIndicatorColor =
+            android.content.res.ColorStateList.valueOf(soft)
     }
 
     /**
