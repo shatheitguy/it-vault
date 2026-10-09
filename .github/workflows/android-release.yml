@@ -58,6 +58,12 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
+      # The JVM tests first: they are seconds, and a failing one should not
+      # be buried under a two-minute build that then succeeds.
+      - name: Unit tests
+        working-directory: android-app
+        run: ./gradlew testReleaseUnitTest --no-daemon
+
       - name: Build the app (unsigned)
         working-directory: android-app
         run: ./gradlew assembleRelease --no-daemon

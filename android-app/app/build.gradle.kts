@@ -60,6 +60,11 @@ android {
 }
 
 dependencies {
+    // Plain JVM tests. The filter predicate on the assets list is real
+    // logic -- case folding, and every set filter having to agree -- and
+    // compiling it is not the same as knowing it answers correctly.
+    testImplementation("junit:junit:4.13.2")
+
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-ktx:1.9.1")

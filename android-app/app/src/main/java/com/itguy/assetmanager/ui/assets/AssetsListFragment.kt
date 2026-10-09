@@ -23,6 +23,19 @@ class AssetsListFragment : Fragment(), Refreshable {
     private lateinit var adapter: AssetAdapter
     private var searchJob: kotlinx.coroutines.Job? = null
 
+    /** What the list is narrowed to. Survives a refresh and a tab away. */
+    private var filters = AssetFilters()
+
+    /**
+     * Every asset the phone last saw, unfiltered -- what the filter sheet
+     * offers its options from.
+     *
+     * It cannot be the list on screen: filter by Location = Warehouse and the
+     * only location left in view is Warehouse, so the filter could never be
+     * widened again without clearing it first.
+     */
+    private var allKnown: List<com.itguy.assetmanager.data.model.Asset> = emptyList()
+
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _b = FragmentAssetsListBinding.inflate(inflater, container, false)
         return b.root
@@ -59,6 +72,13 @@ class AssetsListFragment : Fragment(), Refreshable {
             (activity as? MainActivity)?.showFragment(AssetEditFragment.newInstance(null), "Add Asset", addToBackStack = true)
         }
 
+        b.filterBtn.setOnClickListener { openFilters() }
+        b.filterSummary.setOnClickListener {
+            filters = AssetFilters()
+            paintFilterChrome()
+            refresh()
+        }
+
         b.searchInput.addTextChangedListener {
             searchJob?.cancel()
             searchJob = lifecycleScope.launch {
@@ -67,7 +87,53 @@ class AssetsListFragment : Fragment(), Refreshable {
             }
         }
 
+        paintFilterChrome()
         load("")
+    }
+
+    private fun openFilters() {
+        val sheet = AssetFiltersSheet()
+        // the cache is the fallback: with no signal there is still a full set
+        // of rows to build the options from
+        sheet.source = allKnown.ifEmpty { OfflineCache.loadAssets().orEmpty() }
+        sheet.current = filters
+        sheet.onApply = { chosen ->
+            filters = chosen
+            paintFilterChrome()
+            refresh()
+        }
+        sheet.show(parentFragmentManager, "asset-filters")
+    }
+
+    /** The button's count and the line under it, kept in step with [filters]. */
+    private fun paintFilterChrome() {
+        val b = _b ?: return
+        b.filterBtn.text = if (filters.isEmpty) "FILTER" else "FILTER (${filters.activeCount})"
+        val parts = listOfNotNull(
+            filters.status?.takeIf { it.isNotBlank() },
+            filters.type?.takeIf { it.isNotBlank() },
+            filters.location?.takeIf { it.isNotBlank() },
+            filters.manufacturer?.takeIf { it.isNotBlank() },
+        )
+        if (parts.isEmpty()) {
+            b.filterSummary.visibility = View.GONE
+        } else {
+            b.filterSummary.text = "Filtered: ${parts.joinToString(" · ")}  —  tap to clear"
+            b.filterSummary.visibility = View.VISIBLE
+        }
+    }
+
+    /** The filters, applied wherever the rows came from. */
+    private fun applyFilters(list: List<com.itguy.assetmanager.data.model.Asset>) =
+        if (filters.isEmpty) list else list.filter { filters.matches(it) }
+
+    /** What to say when the list is empty, which depends on why it is. */
+    private fun emptyMessage(query: String): String = when {
+        !filters.isEmpty && query.isNotBlank() ->
+            "No assets match \"$query\" with these filters"
+        !filters.isEmpty -> "No assets match these filters"
+        query.isNotBlank() -> "No assets match \"$query\""
+        else -> "No assets found"
     }
 
     // guarded: an action sheet or pull-to-refresh can fire this just as the
@@ -91,9 +157,12 @@ class AssetsListFragment : Fragment(), Refreshable {
                 val resp = ApiClient.api().listAssets(q = query.ifBlank { null })
                 if (_b == null) return@launch
                 val list = resp.body().orEmpty()
-                adapter.submit(list)
-                b.emptyText.text = "No assets found"
-                b.emptyText.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
+                // the unfiltered set is what the sheet offers its options from
+                if (query.isBlank()) allKnown = list
+                val shown = applyFilters(list)
+                adapter.submit(shown)
+                b.emptyText.text = emptyMessage(query)
+                b.emptyText.visibility = if (shown.isEmpty()) View.VISIBLE else View.GONE
                 if (query.isBlank()) OfflineCache.saveAssets(list)
             } catch (e: Exception) {
                 if (_b == null) return@launch
@@ -110,7 +179,8 @@ class AssetsListFragment : Fragment(), Refreshable {
     private fun prepaintFromCache(query: String) {
         if (_b == null) return
         val cached = OfflineCache.loadAssets() ?: return
-        adapter.submit(filterCached(cached, query))
+        if (allKnown.isEmpty()) allKnown = cached
+        adapter.submit(applyFilters(filterCached(cached, query)))
     }
 
     private fun filterCached(cached: List<com.itguy.assetmanager.data.model.Asset>, query: String) =
@@ -127,12 +197,13 @@ class AssetsListFragment : Fragment(), Refreshable {
         if (_b == null) return
         val cached = OfflineCache.loadAssets()
         if (cached != null) {
-            val filtered = filterCached(cached, query)
+            if (allKnown.isEmpty()) allKnown = cached
+            val filtered = applyFilters(filterCached(cached, query))
             adapter.submit(filtered)
             val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("assets"))
             b.offlineBanner.text = "📡 Offline — showing cached data from $age"
             b.offlineBanner.visibility = View.VISIBLE
-            b.emptyText.text = "No cached assets match \"$query\""
+            b.emptyText.text = emptyMessage(query)
             b.emptyText.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
         } else {
             adapter.submit(emptyList())
