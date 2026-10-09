@@ -1,115 +1,341 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The dashboard, to the shape of the reference: a greeting, one hero card in
+  the install's colour carrying the number that matters with a ring beside it,
+  then the smaller figures as white cards, then the lists.
+
+  The hero is "assets out": how many of the register's items are with someone
+  right now. It is the closest thing this app has to the reference's "4 of 5
+  completed" — a fraction a person can act on, rather than a total that only
+  goes up.
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/page"
+    android:clipToPadding="false">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="28dp"
         android:layoutAnimation="@anim/layout_stagger">
 
+        <!-- ===================== greeting ===================== -->
         <TextView
-            style="@style/HeadingLarge"
+            android:id="@+id/dashDate"
+            style="@style/Caption"
             android:layout_marginTop="6dp"
-            android:text="Overview" />
+            android:text="" />
 
         <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:id="@+id/dashGreeting"
+            style="@style/TitleXL"
             android:layout_marginTop="2dp"
-            android:layout_marginBottom="14dp"
-            android:text="Your infrastructure at a glance"
-            android:textColor="@color/muted"
-            android:textSize="13sp" />
+            android:text="Overview" />
 
         <TextView
             android:id="@+id/offlineBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="10dp"
-            android:background="@color/surface"
-            android:padding="8dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/card_soft"
+            android:gravity="center"
+            android:padding="10dp"
             android:textColor="@color/accent"
             android:textSize="12sp"
-            android:gravity="center"
             android:visibility="gone" />
 
-        <!-- KPI row (matches the web dashboard's top stat cards) -->
+        <!-- ===================== the hero ===================== -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/heroCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            app:cardBackgroundColor="@color/accent"
+            app:cardCornerRadius="26dp"
+            app:cardElevation="4dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="22dp"
+                android:paddingEnd="18dp"
+                android:paddingTop="20dp"
+                android:paddingBottom="20dp">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/heroTitle"
+                        android:tag="keep-colours"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Assets out"
+                        android:textColor="@color/on_accent"
+                        android:textSize="20sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/heroSub"
+                        android:tag="keep-colours"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:alpha="0.9"
+                        android:text="with someone right now"
+                        android:textColor="@color/on_accent"
+                        android:textSize="13.5sp" />
+
+                    <TextView
+                        android:id="@+id/heroCount"
+                        android:tag="keep-colours"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:alpha="0.95"
+                        android:text=""
+                        android:textColor="@color/on_accent"
+                        android:textSize="12.5sp" />
+                </LinearLayout>
+
+                <com.itguy.assetmanager.ui.RingView
+                    android:id="@+id/heroRing"
+                    android:layout_width="96dp"
+                    android:layout_height="96dp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===================== the figures ===================== -->
+        <TextView
+            style="@style/TitleM"
+            android:layout_marginTop="22dp"
+            android:text="At a glance" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
             android:orientation="horizontal">
             <include android:id="@+id/statTotal" layout="@layout/item_stat_card" />
             <include android:id="@+id/statOut" layout="@layout/item_stat_card" />
         </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp">
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
             <include android:id="@+id/statMaint" layout="@layout/item_stat_card" />
             <include android:id="@+id/statDue" layout="@layout/item_stat_card" />
         </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp">
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
             <include android:id="@+id/statWarr" layout="@layout/item_stat_card" />
-            <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
         </LinearLayout>
 
-        <!-- ASSET STATUS widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="ASSET STATUS" />
-            <LinearLayout android:id="@+id/statusBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <!-- ===================== the lists ===================== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                style="@style/TitleM"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:text="Recent activity" />
+
+            <TextView
+                android:id="@+id/seeAllActivity"
+                style="@style/BodySoft"
+                android:paddingStart="10dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="See all"
+                android:textColor="@color/accent" />
         </LinearLayout>
 
-        <!-- TOP ASSET TYPES widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="TOP ASSET TYPES" />
-            <LinearLayout android:id="@+id/typeBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:id="@+id/activityFeed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="4dp" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                style="@style/TitleM"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:text="Recent assets" />
+
+            <TextView
+                android:id="@+id/seeAllAssets"
+                style="@style/BodySoft"
+                android:paddingStart="10dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="See all"
+                android:textColor="@color/accent" />
         </LinearLayout>
 
-        <!-- RECENT ASSETS widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="RECENT ASSETS" />
-            <LinearLayout android:id="@+id/recentAssets" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:id="@+id/recentAssets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="4dp" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                style="@style/TitleM"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:text="Open tickets" />
+
+            <TextView
+                android:id="@+id/seeAllTickets"
+                style="@style/BodySoft"
+                android:paddingStart="10dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="See all"
+                android:textColor="@color/accent" />
         </LinearLayout>
 
-        <!-- OPEN TICKETS widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="OPEN TICKETS" />
-            <LinearLayout android:id="@+id/openTickets" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:id="@+id/openTickets"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="4dp" />
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            style="@style/TitleM"
+            android:layout_marginTop="24dp"
+            android:text="Breakdown" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView style="@style/Caption" android:text="BY STATUS" />
+                <LinearLayout
+                    android:id="@+id/statusBars"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/Caption"
+                    android:layout_marginTop="20dp"
+                    android:text="TOP ASSET TYPES" />
+                <LinearLayout
+                    android:id="@+id/typeBars"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="vertical" />
+
+                <TextView
+                    style="@style/Caption"
+                    android:layout_marginTop="20dp"
+                    android:text="CONTRACTS BY TYPE" />
+                <LinearLayout
+                    android:id="@+id/contractsBars"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="vertical" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                style="@style/TitleM"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:text="Contracts ending soon" />
+
+            <TextView
+                android:id="@+id/seeAllContracts"
+                style="@style/BodySoft"
+                android:paddingStart="10dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="6dp"
+                android:paddingBottom="6dp"
+                android:text="See all"
+                android:textColor="@color/accent" />
         </LinearLayout>
 
-        <!-- RECENT ACTIVITY widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="RECENT ACTIVITY" />
-            <LinearLayout android:id="@+id/activityFeed" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
-        </LinearLayout>
-
-        <!-- CONTRACTS BY TYPE widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="CONTRACTS BY TYPE" />
-            <LinearLayout android:id="@+id/contractsBars" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
-        </LinearLayout>
-
-        <!-- CONTRACTS EXPIRING widget -->
-        <LinearLayout style="@style/WidgetCard">
-            <TextView style="@style/WidgetTitle" android:text="CONTRACTS EXPIRING ≤30d" />
-            <LinearLayout android:id="@+id/contractsExpiring" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
-        </LinearLayout>
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:id="@+id/contractsExpiring"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="6dp" />
+        </com.google.android.material.card.MaterialCardView>
 
         <ProgressBar
             android:id="@+id/dashProgress"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="22dp"
             android:indeterminateTint="@color/accent" />
     </LinearLayout>
 </ScrollView>

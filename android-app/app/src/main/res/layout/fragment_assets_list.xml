@@ -1,79 +1,99 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The asset list: a search field and a filter pill over a stack of cards.
+
+  Search answers "where is the thing called X"; the filter answers "show me
+  every laptop in the Dubai store that is still available". They sit together
+  because they are used together, and what is in force is spelled out under
+  them so a short list is never a mystery.
+-->
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/page">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <!-- Search answers "where is the thing called X"; the filter answers
-             "show me every laptop in the Dubai store that is still available".
-             Side by side because they are used together. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_margin="12dp">
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="4dp">
 
             <com.google.android.material.textfield.TextInputLayout
+                style="@style/Field"
                 android:layout_width="0dp"
                 android:layout_weight="1"
                 android:layout_height="wrap_content"
-                style="@style/DarkInputLayout"
-                app:startIconDrawable="@android:drawable/ic_menu_search"
-                android:hint="Search assets…">
+                android:hint="Search assets…"
+                app:startIconDrawable="@drawable/ic_search"
+                app:startIconTint="@color/text_faint">
                 <com.google.android.material.textfield.TextInputEditText
                     android:id="@+id/searchInput"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textColor="@color/text" />
+                    android:imeOptions="actionSearch"
+                    android:inputType="text"
+                    android:maxLines="1"
+                    android:textColor="@color/text_strong" />
             </com.google.android.material.textfield.TextInputLayout>
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/filterBtn"
                 style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="8dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="10dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
                 android:minWidth="0dp"
-                android:paddingHorizontal="14dp"
-                android:text="FILTER"
-                android:textSize="12sp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:text="Filter"
+                android:textAllCaps="false"
                 android:textColor="@color/accent"
+                android:textSize="13sp"
+                app:cornerRadius="26dp"
                 app:strokeColor="@color/accent" />
         </LinearLayout>
 
-        <!-- What the list is narrowed to right now, so a short list is never a
-             mystery. Tapping it clears everything. -->
         <TextView
             android:id="@+id/filterSummary"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="8dp"
-            android:background="@color/surface"
-            android:padding="8dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/pill_idle"
+            android:gravity="center"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="8dp"
             android:textColor="@color/accent"
             android:textSize="12sp"
-            android:gravity="center"
             android:visibility="gone" />
 
         <TextView
             android:id="@+id/offlineBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="8dp"
-            android:background="@color/surface"
-            android:padding="8dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginBottom="6dp"
+            android:background="@drawable/card_soft"
+            android:gravity="center"
+            android:padding="9dp"
             android:textColor="@color/accent"
             android:textSize="12sp"
-            android:gravity="center"
             android:visibility="gone" />
 
         <androidx.recyclerview.widget.RecyclerView
@@ -82,16 +102,17 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:clipToPadding="false"
-            android:paddingBottom="80dp" />
+            android:paddingTop="4dp"
+            android:paddingBottom="96dp" />
 
         <TextView
             android:id="@+id/emptyText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="No assets found"
-            android:textColor="@color/muted"
             android:gravity="center"
             android:padding="40dp"
+            android:text="No assets found"
+            android:textColor="@color/text_faint"
             android:visibility="gone" />
     </LinearLayout>
 

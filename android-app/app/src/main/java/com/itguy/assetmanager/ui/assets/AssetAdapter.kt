@@ -37,21 +37,42 @@ class AssetAdapter(
                 a.Location.ifBlank { null }
             ).joinToString(" · ")
             b.assetMeta.text = meta
-            b.assetStatus.text = a.Status
-            b.statusDot.setBackgroundColor(statusColor(a.Status))
+            // The pill wears the status's colour: the dot for scanning a
+            // column, the pill for reading one row. Both come from the same
+            // value, so they cannot drift apart.
+            val tint = statusColor(a.Status)
+            b.assetStatus.text = a.Status.replace("-", " ")
+            b.assetStatus.setTextColor(tint)
+            b.assetStatus.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 100f
+                // a tenth of the colour: enough to say which, never enough to
+                // compete with the name beside it
+                setColor((tint and 0x00FFFFFF) or 0x1A000000)
+            }
+            b.statusDot.background = android.graphics.drawable.GradientDrawable().apply {
+                shape = android.graphics.drawable.GradientDrawable.OVAL
+                setColor(tint)
+            }
             b.root.setOnClickListener { onClick(a) }
             b.root.setOnLongClickListener {
                 if (onLongClick == null) false else { onLongClick(a); true }
             }
         }
 
+        /**
+         * One colour per state, darkened for a light surface.
+         *
+         * The old set was picked for a dark theme -- a neon green and a pale
+         * amber on white are a pill nobody can read, and the pill now carries
+         * text rather than being a coloured dash.
+         */
         private fun statusColor(status: String): Int = when (status) {
-            "Available" -> Color.parseColor("#2ECC71")
-            "Checked-Out" -> Color.parseColor("#3BC9DB")
-            "Under-Maintenance" -> Color.parseColor("#FFB84D")
-            "Retired" -> Color.parseColor("#FF3B30")
-            "Lost/Stolen" -> Color.parseColor("#FF3B30")
-            else -> Color.parseColor("#8A93A6")
+            "Available" -> Color.parseColor("#0F9D63")
+            "Checked-Out" -> Color.parseColor("#0E8FB3")
+            "Under-Maintenance" -> Color.parseColor("#B0761A")
+            "Retired" -> Color.parseColor("#6B7280")
+            "Lost/Stolen" -> Color.parseColor("#D24545")
+            else -> Color.parseColor("#667085")
         }
     }
 }

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- An input field: a pale fill, a soft line under it, no box. The label sits
+     above the line in the reference, which is what a Material filled box with
+     a floating hint already does. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/field_fill" />
+            <corners android:topLeftRadius="12dp" android:topRightRadius="12dp" />
+        </shape>
+    </item>
+    <item android:gravity="bottom" android:height="1dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/field_line" />
+        </shape>
+    </item>
+</layer-list>

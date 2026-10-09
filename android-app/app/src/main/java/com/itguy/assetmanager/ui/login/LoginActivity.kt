@@ -43,6 +43,21 @@ class LoginActivity : AppCompatActivity() {
 
         if (Prefs.serverUrl.isNotBlank()) b.serverInput.setText(Prefs.serverUrl)
 
+        // The band at the top is the install's own colour, so the status bar
+        // has to be too -- a white strip above a red band looks like a bug.
+        // Icons go light for the same reason.
+        window.statusBarColor = resolveAccent()
+        androidx.core.view.WindowCompat.getInsetsController(window, b.root)
+            .isAppearanceLightStatusBars = false
+
+        // Their name and their mark, as soon as the phone has seen them once.
+        // Before that it is ours, which is also the honest answer: no server
+        // has been contacted yet.
+        com.itguy.assetmanager.data.Branding.apply(this, b.brandName, b.loginLogo)
+        if (Prefs.brandName.isNotBlank()) b.brandTagline.text = "Asset management"
+
+        b.forgotBtn.setOnClickListener { openPasswordReset() }
+
         b.loginBtn.setOnClickListener { attemptLogin() }
         b.verify2faBtn.setOnClickListener { verify2fa() }
         b.switchMethodBtn.setOnClickListener {
@@ -53,6 +68,35 @@ class LoginActivity : AppCompatActivity() {
         b.backToLoginBtn.setOnClickListener { backToStep1() }
 
         playEntranceAnimation()
+    }
+
+    /** The accent as the theme currently resolves it -- the server's colour
+     * once branding has synced, ours until then. */
+    private fun resolveAccent(): Int {
+        val tv = android.util.TypedValue()
+        return if (theme.resolveAttribute(
+                com.google.android.material.R.attr.colorPrimary, tv, true)) tv.data
+        else androidx.core.content.ContextCompat.getColor(this, com.itguy.assetmanager.R.color.accent)
+    }
+
+    /**
+     * Resetting a password is a job for the server's own page: it sends the
+     * code, and the code never leaves the server now. The app's part is to
+     * open it at the right address rather than leaving someone stuck on a
+     * screen with no way forward.
+     */
+    private fun openPasswordReset() {
+        val raw = b.serverInput.text?.toString().orEmpty().ifBlank { Prefs.serverUrl }
+        if (raw.isBlank()) {
+            showError("Enter your server address first, then tap Forgot password.")
+            return
+        }
+        val url = ApiClient.normalize(raw)
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(url)))
+        } catch (e: Exception) {
+            showError("Could not open $url")
+        }
     }
 
     /** A gentle fade+rise for the card, with the logo popping in slightly

@@ -1,149 +1,307 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Settings, as cards rather than a scroll of labels.
+
+  It was one long column: orange capitals, radio buttons, outlined fields and
+  full-width buttons, with nothing to say where one subject ended and the next
+  began. Each subject is now a card with a plain heading, the theme choice is
+  a row of pills like the reference's filters, and the only buttons that stay
+  filled are the ones you actually press.
+
+  Every id the fragment binds is unchanged.
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/page"
+    android:clipToPadding="false">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="28dp">
 
-        <TextView style="@style/SectionLabel" android:text="APPEARANCE" android:layout_marginTop="0dp" />
-        <RadioGroup
-            android:id="@+id/themeGroup"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical">
-            <RadioButton
-                android:id="@+id/themeSystem"
+        <!-- ===================== appearance ===================== -->
+        <TextView style="@style/TitleM" android:text="Appearance" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Follow system"
-                android:textColor="@color/text"
-                android:buttonTint="@color/accent" />
-            <RadioButton
-                android:id="@+id/themeLight"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:text="How the app follows the light and dark themes." />
+
+                <RadioGroup
+                    android:id="@+id/themeGroup"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <RadioButton
+                        android:id="@+id/themeSystem"
+                        style="@style/Pill"
+                        android:button="@null"
+                        android:text="System" />
+
+                    <RadioButton
+                        android:id="@+id/themeLight"
+                        style="@style/Pill"
+                        android:button="@null"
+                        android:text="Light" />
+
+                    <RadioButton
+                        android:id="@+id/themeDark"
+                        style="@style/Pill"
+                        android:button="@null"
+                        android:text="Dark" />
+                </RadioGroup>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===================== home screen ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="Home screen" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Light"
-                android:textColor="@color/text"
-                android:buttonTint="@color/accent" />
-            <RadioButton
-                android:id="@+id/themeDark"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:text="Android compiles the app icon into the app, so it cannot become your uploaded logo. A pinned shortcut can: it sits on the home screen with your logo on it and opens straight into IT-Vault." />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/pinBrandBtn"
+                    style="@style/ButtonPillQuiet"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Add shortcut with your logo" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===================== account ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="My account" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:text="Dark"
-                android:textColor="@color/text"
-                android:buttonTint="@color/accent" />
-        </RadioGroup>
+                android:orientation="vertical"
+                android:padding="18dp">
 
-        <!--
-          The three-way colour picker that used to be here is gone. Choosing
-          between a red tile, a white one and a grey one is not what anybody
-          wanted from "make the icon match our branding". None of the three
-          is their logo, because Android compiles the launcher icon into the
-          app and no setting can replace it. The shortcut below is the part
-          that actually carries their mark, so that is all this section
-          offers now.
-        -->
-        <TextView style="@style/SectionLabel" android:text="HOME SCREEN" />
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="8dp"
-            android:textSize="12.5sp"
-            android:textColor="@color/muted"
-            android:text="Android compiles the app icon into the app, so it cannot become your uploaded logo. A pinned shortcut can: it sits on the home screen with your logo on it and opens straight into IT-Vault." />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/pinBrandBtn"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="Add a home-screen shortcut with your logo"
-            android:textColor="@color/accent"
-            app:strokeColor="@color/accent"
-            xmlns:app="http://schemas.android.com/apk/res-auto" />
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Display name">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/displayInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <TextView style="@style/SectionLabel" android:text="MY ACCOUNT" />
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Display name">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/displayInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Email">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/emailInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.button.MaterialButton android:id="@+id/saveProfileBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:backgroundTint="@color/accent" android:text="Save profile" />
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Email">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/emailInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textEmailAddress"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <TextView style="@style/SectionLabel" android:text="CHANGE PASSWORD" />
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Old password">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/oldPassInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="New password">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/newPassInput" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
-        <com.google.android.material.button.MaterialButton android:id="@+id/changePassBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="12dp" android:text="Update password" android:textColor="@color/accent" app:strokeColor="@color/accent" xmlns:app="http://schemas.android.com/apk/res-auto" />
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/saveProfileBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Save profile" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===================== password ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="Change password" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Old password">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/oldPassInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textPassword"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="New password">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/newPassInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textPassword"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/changePassBtn"
+                    style="@style/ButtonPillQuiet"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Update password" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/settingsMsg"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
+            android:layout_marginTop="12dp"
+            android:background="@drawable/card_soft"
+            android:padding="12dp"
             android:textColor="@color/accent"
+            android:textSize="13sp"
             android:visibility="gone" />
 
-        <TextView style="@style/SectionLabel" android:text="OFFLINE &amp; SYNC" />
-        <TextView
-            android:id="@+id/syncStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/muted"
-            android:textSize="13sp"
-            android:background="@color/surface"
-            android:padding="12dp"
-            android:text="All changes synced" />
-        <com.google.android.material.button.MaterialButton android:id="@+id/syncNowBtn" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:backgroundTint="@color/accent" android:text="Sync now" />
-        <com.google.android.material.button.MaterialButton android:id="@+id/exportXmlBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Export data as XML" android:textColor="@color/accent" app:strokeColor="@color/accent" xmlns:app="http://schemas.android.com/apk/res-auto" />
+        <!-- ===================== offline and sync ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="Offline &amp; sync" />
 
-        <TextView style="@style/SectionLabel" android:text="SERVER" />
-        <TextView
-            android:id="@+id/serverText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/muted"
-            android:textSize="13sp"
-            android:background="@color/surface"
-            android:padding="12dp" />
-        <com.google.android.material.button.MaterialButton android:id="@+id/changeServerBtn" style="@style/Widget.MaterialComponents.Button.OutlinedButton" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:text="Change server / Logout" android:textColor="@color/accent" app:strokeColor="@color/accent" xmlns:app="http://schemas.android.com/apk/res-auto" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
 
-        <TextView style="@style/SectionLabel" android:text="APP UPDATES" />
-        <TextView
-            android:id="@+id/versionText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:textColor="@color/muted"
-            android:textSize="13sp"
-            android:background="@color/surface"
-            android:padding="12dp"
-            android:text="Version" />
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/checkUpdateBtn"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:backgroundTint="@color/accent"
-            android:text="Check for updates" />
+                <TextView
+                    android:id="@+id/syncStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="All changes synced"
+                    android:textColor="@color/text_soft"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/syncNowBtn"
+                        style="@style/ButtonPill"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:text="Sync now" />
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/exportXmlBtn"
+                        style="@style/ButtonPillQuiet"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="10dp"
+                        android:text="Export XML" />
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===================== server ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="Server" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    android:id="@+id/serverText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/text_soft"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/changeServerBtn"
+                    style="@style/ButtonPillQuiet"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Change server / sign out" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===================== updates ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="App updates" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    android:id="@+id/versionText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Version"
+                    android:textColor="@color/text_soft"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/checkUpdateBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Check for updates" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
+            style="@style/Caption"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="26dp"
             android:gravity="center"
-            android:text="IT-Vault — self-hosted · offline sync"
-            android:textColor="@color/muted"
-            android:textSize="11sp" />
+            android:text="IT-Vault — self-hosted · offline sync" />
     </LinearLayout>
 </ScrollView>

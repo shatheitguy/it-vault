@@ -17,4 +17,26 @@
     <color name="stat_green">#3DDC97</color>
     <color name="stat_amber">#FFB454</color>
     <color name="stat_red">#FF6B6B</color>
+
+    <!-- =================== the redesign's tones, after dark ===================
+         Every token the new screens are built from needs a value here. Without
+         them the dashboard and the asset list fell back to the light set and
+         came out white in dark mode: a card is only "white" because
+         @color/card said so, and nothing had said otherwise.
+
+         Same roles, same relationships, inverted: the page is darkest, a card
+         sits just above it, a field just below, and text steps down through
+         three weights. -->
+    <color name="page">#0B0E14</color>
+    <color name="card">#151B26</color>
+    <color name="card_line">#242C3A</color>
+    <color name="field_fill">#1A222E</color>
+    <color name="field_line">#2B3442</color>
+    <color name="chip_idle">#1E2632</color>
+    <color name="chip_idle_text">#A7B0C0</color>
+    <color name="divider">#1F2734</color>
+    <color name="rail">#2F3847</color>
+    <color name="text_strong">#F4F6FA</color>
+    <color name="text_soft">#A7B0C0</color>
+    <color name="text_faint">#7D8798</color>
 </resources>
