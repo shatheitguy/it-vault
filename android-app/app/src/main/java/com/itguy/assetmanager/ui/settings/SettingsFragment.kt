@@ -47,13 +47,20 @@ class SettingsFragment : Fragment() {
             "IT-Vault v${com.itguy.assetmanager.ui.update.AppUpdater.currentVersionName(requireContext())}"
         b.checkUpdateBtn.setOnClickListener {
             b.checkUpdateBtn.isEnabled = false
-            showMsg("Checking for updates…")
+            showUpdate("Checking for updates…")
             com.itguy.assetmanager.ui.update.AppUpdater.checkManual(requireActivity()) { msg ->
                 if (_b == null) return@checkManual
-                showMsg(msg)
+                showUpdate(msg)
                 b.checkUpdateBtn.isEnabled = true
             }
         }
+    }
+
+    /** The update's own status line, which lives with the update button. */
+    private fun showUpdate(text: String) {
+        if (_b == null) return
+        b.updateStatus.text = text
+        b.updateStatus.visibility = View.VISIBLE
     }
 
     /** SAF: the user picks where the .xml lands (Downloads, Drive, etc.). */

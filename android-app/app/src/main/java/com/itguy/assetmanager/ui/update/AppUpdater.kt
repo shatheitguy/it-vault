@@ -8,13 +8,14 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.core.content.FileProvider
 import androidx.core.content.pm.PackageInfoCompat
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.google.gson.Gson
+import com.itguy.assetmanager.R
+import com.itguy.assetmanager.data.Palette
 import com.itguy.assetmanager.data.Prefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -157,29 +158,73 @@ object AppUpdater {
         if (m.apkUrl.isBlank()) return
         val owner = activity as? LifecycleOwner ?: return
 
-        val bar = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100; isIndeterminate = false
+        // A ring rather than a bar: an APK over a slow link takes long enough
+        // that a 4dp line creeping across a dialog reads as a frozen app. It
+        // is the same ring the dashboard draws, so the one piece of the app
+        // that appears while you wait still looks like the app.
+        val d = activity.resources.displayMetrics.density
+        fun px(v: Float) = (v * d).toInt()
+        val accent = Palette.serverColours()?.accent
+            ?: activity.resources.getColor(R.color.accent, null)
+
+        val ring = com.itguy.assetmanager.ui.RingView(activity).apply {
+            layoutParams = LinearLayout.LayoutParams(px(132f), px(132f)).also {
+                it.gravity = android.view.Gravity.CENTER_HORIZONTAL
+            }
+            setColors(accent, (accent and 0x00FFFFFF) or 0x33000000,
+                      activity.resources.getColor(R.color.text_strong, null))
+            centerText = "0%"
         }
-        val label = TextView(activity).apply { text = "Downloading update…" }
-        val pad = (activity.resources.displayMetrics.density * 20).toInt()
+        val label = TextView(activity).apply {
+            text = "Downloading the update…"
+            textSize = 15f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(activity.resources.getColor(R.color.text_strong, null))
+            setPadding(0, px(18f), 0, 0)
+        }
+        val sub = TextView(activity).apply {
+            textSize = 12.5f
+            gravity = android.view.Gravity.CENTER
+            setTextColor(activity.resources.getColor(R.color.text_soft, null))
+            setPadding(0, px(4f), 0, 0)
+        }
         val container = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(pad + pad, pad, pad + pad, pad / 2)
-            addView(label); addView(bar)
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(px(24f), px(26f), px(24f), px(10f))
+            addView(ring); addView(label); addView(sub)
         }
         val progressDlg = com.itguy.assetmanager.ui.BrandDialog(activity)
-            .setTitle("Updating IT-Vault")
             .setView(container)
             .setCancelable(false)
             .create()
         progressDlg.show()
 
+        // the arc eases toward each reported figure rather than stepping, so
+        // a burst of chunks reads as one smooth sweep
+        var shown = 0f
+        var sweep: android.animation.ValueAnimator? = null
+
         owner.lifecycleScope.launch {
             val file = runCatching {
-                download(activity, m.apkUrl) { pct ->
-                    activity.runOnUiThread { bar.progress = pct }
+                download(activity, m.apkUrl) { read, total ->
+                    val target = if (total > 0) (read.toFloat() / total) else 0f
+                    activity.runOnUiThread {
+                        sweep?.cancel()
+                        sweep = android.animation.ValueAnimator.ofFloat(shown, target).apply {
+                            duration = 220
+                            addUpdateListener { a ->
+                                shown = a.animatedValue as Float
+                                ring.progress = shown
+                                ring.centerText = "${Math.round(shown * 100)}%"
+                            }
+                            start()
+                        }
+                        sub.text = if (total > 0) "${mb(read)} of ${mb(total)}" else mb(read)
+                    }
                 }
             }.getOrNull()
+            sweep?.cancel()
             runCatching { progressDlg.dismiss() }
             if (file == null) {
                 if (!activity.isFinishing) com.itguy.assetmanager.ui.BrandDialog(activity)
@@ -192,7 +237,12 @@ object AppUpdater {
         }
     }
 
-    private suspend fun download(ctx: Context, url: String, onProgress: (Int) -> Unit): File =
+    /** "12.4 MB", so the counter needs no decoding. */
+    private fun mb(bytes: Long): String = "%.1f MB".format(bytes / 1_048_576.0)
+
+    private suspend fun download(
+        ctx: Context, url: String, onProgress: (Long, Long) -> Unit,
+    ): File =
         withContext(Dispatchers.IO) {
             val dir = File(ctx.cacheDir, "downloads").apply { mkdirs() }
             val out = File(dir, "it-vault-update.apk")
@@ -209,7 +259,7 @@ object AppUpdater {
                         while (input.read(buf).also { n = it } >= 0) {
                             output.write(buf, 0, n)
                             read += n
-                            if (total > 0) onProgress(((read * 100) / total).toInt())
+                            onProgress(read, total)
                         }
                     }
                 }

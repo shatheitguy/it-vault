@@ -296,6 +296,16 @@
         <item name="android:textAllCaps">true</item>
     </style>
 
+    <!-- A tab's label: the same weight as a drawer row, and not in capitals,
+         so "Contract Types" fits on one line instead of breaking after the
+         "Manufacturer" and leaving an "s" underneath it. -->
+    <style name="TabText" parent="TextAppearance.Material3.TitleSmall">
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0</item>
+        <item name="android:textAllCaps">false</item>
+    </style>
+
     <style name="WidgetTitle">
         <item name="android:layout_width">wrap_content</item>
         <item name="android:layout_height">wrap_content</item>

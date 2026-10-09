@@ -81,10 +81,31 @@ class ScanActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * The corners and the sweeping line, in the install's own accent.
+     *
+     * This screen is an Activity rather than a fragment, so the palette's
+     * hook never ran over it: the frame and the beam were the bundled pink on
+     * every install, which on a yellow-branded one is the only pink left in
+     * the app.
+     */
+    private fun paintReticle() {
+        val accent = com.itguy.assetmanager.data.Palette.serverColours()?.accent
+            ?: resources.getColor(com.itguy.assetmanager.R.color.accent, null)
+        b.reticle.setColor(accent)
+        // brightest in the middle, faded at both ends, so it reads as a beam
+        // rather than a bar sliding about
+        b.scanLine.background = android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+            intArrayOf(accent and 0x00FFFFFF, accent, accent and 0x00FFFFFF),
+        ).apply { cornerRadius = 2f * resources.displayMetrics.density }
+    }
+
     /** The line crossing the frame. It is the only thing on screen that says
      * the camera is alive: a still viewfinder in a dim store room looks
      * identical to a frozen one. */
     private fun startSweep() {
+        paintReticle()
         b.scanFrame.post {
             val travel = (b.scanFrame.height - b.scanLine.height).toFloat()
             if (travel <= 0f) return@post
