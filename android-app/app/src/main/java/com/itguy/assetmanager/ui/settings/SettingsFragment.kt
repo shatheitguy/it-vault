@@ -118,7 +118,9 @@ class SettingsFragment : Fragment() {
             else -> b.themeSystem.isChecked = true
         }
         bindAppIcon()
+        paintThemePills()
         b.themeGroup.setOnCheckedChangeListener { _, checkedId ->
+            paintThemePills()
             val mode = when (checkedId) {
                 b.themeLight.id -> "light"
                 b.themeDark.id -> "dark"
@@ -128,6 +130,40 @@ class SettingsFragment : Fragment() {
                 Prefs.themeMode = mode
                 requireActivity().recreate()
             }
+        }
+    }
+
+    /**
+     * The three theme pills, filled by hand.
+     *
+     * A RadioButton's background is a drawable, and the palette walker only
+     * repaints flat colours -- so the chosen pill is filled here, in the
+     * install's own accent, instead of hoping a state list picks it up. The
+     * padding is put back afterwards because handing a view a new background
+     * is enough to lose it.
+     */
+    private fun paintThemePills() {
+        if (_b == null) return
+        val p = com.itguy.assetmanager.data.Palette.serverColours()
+        val accent = p?.accent
+            ?: resources.getColor(com.itguy.assetmanager.R.color.accent, null)
+        val onAccent = p?.onAccent
+            ?: resources.getColor(com.itguy.assetmanager.R.color.on_accent, null)
+        val idle = resources.getColor(com.itguy.assetmanager.R.color.chip_idle, null)
+        val idleText = resources.getColor(com.itguy.assetmanager.R.color.chip_idle_text, null)
+        listOf(b.themeSystem, b.themeLight, b.themeDark).forEach { pill ->
+            val on = pill.isChecked
+            val l = pill.paddingLeft; val tp = pill.paddingTop
+            val r = pill.paddingRight; val bt = pill.paddingBottom
+            pill.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 100f
+                setColor(if (on) accent else idle)
+            }
+            pill.setPadding(l, tp, r, bt)
+            pill.setTextColor(if (on) onAccent else idleText)
+            pill.setTypeface(android.graphics.Typeface.DEFAULT,
+                             if (on) android.graphics.Typeface.BOLD
+                             else android.graphics.Typeface.NORMAL)
         }
     }
 

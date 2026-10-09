@@ -1,224 +1,288 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sign in, to the shape of the reference: a branded band across the top with
+  the name on it and the mark overlapping its edge, then a white sheet that
+  slides up over the band and holds the form.
+
+  The band is @color/accent, which means it is the install's own colour — red
+  here, whatever theirs is there. The reference's black band is a brand
+  decision for a coffee shop; ours is the customer's.
+
+  Every id the activity binds is kept: serverInput, userInput, passInput,
+  loginBtn, the whole step2fa block, loginError and loginProgress. This is a
+  new face on the same screen, not a new screen.
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="@color/bg">
+    android:background="@color/accent">
 
     <LinearLayout
         android:id="@+id/loginRoot"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:gravity="center"
-        android:minHeight="620dp"
-        android:padding="28dp"
         android:alpha="0">
 
-        <ImageView
-            android:id="@+id/loginLogo"
-            android:layout_width="88dp"
-            android:layout_height="88dp"
-            android:layout_marginBottom="18dp"
-            android:background="@drawable/logo_circle_bg"
-            android:padding="18dp"
-            android:scaleType="fitCenter"
-            android:src="@mipmap/ic_launcher"
-            android:contentDescription="@string/app_name" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/app_name"
-            android:textColor="@color/text"
-            android:textSize="30sp"
-            android:textStyle="bold"
-            android:letterSpacing="-0.01"
-            android:layout_marginBottom="4dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="@string/setup_title"
-            android:textColor="@color/muted"
-            android:textSize="15sp"
-            android:layout_marginBottom="24dp" />
-
-        <com.google.android.material.card.MaterialCardView
+        <!-- ===================== the branded band ===================== -->
+        <RelativeLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:cardBackgroundColor="@color/surface"
-            app:cardCornerRadius="22dp"
-            app:cardElevation="0dp"
-            app:strokeColor="@color/outline"
-            app:strokeWidth="1dp"
-            app:contentPadding="22dp">
+            android:background="@color/accent"
+            android:paddingStart="28dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="40dp"
+            android:paddingBottom="24dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_toStartOf="@+id/loginLogo"
                 android:orientation="vertical">
 
-                <LinearLayout
-                    android:id="@+id/step1"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical">
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="@string/server_address_label"
-                        app:helperTextEnabled="true"
-                        app:helperText="@string/server_address_placeholder"
-                        app:helperTextTextColor="@color/muted"
-                        app:startIconDrawable="@drawable/ic_server"
-                        app:startIconTint="@color/muted"
-                        style="@style/DarkInputLayout">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/serverInput"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textUri"
-                            android:textColor="@color/text" />
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:hint="Username"
-                        app:startIconDrawable="@drawable/ic_people"
-                        app:startIconTint="@color/muted"
-                        style="@style/DarkInputLayout">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/userInput"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="text"
-                            android:textColor="@color/text" />
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
-                        android:hint="Password"
-                        app:passwordToggleEnabled="true"
-                        style="@style/DarkInputLayout">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/passInput"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="textPassword"
-                            android:imeOptions="actionGo"
-                            android:textColor="@color/text" />
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/loginBtn"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="20dp"
-                        android:text="@string/connect_button" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/step2fa"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:id="@+id/tfaMsg"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:textColor="@color/muted"
-                        android:textSize="13.5sp"
-                        android:layout_marginBottom="14dp" />
-
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:hint="Verification code"
-                        style="@style/DarkInputLayout">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/code2fa"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="number"
-                            android:maxLength="6"
-                            android:imeOptions="actionGo"
-                            android:textColor="@color/text" />
-                    </com.google.android.material.textfield.TextInputLayout>
-
-                    <com.google.android.material.button.MaterialButton
-                        android:id="@+id/verify2faBtn"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="16dp"
-                        android:text="Verify" />
-
-                    <TextView
-                        android:id="@+id/switchMethodBtn"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:gravity="center"
-                        android:textColor="@color/muted"
-                        android:textSize="12.5sp"
-                        android:visibility="gone" />
-
-                    <TextView
-                        android:id="@+id/resendCodeBtn"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:gravity="center"
-                        android:text="Resend code"
-                        android:textColor="@color/muted"
-                        android:textSize="12.5sp"
-                        android:visibility="gone" />
-
-                    <TextView
-                        android:id="@+id/backToLoginBtn"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:gravity="center"
-                        android:text="← Back to sign in"
-                        android:textColor="@color/muted"
-                        android:textSize="12.5sp" />
-                </LinearLayout>
-
+                <!-- The install's own name once branding has synced; until
+                     then, ours. -->
                 <TextView
-                    android:id="@+id/loginError"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:textColor="@color/accent"
-                    android:textSize="13sp"
-                    android:visibility="gone" />
-
-                <ProgressBar
-                    android:id="@+id/loginProgress"
+                    android:id="@+id/brandName"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:layout_marginTop="18dp"
-                    android:visibility="gone"
-                    android:indeterminateTint="@color/accent" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
+                    android:text="@string/app_name"
+                    android:textColor="@color/on_accent"
+                    android:textSize="32sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="-0.02" />
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:text="Self-hosted · secured with your API key"
-            android:textColor="@color/muted"
-            android:textSize="11.5sp" />
+                <TextView
+                    android:id="@+id/brandTagline"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:alpha="0.85"
+                    android:text="@string/setup_title"
+                    android:textColor="@color/on_accent"
+                    android:textSize="15sp" />
+            </LinearLayout>
+
+            <!-- The mark, overlapping the band's edge as in the reference. -->
+            <ImageView
+                android:id="@+id/loginLogo"
+                android:layout_width="76dp"
+                android:layout_height="76dp"
+                android:layout_alignParentEnd="true"
+                android:layout_centerVertical="true"
+                android:background="@drawable/logo_circle_bg"
+                android:elevation="6dp"
+                android:padding="16dp"
+                android:scaleType="fitCenter"
+                android:src="@mipmap/ic_launcher"
+                android:contentDescription="@string/app_name" />
+        </RelativeLayout>
+
+        <!-- ===================== the white sheet ===================== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@drawable/sheet_top"
+            android:orientation="vertical"
+            android:paddingStart="26dp"
+            android:paddingEnd="26dp"
+            android:paddingTop="30dp"
+            android:paddingBottom="34dp">
+
+            <TextView
+                android:id="@+id/signInTitle"
+                style="@style/TitleXL"
+                android:text="Sign in"
+                android:layout_marginBottom="22dp" />
+
+            <LinearLayout
+                android:id="@+id/step1"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="@string/server_address_label"
+                    app:helperTextEnabled="true"
+                    app:helperText="e.g. 192.168.1.50:5000"
+                    app:helperTextTextColor="@color/text_faint"
+                    app:startIconDrawable="@drawable/ic_server"
+                    app:startIconTint="@color/text_faint">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/serverInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textUri"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:hint="Username"
+                    app:startIconDrawable="@drawable/ic_people"
+                    app:startIconTint="@color/text_faint">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/userInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="text"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:hint="Password"
+                    app:passwordToggleEnabled="true"
+                    app:passwordToggleTint="@color/text_faint">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/passInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="textPassword"
+                        android:imeOptions="actionGo"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <!-- The reference puts two links on this line. IT-Vault has no
+                     self-registration — an account is made by an admin — so
+                     the right-hand one says where to go instead of offering
+                     something that does not exist. -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:id="@+id/forgotBtn"
+                        style="@style/BodySoft"
+                        android:text="Forgot password?"
+                        android:textColor="@color/accent" />
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="1dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:id="@+id/noAccountHint"
+                        style="@style/Caption"
+                        android:text="Accounts are created by IT" />
+                </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/loginBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="26dp"
+                    android:text="@string/connect_button" />
+            </LinearLayout>
+
+            <!-- ===================== second factor ===================== -->
+            <LinearLayout
+                android:id="@+id/step2fa"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/tfaMsg"
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:layout_marginBottom="16dp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Verification code">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/code2fa"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="number"
+                        android:maxLength="6"
+                        android:letterSpacing="0.35"
+                        android:imeOptions="actionGo"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/verify2faBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:text="Verify" />
+
+                <TextView
+                    android:id="@+id/switchMethodBtn"
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:layout_marginTop="18dp"
+                    android:gravity="center"
+                    android:textColor="@color/accent"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/resendCodeBtn"
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:layout_marginTop="12dp"
+                    android:gravity="center"
+                    android:text="Resend code"
+                    android:textColor="@color/accent"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/backToLoginBtn"
+                    style="@style/Caption"
+                    android:layout_width="match_parent"
+                    android:layout_marginTop="14dp"
+                    android:gravity="center"
+                    android:text="← Back to sign in" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/loginError"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/card_soft"
+                android:padding="12dp"
+                android:textColor="@color/accent"
+                android:textSize="13sp"
+                android:visibility="gone" />
+
+            <ProgressBar
+                android:id="@+id/loginProgress"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center"
+                android:layout_marginTop="20dp"
+                android:visibility="gone"
+                android:indeterminateTint="@color/accent" />
+
+            <TextView
+                style="@style/Caption"
+                android:layout_width="match_parent"
+                android:layout_marginTop="30dp"
+                android:gravity="center"
+                android:text="Self-hosted · secured with your API key" />
+        </LinearLayout>
     </LinearLayout>
 </ScrollView>

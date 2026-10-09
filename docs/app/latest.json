@@ -1,6 +1,6 @@
 {
-  "versionCode": 35,
-  "versionName": "2.6.2",
+  "versionCode": 36,
+  "versionName": "2.7.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Filter the assets list on the phone -- status, category, location and manufacturer, built from your own data and working offline. And on the web, a Product Catalog entry can be renamed instead of only deleted: the new name carries onto every asset that spells out the old one, so fixing a typo no longer means every asset keeps the mistake."
+  "notes": "A redesigned Android app. The sign-in screen, the dashboard, the asset list, the side menu and Settings have been rebuilt around cards, soft fields and pills, and they take their accent from your server's own branding rather than the bundled red. The dashboard leads with how much of the register is out with somebody, shows four of each list with a \"See all\" link to the screen that owns it, and the side menu no longer repeats what is already in the bottom bar. Dark mode is fixed: the new screens were falling back to the light palette and coming out white."
 }

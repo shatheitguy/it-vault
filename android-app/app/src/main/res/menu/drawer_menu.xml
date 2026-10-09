@@ -1,18 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  The drawer holds what the bottom bar does not.
+
+  Dashboard, Assets, Tickets and Network Scan are one tap away at the bottom
+  of every screen; listing them here as well made the drawer look like the
+  whole app and buried the things that are only reachable from it. What is
+  left is exactly the set with nowhere else to live.
+-->
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:title="Main">
-        <menu>
-            <group android:checkableBehavior="single">
-                <item android:id="@+id/nav_dashboard" android:title="Dashboard" android:icon="@drawable/ic_dashboard" />
-                <item android:id="@+id/nav_assets" android:title="Assets" android:icon="@drawable/ic_assets" />
-                <item android:id="@+id/nav_contracts" android:title="Contracts" android:icon="@drawable/ic_doc" />
-                <item android:id="@+id/nav_tickets" android:title="Tickets" android:icon="@drawable/ic_ticket" />
-            </group>
-        </menu>
-    </item>
     <item android:title="Records">
         <menu>
             <group android:checkableBehavior="single">
+                <item android:id="@+id/nav_contracts" android:title="Contracts" android:icon="@drawable/ic_doc" />
                 <item android:id="@+id/nav_directory" android:title="Directory" android:icon="@drawable/ic_people" />
                 <item android:id="@+id/nav_catalog" android:title="Product Catalog" android:icon="@drawable/ic_catalog" />
                 <item android:id="@+id/nav_lostfound" android:title="Lost &amp; Found" android:icon="@drawable/ic_search" />
@@ -24,7 +23,6 @@
     <item android:title="Tools">
         <menu>
             <group android:checkableBehavior="single">
-                <item android:id="@+id/nav_scan" android:title="Network Scan" android:icon="@drawable/ic_wifi" />
                 <item android:id="@+id/nav_heartbeat" android:title="Heartbeat" android:icon="@drawable/ic_heartbeat" />
                 <item android:id="@+id/nav_backup" android:title="Backup / Restore" android:icon="@drawable/ic_backup" />
             </group>

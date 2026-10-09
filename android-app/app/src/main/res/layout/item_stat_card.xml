@@ -1,31 +1,51 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  One number on the dashboard. White card, a coloured dot for which number it
+  is, the figure large and the label quiet underneath.
+
+  The figure used to be monospace, which made 31 assets look like a reading
+  off a meter. The reference's numbers are the same face as everything else,
+  just bigger, so they read as a headline rather than telemetry.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="0dp"
     android:layout_height="wrap_content"
     android:layout_weight="1"
-    android:layout_marginEnd="8dp"
+    android:layout_marginEnd="10dp"
+    android:background="@drawable/card_soft"
     android:orientation="vertical"
-    android:background="@drawable/card_bg"
-    android:padding="18dp">
+    android:padding="16dp">
 
-    <TextView
-        android:id="@+id/statLabel"
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:textColor="@color/muted"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:letterSpacing="0.06"
-        android:text="LABEL" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <View
+            android:id="@+id/statDot"
+            android:layout_width="8dp"
+            android:layout_height="8dp"
+            android:layout_marginEnd="7dp"
+            android:background="@drawable/dot" />
+
+        <TextView
+            android:id="@+id/statLabel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="LABEL"
+            android:textColor="@color/text_soft"
+            android:textSize="11.5sp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/statValue"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
-        android:fontFamily="monospace"
-        android:textColor="@color/accent"
-        android:textSize="30sp"
+        android:layout_marginTop="6dp"
+        android:text="0"
+        android:textColor="@color/text_strong"
+        android:textSize="28sp"
         android:textStyle="bold"
-        android:text="0" />
+        android:letterSpacing="-0.03" />
 </LinearLayout>

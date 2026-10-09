@@ -12,6 +12,34 @@
     <color name="muted">#5C6A80</color>
     <color name="outline">#DCE1EA</color>
     <color name="bar_track">#E6EAF1</color>
+
+    <!-- ===================== the redesign's shared tones =====================
+         The reference design is built from four things: a tinted page, white
+         cards floating on it with a lot of air, one saturated accent, and
+         everything else in soft grey. These are the greys. The accent stays
+         @color/accent, which an install's branding overwrites at run time —
+         so the shape of the design is ours and the colour is theirs. -->
+
+    <!-- the page behind the cards: a touch bluer and lighter than before, so
+         a white card reads as raised without needing a heavy shadow -->
+    <color name="page">#EEF1F8</color>
+    <!-- a card's own fill, and the hairline that keeps it from dissolving
+         into the page on a cheap screen -->
+    <color name="card">#FFFFFF</color>
+    <color name="card_line">#E8ECF4</color>
+    <!-- input fields: a very light fill with no border, as in the reference -->
+    <color name="field_fill">#F3F5FA</color>
+    <color name="field_line">#DDE3EE</color>
+    <!-- a pill that is not currently chosen -->
+    <color name="chip_idle">#E9EDF6</color>
+    <color name="chip_idle_text">#5C6A80</color>
+    <!-- the row divider inside a card, and the timeline rail beside a list -->
+    <color name="divider">#EFF2F8</color>
+    <color name="rail">#DFE5F0</color>
+    <!-- text, in three weights of attention -->
+    <color name="text_strong">#101828</color>
+    <color name="text_soft">#667085</color>
+    <color name="text_faint">#98A2B3</color>
     <!-- The overview numbers, one role each, matching the web: total in the
          accent, checked out cyan, maintenance green, due soon amber, warranty
          red. Darkened here because the light surface needs it. -->

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The white sheet that slides up over the branded band, as on the login
+     screen. Only the top corners are round: the bottom runs off the screen. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/card" />
+    <corners
+        android:topLeftRadius="34dp"
+        android:topRightRadius="34dp" />
+</shape>

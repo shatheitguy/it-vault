@@ -234,7 +234,20 @@ object Palette {
         walk(view, map)
     }
 
+    /**
+     * A view tagged with this, in XML or in code, is left exactly as it is --
+     * and so is everything inside it.
+     *
+     * The repaint works by colour value, which cannot tell "a white card"
+     * from "white text on the accent": both are #FFFFFF. Anything already
+     * painted in deliberate contrast to the accent says so with this tag
+     * instead of being guessed at.
+     */
+    const val KEEP = "keep-colours"
+
     private fun walk(v: View, map: Map<Int, Int>) {
+        if (v.tag == KEEP) return
+
         // background: only a flat colour can be remapped by value. A drawable
         // is mutated and tinted instead -- and mutate() matters, because
         // drawables from resources are shared and tinting one in place would
