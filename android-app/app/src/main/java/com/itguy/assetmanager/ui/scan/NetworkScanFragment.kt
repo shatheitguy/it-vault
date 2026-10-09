@@ -1,6 +1,7 @@
 package com.itguy.assetmanager.ui.scan
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -71,7 +72,7 @@ class NetworkScanFragment : Fragment(), Refreshable {
     }
 
     private fun onDeviceTapped(d: ScanDevice) {
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle(d.host?.takeIf { it.isNotBlank() } ?: d.ip)
             .setMessage("Add this device as an asset? You'll review and fill in the rest before saving.")
             .setPositiveButton("Add as Asset") { _, _ ->

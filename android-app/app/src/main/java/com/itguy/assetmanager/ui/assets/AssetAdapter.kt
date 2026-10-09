@@ -1,6 +1,5 @@
 package com.itguy.assetmanager.ui.assets
 
-import android.graphics.Color
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -59,20 +58,9 @@ class AssetAdapter(
             }
         }
 
-        /**
-         * One colour per state, darkened for a light surface.
-         *
-         * The old set was picked for a dark theme -- a neon green and a pale
-         * amber on white are a pill nobody can read, and the pill now carries
-         * text rather than being a coloured dash.
-         */
-        private fun statusColor(status: String): Int = when (status) {
-            "Available" -> Color.parseColor("#0F9D63")
-            "Checked-Out" -> Color.parseColor("#0E8FB3")
-            "Under-Maintenance" -> Color.parseColor("#B0761A")
-            "Retired" -> Color.parseColor("#6B7280")
-            "Lost/Stolen" -> Color.parseColor("#D24545")
-            else -> Color.parseColor("#667085")
-        }
+        /** The table moved to StatusTint, which the ticket and contract
+         *  lists now read from too. */
+        private fun statusColor(status: String): Int =
+            com.itguy.assetmanager.ui.StatusTint.of(status)
     }
 }

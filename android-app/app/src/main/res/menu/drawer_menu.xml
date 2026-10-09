@@ -14,7 +14,7 @@
                 <item android:id="@+id/nav_contracts" android:title="Contracts" android:icon="@drawable/ic_doc" />
                 <item android:id="@+id/nav_directory" android:title="Directory" android:icon="@drawable/ic_people" />
                 <item android:id="@+id/nav_catalog" android:title="Product Catalog" android:icon="@drawable/ic_catalog" />
-                <item android:id="@+id/nav_lostfound" android:title="Lost &amp; Found" android:icon="@drawable/ic_search" />
+                <item android:id="@+id/nav_lostfound" android:title="Lost &amp; Found" android:icon="@drawable/ic_lostfound" />
                 <item android:id="@+id/nav_trash" android:title="Trash" android:icon="@drawable/ic_trash" />
                 <item android:id="@+id/nav_audit" android:title="Audit Log" android:icon="@drawable/ic_audit" />
             </group>

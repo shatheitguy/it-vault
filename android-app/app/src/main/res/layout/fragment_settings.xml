@@ -69,31 +69,6 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- ===================== home screen ===================== -->
-        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="Home screen" />
-
-        <com.google.android.material.card.MaterialCardView style="@style/Card">
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="18dp">
-
-                <TextView
-                    style="@style/BodySoft"
-                    android:layout_width="match_parent"
-                    android:text="Android compiles the app icon into the app, so it cannot become your uploaded logo. A pinned shortcut can: it sits on the home screen with your logo on it and opens straight into IT-Vault." />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/pinBrandBtn"
-                    style="@style/ButtonPillQuiet"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Add shortcut with your logo" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
         <!-- ===================== account ===================== -->
         <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="My account" />
 

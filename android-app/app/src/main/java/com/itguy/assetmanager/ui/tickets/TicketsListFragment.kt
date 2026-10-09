@@ -1,12 +1,12 @@
 package com.itguy.assetmanager.ui.tickets
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.LinearLayout
+import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -15,9 +15,12 @@ import com.itguy.assetmanager.data.NetworkUtils
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Prefs
 import com.itguy.assetmanager.data.model.Ticket
+import com.itguy.assetmanager.databinding.DialogTicketNewBinding
 import com.itguy.assetmanager.databinding.FragmentTicketsListBinding
 import com.itguy.assetmanager.ui.MainActivity
+import com.itguy.assetmanager.ui.Pills
 import com.itguy.assetmanager.ui.Refreshable
+import com.itguy.assetmanager.ui.StatusTint
 import com.itguy.assetmanager.ui.generic.SimpleAdapter
 import com.itguy.assetmanager.ui.generic.SimpleRow
 import kotlinx.coroutines.launch
@@ -26,6 +29,7 @@ class TicketsListFragment : Fragment(), Refreshable {
     private var _b: FragmentTicketsListBinding? = null
     private val b get() = _b!!
     private var showClosed = false
+    private var all: List<Ticket> = emptyList()
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
         _b = FragmentTicketsListBinding.inflate(inflater, container, false)
@@ -34,20 +38,33 @@ class TicketsListFragment : Fragment(), Refreshable {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         b.recycler.layoutManager = LinearLayoutManager(requireContext())
-        b.tabs.addOnTabSelectedListener(object : com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
-            override fun onTabSelected(t: com.google.android.material.tabs.TabLayout.Tab) { showClosed = t.position == 1; load() }
-            override fun onTabUnselected(t: com.google.android.material.tabs.TabLayout.Tab) {}
-            override fun onTabReselected(t: com.google.android.material.tabs.TabLayout.Tab) {}
-        })
+
+        // Active / Closed. Two pills rather than a tab bar: it is a filter,
+        // and it now looks like the other filters in the app.
+        paintPills()
+        b.pillActive.setOnClickListener { choose(false) }
+        b.pillClosed.setOnClickListener { choose(true) }
+
+        b.searchInput.addTextChangedListener { render() }
         b.addFab.setOnClickListener { openCreateDialog() }
         load()
     }
+
+    private fun choose(closed: Boolean) {
+        if (showClosed == closed) return
+        showClosed = closed
+        paintPills()
+        render()
+    }
+
+    private fun paintPills() =
+        Pills.paintRow(listOf(b.pillActive, b.pillClosed), if (showClosed) 1 else 0)
 
     override fun refresh() = load()
 
     private fun load() {
         // what the phone already has, before the server is asked
-        OfflineCache.loadTickets()?.let { render(it) }
+        OfflineCache.loadTickets()?.let { all = it; render() }
         lifecycleScope.launch {
             try {
                 val resp = ApiClient.api().listTickets()
@@ -58,11 +75,12 @@ class TicketsListFragment : Fragment(), Refreshable {
                     showFromCache(Exception("server returned HTTP ${resp.code()}"))
                     return@launch
                 }
-                val all = resp.body()!!
+                val list = resp.body()!!
                 if (_b == null) return@launch
-                render(all)
+                all = list
+                render()
                 b.offlineBanner.visibility = View.GONE
-                OfflineCache.saveTickets(all)
+                OfflineCache.saveTickets(list)
             } catch (e: Exception) {
                 if (_b != null) showFromCache(e)
             }
@@ -74,7 +92,8 @@ class TicketsListFragment : Fragment(), Refreshable {
         if (_b == null) return
         val cached = OfflineCache.loadTickets()
         if (cached != null) {
-            render(cached)
+            all = cached
+            render()
             val age = NetworkUtils.timeAgo(OfflineCache.lastUpdated("tickets"))
             b.offlineBanner.text = "📡 Offline — showing cached tickets from $age"
             b.offlineBanner.visibility = View.VISIBLE
@@ -87,33 +106,58 @@ class TicketsListFragment : Fragment(), Refreshable {
         }
     }
 
-    private fun render(all: List<Ticket>) {
-        val filtered = all.filter { (it.status in listOf("Resolved", "Closed")) == showClosed }
+    private fun render() {
+        if (_b == null) return
+        val query = b.searchInput.text?.toString().orEmpty().trim()
+        var filtered = all.filter { (it.status in listOf("Resolved", "Closed")) == showClosed }
+        if (query.isNotBlank()) {
+            filtered = filtered.filter {
+                it.subject.contains(query, true) ||
+                    (it.code ?: "").contains(query, true) ||
+                    it.requester.contains(query, true) ||
+                    it.status.contains(query, true)
+            }
+        }
         val adapter = SimpleAdapter(onClick = { row ->
             val t = row.payload as Ticket
             (activity as? MainActivity)?.showFragment(TicketDetailFragment.newInstance(t.id), "Ticket ${t.code ?: ""}", addToBackStack = true)
         })
         b.recycler.adapter = adapter
         adapter.submit(filtered.map { t ->
-            SimpleRow("${t.code ?: ""} · ${t.subject}", "${t.status} · ${t.priority} · ${t.requester}", t)
+            // the subject leads, because that is what anyone is looking for;
+            // the code and who raised it identify which one; the pill is the
+            // state, exactly as on an asset row
+            SimpleRow(
+                title = t.subject.ifBlank { "(no subject)" },
+                subtitle = listOfNotNull(
+                    t.code?.takeIf { it.isNotBlank() },
+                    t.priority.takeIf { it.isNotBlank() },
+                    t.requester.takeIf { it.isNotBlank() },
+                ).joinToString(" · "),
+                payload = t,
+                trailing = t.status,
+                tint = StatusTint.of(t.status),
+            )
         })
-        b.emptyText.text = if (showClosed) "No closed tickets" else "No open tickets"
+        b.emptyText.text = when {
+            query.isNotBlank() -> "Nothing matches “$query”"
+            showClosed -> "No closed tickets"
+            else -> "No open tickets"
+        }
         b.emptyText.visibility = if (filtered.isEmpty()) View.VISIBLE else View.GONE
     }
 
     private fun openCreateDialog() {
-        val ctx = requireContext()
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        val layout = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, pad, pad, pad) }
-        val subject = EditText(ctx).apply { hint = "Subject" }
-        val desc = EditText(ctx).apply { hint = "Description"; minLines = 3 }
-        layout.addView(subject); layout.addView(desc)
-
-        AlertDialog.Builder(ctx).setTitle("New ticket").setView(layout)
+        val d = DialogTicketNewBinding.inflate(layoutInflater)
+        MaterialAlertDialogBuilder(requireContext()).setTitle("New ticket").setView(d.root)
             .setPositiveButton("Create") { _, _ ->
-                val subj = subject.text.toString().trim()
+                val subj = d.newSubject.text?.toString()?.trim().orEmpty()
                 if (subj.isBlank()) return@setPositiveButton
-                val ticket = Ticket(subject = subj, description = desc.text.toString().trim(), requester = Prefs.displayName.ifBlank { Prefs.username })
+                val ticket = Ticket(
+                    subject = subj,
+                    description = d.newDescription.text?.toString()?.trim().orEmpty(),
+                    requester = Prefs.displayName.ifBlank { Prefs.username },
+                )
                 lifecycleScope.launch {
                     try { ApiClient.api().createTicket(ticket); load() } catch (e: Exception) { }
                 }

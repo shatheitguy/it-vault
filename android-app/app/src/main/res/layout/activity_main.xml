@@ -49,15 +49,19 @@
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="@color/surface"
-        app:itemIconTint="@null"
-        app:itemIconSize="26dp"
-        app:itemHorizontalPadding="18dp"
-        app:itemVerticalPadding="8dp"
-        app:itemIconPadding="18dp"
-        app:itemTextColor="@color/text"
+        android:background="@color/card"
+        app:elevation="0dp"
+        app:headerLayout="@layout/nav_header"
         app:itemBackground="@drawable/nav_item_bg"
+        app:itemHorizontalPadding="16dp"
+        app:itemIconPadding="16dp"
+        app:itemIconSize="22dp"
+        app:itemIconTint="@color/nav_item_tint"
+        app:itemTextAppearance="@style/NavItemText"
+        app:itemTextColor="@color/nav_item_tint"
+        app:itemVerticalPadding="6dp"
         app:menu="@menu/drawer_menu"
-        app:headerLayout="@layout/nav_header" />
+        app:subheaderColor="@color/text_faint"
+        app:subheaderTextAppearance="@style/NavSubheader" />
 
 </androidx.drawerlayout.widget.DrawerLayout>

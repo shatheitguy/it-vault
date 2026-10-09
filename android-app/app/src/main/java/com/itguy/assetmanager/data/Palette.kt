@@ -216,22 +216,35 @@ object Palette {
         val view = root ?: return
         val server = serverColours() ?: return
         val from = bundled(view.context)
-        val map = HashMap<Int, Int>(16).apply {
+
+        // Two maps over the same roles, because one colour can mean two
+        // things. In the light palette the card surface and the ink on a
+        // coloured button are both #FFFFFF, and a single map keyed by colour
+        // has to pick one: it picked the ink, so every view whose background
+        // was plain white -- a reply bar, a toolbar strip -- was repainted in
+        // near-black. Which it means is decided by where the colour is used.
+        // Behind something, white is a surface; in front of something, white
+        // is ink. Each map puts the losing role first so the winner's put
+        // overwrites it.
+        fun build(inkWins: Boolean) = HashMap<Int, Int>(16).apply {
+            if (!inkWins) put(from.onAccent, server.onAccent)
             put(from.bg, server.bg)
             put(from.surface, server.surface)
             put(from.surfaceVariant, server.surfaceVariant)
             put(from.accent, server.accent)
             put(from.accent2, server.accent2)
             put(from.accentContainer, server.accentContainer)
-            put(from.onAccent, server.onAccent)
             put(from.text, server.text)
             put(from.muted, server.muted)
             put(from.outline, server.outline)
             put(from.barTrack, server.barTrack)
+            if (inkWins) put(from.onAccent, server.onAccent)
         }
+        val behind = build(inkWins = false)
+        val front = build(inkWins = true)
         // a palette that maps a colour to itself has nothing to do
-        if (map.all { (k, v) -> k == v }) return
-        walk(view, map)
+        if (behind.all { (k, v) -> k == v } && front.all { (k, v) -> k == v }) return
+        walk(view, behind, front)
     }
 
     /**
@@ -245,7 +258,7 @@ object Palette {
      */
     const val KEEP = "keep-colours"
 
-    private fun walk(v: View, map: Map<Int, Int>) {
+    private fun walk(v: View, behind: Map<Int, Int>, front: Map<Int, Int>) {
         if (v.tag == KEEP) return
 
         // background: only a flat colour can be remapped by value. A drawable
@@ -253,30 +266,30 @@ object Palette {
         // drawables from resources are shared and tinting one in place would
         // recolour every other view using it.
         (v.background as? ColorDrawable)?.color?.let { cur ->
-            map[cur]?.let { v.setBackgroundColor(it) }
+            behind[cur]?.let { v.setBackgroundColor(it) }
         }
         v.backgroundTintList?.defaultColor?.let { cur ->
-            map[cur]?.let { v.backgroundTintList = android.content.res.ColorStateList.valueOf(it) }
+            behind[cur]?.let { v.backgroundTintList = android.content.res.ColorStateList.valueOf(it) }
         }
 
         when (v) {
             is TextView -> {
-                map[v.currentTextColor]?.let { v.setTextColor(it) }
-                map[v.currentHintTextColor]?.let { v.setHintTextColor(it) }
+                front[v.currentTextColor]?.let { v.setTextColor(it) }
+                front[v.currentHintTextColor]?.let { v.setHintTextColor(it) }
                 v.compoundDrawableTintList?.defaultColor?.let { cur ->
-                    map[cur]?.let {
+                    front[cur]?.let {
                         v.compoundDrawableTintList =
                             android.content.res.ColorStateList.valueOf(it)
                     }
                 }
             }
             is ImageView -> v.imageTintList?.defaultColor?.let { cur ->
-                map[cur]?.let { v.imageTintList = android.content.res.ColorStateList.valueOf(it) }
+                front[cur]?.let { v.imageTintList = android.content.res.ColorStateList.valueOf(it) }
             }
         }
 
         if (v is ViewGroup) {
-            for (i in 0 until v.childCount) walk(v.getChildAt(i), map)
+            for (i in 0 until v.childCount) walk(v.getChildAt(i), behind, front)
         }
     }
 

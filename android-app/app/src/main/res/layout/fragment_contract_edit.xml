@@ -1,112 +1,235 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adding or editing a contract.
+
+  Same shape as the asset form, for the same reason: what the contract is,
+  what it covers, and what you wrote about it are three different questions
+  and they now sit in three different cards. Every id the fragment binds is
+  unchanged.
+-->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
+    android:background="@color/page"
+    android:clipToPadding="false"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="32dp">
 
-        <TextView style="@style/SectionLabel" android:text="DETAILS" android:layout_marginTop="0dp" />
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Name">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fName" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+        <!-- ========================= the contract ========================= -->
+        <TextView style="@style/SectionLabel" android:layout_marginTop="4dp" android:text="The contract" />
 
-        <TextView style="@style/FieldLabel" android:text="Type" />
-        <Spinner android:id="@+id/fType" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
 
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Vendor / Company">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fVendor" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Name">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fName"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Cost">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fCost" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="numberDecimal" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                <TextView style="@style/FieldLabel" android:text="Type" />
+                <Spinner android:id="@+id/fType" style="@style/Dropdown" />
 
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="Start Date (YYYY-MM-DD)">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fStart" android:layout_width="match_parent" android:layout_height="wrap_content" android:focusable="false" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:hint="Vendor / company">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fVendor"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="10dp" android:hint="End / Renewal Date (YYYY-MM-DD)">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fEnd" android:layout_width="match_parent" android:layout_height="wrap_content" android:focusable="false" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Cost">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fCost"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:inputType="numberDecimal"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <TextView style="@style/FieldLabel" android:text="Linked Asset (optional)" />
-        <Spinner android:id="@+id/fAsset" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+                <com.google.android.material.textfield.TextInputLayout
+                    android:id="@+id/fLicenseKeyWrap"
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="License key"
+                    android:visibility="gone">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fLicenseKey"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <TextView style="@style/FieldLabel" android:text="Employee (optional)" />
-        <Spinner android:id="@+id/fEmployee" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+        <!-- =========================== the term =========================== -->
+        <TextView style="@style/SectionLabel" android:text="Term" />
 
-        <TextView style="@style/FieldLabel" android:text="Location (optional)" />
-        <Spinner android:id="@+id/fLocation" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
 
-        <TextView style="@style/FieldLabel" android:text="Department (optional)" />
-        <Spinner android:id="@+id/fDepartment" android:layout_width="match_parent" android:layout_height="48dp" android:background="@color/surface" />
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Starts (YYYY-MM-DD)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fStart"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:focusable="false"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
 
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/fLicenseKeyWrap"
-            style="@style/DarkInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:hint="License Key"
-            android:visibility="gone">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fLicenseKey" android:layout_width="match_parent" android:layout_height="wrap_content" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:hint="Ends / renews (YYYY-MM-DD)">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fEnd"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:focusable="false"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
-        <TextView style="@style/SectionLabel" android:text="NOTE" />
-        <com.google.android.material.textfield.TextInputLayout style="@style/DarkInputLayout" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Coverage details, renewal terms, contact person…">
-            <com.google.android.material.textfield.TextInputEditText android:id="@+id/fNote" android:layout_width="match_parent" android:layout_height="wrap_content" android:minLines="3" android:gravity="top" android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+        <!-- ======================== what it covers ======================== -->
+        <TextView style="@style/SectionLabel" android:text="What it covers" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:text="All optional. Link a contract to what it is for and it shows up on that record too." />
+
+                <TextView style="@style/FieldLabel" android:text="Linked asset" />
+                <Spinner android:id="@+id/fAsset" style="@style/Dropdown" />
+
+                <TextView style="@style/FieldLabel" android:text="Employee" />
+                <Spinner android:id="@+id/fEmployee" style="@style/Dropdown" />
+
+                <TextView style="@style/FieldLabel" android:text="Location" />
+                <Spinner android:id="@+id/fLocation" style="@style/Dropdown" />
+
+                <TextView style="@style/FieldLabel" android:text="Department" />
+                <Spinner android:id="@+id/fDepartment" style="@style/Dropdown" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ========================== the note ========================== -->
+        <TextView style="@style/SectionLabel" android:text="Note" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Coverage, renewal terms, who to call…">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/fNote"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="top"
+                        android:inputType="textCapSentences|textMultiLine"
+                        android:minLines="3"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
         <TextView
             android:id="@+id/formError"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/card_soft"
+            android:padding="12dp"
             android:textColor="@color/accent"
+            android:textSize="13sp"
             android:visibility="gone" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/printBtn"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            style="@style/ButtonPillQuiet"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
-            android:text="🖨 Print"
-            android:textColor="@color/accent"
-            android:visibility="gone"
-            app:strokeColor="@color/accent" />
+            android:layout_marginTop="20dp"
+            android:text="Print"
+            android:visibility="gone" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginTop="10dp">
+            android:layout_marginTop="10dp"
+            android:orientation="horizontal">
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/deleteBtn"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/ButtonPillQuiet"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:layout_marginEnd="10dp"
+                android:layout_weight="1"
                 android:text="Delete"
-                android:textColor="@color/accent"
-                android:visibility="gone"
-                app:strokeColor="@color/accent" />
+                android:visibility="gone" />
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/saveBtn"
+                style="@style/ButtonPill"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:backgroundTint="@color/accent"
                 android:text="Save" />
         </LinearLayout>
 
@@ -116,7 +239,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center"
             android:layout_marginTop="16dp"
-            android:visibility="gone"
-            android:indeterminateTint="@color/accent" />
+            android:indeterminateTint="@color/accent"
+            android:visibility="gone" />
     </LinearLayout>
 </ScrollView>

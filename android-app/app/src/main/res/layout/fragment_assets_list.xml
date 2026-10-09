@@ -26,7 +26,7 @@
             android:paddingStart="16dp"
             android:paddingEnd="16dp"
             android:paddingTop="10dp"
-            android:paddingBottom="4dp">
+            android:paddingBottom="0dp">
 
             <com.google.android.material.textfield.TextInputLayout
                 style="@style/Field"
@@ -48,38 +48,39 @@
 
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/filterBtn"
-                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                style="@style/ButtonPillQuiet"
                 android:layout_width="wrap_content"
-                android:layout_height="52dp"
+                android:layout_height="56dp"
                 android:layout_marginStart="10dp"
                 android:insetTop="0dp"
                 android:insetBottom="0dp"
                 android:minWidth="0dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
+                android:paddingStart="18dp"
+                android:paddingEnd="20dp"
                 android:text="Filter"
-                android:textAllCaps="false"
-                android:textColor="@color/accent"
-                android:textSize="13sp"
-                app:cornerRadius="26dp"
-                app:strokeColor="@color/accent" />
+                app:icon="@drawable/ic_filter"
+                app:iconPadding="8dp"
+                app:iconSize="18dp" />
         </LinearLayout>
 
         <TextView
             android:id="@+id/filterSummary"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginStart="16dp"
             android:layout_marginEnd="16dp"
-            android:layout_marginBottom="6dp"
+            android:layout_marginTop="10dp"
+            android:layout_marginBottom="2dp"
             android:background="@drawable/pill_idle"
-            android:gravity="center"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"
+            android:drawablePadding="8dp"
+            android:gravity="center_vertical"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
             android:paddingTop="8dp"
             android:paddingBottom="8dp"
             android:textColor="@color/accent"
-            android:textSize="12sp"
+            android:textSize="12.5sp"
+            android:textStyle="bold"
             android:visibility="gone" />
 
         <TextView

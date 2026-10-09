@@ -160,7 +160,7 @@ class AssetActionsSheet : BottomSheetDialogFragment() {
     }
 
     private fun confirmDelete() {
-        androidx.appcompat.app.AlertDialog.Builder(requireContext())
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(requireContext())
             .setTitle("Delete asset?")
             .setMessage("${assetTag.ifBlank { assetName }} moves to Trash and can be restored from there.")
             .setNegativeButton("Cancel", null)

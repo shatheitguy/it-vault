@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A spinner's background: the same pale fill and the same 14dp corners as the
+  text fields beside it, plus the arrow that says it opens a list.
+
+  The arrow has to live in the background because replacing a Spinner's
+  background is what takes the platform's own arrow away, and a dropdown that
+  looks exactly like a text field until you tap it is a dropdown nobody taps.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/field_fill" />
+            <corners android:radius="14dp" />
+        </shape>
+    </item>
+    <item
+        android:drawable="@drawable/ic_chevron_down"
+        android:gravity="center_vertical|end"
+        android:end="14dp"
+        android:width="20dp"
+        android:height="20dp" />
+</layer-list>

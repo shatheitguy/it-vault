@@ -1,76 +1,92 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Finding devices on the network. One card for what to scan, then the results
+  as the same row cards every other list uses.
+-->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:background="@color/bg">
+    android:background="@color/page"
+    android:orientation="vertical">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="6dp">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Finds devices on your local network. Enable Deep scan and give a CIDR range (e.g. 192.168.1.0/24) to actively sweep it; otherwise it just reads the router's ARP table."
-            android:textColor="@color/muted"
-            android:textSize="12.5sp"
-            android:layout_marginBottom="10dp" />
-
-        <CheckBox
-            android:id="@+id/deepScanCheck"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Deep scan"
-            android:textColor="@color/text" />
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            style="@style/DarkInputLayout"
-            android:hint="CIDR range (e.g. 192.168.1.0/24)">
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/prefixInput"
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text" />
-        </com.google.android.material.textfield.TextInputLayout>
+                android:orientation="vertical"
+                android:padding="18dp">
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/scanBtn"
+                <TextView
+                    style="@style/BodySoft"
+                    android:layout_width="match_parent"
+                    android:text="Reads the router's ARP table to see what is already talking. Turn on a deep scan and give a range to go and knock on every address in it." />
+
+                <com.google.android.material.materialswitch.MaterialSwitch
+                    android:id="@+id/deepScanCheck"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Deep scan"
+                    android:textColor="@color/text_strong"
+                    android:textSize="14sp" />
+
+                <com.google.android.material.textfield.TextInputLayout
+                    style="@style/Field"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:hint="Range, e.g. 192.168.1.0/24">
+                    <com.google.android.material.textfield.TextInputEditText
+                        android:id="@+id/prefixInput"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="1"
+                        android:textColor="@color/text_strong" />
+                </com.google.android.material.textfield.TextInputLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/scanBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:text="Scan" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <TextView
+            android:id="@+id/scanStatus"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:backgroundTint="@color/accent"
-            android:text="SCAN" />
+            android:layout_marginTop="14dp"
+            android:textColor="@color/text_soft"
+            android:textSize="12.5sp" />
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/scanStatus"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:paddingHorizontal="16dp"
-        android:paddingBottom="8dp"
-        android:textColor="@color/muted"
-        android:textSize="12.5sp" />
 
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler"
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1" />
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingTop="8dp"
+        android:paddingBottom="24dp" />
 
     <TextView
         android:id="@+id/emptyText"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:padding="40dp"
         android:gravity="center"
-        android:textColor="@color/muted"
-        android:text="No results yet -- tap SCAN"
-        android:visibility="visible" />
+        android:padding="40dp"
+        android:text="Nothing found yet — tap Scan"
+        android:textColor="@color/text_faint" />
 </LinearLayout>

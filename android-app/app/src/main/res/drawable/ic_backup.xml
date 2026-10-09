@@ -1,3 +1,29 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
-    <path android:fillColor="#6366F1" android:pathData="M4,4h13l3,3v13a1,1 0 0,1 -1,1H4a1,1 0 0,1 -1,-1V5a1,1 0 0,1 1,-1z M7,4v6h9V4z M7,13v7h10v-7z" />
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Backup and restore: a copy put somewhere safe. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4.5,6.5c0,-1.4 3.4,-2.5 7.5,-2.5s7.5,1.1 7.5,2.5" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4.5,6.5v11c0,1.4 3.4,2.5 7.5,2.5s7.5,-1.1 7.5,-2.5v-11" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M4.5,12c0,1.4 3.4,2.5 7.5,2.5s7.5,-1.1 7.5,-2.5" />
 </vector>

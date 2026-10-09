@@ -1,69 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Contracts, laid out like the asset list.
+
+  Five stat cards used to sit above the list and push it off the bottom of the
+  screen, with a separate spinner below them that filtered by the same types
+  the cards were counting. They were the same information twice. The counts
+  now ride on the filter pills — "AMC 4" both tells you and selects — which is
+  one row instead of four and leaves the list visible.
+-->
 <androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg">
+    android:background="@color/page">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="12dp">
-
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
-                <include android:id="@+id/statTotal" layout="@layout/item_stat_card" />
-                <include android:id="@+id/statAmc" layout="@layout/item_stat_card" />
-            </LinearLayout>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
-                <include android:id="@+id/statLicense" layout="@layout/item_stat_card" />
-                <include android:id="@+id/statSub" layout="@layout/item_stat_card" />
-            </LinearLayout>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginTop="8dp">
-                <include android:id="@+id/statExpiring" layout="@layout/item_stat_card" />
-                <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
-            </LinearLayout>
-        </LinearLayout>
-
-        <Spinner
-            android:id="@+id/typeFilter"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="10dp"
-            android:background="@color/surface" />
-
         <com.google.android.material.textfield.TextInputLayout
+            style="@style/Field"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="12dp"
-            style="@style/DarkInputLayout"
-            app:startIconDrawable="@android:drawable/ic_menu_search"
-            android:hint="Search contracts…">
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="10dp"
+            android:hint="Search contracts…"
+            app:startIconDrawable="@drawable/ic_search"
+            app:startIconTint="@color/text_faint">
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/searchInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:textColor="@color/text" />
+                android:imeOptions="actionSearch"
+                android:inputType="text"
+                android:maxLines="1"
+                android:textColor="@color/text_strong" />
         </com.google.android.material.textfield.TextInputLayout>
+
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:clipToPadding="false"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:id="@+id/typePills"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+        </HorizontalScrollView>
+
+        <TextView
+            android:id="@+id/expiringNote"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/card_soft"
+            android:gravity="center"
+            android:padding="10dp"
+            android:textSize="12.5sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
 
         <TextView
             android:id="@+id/offlineBanner"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginHorizontal="12dp"
-            android:layout_marginBottom="8dp"
-            android:background="@color/surface"
-            android:padding="8dp"
+            android:layout_marginStart="16dp"
+            android:layout_marginEnd="16dp"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/card_soft"
+            android:gravity="center"
+            android:padding="9dp"
             android:textColor="@color/accent"
             android:textSize="12sp"
-            android:gravity="center"
             android:visibility="gone" />
 
         <androidx.recyclerview.widget.RecyclerView
@@ -72,16 +89,17 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:clipToPadding="false"
-            android:paddingBottom="80dp" />
+            android:paddingTop="6dp"
+            android:paddingBottom="96dp" />
 
         <TextView
             android:id="@+id/emptyText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="No contracts yet"
-            android:textColor="@color/muted"
             android:gravity="center"
             android:padding="40dp"
+            android:text="No contracts yet"
+            android:textColor="@color/text_faint"
             android:visibility="gone" />
     </LinearLayout>
 

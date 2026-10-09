@@ -1,6 +1,7 @@
 package com.itguy.assetmanager.ui.settings
 
-import android.app.AlertDialog
+import androidx.appcompat.app.AlertDialog
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -133,74 +134,30 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    /**
-     * The three theme pills, filled by hand.
-     *
-     * A RadioButton's background is a drawable, and the palette walker only
-     * repaints flat colours -- so the chosen pill is filled here, in the
-     * install's own accent, instead of hoping a state list picks it up. The
-     * padding is put back afterwards because handing a view a new background
-     * is enough to lose it.
-     */
+    /** The three theme pills, filled in the install's own accent. */
     private fun paintThemePills() {
         if (_b == null) return
-        val p = com.itguy.assetmanager.data.Palette.serverColours()
-        val accent = p?.accent
-            ?: resources.getColor(com.itguy.assetmanager.R.color.accent, null)
-        val onAccent = p?.onAccent
-            ?: resources.getColor(com.itguy.assetmanager.R.color.on_accent, null)
-        val idle = resources.getColor(com.itguy.assetmanager.R.color.chip_idle, null)
-        val idleText = resources.getColor(com.itguy.assetmanager.R.color.chip_idle_text, null)
-        listOf(b.themeSystem, b.themeLight, b.themeDark).forEach { pill ->
-            val on = pill.isChecked
-            val l = pill.paddingLeft; val tp = pill.paddingTop
-            val r = pill.paddingRight; val bt = pill.paddingBottom
-            pill.background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 100f
-                setColor(if (on) accent else idle)
-            }
-            pill.setPadding(l, tp, r, bt)
-            pill.setTextColor(if (on) onAccent else idleText)
-            pill.setTypeface(android.graphics.Typeface.DEFAULT,
-                             if (on) android.graphics.Typeface.BOLD
-                             else android.graphics.Typeface.NORMAL)
-        }
+        listOf(b.themeSystem, b.themeLight, b.themeDark)
+            .forEach { com.itguy.assetmanager.ui.Pills.paint(it, it.isChecked) }
     }
 
     /**
-     * The shortcut that can carry the customer's own logo.
+     * Puts anyone left on an alternative launcher icon back on the default.
      *
-     * The three-way colour picker that used to be beside this is gone: none
-     * of the three tiles is anybody's logo, and being asked to pick between
-     * red, white and grey is not an answer to "make the icon match our
-     * branding". A shortcut icon is a bitmap, so this one really is their
-     * mark.
+     * The control that offered a branded home-screen shortcut is gone, and so
+     * is the colour picker before it. Both were answers to "make the icon
+     * match our branding" that did not actually do that: the app icon is
+     * compiled into the app, and a pinned shortcut sitting beside the real
+     * icon is a second entry for the same thing rather than a themed one.
      *
-     * Anyone left on a variant by the old picker is put back on the default
-     * here, because there is no longer a control to do it with -- and the
-     * aliases stay in the manifest, since disabling a component a launcher
-     * is currently showing would take their icon away entirely.
+     * This stays because the aliases are still in the manifest -- disabling a
+     * component a launcher is currently showing would take the icon off the
+     * home screen entirely -- so the reset needs somewhere to run.
      */
     private fun bindAppIcon() {
         if (AppIcon.current(requireContext()) != AppIcon.Variant.DEFAULT) {
             AppIcon.apply(requireContext(), AppIcon.Variant.DEFAULT)
         }
-
-        b.pinBrandBtn.setOnClickListener {
-            if (!AppIcon.canPin(requireContext())) {
-                toast("This launcher does not accept pinned shortcuts.")
-                return@setOnClickListener
-            }
-            if (!AppIcon.pinBrandedShortcut(requireContext())) {
-                toast("No logo cached yet — open the app once while connected " +
-                      "to the server, then try again.")
-            }
-        }
-    }
-
-    private fun toast(msg: String) {
-        if (isAdded) android.widget.Toast.makeText(requireContext(), msg,
-                                                   android.widget.Toast.LENGTH_LONG).show()
     }
 
     private fun loadProfile() {
@@ -253,7 +210,7 @@ class SettingsFragment : Fragment() {
     }
 
     private fun confirmChangeServer() {
-        AlertDialog.Builder(requireContext())
+        MaterialAlertDialogBuilder(requireContext())
             .setTitle("Change server?")
             .setMessage("You'll be logged out and asked to connect to a server again.")
             .setPositiveButton("Continue") { _, _ ->
