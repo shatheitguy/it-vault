@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The tile the logo sits in on the sign-in screen.
+
+  White, and hard-coded white rather than @color/card: the point of the tile
+  is to give the mark a surface of its own on top of the coloured band, and a
+  themed colour turned it into a dark disc at night, so a logo that is itself
+  dark had nothing to sit against.
+
+  A rounded square rather than a circle, because a logo is usually square and
+  a circle crops the corners off it or leaves it floating small in the middle.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners android:radius="22dp" />
+</shape>

@@ -217,6 +217,50 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- ===================== updates ===================== -->
+        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="App updates" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="18dp">
+
+                <TextView
+                    android:id="@+id/versionText"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Version"
+                    android:textColor="@color/text_soft"
+                    android:textSize="13sp" />
+
+                <!-- What the last check said, directly above the button that
+                     starts the next one. It used to be printed into the
+                     message line further up the screen, where it sat under
+                     the password fields with nothing to say it was about
+                     updates at all. -->
+                <TextView
+                    android:id="@+id/updateStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/card_soft"
+                    android:padding="12dp"
+                    android:textColor="@color/accent"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/checkUpdateBtn"
+                    style="@style/ButtonPill"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:text="Check for updates" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- ===================== server ===================== -->
         <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="Server" />
 
@@ -241,34 +285,6 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="14dp"
                     android:text="Change server / sign out" />
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- ===================== updates ===================== -->
-        <TextView style="@style/TitleM" android:layout_marginTop="22dp" android:text="App updates" />
-
-        <com.google.android.material.card.MaterialCardView style="@style/Card">
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="18dp">
-
-                <TextView
-                    android:id="@+id/versionText"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="Version"
-                    android:textColor="@color/text_soft"
-                    android:textSize="13sp" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/checkUpdateBtn"
-                    style="@style/ButtonPill"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="14dp"
-                    android:text="Check for updates" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

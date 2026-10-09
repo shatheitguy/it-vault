@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The pill behind the tab you are on.
+
+  TabLayout draws its indicator stretched behind the whole tab when asked to,
+  which is how a tab bar joins the rest of the app: the drawer, the bottom bar
+  and every filter mark the chosen thing with a pill, and tabs were the one
+  place still underlining it in a colour of their own.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:insetBottom="8dp"
+    android:insetLeft="4dp"
+    android:insetRight="4dp"
+    android:insetTop="8dp">
+    <shape android:shape="rectangle">
+        <corners android:radius="100dp" />
+        <solid android:color="#FFFFFFFF" />
+    </shape>
+</inset>

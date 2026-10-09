@@ -1,6 +1,6 @@
 {
-  "versionCode": 40,
-  "versionName": "2.7.4",
+  "versionCode": 41,
+  "versionName": "2.7.5",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The bottom bar follows your branding. Its five icons each carried one hard-coded colour of their own — an orange dashboard, a blue monitor, a pink QR code — so the bar showed five brands and none of them yours. They are the same outline icons as the side menu now, in your accent on the destination you are on. Dialog buttons too: Cancel, Save, Pause and Check now were still the bundled red, because a dialog is not a screen and nothing was reaching into it. Long-pressing an asset gives proper rows with real icons instead of a column of emoji. And the toolbar no longer keeps saying “Edit Asset” after you come back from editing one."
+  "notes": "Tab bars, the QR scanner and the sign-in logo. The tabs on Directory and Product Catalog mark the chosen one with a pill in your accent now, like everything else that gets chosen, and they scroll rather than squeeze, so “Manufacturers” no longer breaks across two lines with a lone “s” underneath. The scanner’s target frame was drawing the same rounded rectangle three times, two of them nudged diagonally, which showed as two boxes crossing at an angle — it is four proper corner brackets now, in your accent, and so is the sweeping line. The logo on the sign-in screen sits on a white tile that stays white at night, instead of a dark disc a dark logo disappeared into. In Settings, signing out moved to the end after App updates, and the result of an update check appears directly above the button that started it. Downloading an update now shows a progress ring with the percentage and the megabytes, instead of a thin line creeping across a box."
 }

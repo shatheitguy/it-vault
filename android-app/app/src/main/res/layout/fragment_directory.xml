@@ -19,9 +19,22 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@color/card"
+            android:clipToPadding="false"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:visibility="gone"
+            app:tabGravity="start"
+            app:tabIndicator="@drawable/tab_pill"
+            app:tabIndicatorAnimationMode="elastic"
             app:tabIndicatorColor="@color/accent"
-            app:tabSelectedTextColor="@color/accent"
+            app:tabIndicatorFullWidth="true"
+            app:tabIndicatorGravity="stretch"
+            app:tabMode="scrollable"
+            app:tabPaddingEnd="18dp"
+            app:tabPaddingStart="18dp"
+            app:tabRippleColor="@null"
+            app:tabSelectedTextColor="@color/on_accent"
+            app:tabTextAppearance="@style/TabText"
             app:tabTextColor="@color/text_soft" />
 
         <com.google.android.material.textfield.TextInputLayout

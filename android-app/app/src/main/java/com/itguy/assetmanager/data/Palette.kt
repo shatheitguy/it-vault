@@ -244,7 +244,7 @@ object Palette {
         val front = build(inkWins = true)
         // a palette that maps a colour to itself has nothing to do
         if (behind.all { (k, v) -> k == v } && front.all { (k, v) -> k == v }) return
-        walk(view, behind, front)
+        walk(view, behind, front, server.accent)
     }
 
     /**
@@ -326,7 +326,7 @@ object Palette {
         )
     }
 
-    private fun walk(v: View, behind: Map<Int, Int>, front: Map<Int, Int>) {
+    private fun walk(v: View, behind: Map<Int, Int>, front: Map<Int, Int>, accent: Int) {
         if (v.tag == KEEP) return
 
         // background: only a flat colour can be remapped by value. A drawable
@@ -350,6 +350,14 @@ object Palette {
             }
             // A switch carries the accent on its track when it is on, which
             // is as much "the brand colour" as a button's fill.
+            // A tab bar's indicator cannot be read back off the view, so it
+            // is the one colour that has to be told rather than asked: it is
+            // the accent by definition, which is why Directory and the
+            // catalogue still underlined the chosen tab in the bundled red.
+            is com.google.android.material.tabs.TabLayout -> {
+                remap(v.tabTextColors, front)?.let { v.tabTextColors = it }
+                v.setSelectedTabIndicatorColor(accent)
+            }
             is androidx.appcompat.widget.SwitchCompat -> {
                 remap(v.thumbTintList, behind)?.let { v.thumbTintList = it }
                 remap(v.trackTintList, behind)?.let { v.trackTintList = it }
@@ -378,7 +386,7 @@ object Palette {
         }
 
         if (v is ViewGroup) {
-            for (i in 0 until v.childCount) walk(v.getChildAt(i), behind, front)
+            for (i in 0 until v.childCount) walk(v.getChildAt(i), behind, front, accent)
         }
     }
 

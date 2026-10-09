@@ -1,6 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- The disc a logo sits in. White, so it reads as sitting on top of the
-     branded band rather than tinted by it. -->
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="oval">
-    <solid android:color="@color/card" />
-</shape>
