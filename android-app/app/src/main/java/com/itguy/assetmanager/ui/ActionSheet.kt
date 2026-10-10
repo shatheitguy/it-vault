@@ -26,11 +26,21 @@ import com.itguy.assetmanager.R
  */
 object ActionSheet {
 
-    /** A destructive row is the one you do not want to tap by accident. */
+    /**
+     * A destructive row is the one you do not want to tap by accident.
+     *
+     * [value] is for a row that is a setting rather than an action -- the
+     * filter sheet's "Status: Available" -- and sits at the right in the
+     * accent, so four of them read as a summary of the current view rather
+     * than four identical buttons.
+     */
     class Row(
         val label: String,
         val icon: Int,
         val destructive: Boolean = false,
+        val value: String? = null,
+        /** The one already chosen, in a list of options. */
+        val selected: Boolean = false,
         val onTap: () -> Unit,
     )
 
@@ -81,9 +91,21 @@ object ActionSheet {
      */
     fun row(ctx: Context, r: Row): LinearLayout {
         val ink = ContextCompat.getColor(
-            ctx, if (r.destructive) R.color.stat_red else R.color.text_strong)
+            ctx,
+            when {
+                r.destructive -> R.color.stat_red
+                r.selected -> R.color.accent
+                else -> R.color.text_strong
+            },
+        )
         val tint = ContextCompat.getColor(
-            ctx, if (r.destructive) R.color.stat_red else R.color.text_soft)
+            ctx,
+            when {
+                r.destructive -> R.color.stat_red
+                r.selected -> R.color.accent
+                else -> R.color.text_soft
+            },
+        )
 
         return LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -106,11 +128,31 @@ object ActionSheet {
                 text = r.label
                 textSize = 15.5f
                 setTextColor(ink)
+                if (r.selected) setTypeface(Typeface.DEFAULT, Typeface.BOLD)
                 layoutParams = LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
             })
+            if (r.value != null) {
+                addView(TextView(ctx).apply {
+                    text = r.value
+                    textSize = 14f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setTypeface(Typeface.DEFAULT, Typeface.BOLD)
+                    // set in the accent, unset in soft grey, so a glance down
+                    // the sheet says which of them are doing anything
+                    setTextColor(ContextCompat.getColor(
+                        ctx,
+                        if (r.value == ANY) R.color.text_faint else R.color.accent,
+                    ))
+                    setPadding(px(ctx, 12f), 0, 0, 0)
+                })
+            }
         }
     }
+
+    /** What a setting row says when it is not set to anything. */
+    const val ANY = "Any"
 
     private fun rowBackground(ctx: Context) =
         android.graphics.drawable.StateListDrawable().apply {

@@ -363,6 +363,21 @@ object Palette {
                 remap(v.trackTintList, behind)?.let { v.trackTintList = it }
                 front[v.currentTextColor]?.let { v.setTextColor(it) }
             }
+            // The radio marks in a "pick one" dialog. A CheckedTextView is not
+            // a CompoundButton -- it is a TextView that draws a check mark --
+            // so neither branch below was ever reaching the one control a
+            // list dialog is made of, and it stayed the bundled red.
+            is android.widget.CheckedTextView -> {
+                // Its mark carries no tint of its own to repaint -- the
+                // platform colours it from a theme attribute baked in at
+                // inflation -- so, like the tab indicator, it is told rather
+                // than asked. Chosen is the accent; the rest are outlines.
+                v.checkMarkTintList = android.content.res.ColorStateList(
+                    arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf()),
+                    intArrayOf(accent, ContextCompat.getColor(v.context, R.color.text_faint)),
+                )
+                front[v.currentTextColor]?.let { v.setTextColor(it) }
+            }
             // a checkbox or a radio button says the same thing with its tick
             is android.widget.CompoundButton -> {
                 remap(v.buttonTintList, behind)?.let { v.buttonTintList = it }
