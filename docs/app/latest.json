@@ -1,6 +1,6 @@
 {
-  "versionCode": 41,
-  "versionName": "2.7.5",
+  "versionCode": 42,
+  "versionName": "2.7.6",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Tab bars, the QR scanner and the sign-in logo. The tabs on Directory and Product Catalog mark the chosen one with a pill in your accent now, like everything else that gets chosen, and they scroll rather than squeeze, so “Manufacturers” no longer breaks across two lines with a lone “s” underneath. The scanner’s target frame was drawing the same rounded rectangle three times, two of them nudged diagonally, which showed as two boxes crossing at an angle — it is four proper corner brackets now, in your accent, and so is the sweeping line. The logo on the sign-in screen sits on a white tile that stays white at night, instead of a dark disc a dark logo disappeared into. In Settings, signing out moved to the end after App updates, and the result of an update check appears directly above the button that started it. Downloading an update now shows a progress ring with the percentage and the megabytes, instead of a thin line creeping across a box."
+  "notes": "The filter sheet is the long-press sheet: same heading, same rows, same icons, with what each filter is set to on the right in your accent, and Clear all and Apply as the pill buttons the rest of the app uses. Picking a value opens a list built from those same rows, with a tick on the one chosen. Fixed, and the one worth upgrading for: on a first sign-in the dashboard’s headline card chose its text colour before your branding had arrived, so on a light accent such as yellow it drew white on yellow and stayed that way. It now re-reads the card once the colours land. The sign-in logo fills its tile instead of floating inside a white rim."
 }

@@ -108,16 +108,20 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             header.findViewById(com.itguy.assetmanager.R.id.navHeaderBrand),
             header.findViewById(com.itguy.assetmanager.R.id.navHeaderLogo)
         )
+        com.itguy.assetmanager.ui.LogoTile.fit(
+            header.findViewById(com.itguy.assetmanager.R.id.navHeaderLogo),
+            cornerDp = 14f, insetDp = 7f,
+        )
         // The colours as well as the name. Applied to the whole window, so the
         // toolbar, drawer and bottom bar follow the deployment's accent instead
         // of the bundled red.
         com.itguy.assetmanager.data.Palette.apply(b.root)
         com.itguy.assetmanager.data.Palette.apply(header)
         styleDrawer()
-        com.itguy.assetmanager.data.Palette.apply(
-            supportFragmentManager
-                .findFragmentById(com.itguy.assetmanager.R.id.fragmentContainer)?.view
-        )
+        val shown = supportFragmentManager
+            .findFragmentById(com.itguy.assetmanager.R.id.fragmentContainer)
+        com.itguy.assetmanager.data.Palette.apply(shown?.view)
+        (shown as? Rebranded)?.onPaletteApplied()
     }
 
     /**

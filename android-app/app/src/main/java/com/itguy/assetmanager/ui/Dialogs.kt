@@ -29,13 +29,21 @@ class BrandDialog(context: Context) : MaterialAlertDialogBuilder(context) {
     override fun create(): AlertDialog {
         val dialog = super.create()
         val decor = dialog.window?.decorView ?: return dialog
+        // Over the first few layout passes, not just one. A dialog that is a
+        // list builds its rows lazily, from an adapter, after the window has
+        // already laid itself out once -- so a single pass repaints the title
+        // and the buttons and leaves every row it has not made yet, which is
+        // how a "pick one" dialog kept its radio marks in the bundled red.
+        // Bounded, because repainting is not free and a dialog that is still
+        // laying out after three passes is not going to settle.
         decor.viewTreeObserver.addOnGlobalLayoutListener(
             object : ViewTreeObserver.OnGlobalLayoutListener {
+                private var passes = 0
                 override fun onGlobalLayout() {
-                    if (decor.viewTreeObserver.isAlive) {
+                    Palette.apply(decor)
+                    if (++passes >= 3 && decor.viewTreeObserver.isAlive) {
                         decor.viewTreeObserver.removeOnGlobalLayoutListener(this)
                     }
-                    Palette.apply(decor)
                 }
             }
         )

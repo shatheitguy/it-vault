@@ -22,7 +22,14 @@ import kotlinx.coroutines.launch
 /** Mirrors the web app's Dashboard exactly: KPI row, then the same five
  * widgets in the same order (Asset Status, Top Asset Types, Recent Assets,
  * Open Tickets, Recent Activity), each pulling live from the server. */
-class DashboardFragment : Fragment(), Refreshable {
+class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Rebranded {
+
+    /** The hero's ink is worked out from the card's own colour, so it has
+     *  to be worked out again once that colour is the server's. */
+    override fun onPaletteApplied() {
+        if (_b != null) styleHero()
+    }
+
     private var _b: FragmentDashboardBinding? = null
     private val b get() = _b!!
 

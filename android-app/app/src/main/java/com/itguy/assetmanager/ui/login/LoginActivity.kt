@@ -54,6 +54,9 @@ class LoginActivity : AppCompatActivity() {
         // Before that it is ours, which is also the honest answer: no server
         // has been contacted yet.
         com.itguy.assetmanager.data.Branding.apply(this, b.brandName, b.loginLogo)
+        // the server's mark is rarely the same shape as the bundled one, so
+        // the fit is decided after it has been set rather than in the layout
+        com.itguy.assetmanager.ui.LogoTile.fit(b.loginLogo, cornerDp = 22f, insetDp = 10f)
         if (Prefs.brandName.isNotBlank()) b.brandTagline.text = "Asset management"
 
         b.forgotBtn.setOnClickListener { openPasswordReset() }
