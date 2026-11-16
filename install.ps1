@@ -453,6 +453,17 @@ Python 3.9+ is needed for a no-Docker install and wasn't found.
         & ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
         & ".venv\Scripts\pip.exe" install --quiet -r requirements.txt
         if ($LASTEXITCODE -ne 0) { Die "Couldn't install the Python dependencies." }
+        # Optional: the WhatsApp link runs on Node. Without it everything else
+        # works, and Settings says how to add it later.
+        if (Get-Command npm -ErrorAction SilentlyContinue) {
+            Push-Location whatsapp
+            try {
+                & npm ci --omit=dev --ignore-scripts --no-audit --no-fund --silent
+                if ($LASTEXITCODE -ne 0) { Write-Host "    WhatsApp component not installed (npm failed) -- everything else is fine." }
+            } finally { Pop-Location }
+        } else {
+            Write-Host "    Node.js not found: WhatsApp sending is off. Install Node.js 20+, then run 'npm ci --omit=dev' in $dir\whatsapp."
+        }
     } finally { Pop-Location }
 
     # Same concept as install.sh's --no-docker path: offer to install and wire

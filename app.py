@@ -565,6 +565,13 @@ def _restart_self():
     """Re-exec this process so freshly pulled code takes effect. Delayed so
     the response reaches the browser before the listening socket closes."""
     time.sleep(1.5)
+    # execv keeps this PID, so the WhatsApp helper would never see its parent
+    # go and the restarted server would start a second one on the same link.
+    try:
+        import wa as _wa
+        _wa.shutdown()
+    except Exception:
+        pass
     try:
         os.execv(sys.executable, [sys.executable] + sys.argv)
     except Exception:
@@ -1083,6 +1090,11 @@ def _feature_allowed(key):
 
 app = Flask(__name__, static_folder=None)
 app.secret_key = SECRET
+
+# The WhatsApp link (wa.py + whatsapp/bridge.mjs). Its saved keys sit next to
+# the rest of the install's data and are locked with this install's secret.
+import wa
+wa.configure(DATA_DIR, SECRET)
 
 
 class _TlsAwareSession(SecureCookieSessionInterface):
@@ -2142,6 +2154,22 @@ def migrate_schema():
         cur.execute("ALTER TABLE Employees ADD COLUMN EmpCode VARCHAR(64) DEFAULT ''")
     except Exception:
         pass
+    # A mobile number, so the acknowledgement link and the signed copy can go
+    # out on WhatsApp as well as email. Typed by hand; the directory sync
+    # never writes it.
+    try:
+        cur.execute("ALTER TABLE Employees ADD COLUMN Phone VARCHAR(40) DEFAULT ''")
+    except Exception:
+        pass
+    # WhatsApp: the country code a local number ('050 123 4567') is read in,
+    # and which of the two messages go out on it.
+    for col, typ in {"wa_country_code": "VARCHAR(6) DEFAULT '971'",
+                     "wa_send_link": "TINYINT DEFAULT 1",
+                     "wa_send_pdf": "TINYINT DEFAULT 1"}.items():
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
     # Item Category picker: backfill from whatever Type values already exist
     # on real assets, so switching that field to a dropdown doesn't blank out
     # anyone's existing data (one-time -- skipped once Categories has rows)
@@ -2888,11 +2916,12 @@ def create_employee():
         "Designation": data.get("Designation") or "",
         "Department": data.get("Department") or "",
         "Email": data.get("Email") or "",
+        "Phone": (data.get("Phone") or "").strip()[:40],
         "source": "manual"
     }
-    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, source, updated_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
-                (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["source"]))
+    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, Phone, source, updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
+                (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["Phone"], emp["source"]))
     c.commit(); c.close()
     return jsonify(emp)
 
@@ -2920,7 +2949,7 @@ def update_employee(e_id):
     """
     data = request.get_json(force=True) or {}
     editable = ("EmployeeID", "EmpCode", "EmployeeName", "Designation",
-                "Department", "Email")
+                "Department", "Email", "Phone")
     c = conn(); cur = c.cursor()
     cur.execute("SELECT `%s`, manual_fields FROM Employees WHERE _id=%%s"
                 % "`, `".join(editable), [e_id])
@@ -2932,6 +2961,8 @@ def update_employee(e_id):
         if col not in data:
             continue
         new = "" if data[col] is None else str(data[col])
+        if col == "Phone":
+            new = new.strip()[:40]
         sets.append("`%s`=%%s" % col)
         vals.append(new)
         if new != ("" if before.get(col) is None else str(before[col])):
@@ -7084,6 +7115,74 @@ def notify_ticket_assigned(ticket, assignee_user):
     except Exception as e:
         print("assign notify error:", e); return False
 
+# ---- WhatsApp (Settings -> Notifications -> WhatsApp) ----
+def _wa_status_json(s):
+    s = dict(s or {})
+    qr = s.pop("qr", None)
+    if qr:
+        # drawn here, so the page needs no QR library of its own
+        try:
+            img = qrcode.make(qr, image_factory=qrcode.image.svg.SvgPathImage, box_size=8, border=2)
+            s["qr_svg"] = img.to_string(encoding="unicode")
+        except Exception as e:
+            s["error"] = f"could not draw the QR: {e}"
+    ws = _wa_settings()
+    s.update(country_code=ws["cc"], send_link=ws["send_link"], send_pdf=ws["send_pdf"])
+    return jsonify(s)
+
+
+@app.route("/api/whatsapp/status")
+@auth_required(module="settings", level="read")
+def whatsapp_status():
+    return _wa_status_json(wa.status())
+
+
+@app.route("/api/whatsapp/link", methods=["POST"])
+@auth_required(module="settings", level="write")
+def whatsapp_link():
+    s = wa.start()
+    audit(session.get("user"), "WHATSAPP_LINK", "", "started linking WhatsApp")
+    return _wa_status_json(s)
+
+
+@app.route("/api/whatsapp/unlink", methods=["POST"])
+@auth_required(module="settings", level="write")
+def whatsapp_unlink():
+    s = wa.logout()
+    audit(session.get("user"), "WHATSAPP_UNLINK", "", "unlinked WhatsApp")
+    return _wa_status_json(s)
+
+
+@app.route("/api/whatsapp/settings", methods=["POST"])
+@auth_required(module="settings", level="write")
+def whatsapp_settings():
+    d = request.get_json(force=True) or {}
+    ws = _wa_settings()
+    cc = re.sub(r"\D", "", str(d.get("country_code", ws["cc"])))[:4]
+    if not cc:
+        return jsonify({"error": "Enter a country code, e.g. 971 for the UAE."}), 400
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Settings SET wa_country_code=%s, wa_send_link=%s, wa_send_pdf=%s WHERE id=1",
+                (cc, 1 if d.get("send_link", ws["send_link"]) else 0,
+                 1 if d.get("send_pdf", ws["send_pdf"]) else 0))
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/whatsapp/test", methods=["POST"])
+@auth_required(module="settings", level="write")
+def whatsapp_test():
+    d = request.get_json(force=True) or {}
+    num = wa.normalize(d.get("number"), _wa_settings()["cc"])
+    if not num:
+        return jsonify({"error": "That is not a phone number."}), 400
+    r = wa.send(num, f"{brand_name()}: test message. WhatsApp is linked and working.")
+    msg = {"ok": f"Sent to +{num}", "not_linked": "WhatsApp is not linked yet.",
+           "not_on_whatsapp": f"+{num} is not on WhatsApp.", "bad_number": "That is not a phone number.",
+           "unavailable": wa.installed() or "WhatsApp is not available on this server."}.get(r, "Could not send. See the server log.")
+    return jsonify({"ok": r == "ok", "result": r, "message": msg}), (200 if r == "ok" else 400)
+
+
 @app.route("/api/settings/smtp-test", methods=["POST"])
 @auth_required(module="settings", level="write")
 def test_email():
@@ -9089,6 +9188,49 @@ def _sign_recipient(identifier):
     return ((r.get("EmployeeName") or identifier), (r.get("Email") or "").strip())
 
 
+def _employee_phone(identifier):
+    """The mobile number on file for an assignee. Only employee records carry
+    one; a system user assignee has none."""
+    identifier = (identifier or "").strip()
+    if not identifier:
+        return ""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT Phone FROM Employees WHERE EmployeeID=%s", [identifier])
+        r = cur.fetchone(); c.close()
+        return ((r or {}).get("Phone") or "").strip()
+    except Exception:
+        return ""
+
+
+def _wa_settings():
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT wa_country_code, wa_send_link, wa_send_pdf FROM Settings WHERE id=1")
+        r = cur.fetchone() or {}; c.close()
+    except Exception:
+        r = {}
+    return {"cc": re.sub(r"\D", "", str(r.get("wa_country_code") or "971")) or "971",
+            "send_link": bool(r.get("wa_send_link", 1) if r.get("wa_send_link") is not None else 1),
+            "send_pdf": bool(r.get("wa_send_pdf", 1) if r.get("wa_send_pdf") is not None else 1)}
+
+
+def _wa_link_target(employee_id):
+    """(number, why_not) for sending the acknowledgement link on WhatsApp."""
+    ws = _wa_settings()
+    if not ws["send_link"]:
+        return "", "off"
+    phone = _employee_phone(employee_id)
+    if not phone:
+        return "", "no_phone"
+    num = wa.normalize(phone, ws["cc"])
+    if not num:
+        return "", "bad_number"
+    if not wa.is_on():
+        return num, "not_linked"
+    return num, ""
+
+
 def _smtp_ready():
     """Whether mail is set up at all. Worth asking before offering to send:
     otherwise the only feedback is a send that quietly reports failure."""
@@ -9114,10 +9256,21 @@ def get_sign_link(a_id):
     # leaving copy-and-paste as the only way to get it to the employee.
     who, to = _sign_recipient(a.get("EmployeeID"))
     mail_ok = _smtp_ready()
+    wa_num, wa_why = _wa_link_target(a.get("EmployeeID")) if a.get("EmployeeID") else ("", "")
     return jsonify({"ok": True, "token": tk, "url": url,
                     "assignee": who, "assignee_email": to,
                     "can_email": bool(to) and mail_ok,
-                    "smtp_ready": mail_ok})
+                    "smtp_ready": mail_ok,
+                    "assignee_phone": ("+" + wa_num) if wa_num else "",
+                    "can_whatsapp": bool(wa_num) and not wa_why,
+                    "whatsapp_reason": wa_why})
+
+
+def _wa_sign_link_text(who, a, url):
+    tag = a.get("AssetTag") or a.get("_id", "")
+    return (f"{brand_name()}: Hi {who or 'there'}, '{a.get('Name') or 'an asset'}' "
+            f"(Asset ID: {tag}) is assigned to you. Please open this link to "
+            f"acknowledge it and sign:\n{url}\n\nThe link works once and expires in 7 days.")
 
 
 @app.route("/api/assets/<a_id>/sign/send", methods=["POST"])
@@ -9141,21 +9294,41 @@ def send_sign_link(a_id):
     if not emp:
         return jsonify({"error": "This asset is not assigned to anyone yet, so there is nobody to send it to. Assign it first, or copy the link."}), 400
     who, to = _sign_recipient(emp)
-    if not to:
-        return jsonify({"error": f"{who} has no email address on file. Add one on the Employees page, or copy the link instead."}), 400
-    if not _smtp_ready():
-        return jsonify({"error": "Email is not set up yet -- add an SMTP server under Settings before sending. You can copy the link in the meantime."}), 400
+    mail_ok = bool(to) and _smtp_ready()
+    wa_num, wa_why = _wa_link_target(emp)
+    if not mail_ok and (not wa_num or wa_why):
+        # Neither way out works: say why for both, since fixing either is enough.
+        if not to:
+            mail_why = f"{who} has no email address on file"
+        else:
+            mail_why = "email is not set up (add an SMTP server under Settings)"
+        wa_text = {"no_phone": f"no mobile number on file for {who}",
+                   "bad_number": "the mobile number on file is not a valid number",
+                   "not_linked": "WhatsApp is not linked (Settings > Notifications)",
+                   "off": "sending links on WhatsApp is switched off"}.get(wa_why, "")
+        msg = f"Can't send: {mail_why}" + (f", and {wa_text}" if wa_text else "") + ". Copy the link instead, or fix one of these on the Employees page or in Settings."
+        return jsonify({"error": msg}), 400
     # Issued here and passed down, so the link that goes in the mail is the
     # same one handed back to the dialog. Letting the notifier mint its own
     # would rotate the nonce a second time and kill the mail we just sent.
     _tk, url = _issue_sign_link(a_id, a.get("Name") or "")
-    ok = notify_person_asset_assigned(
-        emp, dict(a), checked_out=(a.get("Status") == "Checked-Out"),
-        reminder=True, sign_url=url)
-    if not ok:
-        return jsonify({"error": f"Could not send to {to}. Check the SMTP settings and the server log."}), 502
-    audit(session.get("user"), "SIGN_LINK_SENT", a_id, f"acknowledgement link emailed to {to}")
-    return jsonify({"ok": True, "sent_to": to, "assignee": who, "url": url})
+    sent, failed = [], []
+    if mail_ok:
+        ok = notify_person_asset_assigned(
+            emp, dict(a), checked_out=(a.get("Status") == "Checked-Out"),
+            reminder=True, sign_url=url)
+        (sent if ok else failed).append(to)
+    if wa_num and not wa_why:
+        r = wa.send(wa_num, _wa_sign_link_text(who, a, url))
+        if r == "ok":
+            sent.append(f"WhatsApp +{wa_num}")
+        else:
+            failed.append({"not_on_whatsapp": f"+{wa_num} (not on WhatsApp)"}.get(r, f"WhatsApp +{wa_num}"))
+    if not sent:
+        return jsonify({"error": "Could not send to " + " or ".join(failed) + ". Check the settings and the server log."}), 502
+    audit(session.get("user"), "SIGN_LINK_SENT", a_id, "acknowledgement link sent to " + ", ".join(sent))
+    return jsonify({"ok": True, "sent_to": " and ".join(sent), "failed": failed,
+                    "assignee": who, "url": url})
 
 # The colour maths behind every publicly-shared page: the acknowledgement
 # page and the page a scanned QR opens. Both are seen by people who never
@@ -9337,7 +9510,23 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
 .btnrow .btn{flex:1;min-width:140px;min-height:44px}
 #result{margin-top:16px;font-size:14px;min-height:24px}
-.ok{color:var(--grn)}.err{color:var(--red);white-space:pre-wrap}
+/* The outcome of signing is the one thing on this page nobody may miss. It
+   used to be a line of 14px text coloured var(--grn) -- a variable this page
+   never defined, so "Acknowledged" came out in plain body text, under the
+   button, often below the fold on a phone. Now it is a banner in fixed
+   colours that read on either scheme, and the page scrolls to it. */
+#result.ok{display:flex;gap:14px;align-items:flex-start;padding:18px 18px 16px;border-radius:var(--radius);
+  background:#e7f7ec;border:2px solid #23944d;color:#0d3a1f;font-size:15px;line-height:1.45;
+  box-shadow:0 6px 24px rgba(35,148,77,.25);animation:okpop .35s ease-out}
+#result .ok-ico{flex:none;width:46px;height:46px;border-radius:50%;background:#23944d;color:#fff;
+  display:flex;align-items:center;justify-content:center;font-size:28px;font-weight:800}
+#result .ok-head{font-size:21px;font-weight:800;margin:2px 0 4px;color:#0d3a1f}
+#result .ok-sub{color:#245c38}
+#result.err{padding:12px 14px;border-radius:var(--radius);background:#fdecea;border:1.5px solid #e0473c;
+  color:#8e1c14;font-weight:600;white-space:pre-wrap}
+#result.busy{color:var(--muted)}
+@keyframes okpop{from{transform:scale(.96);opacity:0}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){#result.ok{animation:none}}
 .center{text-align:center;margin-top:40px;color:var(--muted)}
 @media (max-width:480px){
   body{padding:16px 10px}
@@ -9578,10 +9767,29 @@ document.getElementById('saveSign').addEventListener('click',async()=>{
     return;}
   if(!hasSig||!ctx||ctx.getImageData(0,0,canvas.width,canvas.height).data.filter(c=>c>0).length<100){ res.className='err';res.textContent='⚠ Please sign above.';return; }
   const data=getSigData();
-  res.textContent='Submitting…';
-  const r=await fetch('/api/assets/sign/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name,data})});
-  const j=await r.json();
-  if(j.ok){res.className='ok';res.innerHTML=j.emailed?'✅ <b>Acknowledged</b> — thank you. A signed copy has been sent to your email.':'✅ <b>Acknowledged</b> — thank you. Your signature has been recorded.';document.querySelector('.btn').disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+data+'">'); w.document.close();};}}
+  // One submit at a time: the button used to stay live while the request
+  // was out, and on a slow moment people pressed it again.
+  const sb=document.getElementById('saveSign');
+  const sbLabel=sb.textContent;
+  sb.disabled=true; sb.textContent='⏳ SUBMITTING…';
+  res.className='busy'; res.textContent='Submitting your acknowledgement…';
+  let j;
+  try{
+    const r=await fetch('/api/assets/sign/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,name,data})});
+    j=await r.json().catch(()=>({ok:false,error:'The server sent back something unexpected. Please try again.'}));
+  }catch(e){ j={ok:false,error:'Could not reach the server. Check your connection and try again.'}; }
+  if(!j.ok){ sb.disabled=false; sb.textContent=sbLabel; }
+  if(j.ok){
+    const where=[j.emailed?'your email':'', j.whatsapp?'your WhatsApp':''].filter(Boolean).join(' and ');
+    const tag=(document.getElementById('assetIdBadge')||{}).textContent||'';
+    res.className='ok';
+    res.innerHTML='<div class=ok-ico>✓</div><div><div class=ok-head>Acknowledged — thank you</div>'+
+      '<div class=ok-sub>Your signature'+(tag?' for <b>'+esc(tag)+'</b>':'')+' has been recorded.'+
+      (where?' A signed PDF copy is on its way to '+where+'.':'')+' You can close this page.</div></div>';
+    sb.textContent='✓ SUBMITTED';
+    res.scrollIntoView({block:'center',behavior:'smooth'});
+    try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
+    sb.disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+data+'">'); w.document.close();};}}
   else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
 });
 /*__PUBLIC_THEME_JS__*/
@@ -9947,25 +10155,48 @@ def _send_email_with_attachment(to_email, subject, body, attachment_bytes, attac
     except Exception as e:
         print("email attachment send error:", e); return False
 
-def _email_signed_asset_pdf(asset, signer_name, sig_data_url):
-    """Sends the signed-acknowledgement PDF to the assigned employee/user and
-    to every admin/staff account with an email on file -- fire-and-forget,
-    never blocks or fails the acknowledgement itself. Returns True if a copy
-    actually went to the assigned employee, so the sign page can promise
-    "sent to your email" only when that's true."""
+def _signed_copy_plan(asset):
+    """Who the signed copy is going to: (employee email or '', WhatsApp number
+    or ''). Decided before the response so the sign page can say where the
+    copy is headed -- the sending itself happens afterwards."""
+    emp_email = _lookup_person_email(asset.get("EmployeeID") or "")
+    if emp_email and not _smtp_ready():
+        emp_email = ""
+    wa_num = ""
+    try:
+        ws = _wa_settings()
+        if ws["send_pdf"] and wa.is_on():
+            wa_num = wa.normalize(_employee_phone(asset.get("EmployeeID")), ws["cc"])
+    except Exception as e:
+        print("[whatsapp] signed copy plan:", e, flush=True)
+    return emp_email, wa_num
+
+
+def _deliver_signed_asset_pdf(asset, signer_name, sig_data_url, emp_email, wa_num):
+    """Sends the signed-acknowledgement PDF to the assigned employee (email
+    and WhatsApp) and to every admin/staff account with an email on file.
+
+    Runs on its own thread, after the sign page already has its answer. It
+    used to run inside the request: the PDF build, then one SMTP connection
+    per recipient -- the employee and every admin, each with a 10 second
+    timeout -- all before the person signing saw anything. On a slow mail
+    server that was a spinner long enough to make people press Submit again."""
     try:
         pdf_bytes = _build_signed_asset_pdf(asset, signer_name, sig_data_url)
     except Exception as e:
-        print("signed pdf build error:", e); return False
+        print("signed pdf build error:", e); return
     fname = f"{(asset.get('AssetTag') or asset.get('_id') or 'asset')}_signed.pdf"
     tag = asset.get("AssetTag") or asset.get("_id", "")
     body = (f"'{asset.get('Name','')}' (Asset ID: {tag}) was acknowledged and signed by "
             f"{signer_name}. The signed copy is attached as a PDF.")
+    if wa_num:
+        r = wa.send(wa_num, f"{brand_name()}: {body}", pdf=pdf_bytes, file_name=fname)
+        print(f"[whatsapp] signed copy of {tag} -> +{wa_num}: {r}", flush=True)
+        if r == "ok":
+            audit("system", "SIGNED_COPY_WHATSAPP", asset.get("_id", ""), f"signed copy sent on WhatsApp to +{wa_num}")
     sent_to = set()
-    emailed_employee = False
-    emp_email = _lookup_person_email(asset.get("EmployeeID") or "")
     if emp_email:
-        emailed_employee = bool(_send_email_with_attachment(emp_email, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname))
+        _send_email_with_attachment(emp_email, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
         sent_to.add(emp_email.lower())
     try:
         c = conn(); cur = c.cursor()
@@ -9978,7 +10209,6 @@ def _email_signed_asset_pdf(asset, signer_name, sig_data_url):
         if e and e.lower() not in sent_to:
             _send_email_with_attachment(e, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
             sent_to.add(e.lower())
-    return emailed_employee
 
 @app.route("/api/assets/sign/approve", methods=["POST"])
 def approve_asset():
@@ -10016,7 +10246,7 @@ def approve_asset():
                 (receivedBy, name, notesReceived, sigData, aid))
     c.commit(); c.close()
     audit(session.get("user"), "ACKNOWLEDGE", aid, f"{name} acknowledged")
-    emailed = False
+    emailed = whatsapped = False
     try:
         cc = conn(); ccur = cc.cursor()
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [aid]); full_asset = ccur.fetchone()
@@ -10030,13 +10260,16 @@ def approve_asset():
                 full_asset["Email"] = er.get("Email") or ""
         cc.close()
         if full_asset:
-            emailed = _email_signed_asset_pdf(full_asset, name, sigData)
+            emp_email, wa_num = _signed_copy_plan(full_asset)
+            emailed, whatsapped = bool(emp_email), bool(wa_num)
+            threading.Thread(target=_deliver_signed_asset_pdf, daemon=True,
+                             args=(full_asset, name, sigData, emp_email, wa_num)).start()
     except Exception as e:
         print("signed pdf email error:", e)
-    # tells the sign page whether it can honestly say a copy reached the
-    # signer's own inbox (it only does if the asset has an employee with an
-    # email on file and SMTP actually accepted it)
-    return jsonify({"ok": True, "emailed": bool(emailed)})
+    # Tells the sign page where the signed copy is headed: only to an inbox
+    # that exists on a server with mail set up, and only to a WhatsApp that is
+    # linked -- the page says "on its way", never "delivered".
+    return jsonify({"ok": True, "emailed": emailed, "whatsapp": whatsapped})
 
 @app.route("/api/assets/<aid>/signature")
 @auth_required(module="assets", level="read")
@@ -10746,6 +10979,19 @@ def update_apply():
                 return jsonify({"ok": False, "log": "\n\n".join(steps),
                                 "error": f"{label} failed -- nothing was restarted, "
                                          "so the running version is unchanged."}), 500
+        # The WhatsApp component, where Node is installed. Optional: a failure
+        # here is logged and the update goes ahead -- only WhatsApp is affected.
+        import shutil
+        npm = shutil.which("npm") or shutil.which("npm.cmd")
+        if npm and os.path.exists(os.path.join(BASE, "whatsapp", "package-lock.json")):
+            ncmd = [npm, "ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"]
+            try:
+                pr = subprocess.run(ncmd, cwd=os.path.join(BASE, "whatsapp"),
+                                    capture_output=True, text=True, timeout=600)
+                steps.append(("$ npm ci (whatsapp)\n" + (pr.stdout or "") + (pr.stderr or "")).strip()
+                             + ("" if pr.returncode == 0 else "\n(WhatsApp component not updated; everything else was)"))
+            except Exception as e:
+                steps.append(f"$ npm ci (whatsapp)\nskipped: {e}")
         audit(session.get("user"), "UPDATE_APPLY", "", f"via=source from={APP_VERSION}")
         threading.Thread(target=_restart_self, daemon=True).start()
         return jsonify({"ok": True, "method": "source", "restarting": True,
@@ -11472,5 +11718,6 @@ if __name__ == "__main__":
     start_ldap_scheduler()
     start_backup_scheduler()
     start_contract_expiry_scheduler()
+    wa.resume()
     print("IT-Vault (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
     app.run(host="0.0.0.0", port=5000, debug=False)

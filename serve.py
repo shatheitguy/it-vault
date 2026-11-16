@@ -127,6 +127,9 @@ def main():
     _app.start_backup_scheduler()
     _app.start_heartbeat_runner()    # runs IT-Vault's own checks
     _app.start_contract_expiry_scheduler()
+    # WhatsApp linked before: reconnect now, so the first signed copy after a
+    # restart doesn't wait for someone to open Settings
+    _app.wa.resume()
 
     host = os.environ.get("HOST", "0.0.0.0")
     port = int(os.environ.get("PORT", 5000))

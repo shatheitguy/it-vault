@@ -991,6 +991,14 @@ install_native() {
     step "Creating a virtualenv and installing dependencies"
     ( cd "$DIR" && "$PY" -m venv .venv ) || die "Couldn't create a virtualenv in $DIR/.venv."
     ( cd "$DIR" && .venv/bin/pip install --quiet --upgrade pip         && .venv/bin/pip install --quiet -r requirements.txt )         || die "Couldn't install the Python dependencies."
+    # Optional: the WhatsApp link runs on Node. Without it everything else
+    # works, and Settings says how to add it later.
+    if command -v npm >/dev/null 2>&1; then
+        ( cd "$DIR/whatsapp" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund --silent ) \
+            || say "    WhatsApp component not installed (npm failed) -- everything else is fine."
+    else
+        say "    Node.js not found: WhatsApp sending is off. Install Node.js 20+, then run 'npm ci --omit=dev' in $DIR/whatsapp."
+    fi
 
     # Same concept as the Docker path: offer to install and wire up the
     # database here too, so a --no-docker install doesn't dead-end at the
