@@ -385,7 +385,7 @@ let employees=[];
 async function loadEmployees(){
   const r=await api('/api/employees'); employees=r?await r.json():[];
   const q=(document.getElementById('empSearch').value||'').trim().toLowerCase();
-  const list=(employees||[]).filter(e=>[e.EmployeeName,e.EmployeeID,e.EmpCode,e.Department,e.Designation,e.Email].some(v=>(v||'').toLowerCase().includes(q)));
+  const list=(employees||[]).filter(e=>[e.EmployeeName,e.EmployeeID,e.EmpCode,e.Department,e.Designation,e.Email,e.Phone].some(v=>(v||'').toLowerCase().includes(q)));
   renderEmployees(list);
 }
 function tempEmpId(e){
@@ -405,6 +405,7 @@ function renderEmployees(list){
     <td>${esc(e.Department)}</td>
     <td>${esc(e.Designation)}</td>
     <td>${esc(e.Email)}</td>
+    <td class="mono">${esc(e.Phone)}</td>
     <td>${esc(e.source||'manual')}</td>
     <td><div class="row-actions">
       <button class="btn sm ghost" onclick="openEmpModal('${e._id}')">EDIT</button>
@@ -437,6 +438,7 @@ async function openEmpModal(id){
   document.getElementById('e_EmployeeID').value=e.EmployeeID||'';
   document.getElementById('e_EmployeeName').value=e.EmployeeName||'';
   document.getElementById('e_Email').value=e.Email||'';
+  document.getElementById('e_Phone').value=e.Phone||'';
   document.getElementById('empModal').classList.add('show');
   loadDepartmentOptions(e.Department||'');
   loadDesignationOptions(e.Designation||'');
@@ -481,7 +483,8 @@ async function saveEmployee(){
     EmployeeName:document.getElementById('e_EmployeeName').value.trim(),
     Department:document.getElementById('e_Department').value.trim(),
     Designation:document.getElementById('e_Designation').value.trim(),
-    Email:document.getElementById('e_Email').value.trim()
+    Email:document.getElementById('e_Email').value.trim(),
+    Phone:document.getElementById('e_Phone').value.trim()
   };
   if(!body.EmployeeID&&!body.EmployeeName){toast('ID or Name required');return;}
   const r=editingEmpId
@@ -4764,6 +4767,7 @@ async function loadUserSettings(){
       btn.classList.add('active');
       const sec = btn.dataset.sec;
       document.querySelectorAll('.cfg-sec').forEach(s => s.style.display = (s.dataset.sec === sec) ? 'block' : 'none');
+      if (sec === 'notif') waRefresh(); else waStopPolling();
     };
   });
   }
@@ -4960,5 +4964,69 @@ window.loadUserSettings = loadUserSettings;
     }finally{
       goBtn.textContent=label;
     }
+  };
+})();
+
+/* ---------- WhatsApp (Settings > Notifications) ----------
+   Link / unlink the company's WhatsApp, and while a QR is up keep asking for
+   the current one: WhatsApp replaces it every ~20 seconds, and an old code
+   just fails to scan with no explanation. Polling stops when the section is
+   left or the link is made. */
+let _waPoll=null;
+function waStopPolling(){ if(_waPoll){clearTimeout(_waPoll);_waPoll=null;} }
+function waRender(s){
+  const g=id=>document.getElementById(id);
+  if(!g('waPanel')) return;
+  const st=(s&&s.status)||'off';
+  const labels={on:'Linked'+(s.me?' as +'+s.me:''),qr:'Waiting for the QR to be scanned',connecting:'Connecting…',
+    off:s&&s.error==='logged_out'?'Unlinked from the phone. Link again to keep sending.':'Not linked',unavailable:'Not available on this server'};
+  g('waStatusText').textContent=labels[st]||st;
+  g('waDot').className='wa-dot '+st;
+  g('waLinkBtn').style.display=(st==='on'||st==='unavailable')?'none':'';
+  g('waLinkBtn').disabled=(st==='connecting'||st==='qr');
+  g('waUnlinkBtn').style.display=(st==='on'||st==='qr'||st==='connecting'||(s&&s.linked))?'':'none';
+  const qrBox=g('waQrBox');
+  if(st==='qr'&&s.qr_svg){ g('waQr').innerHTML=s.qr_svg; qrBox.style.display=''; } else { qrBox.style.display='none'; g('waQr').innerHTML=''; }
+  const m=g('waMsg');
+  if(st==='unavailable'&&s.error){ m.textContent=s.error; m.style.color='var(--amber)'; }
+  else if(s&&s.error&&s.error!=='logged_out'&&st!=='on'){ m.textContent='✕ '+s.error; m.style.color='var(--red)'; }
+  if(s&&s.country_code!=null&&document.activeElement!==g('waCc')) g('waCc').value=s.country_code;
+  if(s&&s.send_link!=null) g('waSendLink').checked=!!s.send_link;
+  if(s&&s.send_pdf!=null) g('waSendPdf').checked=!!s.send_pdf;
+}
+async function waRefresh(){
+  waStopPolling();
+  const r=await api('/api/whatsapp/status'); if(!r||!r.ok) return;
+  const s=await r.json().catch(()=>null); if(!s) return;
+  waRender(s);
+  const sec=document.querySelector('.cfg-sec[data-sec="notif"]');
+  const visible=sec&&sec.style.display!=='none';
+  if(visible&&(s.status==='qr'||s.status==='connecting')) _waPoll=setTimeout(waRefresh,2500);
+}
+(function(){
+  const g=id=>document.getElementById(id);
+  if(!g('waPanel')) return;
+  const post=(url,body)=>api(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  g('waLinkBtn').onclick=async()=>{
+    g('waMsg').textContent=''; g('waStatusText').textContent='Starting…'; g('waLinkBtn').disabled=true;
+    const r=await post('/api/whatsapp/link'); const s=r?await r.json().catch(()=>null):null;
+    if(s) waRender(s); waRefresh();
+  };
+  g('waUnlinkBtn').onclick=async()=>{
+    if(!confirm('Unlink WhatsApp? IT-Vault stops sending on WhatsApp until it is linked again, and it is removed from the phone\'s Linked devices.')) return;
+    const r=await post('/api/whatsapp/unlink'); const s=r?await r.json().catch(()=>null):null;
+    if(s) waRender(s); toast('✓ WHATSAPP UNLINKED');
+  };
+  g('waSaveBtn').onclick=async()=>{
+    const r=await post('/api/whatsapp/settings',{country_code:g('waCc').value.trim(),send_link:g('waSendLink').checked,send_pdf:g('waSendPdf').checked});
+    const j=r?await r.json().catch(()=>({})):{};
+    if(r&&r.ok) toast('✓ WHATSAPP SETTINGS SAVED'); else toast('✕ '+(j.error||'failed'));
+  };
+  g('waTestBtn').onclick=async()=>{
+    const num=g('waTestNum').value.trim(); const m=g('waMsg');
+    if(!num){ m.textContent='Enter a number to test with.'; m.style.color='var(--amber)'; return; }
+    m.textContent='sending…'; m.style.color='';
+    const r=await post('/api/whatsapp/test',{number:num}); const j=r?await r.json().catch(()=>({})):{};
+    m.textContent=(j.ok?'✓ ':'✕ ')+(j.message||j.error||'failed'); m.style.color=j.ok?'var(--grn)':'var(--red)';
   };
 })();

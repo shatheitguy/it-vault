@@ -1,3 +1,13 @@
+# The WhatsApp link (whatsapp/bridge.mjs) runs on Node, through Baileys. It is
+# built in its own stage so the final image carries just the node binary and
+# the bridge's production modules -- no npm, no build tools. Baileys and its
+# crypto are plain JS + WebAssembly, so the same modules work on amd64 and
+# arm64. Install scripts are skipped: none of these packages need one.
+FROM node:22-bookworm-slim AS whatsapp
+WORKDIR /wa
+COPY whatsapp/package.json whatsapp/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -11,13 +21,18 @@ WORKDIR /app
 # non-root user below: Docker's default capability set includes NET_RAW, so
 # the file capability is honoured.
 RUN apt-get update && apt-get install -y --no-install-recommends gcc default-libmysqlclient-dev pkg-config curl \
-    iputils-ping iproute2 net-tools \
+    iputils-ping iproute2 net-tools libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+
+# Node for the WhatsApp bridge, and the bridge's modules from the stage above.
+# The node binary links only against glibc and libstdc++, both already here.
+COPY --from=whatsapp /usr/local/bin/node /usr/local/bin/node
+COPY --from=whatsapp /wa/node_modules ./whatsapp/node_modules
 
 # Runtime dirs the app writes to (invoices, backups, and /app/data for the
 # uploaded branding, the saved DB pointer and the session key) -- created up

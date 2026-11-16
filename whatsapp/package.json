@@ -1,0 +1,12 @@
+{
+  "name": "itvault-whatsapp-bridge",
+  "private": true,
+  "description": "IT-Vault's WhatsApp link (Baileys). Started and stopped by the Python server; never run by hand.",
+  "type": "module",
+  "main": "bridge.mjs",
+  "engines": { "node": ">=20" },
+  "dependencies": {
+    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "pino": "9.14.0"
+  }
+}

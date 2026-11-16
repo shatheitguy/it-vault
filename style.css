@@ -952,3 +952,14 @@ body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
 .tm-p-edge s{position:absolute;right:4px;top:8px;bottom:8px;width:5px;
   background:repeating-linear-gradient(#111 0 3px,transparent 3px 6px);text-decoration:none}
 @media(max-width:560px){ .tm-prev{height:36px} }
+
+/* WhatsApp card (Settings > Notifications) */
+.wa-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:6px 0 4px}
+.wa-state{display:flex;align-items:center;gap:9px;font-weight:600}
+.wa-dot{width:11px;height:11px;border-radius:50%;background:var(--muted);flex:none}
+.wa-dot.on{background:var(--grn);box-shadow:0 0 0 4px color-mix(in srgb,var(--grn) 22%,transparent)}
+.wa-dot.qr,.wa-dot.connecting{background:var(--amber)}
+.wa-dot.unavailable{background:var(--red)}
+.wa-qr{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:12px}
+.wa-qr #waQr{background:#fff;padding:10px;border-radius:10px;line-height:0}
+.wa-qr #waQr svg{width:240px;height:240px;display:block}

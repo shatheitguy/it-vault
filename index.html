@@ -6,7 +6,7 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20261009a">
+<link rel="stylesheet" href="/style.css?v=20261116a">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -70,7 +70,7 @@
         <input id="empSearch" placeholder="Search name, ID, department…">
       </div>
       <div class="tablewrap">
-        <table id="empGrid"><thead><tr><th>EMP ID</th><th>USERNAME</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
+        <table id="empGrid"><thead><tr><th>EMP ID</th><th>USERNAME</th><th>NAME</th><th>DEPARTMENT</th><th>DESIGNATION</th><th>EMAIL</th><th>MOBILE</th><th>SOURCE</th><th></th></tr></thead><tbody id="empBody"></tbody></table>
         <div class="empty" id="empEmpty" style="display:none">NO EMPLOYEES // add manually or pull from LDAP</div>
       </div>
 
@@ -532,6 +532,30 @@
               <div class="field2" style="grid-column:1/-1"><label>From</label><input id="s_from"></div>
             </div>
             <div class="m-actions" style="justify-content:flex-start"><button class="btn" id="saveSettings">Save notifications</button><button class="btn ghost" id="smtpTestBtn">⚡ TEST EMAIL</button><span id="smtpTestMsg" class="muted" style="margin-left:8px"></span></div>
+            </div>
+            <div class="panel" style="margin-top:14px" id="waPanel"><div class="secthead">WHATSAPP</div>
+              <p class="sec-hint">Link the company's WhatsApp the way you would WhatsApp Web, and the acknowledgement link and the signed PDF copy go to the employee's mobile as well as their email. On the phone: WhatsApp &rsaquo; Settings &rsaquo; Linked devices &rsaquo; Link a device, then scan the code here. WhatsApp does not officially allow automated sending, so messages go one at a time, a few seconds apart, and only to your own employees. Use a business number you are comfortable linking.</p>
+              <div class="wa-row">
+                <div class="wa-state"><span class="wa-dot" id="waDot"></span><span id="waStatusText">Checking…</span></div>
+                <div class="m-actions" style="justify-content:flex-start;margin:0">
+                  <button class="btn" id="waLinkBtn" type="button">🔗 LINK WHATSAPP</button>
+                  <button class="btn ghost danger" id="waUnlinkBtn" type="button" style="display:none">UNLINK</button>
+                </div>
+              </div>
+              <div id="waQrBox" class="wa-qr" style="display:none"><div id="waQr"></div><div class="muted">Scan with WhatsApp &rsaquo; Linked devices. The code refreshes by itself.</div></div>
+              <div class="grid2" style="margin-top:12px">
+                <div class="field2"><label>Default country code</label><input id="waCc" inputmode="numeric" maxlength="4" placeholder="971"><span class="muted" style="font-size:12px">Used for numbers typed without one, e.g. 050 123 4567 becomes +971 50 123 4567</span></div>
+                <div class="field2"><label>Send on WhatsApp</label>
+                  <label class="chk"><input type="checkbox" id="waSendLink"> The acknowledgement link (SEND LINK in the sign dialog)</label>
+                  <label class="chk"><input type="checkbox" id="waSendPdf"> The signed PDF copy, once the employee signs</label>
+                </div>
+              </div>
+              <div class="m-actions" style="justify-content:flex-start">
+                <button class="btn" id="waSaveBtn" type="button">Save WhatsApp</button>
+                <input id="waTestNum" type="tel" placeholder="Test number" style="max-width:180px">
+                <button class="btn ghost" id="waTestBtn" type="button">⚡ TEST MESSAGE</button>
+                <span id="waMsg" class="muted" style="margin-left:8px"></span>
+              </div>
             </div>
             <div class="panel" style="margin-top:14px"><div class="secthead">NOTIFICATION CHANNELS</div>
 <p class="sec-hint">Where every notification is delivered &mdash; asset events, tickets, SLA breaches, backups and Heartbeat outage alerts. With none set up they go to users who have an email on their profile. Test a channel before something has to rely on it.</p>
@@ -1051,7 +1075,8 @@
       <div class="field2"><label>Employee Name</label><input id="e_EmployeeName"></div>
       <div class="field2"><label>Department</label><select id="e_Department"><option value="">-- select department --</option></select></div>
       <div class="field2"><label>Designation</label><select id="e_Designation"><option value="">-- select designation --</option></select></div>
-      <div class="field2" style="grid-column:1/-1"><label>Email</label><input id="e_Email"></div>
+      <div class="field2"><label>Email</label><input id="e_Email"></div>
+      <div class="field2"><label>Mobile (WhatsApp)</label><input id="e_Phone" type="tel" inputmode="tel" placeholder="050 123 4567 or +971…"></div>
     </div>
     <p class="sec-hint" style="margin:10px 0 0">Anything you change here stays as you typed it. The Active Directory sync fills in name, department, designation and email for people nobody has edited, and leaves your edits alone from then on -- so a title you set does not revert at the next sync.</p>
   </div>
@@ -1404,6 +1429,6 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20261009a"></script>
+<script src="/app.js?nocache=20261116a"></script>
 </body>
 </html>

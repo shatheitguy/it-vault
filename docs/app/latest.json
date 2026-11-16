@@ -1,6 +1,6 @@
 {
-  "versionCode": 42,
-  "versionName": "2.7.6",
+  "versionCode": 43,
+  "versionName": "2.8.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "The filter sheet is the long-press sheet: same heading, same rows, same icons, with what each filter is set to on the right in your accent, and Clear all and Apply as the pill buttons the rest of the app uses. Picking a value opens a list built from those same rows, with a tick on the one chosen. Fixed, and the one worth upgrading for: on a first sign-in the dashboard’s headline card chose its text colour before your branding had arrived, so on a light accent such as yellow it drew white on yellow and stayed that way. It now re-reads the card once the colours land. The sign-in logo fills its tile instead of floating inside a white rim."
+  "notes": "WhatsApp: link the company's WhatsApp in Settings > Notifications and the acknowledgement link and the signed PDF copy go to the employee's mobile as well as their email. Employees have a Mobile field for it. Signing is faster: the signed copy is sent in the background, so the page answers straight away, and the submit button holds while it works so nobody signs twice. The 'Acknowledged' message on the sign page is now a large green banner the page scrolls to, instead of a line of plain text under the button."
 }
