@@ -102,9 +102,11 @@ object Prefs {
         get() = prefs.getLong("skipped_update_code", 0L)
         set(v) = prefs.edit().putLong("skipped_update_code", v).apply()
 
-    /** "system" (default, follows the device setting), "light", or "dark". */
+    /** "server" (default: whatever Settings > Customization > Light & dark
+     * says for the app on the web), "system" (follows this phone), "light",
+     * or "dark". */
     var themeMode: String
-        get() = prefs.getString("theme_mode", "system") ?: "system"
+        get() = prefs.getString("theme_mode", "server") ?: "server"
         set(v) {
             prefs.edit().putString("theme_mode", v).apply()
             applyThemeMode()
@@ -122,9 +124,15 @@ object Prefs {
     /** Call once at the top of every entry-point Activity's onCreate, before
      * super.onCreate() -- AppCompatDelegate needs to know the mode before the
      * theme is resolved for this Activity's window. */
+    /** The web app's own light/dark choice, from /api/branding. */
+    var serverUiMode: String
+        get() = prefs.getString("server_ui_mode", "system") ?: "system"
+        set(v) { prefs.edit().putString("server_ui_mode", v).apply() }
+
     fun applyThemeMode() {
+        val mode = if (themeMode == "server") serverUiMode else themeMode
         AppCompatDelegate.setDefaultNightMode(
-            when (themeMode) {
+            when (mode) {
                 "light" -> AppCompatDelegate.MODE_NIGHT_NO
                 "dark" -> AppCompatDelegate.MODE_NIGHT_YES
                 else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM

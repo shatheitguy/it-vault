@@ -45,3 +45,9 @@ Thumbs.db
 # Release APKs are attached to GitHub Releases, not committed
 *.apk
 
+
+# WhatsApp link (encrypted keys) -- on a source install the data folder is the
+# code folder, so the linked phone's session lands next to bridge.mjs. Never commit it.
+whatsapp/*.json
+!whatsapp/package.json
+!whatsapp/package-lock.json

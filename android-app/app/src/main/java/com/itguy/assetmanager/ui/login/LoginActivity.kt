@@ -37,6 +37,7 @@ class LoginActivity : AppCompatActivity() {
 
         b = ActivityLoginBinding.inflate(layoutInflater)
         setContentView(b.root)
+        com.itguy.assetmanager.ui.FormLabels.apply(b.root)
         // Themed before the first frame from the cached palette, so signing
         // back in to a server you have used before does not flash red first.
         com.itguy.assetmanager.data.Palette.apply(b.root)

@@ -117,13 +117,19 @@ async function useLockedAuthState(dir, B) {
 }
 
 /* ---- the connection ---- */
-const st = { sock: null, status: 'off', qr: null, me: null, error: null, want: false, tries: 0, queue: Promise.resolve() }
+const st = { sock: null, status: 'off', qr: null, me: null, error: null, want: false, tries: 0, queue: Promise.resolve(), starting: false, timer: null }
 const linked = () => fs.existsSync(path.join(DIR, 'creds.json'))
 function wipe() { try { fs.rmSync(DIR, { recursive: true, force: true }) } catch { /* gone already */ } }
 
 async function start() {
   st.want = true
-  if (st.sock && st.status !== 'off') return
+  if (st.timer) { clearTimeout(st.timer); st.timer = null }
+  // st.sock is only set after several awaits, so a second start() in that
+  // window (the helper's own resume plus a Link click) opened a second socket
+  // on the same keys; WhatsApp then replaced one and its close handler wiped
+  // the state of the live one. The flag is set before the first await.
+  if (st.starting || (st.sock && st.status !== 'off')) return
+  st.starting = true
   st.status = 'connecting'; st.error = null
   try {
     const B = await import('@whiskeysockets/baileys')
@@ -138,8 +144,10 @@ async function start() {
       shouldSyncHistoryMessage: () => false, generateHighQualityLinkPreview: false,
     })
     st.sock = sock
+    st.starting = false
     sock.ev.on('creds.update', saveCreds)
     sock.ev.on('connection.update', u => {
+      if (st.sock !== sock) return          // an old socket's late events change nothing
       if (u.qr) { st.status = 'qr'; st.qr = u.qr }
       if (u.connection === 'open') {
         st.status = 'on'; st.qr = null; st.tries = 0; st.error = null
@@ -162,22 +170,28 @@ async function start() {
           console.log('[whatsapp] replaced by another session of this link; standing down')
           return
         }
-        // a dropped connection comes back in a few seconds, slower each time;
-        // a QR nobody scans stops asking after a while
-        if (st.want && st.tries < 8 && (linked() || st.tries < 3)) {
+        // A linked phone is retried for as long as it stays linked: 3s, 6s,
+        // 12s ... then every 5 minutes. Giving up after eight tries (about two
+        // minutes) meant a router reboot switched WhatsApp off until someone
+        // pressed Link again. A QR nobody scans still stops after three.
+        if (st.want && (linked() || st.tries < 3)) {
           st.tries++
-          setTimeout(() => { void start() }, Math.min(60_000, 3000 * st.tries))
+          const wait = Math.min(300_000, 3000 * 2 ** Math.min(st.tries - 1, 7))
+          st.timer = setTimeout(() => { st.timer = null; if (st.want) void start() }, wait)
         } else st.want = false
       }
     })
   } catch (e) {
     st.sock = null; st.status = 'off'; st.error = String(e?.message || e).slice(0, 200)
     console.error('[whatsapp]', st.error)
+  } finally {
+    st.starting = false
   }
 }
 
 async function logout() {
   st.want = false
+  if (st.timer) { clearTimeout(st.timer); st.timer = null }   // or the pending retry relinks
   try { await st.sock?.logout() } catch { /* already gone */ }
   try { st.sock?.end?.(undefined) } catch { /* closed */ }
   st.sock = null; st.status = 'off'; st.qr = null; st.me = null; st.error = null
@@ -186,7 +200,7 @@ async function logout() {
 
 /** One message at a time, 3 seconds apart -- WhatsApp blocks numbers that send fast.
  *  'ok' | 'not_linked' | 'not_on_whatsapp' | 'bad_number' | 'failed' */
-function send({ number, text, document, fileName, caption }) {
+function send({ number, text, document, fileName, caption, image, imageType }) {
   const num = String(number || '').replace(/\D/g, '')
   if (num.length < 8 || num.length > 15) return Promise.resolve('bad_number')
   if (st.status !== 'on' || !st.sock) return Promise.resolve('not_linked')
@@ -198,6 +212,12 @@ function send({ number, text, document, fileName, caption }) {
         await st.sock.sendMessage(r.jid, {
           document: Buffer.from(document, 'base64'), mimetype: 'application/pdf',
           fileName: String(fileName || 'document.pdf').slice(0, 120),
+          caption: String(caption || text || '').slice(0, 1500) || undefined,
+        })
+      } else if (image) {
+        // the banner: the message rides on it as the caption
+        await st.sock.sendMessage(r.jid, {
+          image: Buffer.from(image, 'base64'), mimetype: String(imageType || 'image/jpeg'),
           caption: String(caption || text || '').slice(0, 1500) || undefined,
         })
       } else {

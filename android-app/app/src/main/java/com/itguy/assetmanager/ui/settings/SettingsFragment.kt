@@ -122,7 +122,8 @@ class SettingsFragment : Fragment() {
         when (Prefs.themeMode) {
             "light" -> b.themeLight.isChecked = true
             "dark" -> b.themeDark.isChecked = true
-            else -> b.themeSystem.isChecked = true
+            "system" -> b.themeSystem.isChecked = true
+            else -> b.themeServer.isChecked = true
         }
         bindAppIcon()
         paintThemePills()
@@ -131,7 +132,8 @@ class SettingsFragment : Fragment() {
             val mode = when (checkedId) {
                 b.themeLight.id -> "light"
                 b.themeDark.id -> "dark"
-                else -> "system"
+                b.themeSystem.id -> "system"
+                else -> "server"
             }
             if (mode != Prefs.themeMode) {
                 Prefs.themeMode = mode
@@ -143,7 +145,7 @@ class SettingsFragment : Fragment() {
     /** The three theme pills, filled in the install's own accent. */
     private fun paintThemePills() {
         if (_b == null) return
-        listOf(b.themeSystem, b.themeLight, b.themeDark)
+        listOf(b.themeServer, b.themeSystem, b.themeLight, b.themeDark)
             .forEach { com.itguy.assetmanager.ui.Pills.paint(it, it.isChecked) }
     }
 

@@ -47,7 +47,7 @@
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <TextView style="@style/FieldLabel" android:text="Type" />
-                <Spinner android:id="@+id/fType" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fType" style="@style/Dropdown" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     style="@style/Field"
@@ -148,16 +148,16 @@
                     android:text="All optional. Link a contract to what it is for and it shows up on that record too." />
 
                 <TextView style="@style/FieldLabel" android:text="Linked asset" />
-                <Spinner android:id="@+id/fAsset" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fAsset" style="@style/Dropdown" />
 
                 <TextView style="@style/FieldLabel" android:text="Employee" />
-                <Spinner android:id="@+id/fEmployee" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fEmployee" style="@style/Dropdown" />
 
                 <TextView style="@style/FieldLabel" android:text="Location" />
-                <Spinner android:id="@+id/fLocation" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fLocation" style="@style/Dropdown" />
 
                 <TextView style="@style/FieldLabel" android:text="Department" />
-                <Spinner android:id="@+id/fDepartment" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fDepartment" style="@style/Dropdown" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

@@ -1,0 +1,371 @@
+/* IT-Vault design layer -- loaded after style.css.
+ *
+ * Works with every theme in Settings: it only uses the palette variables the
+ * theme engine sets (--bg --surface --surface2 --line --txt --muted --accent
+ * --accent2 --accent-soft ...), never its own colours, so a red, yellow or
+ * light theme all come out right.
+ *
+ * Layout fits the screen it is on, on its own:
+ *   >= 1100px   full sidebar; content capped and centred past 1800px
+ *   761-1099px  slim icon rail
+ *   <= 760px    phone: no sidebar -- bottom tab bar, a menu drawer, cards
+ *               instead of the wide table, dialogs as bottom sheets
+ * Type and spacing scale smoothly in between (clamp()).
+ */
+
+:root{
+  --r-lg:clamp(12px,0.6vw + 8px,16px);
+  --r-md:10px;
+  --r-sm:8px;
+  --gap:clamp(10px,0.8vw + 6px,18px);
+  --pad-main:clamp(14px,1.6vw + 6px,32px);
+  --row-h:clamp(48px,2.2vw + 30px,58px);
+  --tint:color-mix(in srgb,var(--accent) 12%,transparent);
+  --tint-2:color-mix(in srgb,var(--accent) 22%,transparent);
+  --elev:0 1px 0 color-mix(in srgb,var(--txt) 4%,transparent) inset,0 10px 30px -18px rgba(0,0,0,.55);
+}
+
+/* ------------------------------------------------------------ icons */
+.ic{width:1.15em;height:1.15em;flex:none;vertical-align:-.2em}
+.btn,.btn.sm,button.btn{display:inline-flex;align-items:center;justify-content:center;gap:.5em;white-space:nowrap}
+.btn .ic{width:16px;height:16px}
+.btn.sm .ic{width:14px;height:14px}
+.cfgitem{display:flex;align-items:center;gap:10px}
+.cfgitem .ic{width:17px;height:17px;opacity:.85}
+.cfgitem{position:relative;border:1px solid transparent!important;font-weight:500}
+.cfgitem:hover{background:color-mix(in srgb,var(--txt) 6%,transparent)}
+.cfgitem.active{background:var(--tint)!important;color:var(--accent);box-shadow:none!important;font-weight:600}
+.cfgitem.active::before{content:"";position:absolute;left:-1px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.cfgitem-danger,.cfgitem-danger .ic{color:var(--red)}
+
+/* ------------------------------------------------------------ shell */
+.main{padding:var(--pad-main);scroll-behavior:smooth}
+.main>div[id^="page-"]{max-width:1720px;margin-inline:auto}
+.side{flex-basis:clamp(220px,14vw,264px);padding:18px 14px;gap:4px;
+  background:color-mix(in srgb,var(--surface) 92%,var(--bg));border-right:1px solid var(--line)}
+.logo{padding:4px 10px 20px;font-size:clamp(17px,.4vw + 13px,20px);letter-spacing:-.01em}
+.logo img{width:30px;height:30px;border-radius:9px;object-fit:contain}
+.nav{gap:2px}
+.nav-grp{padding:16px 12px 6px;font-size:10.5px;letter-spacing:.9px;font-weight:600}
+.nav a{position:relative;gap:12px;padding:0 12px;min-height:40px;border-radius:var(--r-md);font-size:14px;
+  font-weight:500;border:1px solid transparent;transition:background .15s,color .15s}
+.nav a .ni{width:20px;height:20px;display:grid;place-items:center;flex:none;font-size:16px}
+.nav a .ni .ic{width:19px;height:19px}
+.nav a:hover{background:color-mix(in srgb,var(--txt) 6%,transparent)}
+.nav a.active{background:var(--tint);color:var(--accent);border-color:transparent;box-shadow:none;font-weight:600}
+.nav a.active::before{content:"";position:absolute;left:-14px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--accent)}
+.side-foot{gap:10px}
+.userbox{background:transparent;border-color:var(--line);border-radius:var(--r-md);padding:10px}
+.logout{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:38px;
+  background:transparent;border:1px solid var(--line);border-radius:var(--r-md);color:var(--muted);
+  font:600 13px var(--font);letter-spacing:0;text-transform:none;cursor:pointer;transition:.15s}
+.logout::before{content:none!important}
+.logout .ic{width:16px;height:16px}
+.logout:hover{color:var(--red);border-color:color-mix(in srgb,var(--red) 45%,transparent);background:color-mix(in srgb,var(--red) 8%,transparent)}
+
+/* page header */
+.topbar{padding:2px 0 clamp(14px,1.2vw,22px);margin-bottom:clamp(14px,1.2vw,22px);border-bottom:1px solid var(--line);gap:10px;flex-wrap:wrap}
+.topbar h2{font-size:clamp(20px,.9vw + 12px,28px);font-weight:700;letter-spacing:-.02em;line-height:1.15}
+.crumb{font-size:12px;letter-spacing:.2px;text-transform:none;color:var(--muted)}
+.topbar .btn{min-height:38px}
+
+/* ------------------------------------------------------------ buttons & inputs */
+.btn{min-height:36px;padding:0 15px;border-radius:var(--r-md);font-weight:600;font-size:13px;letter-spacing:.2px;
+  transition:filter .15s,background .15s,border-color .15s,color .15s,transform .05s}
+.btn:active{transform:translateY(1px)}
+.btn.sm{min-height:30px;padding:0 11px;border-radius:var(--r-sm);font-size:12px}
+.btn.ghost{border-color:var(--line2);color:var(--txt);background:transparent}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent);background:var(--tint)}
+.btn.mag{background:var(--accent);color:var(--btn-text,#04121f)}
+.btn:focus-visible,.nav a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.toolbar input,.toolbar select,.field2 input,.field2 select,.field2 textarea,.invbox input,.invbox select{border-radius:var(--r-md)!important;min-height:38px}
+.toolbar input#search{padding-left:36px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a98b0' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-size:16px;background-position:12px center}
+
+/* ------------------------------------------------------------ cards */
+.panel,.tablewrap,.stat,.kpi,.widget,.cfgnav,.invbox{border-radius:var(--r-lg)}
+.kpis,.stats{gap:var(--gap);grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+.kpi{padding:clamp(14px,1vw + 6px,20px);gap:14px;box-shadow:var(--elev);background:var(--surface)}
+.kpi::after{display:none}
+.kpi-ico{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;font-size:0;
+  background:color-mix(in srgb,var(--kc,var(--accent)) 14%,transparent);color:var(--kc,var(--accent));border:0}
+.kpi-ico .ic{width:22px;height:22px}
+.kpi.hbk-down{--kc:var(--red)} .kpi.hbk-pending{--kc:var(--amber)} .kpi.hbk-up{--kc:var(--grn)} .kpi.hbk-paused{--kc:var(--muted)} .kpi.hbk-avg{--kc:var(--cyan)}
+.kpi.c1{--kc:var(--accent)} .kpi.c2{--kc:var(--cyan)} .kpi.c3{--kc:var(--amber)} .kpi.c4{--kc:var(--amber)} .kpi.c5{--kc:var(--red)}
+.kpi-v{font-size:clamp(24px,1vw + 16px,32px);letter-spacing:-.02em}
+.kpi-k{font-size:12px;letter-spacing:.2px;text-transform:none;color:var(--muted);font-weight:500}
+.stat{position:relative;padding:clamp(14px,1vw + 6px,20px);box-shadow:var(--elev);overflow:hidden}
+.stat::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--sc,var(--accent))}
+.stat.c1{--sc:var(--accent)} .stat.c2{--sc:var(--cyan)} .stat.c3{--sc:var(--amber)} .stat.c4{--sc:var(--amber)} .stat.c5{--sc:var(--red)}
+.stat .k{font-size:12px;text-transform:none;letter-spacing:.2px;color:var(--muted);font-weight:500}
+.stat .v{font-size:clamp(24px,1vw + 16px,32px);letter-spacing:-.02em;margin-top:6px}
+.widget{box-shadow:var(--elev)}
+
+/* ------------------------------------------------------------ tables */
+.tablewrap{box-shadow:var(--elev);overflow:auto;border-radius:var(--r-lg)}
+.tablewrap table{font-size:13.5px}
+.tablewrap thead th{position:sticky;top:0;z-index:2;background:var(--surface);font-size:11px;font-weight:600;
+  letter-spacing:.6px;text-transform:uppercase;color:var(--muted);padding:12px 14px;border-bottom:1px solid var(--line);white-space:nowrap}
+.tablewrap tbody td{padding:10px 14px;height:var(--row-h);border-bottom:1px solid var(--line);vertical-align:middle}
+.tablewrap tbody tr{transition:background .12s}
+.tablewrap tbody tr:hover{background:color-mix(in srgb,var(--txt) 4%,transparent)}
+.tablewrap tbody tr:last-child td{border-bottom:0}
+td.c-AssetTag{color:var(--muted);font-size:12.5px;white-space:nowrap}
+.nm{display:flex;align-items:center;gap:12px;min-width:0}
+.nm-t{display:flex;flex-direction:column;min-width:0;gap:1px}
+.nm-n{font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm-s{display:none;font-size:11.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ticon{width:36px;height:36px;border-radius:10px;display:grid;place-items:center;flex:none;
+  background:var(--tint);color:var(--accent)}
+.ticon .ic{width:19px;height:19px}
+/* status as a soft pill in its own colour */
+.pill{display:inline-flex;align-items:center;gap:7px;padding:4px 11px 4px 9px;border-radius:999px;font-size:12px;font-weight:600;
+  white-space:nowrap;color:var(--pc,var(--muted));background:color-mix(in srgb,var(--pc,var(--muted)) 13%,transparent);
+  border:1px solid color-mix(in srgb,var(--pc,var(--muted)) 26%,transparent)}
+.pill .sev{width:6px;height:6px;border-radius:50%;background:currentColor;display:inline-block;flex:none}
+.pill .sev::before,.pill .sev::after{display:none}
+.row-more{width:34px;min-height:34px!important;padding:0!important;font-size:18px;line-height:1}
+
+/* row menu */
+.row-menu{border-radius:var(--r-md);padding:6px;min-width:180px;box-shadow:0 18px 50px -12px rgba(0,0,0,.6);border:1px solid var(--line2)}
+.row-menu button{border-radius:var(--r-sm);padding:9px 12px;font-weight:500;text-align:left}
+
+/* ------------------------------------------------------------ dialogs */
+.modal{backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.modal-box{border-radius:calc(var(--r-lg) + 4px);box-shadow:0 30px 80px -20px rgba(0,0,0,.7);border-color:var(--line2)}
+.modal-box > h3:first-child{font-size:clamp(16px,.5vw + 13px,19px);letter-spacing:-.01em}
+
+/* ------------------------------------------------------------ network scan: one row */
+.scan-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.invbox .scan-bar .toggle{display:inline-flex;align-items:center;gap:9px;height:38px;margin:0;padding:0 14px;
+  border:1px solid var(--line2);border-radius:var(--r-md);background:transparent;cursor:pointer;
+  text-transform:none;letter-spacing:0;font:600 13px var(--font);color:var(--txt);white-space:nowrap}
+.invbox .scan-bar .toggle input{width:34px;min-height:0;height:20px;padding:0;border:0}
+.scan-bar .scan-prefix-row{flex:1 1 220px;margin:0}
+.scan-bar .scan-prefix{width:100%;min-height:38px}
+.scan-bar #scanBtn{margin-left:auto;min-width:110px}
+@media (max-width:560px){.scan-bar #scanBtn{flex:1 1 100%;margin-left:0}}
+
+/* ------------------------------------------------------------ public address */
+.pub-row{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap}
+.pub-row .field2{flex:1 1 320px}
+.pub-state{margin-top:10px;font-size:13px;padding:10px 12px;border-radius:var(--r-md);border:1px solid var(--line)}
+.pub-state:empty{display:none}
+.pub-state.ok{color:var(--muted)}
+.pub-state.warn{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 40%,transparent);background:color-mix(in srgb,var(--amber) 8%,transparent)}
+.sign-warn{margin-top:10px;font-size:13px;line-height:1.5;padding:10px 12px;border-radius:var(--r-md);color:var(--amber);
+  border:1px solid color-mix(in srgb,var(--amber) 40%,transparent);background:color-mix(in srgb,var(--amber) 8%,transparent)}
+.sign-warn a{color:inherit;text-decoration:underline}
+
+/* ------------------------------------------------------------ status pill as a control */
+.pill-btn{cursor:pointer;font-family:var(--font);transition:filter .15s,box-shadow .15s}
+.pill-btn:hover{box-shadow:0 0 0 3px color-mix(in srgb,var(--pc,var(--muted)) 18%,transparent)}
+.pill-caret{width:13px;height:13px;margin-left:1px;opacity:.75}
+.row-menu .rm-head{font-size:10.5px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);padding:6px 12px 4px}
+.row-menu .rm-st{display:flex;align-items:center;gap:10px}
+.row-menu .rm-st.on{color:var(--accent);font-weight:600}
+.row-menu .rm-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.row-menu .rm-ok{width:15px;height:15px;margin-left:auto}
+
+/* contract types */
+.ctype{display:inline-flex;align-items:center;gap:9px}
+.ticon.sm{width:28px;height:28px;border-radius:8px}
+.ticon.sm .ic{width:15px;height:15px}
+
+/* header controls: a dropdown or a switch sits in the header as a button does */
+.topbar select,.dash-tools select,.toolbar select{height:38px;min-height:38px;padding:0 34px 0 12px;border-radius:var(--r-md);
+  border:1px solid var(--line2);background-color:var(--surface);color:var(--txt);font:600 13px var(--font);cursor:pointer;
+  appearance:none;-webkit-appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a98b0' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-size:15px;background-position:right 11px center}
+.topbar select:hover,.toolbar select:hover{border-color:var(--accent)}
+.topbar .toggle{height:38px;margin:0;padding:0 14px;border-radius:var(--r-md);border:1px solid var(--line2);background:transparent;
+  font:600 13px var(--font);gap:9px}
+.topbar .toggle:hover{border-color:var(--accent)}
+.toggle input[type=checkbox]{appearance:none;-webkit-appearance:none;width:34px;height:20px;border-radius:999px;background:var(--line2);
+  position:relative;flex:none;cursor:pointer;transition:background .15s;margin:0}
+.toggle input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}
+.toggle input[type=checkbox]:checked{background:var(--accent)}
+.toggle input[type=checkbox]:checked::after{transform:translateX(14px);background:var(--btn-text,#04121f)}
+
+/* ------------------------------------------------------------ category look */
+.ticon.has-photo{background:#fff;padding:0;overflow:hidden}
+.ticon.has-photo img{width:100%;height:100%;object-fit:contain}
+.cat-cell{display:flex;align-items:center;gap:12px}
+.cat-look{padding:0;border:0;background:none;cursor:pointer;border-radius:10px;flex:none}
+.cat-look:hover .ticon{outline:2px solid var(--accent);outline-offset:2px}
+.ui-dialog .look-box{width:min(520px,94vw);max-width:520px}
+.look-photo{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px;border:1px solid var(--line);border-radius:var(--r-lg);margin-bottom:14px}
+.look-prev .ticon{width:56px;height:56px;border-radius:14px}
+.look-prev .ticon .ic{width:28px;height:28px}
+.look-lbl{font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.look-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(48px,1fr));gap:8px}
+.look-opt{height:48px;border-radius:12px;border:1px solid var(--line2);background:var(--bg1);color:var(--txt);cursor:pointer;display:grid;place-items:center;font:600 11px var(--font)}
+.look-opt .ic{width:22px;height:22px}
+.look-opt:hover{border-color:var(--accent)}
+.look-opt.on{background:var(--tint);border-color:var(--accent);color:var(--accent)}
+
+/* ------------------------------------------------------------ settings: light & dark */
+.mode-rows{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-top:6px}
+.mode-row{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;background:var(--surface)}
+.mode-row + .mode-row{border-top:1px solid var(--line)}
+.mode-lbl{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mode-lbl b{font-size:14px;color:var(--txt);font-weight:600}
+.mode-lbl span{font-size:12.5px;color:var(--muted)}
+.seg{display:inline-flex;padding:3px;gap:2px;border:1px solid var(--line2);border-radius:11px;background:var(--bg1);flex:none}
+.seg button{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--muted);
+  font:600 12.5px var(--font);padding:7px 12px;border-radius:8px;cursor:pointer;transition:background .15s,color .15s}
+.seg button .ic{width:15px;height:15px}
+.seg button:hover{color:var(--txt)}
+.seg button.on{background:var(--accent);color:var(--btn-text,#04121f)}
+@media (max-width:640px){
+  .mode-row{flex-direction:column;align-items:stretch;gap:10px}
+  .seg{width:100%}.seg button{flex:1;justify-content:center}
+}
+
+/* ------------------------------------------------------------ phone tab bar (hidden off phones) */
+.bnav,.drawer-scrim{display:none}
+
+/* ============================================================ slim rail: 761-1099 */
+@media (max-width:1099px) and (min-width:761px){
+  .side{flex:0 0 72px;width:72px;padding:14px 10px}
+  .logo{justify-content:center;padding:4px 0 14px;font-size:0}
+  #sideName{display:none}
+  .nav a{justify-content:center;padding:0;font-size:0;gap:0;min-height:44px}
+  .nav a .ni{font-size:16px}
+  .nav a.active::before{left:-10px}
+  .nav-grp{font-size:0;padding:10px 0 4px;border-top:1px solid var(--line);margin:6px 8px 0}
+  .nav-grp:first-child{border-top:0}
+  .userbox{justify-content:center;padding:6px;border:0}
+  .userbox > div:not(.avatar){display:none}
+  .logout span{display:none}
+  .logout{font-size:0}
+}
+
+/* ============================================================ phone: <= 760 */
+@media (max-width:760px){
+  html,body{overflow-x:hidden}
+  /* no stacking context of its own here, or the drawer (inside #app) sits
+     under the scrim and the tab bar (outside it) */
+  #app{display:block;height:100dvh;z-index:auto}
+  .main{height:100dvh;width:100%;padding:12px 14px calc(84px + env(safe-area-inset-bottom));overflow-x:hidden}
+  .main>div[id^="page-"]{max-width:100%}
+
+  /* the sidebar becomes a drawer, opened from "More" */
+  .side{position:fixed;inset:0 auto 0 0;z-index:260;width:min(86vw,320px);flex:none;height:100dvh;
+    transform:translateX(-104%);transition:transform .25s ease;box-shadow:0 0 60px rgba(0,0,0,.6);padding:18px 14px;overflow-y:auto}
+  body.drawer-open .side{transform:none}
+  .drawer-scrim{display:block;position:fixed;inset:0;z-index:255;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:opacity .2s}
+  body.drawer-open .drawer-scrim{opacity:1;pointer-events:auto}
+  /* undo the old narrow-rail rules inside the drawer */
+  .logo{justify-content:flex-start;font-size:18px;padding:4px 10px 18px}
+  #sideName{display:inline}
+  .nav a{justify-content:flex-start;padding:0 12px;font-size:15px;gap:12px;min-height:46px}
+  .nav a span:not(.ni){display:inline}
+  .nav-grp{text-align:left;font-size:10.5px;padding:14px 12px 6px;overflow:visible}
+  .userbox{justify-content:flex-start;padding:10px}
+  .userbox > div:not(.avatar){display:block}
+  .logout{font-size:13px}
+  .logout span{display:inline}
+
+  .bnav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:240;
+    padding:6px 6px calc(6px + env(safe-area-inset-bottom));
+    background:color-mix(in srgb,var(--surface) 88%,transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-top:1px solid var(--line)}
+  .bnav button{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
+    color:var(--muted);font:600 11px var(--font);padding:6px 0;border-radius:12px;cursor:pointer;min-height:52px}
+  .bnav button[hidden]{display:none}
+  /* a dialog owns the screen: its own buttons sit where the tab bar would */
+  body:has(.modal.show) .bnav,body:has(.ui-dialog) .bnav{display:none}
+  .modal .msec-head,.modal .sec-head{flex-wrap:wrap;row-gap:4px}
+  .modal label .mlink{float:none;display:block;position:static;margin:4px 0 0;text-align:left}
+  .bnav button .ic{width:22px;height:22px}
+  .bnav button.on{color:var(--accent)}
+  .bnav button.on .ic{filter:drop-shadow(0 0 8px var(--tint-2))}
+
+  /* page header: title on its own line, actions share the row below */
+  .topbar{border-bottom:0;padding-bottom:6px;margin-bottom:12px}
+  .topbar>div:first-child{flex:1 1 100%}
+  .topbar .crumb{display:none}
+  .topbar .spacer{display:none}
+  .topbar .btn{flex:1 1 0;min-width:0}
+
+  /* figures become a strip you can swipe */
+  .stats,.kpis{display:flex;overflow-x:auto;gap:10px;margin:0 -14px 14px;padding:2px 14px 4px;scroll-snap-type:x mandatory;scrollbar-width:none}
+  .stats::-webkit-scrollbar,.kpis::-webkit-scrollbar{display:none}
+  .stat,.kpi{flex:0 0 clamp(132px,40vw,172px);scroll-snap-align:start;padding:12px 14px}
+  .stat .v,.kpi-v{font-size:24px}
+  .kpi-ico{width:36px;height:36px;border-radius:10px}
+  .kpi-ico .ic{width:19px;height:19px}
+
+  /* search on its own line, the rest wraps under it */
+  .toolbar{gap:8px;flex-wrap:wrap}
+  .toolbar>*{min-width:0}
+  .toolbar input#search{flex:1 1 100%}
+  .toolbar select{flex:1 1 calc(50% - 4px)}
+  .toolbar .tb-spacer{display:none}
+  .toolbar .count{flex:1 1 100%;order:9;font-size:12px}
+  .toolbar .btn.sm{flex:1 1 auto}
+  .hscroll{display:none!important}
+  /* rows of buttons laid out inline (section headers, panels) wrap instead
+     of pushing past the edge */
+  .secthead,.main [style*="display:flex"]{flex-wrap:wrap;row-gap:8px}
+  .secthead .btn,.main [style*="display:flex"] > .btn{min-width:0}
+
+  /* the asset list: one card per asset */
+  #tablewrap{background:transparent;border:0;box-shadow:none;overflow:visible}
+  #grid thead{display:none}
+  #grid,#grid tbody{display:block;width:100%}
+  #grid tr.arow{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:10px;row-gap:8px;align-items:center;
+    background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:12px 12px 12px 14px;margin-bottom:10px;box-shadow:var(--elev)}
+  #grid tr.arow td{display:none;padding:0;height:auto;border:0}
+  #grid tr.arow td.c-Name{display:block;grid-column:1;grid-row:1}
+  #grid tr.arow td.c-act{display:block;grid-column:2;grid-row:1}
+  #grid tr.arow td.c-Status{display:block;grid-column:1 / -1;grid-row:2}
+  #grid tr.arow td.c-AssetTag,#grid tr.arow td.c-EmployeeID,#grid tr.arow td.c-Location{display:inline-flex;grid-row:3;font-size:12.5px;color:var(--muted)}
+  #grid tr.arow td.c-AssetTag{grid-column:1 / -1}
+  #grid tr.arow td.c-EmployeeID:not(.is-empty){grid-row:4;grid-column:1 / -1;color:var(--txt)}
+  #grid tr.arow td.c-EmployeeID:not(.is-empty)::before{content:"";width:16px;height:16px;margin-right:6px;flex:none;
+    background:currentColor;opacity:.7;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E") center/contain no-repeat;
+    mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='12' cy='7' r='4'/%3E%3C/svg%3E") center/contain no-repeat}
+  #grid tr.arow:hover,#grid tr.arow:hover td{background:var(--surface)!important}
+  #grid tr.arow td{background:transparent!important}
+  #grid tr.arow td.c-act{justify-self:end}
+  #grid tr.arow td.c-Location{justify-self:end;text-align:right}
+  .nm-s{display:block}
+  #grid tr:not(.arow){display:block}
+  #grid tr:not(.arow) td{display:block;border:0;padding:14px 4px 8px;height:auto}
+  .nm-n{white-space:normal}
+
+  /* other tables scroll sideways inside their card instead of pushing the page */
+  .tablewrap:not(#tablewrap){overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tablewrap:not(#tablewrap) table{min-width:640px}
+
+  /* dialogs come up from the bottom, full width */
+  .modal{align-items:flex-end;padding:0}
+  .modal .modal-box{width:100%!important;max-width:100%!important;max-height:94dvh;border-radius:20px 20px 0 0;
+    padding:18px 16px calc(14px + env(safe-area-inset-bottom))}
+  .ui-dialog .modal-box{border-radius:20px 20px 0 0}
+
+  /* settings: the section list becomes a swipeable row of chips */
+  .cfgwrap{grid-template-columns:minmax(0,1fr)}
+  .cfgnav{position:static;flex-direction:row;overflow-x:auto;padding:6px;gap:6px;scrollbar-width:none}
+  .cfgnav::-webkit-scrollbar{display:none}
+  .cfgitem{flex:0 0 auto;white-space:nowrap;padding:8px 12px}
+}
+
+/* very small phones */
+@media (max-width:360px){
+  .main{padding-inline:10px}
+  .bnav button span{font-size:10px}
+  .stat,.kpi{flex-basis:46vw}
+}
+
+/* big screens: a little more room to breathe */
+@media (min-width:1800px){
+  .tablewrap table{font-size:14px}
+  .nav a{min-height:42px;font-size:14.5px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  .side,.drawer-scrim,.btn,.nav a{transition:none!important}
+}

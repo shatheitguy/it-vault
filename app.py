@@ -22,7 +22,7 @@ import os, io, json, hashlib, hmac, uuid, secrets, time, base64, re, zipfile, th
 from datetime import timedelta, datetime
 from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, session, send_from_directory, redirect, make_response
-from flask import g, has_request_context
+from flask import g, has_request_context, copy_current_request_context
 from flask.sessions import SecureCookieSessionInterface
 import pymysql
 from dbutils.pooled_db import PooledDB
@@ -656,7 +656,7 @@ def coerce_val(col, v):
         except Exception:
             return 0.0
     return str(v)
-STATUSES = ["Available", "Checked-Out", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen"]
+STATUSES = ["Available", "Checked-Out", "Returned", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen"]
 # role groups
 ROLE_VIEW = "read-only"
 ROLE_EDIT = "read-write"
@@ -2161,6 +2161,21 @@ def migrate_schema():
         cur.execute("ALTER TABLE Employees ADD COLUMN Phone VARCHAR(40) DEFAULT ''")
     except Exception:
         pass
+    # When an employee was added, so the Directory can put the newest at the
+    # top: sorted A-Z, someone just added from the asset form landed on row
+    # 132 and looked missing. Added empty first, then given its default, so
+    # the people already there are not all stamped "added today". Anyone
+    # added in the last two days before this existed gets their last change.
+    try:
+        cur.execute("ALTER TABLE Employees ADD COLUMN created_at DATETIME NULL")
+        cur.execute("UPDATE Employees SET created_at=updated_at "
+                    "WHERE updated_at >= NOW() - INTERVAL 2 DAY AND source='manual'")
+    except Exception:
+        pass
+    try:
+        cur.execute("ALTER TABLE Employees MODIFY created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP")
+    except Exception:
+        pass
     # WhatsApp: the country code a local number ('050 123 4567') is read in,
     # and which of the two messages go out on it.
     for col, typ in {"wa_country_code": "VARCHAR(6) DEFAULT '971'",
@@ -2170,6 +2185,66 @@ def migrate_schema():
             cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
         except Exception:
             pass
+    # The watermark stamped across the acknowledgement copy that goes out
+    # when an asset comes back (Status -> Returned). Settings > Branding.
+    # A breach is reported once per due date; changing the due date re-arms it
+    try:
+        cur.execute("ALTER TABLE Tickets ADD COLUMN sla_breach_sent TINYINT DEFAULT 0")
+    except Exception:
+        pass
+    for col, typ in {"ret_wm_text": "VARCHAR(40) DEFAULT 'RETURNED'",
+                     "ret_wm_color": "VARCHAR(9) DEFAULT '#d32f2f'",
+                     "ret_wm_opacity": "TINYINT DEFAULT 18",
+                     "ret_wm_send": "TINYINT DEFAULT 1",
+                     # days a Returned asset waits before it is Available
+                     # again on its own; 0 leaves it Returned until someone
+                     # changes it
+                     "ret_auto_days": "INT DEFAULT 0"}.items():
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # A user's own mobile, so their sign-in codes can come on WhatsApp too
+    try:
+        cur.execute("ALTER TABLE Users ADD COLUMN phone VARCHAR(40) DEFAULT ''")
+    except Exception:
+        pass
+    # The address people outside this computer reach IT-Vault on. Every link
+    # that leaves the app (sign links, QR labels, the portal) is built from it.
+    try:
+        cur.execute("ALTER TABLE Settings ADD COLUMN public_url VARCHAR(255) DEFAULT ''")
+    except Exception:
+        pass
+    # WhatsApp: the name messages start with (blank = the Company Name) and an
+    # optional banner picture that link and test messages are sent on
+    for col, typ in (("wa_sender_name", "VARCHAR(80) DEFAULT ''"), ("wa_banner", "MEDIUMBLOB NULL"),
+                     ("wa_banner_type", "VARCHAR(20) DEFAULT ''"), ("wa_banner_v", "INT DEFAULT 0")):
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # Light / dark: "system" follows the device, or it is fixed. One for the
+    # app, one for the pages the public opens from a link or a QR (the
+    # acknowledgement page and the asset card), one for the ticket portal.
+    for col in ("ui_mode", "sign_mode", "portal_mode"):
+        try:
+            cur.execute(f"ALTER TABLE Settings ADD COLUMN {col} VARCHAR(8) DEFAULT 'system'")
+        except Exception:
+            pass
+    # A category's look in the asset list: an icon picked from the app's set,
+    # and/or a small product photo (stored here, already shrunk, so it goes
+    # with the database to any server)
+    for col, typ in (("icon", "VARCHAR(20) DEFAULT ''"), ("photo", "MEDIUMBLOB NULL"),
+                     ("photo_type", "VARCHAR(20) DEFAULT ''"), ("photo_v", "INT DEFAULT 0")):
+        try:
+            cur.execute(f"ALTER TABLE Categories ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    # When the asset came back, so the countdown above has a start
+    try:
+        cur.execute("ALTER TABLE Assets ADD COLUMN ReturnedAt DATETIME NULL")
+    except Exception:
+        pass
     # Item Category picker: backfill from whatever Type values already exist
     # on real assets, so switching that field to a dropdown doesn't blank out
     # anyone's existing data (one-time -- skipped once Categories has rows)
@@ -2376,9 +2451,8 @@ def login():
             session["pending_2fa_display"] = row["display"]; session["pending_2fa_exp"] = time.time() + 300
             session["pending_2fa_remember"] = bool(d.get("remember"))
             session.permanent = True
-            if "email" in methods:
-                _send_login_otp_email(row["username"], row.get("email") or "")
-            return jsonify({"ok": True, "need_2fa": True, "methods": methods})
+            sent = _send_login_code(row["username"]) if "email" in methods else []
+            return jsonify({"ok": True, "need_2fa": True, "methods": methods, "sent_to": sent})
         _start_session(row["username"], row["role"], row["display"], bool(d.get("remember")))
         return jsonify({"ok": True, "role": row["role"]})
     _login_failed(gate)
@@ -2536,6 +2610,72 @@ def _mail_from(addr, brand):
     return formataddr((name or (brand or "IT-Vault"), mailbox))
 
 
+def _code_targets(username):
+    """(email, whatsapp number) a code can go to for this user: the email
+    when mail is set up, the mobile when the company WhatsApp is linked."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT email, phone FROM Users WHERE username=%s", [username])
+        r = cur.fetchone() or {}; c.close()
+    except Exception:
+        r = {}
+    email = (r.get("email") or "").strip() if _smtp_ready() else ""
+    num = ""
+    try:
+        if (r.get("phone") or "").strip() and wa.is_on():
+            num = wa.normalize(r.get("phone"), _wa_settings()["cc"])
+    except Exception:
+        num = ""
+    return email, num
+
+
+def _mask_num(n):
+    n = str(n or "")
+    return f"+{n[:3]} •••• {n[-4:]}" if len(n) > 7 else f"+{n}"
+
+
+def _code_where(email, num):
+    out = []
+    if email:
+        out.append("your email")
+    if num:
+        out.append(f"WhatsApp {_mask_num(num)}")
+    return out
+
+
+def _deliver_code(email, num, subject, text):
+    """Email and WhatsApp, after the reply: nobody waits on a mail server or
+    the WhatsApp queue to see the box for the code."""
+    if email:
+        try:
+            _send_simple_email(email, subject, text)
+        except Exception as e:
+            print("sign-in code email error:", e, flush=True)
+    if num:
+        try:
+            r = wa.send(num, f"{_wa_brand()}: {text}")
+            if r != "ok":
+                print(f"[whatsapp] sign-in code -> +{num}: {r}", flush=True)
+        except Exception as e:
+            print("sign-in code whatsapp error:", e, flush=True)
+
+
+def _send_login_code(username):
+    """Issue one sign-in code and send it to every place this user can get it
+    -- email and WhatsApp both, so whichever is to hand works. Returns where
+    it is going (empty: nowhere to send it)."""
+    email, num = _code_targets(username)
+    if not email and not num:
+        return []
+    handle, code = _issue_auth_code("login2fa", username, 300)
+    session["pending_2fa_id"] = handle
+    session["pending_2fa_email_sent_at"] = time.time()
+    _after_reply(_deliver_code, email, num, f"Your sign-in code is {code}",
+                 f"Your sign-in code is {code}. It expires in 5 minutes. "
+                 "If you did not just try to sign in, ignore this message.")
+    return _code_where(email, num)
+
+
 def _send_login_otp_email(username, to_email):
     if not to_email:
         return False
@@ -2572,10 +2712,12 @@ def resend_login_otp():
     if not u: return jsonify({"error": "no pending sign-in"}), 400
     if time.time() - session.get("pending_2fa_email_sent_at", 0) < 20:
         return jsonify({"error": "please wait a few seconds before requesting another code"}), 429
-    c = conn(); cur = c.cursor()
-    cur.execute("SELECT email FROM Users WHERE username=%s", [u]); row = cur.fetchone() or {}; c.close()
-    ok = _send_login_otp_email(u, row.get("email") or "")
-    return jsonify({"ok": ok}) if ok else (jsonify({"error": "could not send email -- check SMTP settings"}), 400)
+    sent = _send_login_code(u)
+    if not sent:
+        return jsonify({"error": "There is nowhere to send a code: no email (with mail set up) and no WhatsApp."}), 400
+    return jsonify({"ok": True, "sent_to": sent})
+
+_TOTP_FAILS = {}   # username -> [wrong codes, since]
 
 @app.route("/api/2fa/verify-login", methods=["POST"])
 def verify_login_2fa():
@@ -2588,8 +2730,22 @@ def verify_login_2fa():
     row = cur.fetchone(); c.close()
     if not row: return jsonify({"ok": False, "error": "Sign-in expired -- please log in again"}), 400
     ok = False
+    # An authenticator code is six digits. With no limit, a script holding
+    # the password could simply try them all; a correct password even reset
+    # the login throttle. Five wrong codes in 15 minutes now locks 2FA for
+    # that account for 15 minutes, whoever is asking.
+    _f = _TOTP_FAILS.get(u)
+    if _f and _f[0] >= 5 and time.time() - _f[1] < 900:
+        return jsonify({"ok": False, "error": "Too many wrong codes. Wait 15 minutes and sign in again."}), 429
     if method == "totp" and row.get("totp_enabled") and row.get("totp_secret"):
         ok = pyotp.TOTP(row["totp_secret"]).verify(code, valid_window=1)
+        if ok:
+            _TOTP_FAILS.pop(u, None)
+        else:
+            if not _f or time.time() - _f[1] >= 900:
+                _f = [0, time.time()]
+            _f[0] += 1; _TOTP_FAILS[u] = _f
+            audit(u, "2FA_FAILED", "", _client_ip())
     elif method == "email" and row.get("email_otp_enabled"):
         who, err = _check_auth_code(session.get("pending_2fa_id"), "login2fa", code,
                                     username=u)
@@ -2695,12 +2851,22 @@ def forgot_password_reset():
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Users SET password=%s WHERE username=%s", (hash_pw(new_pw), u))
     c.commit()
-    cur.execute("SELECT username, role, display FROM Users WHERE username=%s", [u]); row = cur.fetchone(); c.close()
+    cur.execute("SELECT username, role, display, email, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [u]); row = cur.fetchone(); c.close()
     for k in ("pwreset_id", "pwreset_exp", "pwreset_sent_at"):
         session.pop(k, None)
+    audit(u, "PASSWORD_RESET", "", "password reset via email OTP")
+    if row and (row.get("totp_enabled") or row.get("email_otp_enabled")):
+        # The reset proves the mailbox, not the second factor. Signing in
+        # straight from here meant whoever held the inbox skipped 2FA; now the
+        # new password is set and the sign-in goes through 2FA like any other.
+        methods = (["totp"] if row.get("totp_enabled") else []) + (["email"] if row.get("email_otp_enabled") else [])
+        session["pending_2fa_user"] = row["username"]; session["pending_2fa_role"] = row["role"]
+        session["pending_2fa_display"] = row["display"]; session["pending_2fa_exp"] = time.time() + 300
+        session["pending_2fa_remember"] = False
+        sent = _send_login_code(row["username"]) if "email" in methods else []
+        return jsonify({"ok": True, "need_2fa": True, "methods": methods, "sent_to": sent})
     if row:
         _start_session(row["username"], row["role"], row["display"], remember=False)
-    audit(u, "PASSWORD_RESET", "", "password reset via email OTP")
     return jsonify({"ok": True})
 
 @app.route("/api/logout", methods=["POST"])
@@ -2715,13 +2881,14 @@ def me():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT display, email, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]])
     row = cur.fetchone() or {}
-    cur.execute("SELECT theme, ldap_server, ldap_domain, ldap_bind_user, ldap_base_dn, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, matrix_on, app_name, logo_text, logo, has_letterhead FROM Settings WHERE id=1")
+    cur.execute("SELECT theme, ldap_server, ldap_domain, ldap_bind_user, ldap_base_dn, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, region, matrix_on, app_name, logo_text, logo, has_letterhead, ui_mode FROM Settings WHERE id=1")
     s = cur.fetchone() or {"theme":"dark"}
     c.close()
     # The sidebar can only hide what it can't reach if it knows the actual
     # per-module rights, so send them with the identity rather than making the
     # UI infer access from the role name (which custom roles make impossible).
     return jsonify({"user": session["user"], "role": session["role"],
+                    "ui_mode": _mode(s.get("ui_mode")),
                     "perms": _role_perms(session["role"]),
                     "features": sorted(_role_features(session["role"])),
                     "display": row.get("display", ""), "email": row.get("email", ""),
@@ -2889,8 +3056,10 @@ def ldap_search_func(q):
 
 @app.route("/api/ldap/search")
 @auth_required()
+@feature_required("directory.ldap")
 def ldap_search():
-    q = (request.args.get("q") or "").strip()
+    from ldap3.utils.conv import escape_filter_chars
+    q = escape_filter_chars((request.args.get("q") or "").strip())
     r = ldap_search_func(q)
     return jsonify(r["json"]), r["status"]
 
@@ -2898,12 +3067,16 @@ def ldap_search():
 @auth_required(module="directory", level="read")
 def list_employees():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT * FROM Employees ORDER BY EmployeeName")
+    cur.execute("SELECT *, (created_at >= NOW() - INTERVAL 2 DAY) AS is_new "
+                "FROM Employees ORDER BY EmployeeName")
     rows = cur.fetchall(); c.close()
+    for r in rows:
+        r["is_new"] = bool(r.get("is_new"))
     return jsonify(rows)
 
 @app.route("/api/employees", methods=["POST"])
 @auth_required(module="directory", level="write")
+@feature_required("directory.create")
 def create_employee():
     import uuid
     data = request.get_json(force=True) or {}
@@ -2919,14 +3092,20 @@ def create_employee():
         "Phone": (data.get("Phone") or "").strip()[:40],
         "source": "manual"
     }
-    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, Phone, source, updated_at)
-                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
-                (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["Phone"], emp["source"]))
+    # What was typed here is the person's, the same as an edit: without this
+    # an employee added by hand whose ID matches an AD account had their
+    # name, title and email replaced by AD's within half an hour.
+    emp["manual_fields"] = _manual_add("", [col for col in EMPLOYEE_SYNC_FIELDS
+                                            if str(emp.get(col) or "").strip()])
+    cur.execute("""INSERT INTO Employees (_id, EmployeeID, EmpCode, EmployeeName, Designation, Department, Email, Phone, source, manual_fields, updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
+                (emp["_id"], emp["EmployeeID"], emp["EmpCode"], emp["EmployeeName"], emp["Designation"], emp["Department"], emp["Email"], emp["Phone"], emp["source"], emp["manual_fields"]))
     c.commit(); c.close()
     return jsonify(emp)
 
 @app.route("/api/employees/<e_id>", methods=["PUT"])
 @auth_required(module="directory", level="write")
+@feature_required("directory.edit")
 def update_employee(e_id):
     """Change an employee, one field at a time if that is all that was sent.
 
@@ -2994,6 +3173,7 @@ def update_employee(e_id):
 
 @app.route("/api/employees/<e_id>", methods=["DELETE"])
 @auth_required(module="directory", level="write")
+@feature_required("directory.delete")
 def delete_employee(e_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT EmployeeName FROM Employees WHERE _id=%s", [e_id])
@@ -3008,6 +3188,7 @@ def delete_employee(e_id):
 
 @app.route("/api/employees/ldap-import", methods=["POST"])
 @auth_required(module="directory", level="write")
+@feature_required("directory.ldap")
 def ldap_import_employees():
     data = request.get_json(force=True) or {}
     q = (data.get("q") or "").strip()
@@ -3163,6 +3344,7 @@ def ldap_sync_all(row):
 
 @app.route("/api/employees/ldap-sync", methods=["POST"])
 @auth_required(module="directory", level="write")
+@feature_required("directory.ldap")
 def ldap_sync_employees():
     row = _ldap_settings()
     if not (row.get("ldap_server") and row.get("ldap_base_dn") and row.get("ldap_bind_user") and row.get("ldap_bind_pass")):
@@ -3286,6 +3468,7 @@ def _resolve_employee_name(cur, employee_id):
 
 @app.route("/api/assets", methods=["POST"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.create")
 def create_asset():
     data = request.get_json(force=True)
     serial = (data.get("Serial") or "").strip()
@@ -3314,9 +3497,9 @@ def create_asset():
     except Exception as e:
         print("public code mint error:", e)
     c.close()
-    send_notification("IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.", kind="asset.created")
+    _after_reply(send_notification, "IT Guy: New asset added", f"Asset '{data.get('Name','?')}' (S/N {data.get('Serial','?')}) was added by {session.get('user')}.", kind="asset.created")
     if (data.get("EmployeeID") or "").strip():
-        notify_person_asset_assigned(data["EmployeeID"], {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
+        _after_reply(notify_person_asset_assigned, data["EmployeeID"], {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
     return jsonify({"ok": True, "_id": a_id})
 
 @app.route("/api/assets/<a_id>", methods=["GET"])
@@ -3331,6 +3514,7 @@ def get_asset(a_id):
 
 @app.route("/api/assets/<a_id>", methods=["PUT"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.edit")
 def update_asset(a_id):
     data = request.get_json(force=True)
     c = conn(); cur = c.cursor()
@@ -3340,6 +3524,46 @@ def update_asset(a_id):
     if not old:
         c.close(); return jsonify({"error": "not found"}), 404
     old = row_to_dict(old)
+    # Returned: the item is back with IT. Whoever had it is no longer
+    # responsible for it, so the assignment, the receipt and the signature
+    # all come off the asset -- the signature has to, or the sign page reads
+    # the asset as already signed and the next person can never sign for it.
+    # Before they go, the acknowledgement is captured as it stood, and after
+    # the reply it is sent again to the employee and IT stamped RETURNED.
+    # The old signature is kept in History, so nothing is lost.
+    returned_copy = None
+    if data.get("Status") == "Returned" and old.get("Status") != "Returned":
+        cur.execute("SELECT SignatureData, Notes FROM Assets WHERE _id=%s", [a_id])
+        extra = cur.fetchone() or {}
+        prev_emp = (old.get("EmployeeID") or "").strip()
+        sig = extra.get("SignatureData") or ""
+        if prev_emp or sig:
+            returned_copy = {
+                "asset": {**old, **{k: v for k, v in data.items() if k in COLUMNS},
+                          "_id": a_id, "Status": "Returned", "EmployeeID": prev_emp,
+                          "ReceivedBy": old.get("ReceivedBy") or "",
+                          "NotesReceived": old.get("NotesReceived") or "",
+                          "Notes": extra.get("Notes") or ""},
+                "signer": old.get("ReceivedBy") or "",
+                "sig": sig,
+                "returned_on": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "returned_to": session.get("user") or "",
+            }
+            if prev_emp:
+                cur.execute("SELECT EmployeeName, Department, Designation, Email FROM Employees WHERE EmployeeID=%s", [prev_emp])
+                er = cur.fetchone() or {}
+                for k in ("EmployeeName", "Department", "Designation", "Email"):
+                    returned_copy["asset"][k] = er.get(k) or ""
+        data["EmployeeID"] = ""
+        data["ReceivedBy"] = ""
+        data["NotesReceived"] = ""
+        # SignNonce goes whether or not it was ever signed: an unsigned link
+        # still in someone's inbox would otherwise sign the asset back out
+        cur.execute("UPDATE Assets SET ReturnedAt=NOW(), SignNonce='' WHERE _id=%s", [a_id])
+        if sig:
+            cur.execute("UPDATE Assets SET SignatureData=NULL WHERE _id=%s", [a_id])
+            cur.execute("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) VALUES (%s, NOW(), %s, %s, %s, %s)",
+                        (a_id, session.get("user", "?"), "SignatureData", sig, ""))
     became_checked_out = data.get("Status") == "Checked-Out" and old.get("Status") != "Checked-Out"
     became_returned = old.get("Status") == "Checked-Out" and data.get("Status") not in (None, "", "Checked-Out")
     # Checking an asset out/in is just changing Status on this form now (no
@@ -3395,15 +3619,26 @@ def update_asset(a_id):
     new_emp = (data.get("EmployeeID") or "").strip()
     emp_changed = new_emp and new_emp != (old.get("EmployeeID") or "").strip()
     if new_emp and (emp_changed or became_checked_out):
-        notify_person_asset_assigned(new_emp, {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
-    try:
-        notify_asset_status_changed({**data, "_id": a_id}, old.get("Status"), data.get("Status"))
-    except Exception as e:
-        print("asset status-change notify error:", e)
+        _after_reply(notify_person_asset_assigned, new_emp, {**data, "_id": a_id}, checked_out=(data.get("Status") == "Checked-Out"))
+    if returned_copy:
+        audit(session.get("user"), "ASSET_RETURNED", a_id,
+              f"returned by {returned_copy['asset'].get('EmployeeName') or returned_copy['asset'].get('EmployeeID') or '?'}")
+    if returned_copy and _ret_wm_settings()["send"]:
+        # the returned copy is the status-change mail for this case: it goes
+        # to the same people, and a plain "status changed" on top of it is noise
+        _after_reply(_deliver_returned_copy, returned_copy)
+    elif returned_copy:
+        # copy switched off: the plain notice still goes, to the employee who
+        # gave it back as well (the asset no longer names them)
+        _after_reply(notify_asset_status_changed, {**returned_copy["asset"], "RequestedBy": old.get("RequestedBy") or ""},
+                     old.get("Status"), "Returned")
+    elif data.get("Status") and data.get("Status") != old.get("Status"):
+        _after_reply(notify_asset_status_changed, {**old, **data, "_id": a_id}, old.get("Status"), data.get("Status"))
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>", methods=["DELETE"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.delete")
 def delete_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT Name, Serial FROM Assets WHERE _id=%s AND is_deleted=0", [a_id]); r = cur.fetchone()
@@ -3412,7 +3647,7 @@ def delete_asset(a_id):
     # GLPI-style soft delete: keep the row, just flag it
     cur.execute("UPDATE Assets SET is_deleted=1 WHERE _id=%s", [a_id])
     c.commit(); c.close()
-    send_notification("IT Guy: Asset removed", f"Asset '{r.get('Name','?')}' (S/N {r.get('Serial','?')}) was removed by {session.get('user')}.", kind="asset.deleted")
+    _after_reply(send_notification, "IT Guy: Asset removed", f"Asset '{r.get('Name','?')}' (S/N {r.get('Serial','?')}) was removed by {session.get('user')}.", kind="asset.deleted")
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/history")
@@ -3426,6 +3661,7 @@ def asset_history(a_id):
 
 @app.route("/api/assets/<a_id>/restore", methods=["POST"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.trash")
 def restore_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Assets SET is_deleted=0 WHERE _id=%s", [a_id]); c.commit(); c.close()
@@ -3450,6 +3686,7 @@ def _purge_asset_row(cur, a_id, invoice_file):
 
 @app.route("/api/assets/<a_id>/permanent", methods=["DELETE"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.trash")
 def permanent_delete_asset(a_id):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT Name, Serial, InvoiceFile FROM Assets WHERE _id=%s AND is_deleted=1", [a_id])
@@ -3463,6 +3700,7 @@ def permanent_delete_asset(a_id):
 
 @app.route("/api/assets/trash/empty", methods=["POST"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.trash")
 def empty_trash():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT _id, Name, Serial, InvoiceFile FROM Assets WHERE is_deleted=1")
@@ -3590,8 +3828,10 @@ def manufacturers_api():
 def categories_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
-        cur.execute("SELECT id, name FROM Categories ORDER BY name"); rows = cur.fetchall(); c.close()
-        return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+        cur.execute("SELECT id, name, icon, photo_v, (photo IS NOT NULL) AS has_photo FROM Categories ORDER BY name"); rows = cur.fetchall(); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"], "icon": r.get("icon") or "",
+                         "photo": (f"/api/categories/{r['id']}/photo?v={r.get('photo_v') or 0}" if r.get("has_photo") else "")}
+                        for r in rows])
     if request.method == "POST":
         n = (request.get_json(force=True).get("name") or "").strip()
         if not n: return jsonify({"error": "name required"}), 400
@@ -3604,6 +3844,64 @@ def categories_api():
         cid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM Categories WHERE id=%s", [cid]); c.commit(); c.close()
         return jsonify({"ok": True})
+
+CATEGORY_ICONS = {"laptop", "desktop", "monitor", "smartphone", "tablet", "router", "switch", "wifi", "shield",
+                  "server", "drive", "camera", "printer", "headphones", "battery", "keyboard", "projector", "box"}
+
+
+@app.route("/api/categories/<int:cid>/look", methods=["POST", "DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def category_look(cid):
+    """Set a category's icon (JSON {"icon": name}, "" = automatic) or upload
+    a product photo (multipart "photo"); DELETE removes the photo. The photo
+    is checked to be a real image and shrunk to 256px before it is kept."""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT id FROM Categories WHERE id=%s", [cid])
+    if not cur.fetchone():
+        c.close(); return jsonify({"error": "not found"}), 404
+    if request.method == "DELETE":
+        cur.execute("UPDATE Categories SET photo=NULL, photo_type='', photo_v=photo_v+1 WHERE id=%s", [cid])
+        c.commit(); c.close(); return jsonify({"ok": True})
+    f = request.files.get("photo")
+    if f:
+        raw = f.read(6 * 1024 * 1024 + 1)
+        if len(raw) > 6 * 1024 * 1024:
+            c.close(); return jsonify({"error": "That photo is over 6 MB."}), 400
+        try:
+            from PIL import Image as PILImage
+            im = PILImage.open(io.BytesIO(raw)); im.load()
+            if im.format not in ("PNG", "JPEG", "WEBP", "GIF"):
+                raise ValueError("format")
+            im = im.convert("RGBA") if im.mode in ("P", "LA", "RGBA") else im.convert("RGB")
+            im.thumbnail((256, 256))
+            out = io.BytesIO()
+            if im.mode == "RGBA":
+                im.save(out, format="PNG", optimize=True); kind = "image/png"
+            else:
+                im.save(out, format="JPEG", quality=86); kind = "image/jpeg"
+        except Exception:
+            c.close(); return jsonify({"error": "That file is not a photo we can use (PNG, JPEG, WebP or GIF)."}), 400
+        cur.execute("UPDATE Categories SET photo=%s, photo_type=%s, photo_v=photo_v+1 WHERE id=%s",
+                    [out.getvalue(), kind, cid])
+    else:
+        icon = str((request.get_json(force=True, silent=True) or {}).get("icon") or "").strip()
+        if icon and icon not in CATEGORY_ICONS:
+            c.close(); return jsonify({"error": "unknown icon"}), 400
+        cur.execute("UPDATE Categories SET icon=%s WHERE id=%s", [icon, cid])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/categories/<int:cid>/photo")
+@auth_required(module="assets", level="read")
+def category_photo(cid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT photo, photo_type FROM Categories WHERE id=%s", [cid]); r = cur.fetchone(); c.close()
+    if not r or not r.get("photo"):
+        return jsonify({"error": "not found"}), 404
+    return Response(bytes(r["photo"]), mimetype=r.get("photo_type") or "image/png",
+                    headers={"Cache-Control": "private, max-age=31536000", "X-Content-Type-Options": "nosniff"})
+
 
 @app.route("/api/contract-types", methods=["GET", "POST", "PUT", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
@@ -3713,37 +4011,77 @@ def import_excel():
     if not data:
         return jsonify({"error": "empty"}), 400
     header = [str(h).strip() if h else "" for h in data[0]]
-    c = conn(); cur = c.cursor(); added = updated = 0
+    c = conn(); cur = c.cursor(); added = updated = skipped = 0
     seen_types = set()
+    # A sheet only says something about the cells it fills in. This used to
+    # write every column of a matched asset from an 8-key row, so re-importing
+    # a short list blanked the employee, model, price, warranty and tag of
+    # every asset whose serial it named -- and matched assets in the Trash.
+    # Now: a blank cell changes nothing, a matched asset gets only the cells
+    # the sheet has (each recorded in History), and a header spelled exactly
+    # like an asset column (e.g. a re-imported export) is read as that column.
+    aliases = {
+        "Name": ("Name", "ASSET", "Asset Name", "Item"),
+        "Type": ("Type", "Category", "Asset Type", "Item Category"),
+        "Serial": ("Serial", "Serial No", "Serial Number"),
+        "Location": ("Location", "Site", "Place"),
+        "Status": ("Status",),
+        "ReceivedBy": ("ReceivedBy", "Received By", "Owner", "User"),
+        "Note": ("Note", "Notes", "Remark", "Comments"),
+        "PurchaseDate": ("PurchaseDate", "Purchase Date", "Bought"),
+        "AssetTag": ("AssetTag", "Asset ID", "Asset Tag"),
+    }
+    def _cell(v):
+        if v is None:
+            return ""
+        if isinstance(v, datetime):
+            return v.strftime("%Y-%m-%d")
+        return str(v).strip()
+    who = session.get("user", "import")
     for raw in data[1:]:
         if raw is None or all(v is None or str(v).strip() == "" for v in raw):
             continue
         rec = {header[i]: (raw[i] if i < len(raw) else None) for i in range(len(header))}
-        row = {
-            "Name": rec.get("Name") or rec.get("ASSET") or rec.get("Asset Name") or rec.get("Item") or "",
-            "Type": rec.get("Type") or rec.get("Category") or rec.get("Asset Type") or "",
-            "Serial": rec.get("Serial") or rec.get("Serial No") or rec.get("Serial Number") or "",
-            "Location": rec.get("Location") or rec.get("Site") or rec.get("Place") or "",
-            "Status": rec.get("Status") or "Active",
-            "ReceivedBy": rec.get("ReceivedBy") or rec.get("Received By") or rec.get("Owner") or rec.get("User") or "",
-            "Notes": rec.get("Notes") or rec.get("Remark") or rec.get("Comments") or "",
-            "PurchaseDate": rec.get("PurchaseDate") or rec.get("Purchase Date") or rec.get("Bought") or "",
-        }
-        t = str(row.get("Type") or "").strip()
+        row = {}
+        for col in COLUMNS:
+            for name in aliases.get(col, (col,)):
+                v = _cell(rec.get(name))
+                if v:
+                    row[col] = v
+                    break
+        t = row.get("Type", "")
         if t and t not in seen_types:
             seen_types.add(t)
             cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [t])
-        serial = str(row["Serial"]).strip()
+        serial = row.get("Serial", "")
         if serial:
-            cur.execute("SELECT _id FROM Assets WHERE Serial=%s", [serial]); ex = cur.fetchone()
+            cur.execute("SELECT * FROM Assets WHERE LOWER(Serial)=%s ORDER BY is_deleted LIMIT 1", [serial.lower()])
+            ex = cur.fetchone()
+            if ex and ex.get("is_deleted"):
+                skipped += 1; continue          # in the Trash: restore it first
             if ex:
-                sets = ", ".join(f"`{col}`=%s" for col in COLUMNS)
-                cur.execute(f"UPDATE Assets SET {sets} WHERE _id=%s", [coerce_val(col, row.get(col, "")) for col in COLUMNS] + [ex["_id"]])
-                updated += 1; continue
+                old = row_to_dict(ex)
+                changes = [(col, str(old.get(col) or ""), row[col]) for col in row
+                           if col != "Serial" and row[col] != str(old.get(col) or "")]
+                if changes:
+                    cur.execute("UPDATE Assets SET " + ", ".join(f"`{col}`=%s" for col, _o, _n in changes)
+                                + ", UpdatedAt=NOW() WHERE _id=%s",
+                                [coerce_val(col, n) for col, _o, n in changes] + [ex["_id"]])
+                    cur.executemany("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) "
+                                    "VALUES (%s, NOW(), %s, %s, %s, %s)",
+                                    [(ex["_id"], who, col, o, n) for col, o, n in changes])
+                    updated += 1
+                continue
+        if not row.get("Name") and not serial:
+            skipped += 1; continue
+        row.setdefault("Status", "Available")
+        if not row.get("AssetTag"):
+            row["AssetTag"] = _next_asset_tag(cur)
         a_id = uuid.uuid4().hex
-        vals = [a_id] + [coerce_val(col, row.get(col, "")) for col in COLUMNS]
-        cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS)
-        ph = ", ".join(["%s"] * (len(COLUMNS) + 1))
+        _now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        vals = [a_id] + [coerce_val(col, row.get(col, "")) for col in COLUMNS] + [_now, _now]
+        cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
+        ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
         cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); added += 1
         # imported assets get a public address too, or their first printed
         # label would be the thing that decides whether they have one
@@ -3752,7 +4090,8 @@ def import_excel():
         except Exception:
             pass
     c.commit(); c.close()
-    return jsonify({"ok": True, "added": added, "updated": updated})
+    audit(session.get("user"), "IMPORT", "", f"{added} added, {updated} updated, {skipped} skipped")
+    return jsonify({"ok": True, "added": added, "updated": updated, "skipped": skipped})
 
 @app.route("/api/catalog/import", methods=["POST"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
@@ -4131,12 +4470,19 @@ def change_own_password():
 @auth_required()
 def twofa_status():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT email, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [session["user"]])
+    cur.execute("SELECT email, phone, totp_enabled, email_otp_enabled FROM Users WHERE username=%s", [session["user"]])
     row = cur.fetchone() or {}
     cur.execute("SELECT smtp_host FROM Settings WHERE id=1"); s = cur.fetchone() or {}
     c.close()
+    email, num = _code_targets(session["user"])
+    try:
+        wa_on = wa.is_on()
+    except Exception:
+        wa_on = False
     return jsonify({"totp_enabled": bool(row.get("totp_enabled")), "email_otp_enabled": bool(row.get("email_otp_enabled")),
-                    "email": row.get("email") or "", "smtp_configured": bool(s.get("smtp_host"))})
+                    "email": row.get("email") or "", "smtp_configured": bool(s.get("smtp_host")),
+                    "phone": row.get("phone") or "", "whatsapp_linked": wa_on,
+                    "code_targets": _code_where(email, num)})
 
 @app.route("/api/2fa/totp/setup", methods=["POST"])
 @auth_required()
@@ -4184,19 +4530,15 @@ def twofa_totp_disable():
 @app.route("/api/2fa/email-otp/enable", methods=["POST"])
 @auth_required()
 def twofa_email_otp_enable():
-    c = conn(); cur = c.cursor()
-    cur.execute("SELECT email FROM Users WHERE username=%s", [session["user"]]); row = cur.fetchone() or {}
-    cur.execute("SELECT smtp_host FROM Settings WHERE id=1"); s = cur.fetchone() or {}
-    c.close()
-    email = row.get("email") or ""
-    if not email: return jsonify({"error": "Set an email on your profile first"}), 400
-    if not s.get("smtp_host"): return jsonify({"error": "SMTP is not configured -- ask an admin to set it up in Settings"}), 400
+    email, num = _code_targets(session["user"])
+    if not email and not num:
+        return jsonify({"error": "Add an email (with mail set up in Settings) or a mobile number with WhatsApp linked first, so codes have somewhere to go."}), 400
     handle, code = _issue_auth_code("enroll_email", session["user"], 600)
     session["email_otp_enroll_id"] = handle
     session["email_otp_pending_sent_at"] = time.time()
-    ok = _send_simple_email(email, "Confirm email sign-in codes", f"Your verification code is: {code}\n\nEnter this code to confirm email sign-in codes for your account.")
-    if not ok: return jsonify({"error": "Could not send email -- check SMTP settings"}), 400
-    return jsonify({"ok": True, "sent_to": email})
+    _after_reply(_deliver_code, email, num, "Confirm sign-in codes",
+                 f"Your code to turn on sign-in codes is {code}. Enter it in IT-Vault to confirm.")
+    return jsonify({"ok": True, "sent_to": " and ".join(_code_where(email, num))})
 
 @app.route("/api/2fa/email-otp/confirm", methods=["POST"])
 @auth_required()
@@ -4283,20 +4625,43 @@ def profile():
         if "display" in d and d["display"]:
             cur.execute("UPDATE Users SET display=%s WHERE username=%s", (d["display"], session["user"]))
         if "email" in d:
-            cur.execute("UPDATE Users SET email=%s WHERE username=%s", (d["email"].strip(), session["user"]))
+            # the email is where password resets go: changing it from a
+            # session someone left open would hand them the account for good
+            cur.execute("SELECT email, password FROM Users WHERE username=%s", [session["user"]]); me_row = cur.fetchone() or {}
+            new_email = (d["email"] or "").strip()
+            if new_email != (me_row.get("email") or "").strip():
+                if not d.get("password") or not verify_pw(d["password"], me_row.get("password") or ""):
+                    c.close()
+                    return jsonify({"error": "Enter your current password to change your email.",
+                                    "need_password": True}), 403
+                cur.execute("UPDATE Users SET email=%s WHERE username=%s", (new_email, session["user"]))
+        if "phone" in d:
+            # sign-in codes can go here, so it is guarded like the email
+            cur.execute("SELECT phone, password FROM Users WHERE username=%s", [session["user"]]); me_ph = cur.fetchone() or {}
+            new_phone = re.sub(r"[^\d+ ()-]", "", str(d.get("phone") or ""))[:40].strip()
+            if new_phone != (me_ph.get("phone") or "").strip():
+                if not d.get("password") or not verify_pw(d["password"], me_ph.get("password") or ""):
+                    c.close()
+                    return jsonify({"error": "Enter your current password to change your mobile number.",
+                                    "need_password": True}), 403
+                cur.execute("UPDATE Users SET phone=%s WHERE username=%s", (new_phone, session["user"]))
         if "avatar" in d:
             cur.execute("UPDATE Users SET avatar=%s WHERE username=%s", (d["avatar"], session["user"]))
-        if d.get("theme") in ("dark", "light"):
+        # the theme is the whole install's, not this user's: only someone who
+        # may change branding changes it
+        if d.get("theme") in ("dark", "light") and _feature_allowed("settings.branding"):
             cur.execute("UPDATE Settings SET theme=%s WHERE id=1", [d["theme"]])
         if d.get("old") and d.get("new"):
             cur.execute("SELECT password FROM Users WHERE username=%s", [session["user"]]); row = cur.fetchone()
             if not row or not verify_pw(d["old"], row["password"]): c.close(); return jsonify({"error": "old password incorrect"}), 403
-            cur.execute("UPDATE Users SET password=%s WHERE username=%s", (hash_pw(d["new"]), session["user"]))
+            new_hash = hash_pw(d["new"])
+            cur.execute("UPDATE Users SET password=%s WHERE username=%s", (new_hash, session["user"]))
+            session["pwfp"] = _pw_fp(new_hash)   # this session stays; the others end
         c.commit(); c.close()
         return jsonify({"ok": True})
-    cur.execute("SELECT username, display, email, role, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]]); u = cur.fetchone() or {}
+    cur.execute("SELECT username, display, email, phone, role, avatar, api_key, last_login FROM Users WHERE username=%s", [session["user"]]); u = cur.fetchone() or {}
     c.close()
-    return jsonify({"user": u.get("username"), "display": u.get("display", ""), "email": u.get("email", ""), "role": u.get("role", ""),
+    return jsonify({"user": u.get("username"), "display": u.get("display", ""), "email": u.get("email", ""), "phone": u.get("phone", "") or "", "role": u.get("role", ""),
                     "avatar": u.get("avatar", ""), "api_key_set": bool(u.get("api_key")),
                     "last_login": u.get("last_login", "")})
 
@@ -4674,7 +5039,9 @@ def _hb_apply_result(cur, mon, up, ms, err, cert):
     transition = None
     if up:
         new, fails = "up", 0
-        if was != "up":
+        # "recovered" only after a "down" was sent: a new monitor's first
+        # success, or a blip that never reached the threshold, is not news
+        if was == "down":
             transition = "up"
         wait = interval
     else:
@@ -4931,7 +5298,12 @@ def _hb_notify(mon, transition, err, all_channels=None):
         if not fn:
             continue
         try:
-            fn(_hb_channel_cfg(ch), subject, body, payload)
+            # the email sender takes no payload; passing one raised TypeError
+            # and an email-only install never heard that a monitor was down
+            if (ch.get("kind") or "").lower() == "email":
+                fn(_hb_channel_cfg(ch), subject, body)
+            else:
+                fn(_hb_channel_cfg(ch), subject, body, payload)
         except Exception as e:
             print(f"[itvault] heartbeat alert via {ch.get('name')} failed: {e}", flush=True)
 
@@ -5497,6 +5869,22 @@ def letterhead_file():
 def settings():
     if request.method != "GET" and not _module_write_allowed("settings"):
         return jsonify({"error": "No access"}), 403
+    if request.method == "PUT":
+        # Any settings permission used to open every key here, including the
+        # database connection and the SMTP / LDAP / UniFi servers -- pointing
+        # one of those at your own host is how a stored password walks out.
+        # Those keys now need their own tick; the database needs an admin.
+        _keys = set((request.form.to_dict() if (request.content_type or "").startswith("multipart/form-data")
+                     else (request.get_json(force=True, silent=True) or {})).keys())
+        if any(k.startswith("db_") for k in _keys) and session.get("role") != ROLE_ADMIN \
+                and not (not session.get("user") and (_resolve_session_from_api_key() or {}).get("role") == ROLE_ADMIN):
+            return jsonify({"error": "Only an admin can change the database connection."}), 403
+        for _prefix, _feat, _what in (("smtp_", "settings.email", "email (SMTP)"),
+                                      ("ldap_", "settings.ldap", "LDAP / Active Directory"),
+                                      ("unifi_", "settings.unifi", "UniFi"),
+                                      ("portal_", "settings.portal", "support portal")):
+            if any(k.startswith(_prefix) for k in _keys) and not _feature_allowed(_feat):
+                return jsonify({"error": f"No access to the {_what} settings."}), 403
     c = conn(); cur = c.cursor()
     if request.method == "PUT":
         # accept JSON or multipart FormData (branding uses FormData)
@@ -6015,6 +6403,15 @@ def tickets_api():
 
 @app.route("/api/portal/tickets", methods=["POST"])
 def portal_create_ticket():
+    # Public and it sends mail -- to staff, and to whatever requester address
+    # is typed in -- and stores photos. Ten tickets an hour from one address
+    # is plenty for a person and useless to a script.
+    if not _public_throttle("portal-ticket:" + _client_ip(), limit=10, window=3600):
+        return jsonify({"error": "Too many requests from here just now. Please try again later."}), 429
+    return _portal_create_ticket()
+
+
+def _portal_create_ticket():
     """Public (no auth) ticket/request intake from the portal invite link.
 
     Accepts JSON, or multipart/form-data when the visitor attached photos.
@@ -6172,7 +6569,9 @@ def ticket_detail(ticket_id):
         # Assigning is queue work too -- there is a dedicated "Assign to IT"
         # control for it -- so it sits with status and priority.
         _queue_only = {"status", "priority", "assignee"}
-        _touched = {k for k in (request.get_json(silent=True) or {}).keys()}
+        # force=True like the update below: without it a text/plain body
+        # read as "no fields" here and was still applied in full there
+        _touched = {k for k in (request.get_json(force=True, silent=True) or {}).keys()}
         if not _touched.issubset(_queue_only) and not _feature_allowed("tickets.edit"):
             return jsonify({"error": "No access -- you can't change a ticket's details. "
                                      "You can still reply, and set status and priority."}), 403
@@ -6520,9 +6919,11 @@ def dash_layout():
 @app.route("/api/branding")
 def branding():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address, has_letterhead FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
+    cur.execute("SELECT app_name, logo_text, matrix_on, theme, theme_preset, bg_type, bg, comp_bg, radius, font, accent, accent2, language, currency, company_phone, company_address, has_letterhead, sign_mode, portal_mode, ui_mode FROM Settings WHERE id=1"); s = cur.fetchone(); c.close()
     s = s or {}
     return jsonify({"app_name": s.get("app_name", "IT-Vault"), "logo_text": s.get("logo_text", "IT-Vault"),
+                    "sign_mode": _mode(s.get("sign_mode")), "portal_mode": _mode(s.get("portal_mode")),
+                    "ui_mode": _mode(s.get("ui_mode")),
                     "matrix_on": bool(s.get("matrix_on", 1)), "logo": "/logo.png",
                     "theme": s.get("theme", "dark"), "theme_preset": s.get("theme_preset", "deepdark"),
                     "bg_type": s.get("bg_type", "solid"), "bg": s.get("bg", "#0a0d13"),
@@ -7024,6 +7425,25 @@ def _notify_enabled(kind, srow=None):
     return bool(_notify_prefs(srow).get(kind, True))
 
 
+def _after_reply(fn, *args, **kwargs):
+    """Run fn on its own thread so the request can answer now.
+
+    Saving an asset used to wait for every notification to go out first --
+    each channel, then the employee's mail, each SMTP connection with its own
+    timeout -- so a slow or unreachable mail server made Save hang for
+    seconds. The work keeps the request's context (the sign link is built
+    from the address the request came in on) and any failure is logged,
+    never surfaced, the same as when it ran inline.
+    """
+    @copy_current_request_context
+    def run():
+        try:
+            fn(*args, **kwargs)
+        except Exception as e:
+            print(f"[itvault] background {getattr(fn, '__name__', 'task')} failed: {e}", flush=True)
+    threading.Thread(target=run, daemon=True).start()
+
+
 def send_notification(subject, body, kind=None):
     """Every system notification, down the channels configured in Settings.
 
@@ -7116,6 +7536,75 @@ def notify_ticket_assigned(ticket, assignee_user):
         print("assign notify error:", e); return False
 
 # ---- WhatsApp (Settings -> Notifications -> WhatsApp) ----
+def _wa_brand():
+    """The name a WhatsApp message starts with: the sender name set in
+    Settings > Notifications > WhatsApp, else the Company Name."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT wa_sender_name FROM Settings WHERE id=1")
+        n = ((cur.fetchone() or {}).get("wa_sender_name") or "").strip(); c.close()
+    except Exception:
+        n = ""
+    return n or brand_name()
+
+
+def _wa_banner():
+    """(bytes, mimetype) of the banner, or (None, '')."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT wa_banner, wa_banner_type FROM Settings WHERE id=1")
+        r = cur.fetchone() or {}; c.close()
+        if r.get("wa_banner"):
+            return bytes(r["wa_banner"]), (r.get("wa_banner_type") or "image/jpeg")
+    except Exception:
+        pass
+    return None, ""
+
+
+def _wa_send_text(num, text):
+    """A text message, on the banner picture when one is set."""
+    img, kind = _wa_banner()
+    if img:
+        return wa.send(num, text, image=img, image_type=kind)
+    return wa.send(num, text)
+
+
+@app.route("/api/whatsapp/banner", methods=["GET", "POST", "DELETE"])
+@auth_required(module="settings", level="read")
+def whatsapp_banner():
+    if request.method == "GET":
+        img, kind = _wa_banner()
+        if not img:
+            return jsonify({"error": "no banner"}), 404
+        return Response(img, mimetype=kind, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    if not _module_write_allowed("settings"):
+        return jsonify({"error": "No access"}), 403
+    c = conn(); cur = c.cursor()
+    if request.method == "DELETE":
+        cur.execute("UPDATE Settings SET wa_banner=NULL, wa_banner_type='', wa_banner_v=wa_banner_v+1 WHERE id=1")
+        c.commit(); c.close(); return jsonify({"ok": True})
+    f = request.files.get("banner")
+    if not f:
+        c.close(); return jsonify({"error": "no file"}), 400
+    raw = f.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
+        c.close(); return jsonify({"error": "That picture is over 8 MB."}), 400
+    try:
+        from PIL import Image as PILImage
+        im = PILImage.open(io.BytesIO(raw)); im.load()
+        if im.format not in ("PNG", "JPEG", "WEBP"):
+            raise ValueError("format")
+        im = im.convert("RGB")
+        im.thumbnail((1280, 1280))
+        out = io.BytesIO(); im.save(out, format="JPEG", quality=85)
+    except Exception:
+        c.close(); return jsonify({"error": "That file is not a picture we can use (PNG, JPEG or WebP)."}), 400
+    cur.execute("UPDATE Settings SET wa_banner=%s, wa_banner_type='image/jpeg', wa_banner_v=wa_banner_v+1 WHERE id=1", [out.getvalue()])
+    c.commit(); c.close()
+    audit(session.get("user"), "SETTINGS", "", "WhatsApp banner updated")
+    return jsonify({"ok": True})
+
+
 def _wa_status_json(s):
     s = dict(s or {})
     qr = s.pop("qr", None)
@@ -7128,6 +7617,14 @@ def _wa_status_json(s):
             s["error"] = f"could not draw the QR: {e}"
     ws = _wa_settings()
     s.update(country_code=ws["cc"], send_link=ws["send_link"], send_pdf=ws["send_pdf"])
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT wa_sender_name, wa_banner_v, (wa_banner IS NOT NULL) AS has_banner FROM Settings WHERE id=1")
+        r = cur.fetchone() or {}; c.close()
+        s.update(sender_name=r.get("wa_sender_name") or "", sender_default=brand_name(),
+                 banner=(f"/api/whatsapp/banner?v={r.get('wa_banner_v') or 0}" if r.get("has_banner") else ""))
+    except Exception:
+        pass
     return jsonify(s)
 
 
@@ -7165,6 +7662,8 @@ def whatsapp_settings():
     cur.execute("UPDATE Settings SET wa_country_code=%s, wa_send_link=%s, wa_send_pdf=%s WHERE id=1",
                 (cc, 1 if d.get("send_link", ws["send_link"]) else 0,
                  1 if d.get("send_pdf", ws["send_pdf"]) else 0))
+    if "sender_name" in d:
+        cur.execute("UPDATE Settings SET wa_sender_name=%s WHERE id=1", [str(d.get("sender_name") or "").strip()[:80]])
     c.commit(); c.close()
     return jsonify({"ok": True})
 
@@ -7176,7 +7675,7 @@ def whatsapp_test():
     num = wa.normalize(d.get("number"), _wa_settings()["cc"])
     if not num:
         return jsonify({"error": "That is not a phone number."}), 400
-    r = wa.send(num, f"{brand_name()}: test message. WhatsApp is linked and working.")
+    r = _wa_send_text(num, f"{_wa_brand()}: test message. WhatsApp is linked and working.")
     msg = {"ok": f"Sent to +{num}", "not_linked": "WhatsApp is not linked yet.",
            "not_on_whatsapp": f"+{num} is not on WhatsApp.", "bad_number": "That is not a phone number.",
            "unavailable": wa.installed() or "WhatsApp is not available on this server."}.get(r, "Could not send. See the server log.")
@@ -7245,6 +7744,7 @@ def nowstr():
 # ---------- ITAM: checkout / checkin ----------
 @app.route("/api/assets/<a_id>/checkout", methods=["POST"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.checkout")
 def checkout_asset(a_id):
     d = request.get_json(force=True)
     user = (d.get("username") or "").strip()
@@ -7256,45 +7756,68 @@ def checkout_asset(a_id):
     # dialog lets you pick a different day if the sign-off happened earlier.
     signed_date = (d.get("signed_date") or "").strip() or datetime.now().strftime("%Y-%m-%d")
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Name FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
+    cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [a_id]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
-    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, NotesReceived=%s WHERE _id=%s", (user, signed_date, a_id))
+    # The person it is checked out to is who it is assigned to. This used to
+    # set only ReceivedBy, so EmployeeID still named the previous holder and
+    # the sign link, the signed copy and every notice went to them.
+    who = session.get("user", "?")
+    prev_emp = (a.get("EmployeeID") or "").strip()
+    hist = [(a_id, who, "Status", a.get("Status") or "", "Checked-Out")]
+    if prev_emp != user:
+        hist.append((a_id, who, "EmployeeID", prev_emp, user))
+        if (a.get("SignatureData") or ""):
+            # the last person's signature is theirs, not the new holder's
+            hist.append((a_id, who, "SignatureData", a["SignatureData"], ""))
+            cur.execute("UPDATE Assets SET SignatureData=NULL, SignNonce='' WHERE _id=%s", [a_id])
+    cur.execute("UPDATE Assets SET Status='Checked-Out', EmployeeID=%s, ReceivedBy=%s, NotesReceived=%s, ReturnedAt=NULL, UpdatedAt=NOW() WHERE _id=%s",
+                (user, _resolve_employee_name(cur, user) or user, signed_date, a_id))
+    # one open checkout per asset: an earlier one still open is closed here
+    cur.execute("UPDATE Checkouts SET checkin_date=%s WHERE asset_id=%s AND checkin_date IS NULL", (nowstr(), a_id))
     cur.execute("INSERT INTO Checkouts (asset_id, username, checkout_date, expected_checkin, note) VALUES (%s,%s,%s,%s,%s)",
                 (a_id, user, nowstr(), expected, note))
+    cur.executemany("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) VALUES (%s, NOW(), %s, %s, %s, %s)", hist)
     c.commit(); c.close()
     audit(session.get("user"), "CHECKOUT", a_id, f"{a['Name']} -> {user}" + (f" (due {expected})" if expected else ""))
-    send_notification("IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.", kind="asset.checkout")
+    _after_reply(send_notification, "IT Guy: Asset checked out", f"'{a['Name']}' was checked out to {user} by {session.get('user')}.", kind="asset.checkout")
     try:
         cc = conn(); ccur = cc.cursor()
         ccur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); full_asset = ccur.fetchone(); cc.close()
     except Exception:
         full_asset = None
     full_asset = full_asset or {"Name": a["Name"], "_id": a_id}
-    notify_person_asset_assigned(user, full_asset, checked_out=True)
-    try:
-        notify_asset_status_changed(full_asset, None, "Checked-Out")
-    except Exception as e:
-        print("asset status-change notify error:", e)
+    _after_reply(notify_person_asset_assigned, user, full_asset, checked_out=True)
+    _after_reply(notify_asset_status_changed, full_asset, a.get("Status"), "Checked-Out")
     return jsonify({"ok": True})
 
 @app.route("/api/assets/<a_id>/checkin", methods=["POST"])
 @auth_required(module="assets", level="write")
+@feature_required("assets.checkout")
 def checkin_asset(a_id):
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT * FROM Assets WHERE _id=%s", [a_id]); a = cur.fetchone()
+    cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [a_id]); a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
     old_status = a.get("Status")
     cur.execute("SELECT id FROM Checkouts WHERE asset_id=%s AND checkin_date IS NULL ORDER BY id DESC LIMIT 1", [a_id])
     co = cur.fetchone()
     if co:
         cur.execute("UPDATE Checkouts SET checkin_date=%s WHERE id=%s", (nowstr(), co["id"]))
-    cur.execute("UPDATE Assets SET Status='Available', ReceivedBy='' WHERE _id=%s", [a_id])
+    # Checked in = back with IT and nobody's: the assignment, the receipt,
+    # the signature and any outstanding sign link all come off, the same as
+    # Returned. This used to clear ReceivedBy only, leaving an Available
+    # asset still assigned to, and signed by, the person who handed it back.
+    who = session.get("user", "?")
+    hist = [(a_id, who, col, str(a.get(col) or ""), new)
+            for col, new in (("Status", "Available"), ("EmployeeID", ""), ("ReceivedBy", ""),
+                             ("NotesReceived", ""), ("SignatureData", ""))
+            if str(a.get(col) or "") != new]
+    cur.execute("UPDATE Assets SET Status='Available', EmployeeID='', ReceivedBy='', NotesReceived='', "
+                "SignatureData=NULL, SignNonce='', UpdatedAt=NOW() WHERE _id=%s", [a_id])
+    if hist:
+        cur.executemany("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) VALUES (%s, NOW(), %s, %s, %s, %s)", hist)
     c.commit(); c.close()
     audit(session.get("user"), "CHECKIN", a_id, f"{a['Name']} returned")
-    try:
-        notify_asset_status_changed(a, old_status, "Available")
-    except Exception as e:
-        print("asset status-change notify error:", e)
+    _after_reply(notify_asset_status_changed, a, old_status, "Available")
     return jsonify({"ok": True})
 
 # ---------- ITAM: maintenance ----------
@@ -7480,6 +8003,56 @@ def _employee_for_label(emp_map, assigned):
     return (code or assigned), (name or assigned)
 
 
+def _clean_public_url(v):
+    v = str(v or "").strip().rstrip("/")
+    if not v:
+        return ""
+    if not re.match(r"^https?://[A-Za-z0-9.\-\[\]:]+(/[^\s]*)?$", v):
+        return None
+    return v
+
+
+def _saved_public_url():
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT public_url FROM Settings WHERE id=1")
+        v = ((cur.fetchone() or {}).get("public_url") or "").strip(); c.close()
+    except Exception:
+        return ""
+    v = _clean_public_url(v)
+    return (v + "/") if v else ""
+
+
+def _is_local_only(url):
+    """True for an address only this computer can open."""
+    try:
+        from urllib.parse import urlparse
+        h = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return h in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or h.endswith(".localhost")
+
+
+@app.route("/api/settings/public-url", methods=["GET", "POST"])
+@auth_required(module="settings", level="read")
+def public_url_setting():
+    if request.method == "POST":
+        if not _feature_allowed("settings.general"):
+            return jsonify({"error": "No access"}), 403
+        raw = (request.get_json(force=True, silent=True) or {}).get("public_url")
+        v = _clean_public_url(raw)
+        if v is None:
+            return jsonify({"error": "Enter a full address starting with http:// or https://, e.g. http://192.168.1.10:5000"}), 400
+        c = conn(); cur = c.cursor()
+        cur.execute("UPDATE Settings SET public_url=%s WHERE id=1", [v]); c.commit(); c.close()
+        audit(session.get("user"), "SETTINGS", "", f"public address set to {v or '(automatic)'}")
+    saved = _saved_public_url().rstrip("/")
+    effective = _public_base().rstrip("/")
+    return jsonify({"ok": True, "public_url": saved, "effective": effective,
+                    "env_override": bool((os.environ.get("ITVAULT_PUBLIC_URL") or "").strip()),
+                    "local_only": _is_local_only(effective)})
+
+
 def _public_base():
     """The base URL a phone should use, with a trailing slash.
 
@@ -7504,6 +8077,13 @@ def _public_base():
     override = (os.environ.get("ITVAULT_PUBLIC_URL") or "").strip()
     if override:
         return override.rstrip("/") + "/"
+    # Settings > General > Public address. Without it a link is built from
+    # whatever address the admin happened to open the app on -- often
+    # http://localhost:5000, which no employee's phone can reach and which
+    # WhatsApp does not even make tappable.
+    saved = _saved_public_url()
+    if saved:
+        return saved
     base = request.host_url
     proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
     if proto in ("http", "https") and "://" in base:
@@ -8108,7 +8688,7 @@ def asset_public(a_id):
     try:
         sc = conn(); scur = sc.cursor()
         cols = ", ".join("`%s`" % col for col in THEME_COLS)
-        scur.execute("SELECT app_name, logo_text, company_phone, company_address, "
+        scur.execute("SELECT app_name, logo_text, company_phone, company_address, sign_mode, "
                      + cols + " FROM Settings WHERE id=1")
         srow = scur.fetchone(); sc.close()
         app_name = (srow.get("app_name") or "IT-Vault") if srow else "IT-Vault"
@@ -8117,6 +8697,7 @@ def asset_public(a_id):
         company_address = (srow.get("company_address") or "") if srow else ""
         if srow:
             brand_theme = {k: srow.get(k) for k in THEME_COLS}
+            brand_theme["sign_mode"] = _mode(srow.get("sign_mode"))
     except Exception:
         app_name, logo_text, company_phone, company_address = "IT-Vault", "IT-Vault", "", ""
     # who actually processed this asset (the staff/admin account, as opposed to
@@ -8159,7 +8740,11 @@ def asset_public(a_id):
     # what the asset actually is remains the reason IT scans tags.
     from html import escape as _esc
     tag_txt = asset.get("AssetTag") or asset["_id"][:12]
-    staff_view = bool(session.get("user"))
+    # signed in AND allowed to see assets: a helpdesk-only role walking the
+    # tags used to get every assignee's name and email
+    staff_view = bool(session.get("user")) and (
+        session.get("role") == ROLE_ADMIN
+        or _PERM_ORDER.get(_role_perms(session.get("role")).get("assets", "none"), 0) >= _PERM_ORDER.get("read", 1))
     card_cls = "" if staff_view else "pubcard"
     if staff_view:
         page_title = f"Asset {_h(asset['Name'])}"
@@ -9166,6 +9751,34 @@ def _issue_sign_link(a_id, name=""):
     return tk, f"{_public_base()}sign?token={quote(tk)}"
 
 
+def _current_sign_link(a_id, name=""):
+    """The link already out for this asset, if it has a day or more left;
+    otherwise a new one.
+
+    Opening the sign dialog -- on the web or the phone -- used to issue a new
+    link every time, which retired the one already in the employee's inbox:
+    an admin who only looked at the link killed it. Looking is not sending.
+    SEND LINK still issues a fresh one; this is only for showing it.
+    """
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT SignNonce FROM Assets WHERE _id=%s", [a_id])
+        nonce = ((cur.fetchone() or {}).get("SignNonce") or "").strip()
+        row = None
+        if nonce:
+            cur.execute("SELECT code FROM SignLinks WHERE asset_id=%s AND nonce=%s "
+                        "AND expires_at > NOW() + INTERVAL 1 DAY "
+                        "ORDER BY expires_at DESC LIMIT 1", [a_id, nonce])
+            row = cur.fetchone()
+        c.close()
+        if row and row.get("code"):
+            tk = _sign_token({"asset_id": a_id, "name": name or "", "n": nonce}, exp_hours=24 * 7)
+            return tk, f"{_public_base()}s/{row['code']}"
+    except Exception as e:
+        print("[itvault] could not read the current sign link:", e, flush=True)
+    return _issue_sign_link(a_id, name)
+
+
 def _sign_recipient(identifier):
     """(name, email) for whoever an asset is assigned to.
 
@@ -9247,17 +9860,26 @@ def _smtp_ready():
 @auth_required(module="assets", level="write")
 def get_sign_link(a_id):
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Name, EmployeeID FROM Assets WHERE _id=%s", [a_id])
+    cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets WHERE _id=%s", [a_id])
     a = cur.fetchone()
     if not a: c.close(); return jsonify({"error": "asset not found"}), 404
     c.close()
-    tk, url = _issue_sign_link(a_id, a["Name"])
+    tk, url = _current_sign_link(a_id, a["Name"])
+    local_only = _is_local_only(url)
     # Who the link can be emailed to, so the dialog can offer it rather than
     # leaving copy-and-paste as the only way to get it to the employee.
     who, to = _sign_recipient(a.get("EmployeeID"))
     mail_ok = _smtp_ready()
     wa_num, wa_why = _wa_link_target(a.get("EmployeeID")) if a.get("EmployeeID") else ("", "")
-    return jsonify({"ok": True, "token": tk, "url": url,
+    # For the "open in WhatsApp" button (wa.me): it goes from whoever is
+    # using the dialog, so it needs no linked phone and ignores the
+    # send-on-WhatsApp switch -- only a number, if there is one on file.
+    direct_num = ""
+    if a.get("EmployeeID"):
+        direct_num = wa.normalize(_employee_phone(a.get("EmployeeID")), _wa_settings()["cc"])
+    return jsonify({"ok": True, "token": tk, "url": url, "local_only": local_only,
+                    "wa_direct_number": direct_num,
+                    "wa_direct_text": _wa_sign_link_text(who if a.get("EmployeeID") else "", a, url),
                     "assignee": who, "assignee_email": to,
                     "can_email": bool(to) and mail_ok,
                     "smtp_ready": mail_ok,
@@ -9268,7 +9890,7 @@ def get_sign_link(a_id):
 
 def _wa_sign_link_text(who, a, url):
     tag = a.get("AssetTag") or a.get("_id", "")
-    return (f"{brand_name()}: Hi {who or 'there'}, '{a.get('Name') or 'an asset'}' "
+    return (f"{_wa_brand()}: Hi {who or 'there'}, '{a.get('Name') or 'an asset'}' "
             f"(Asset ID: {tag}) is assigned to you. Please open this link to "
             f"acknowledge it and sign:\n{url}\n\nThe link works once and expires in 7 days.")
 
@@ -9319,7 +9941,7 @@ def send_sign_link(a_id):
             reminder=True, sign_url=url)
         (sent if ok else failed).append(to)
     if wa_num and not wa_why:
-        r = wa.send(wa_num, _wa_sign_link_text(who, a, url))
+        r = _wa_send_text(wa_num, _wa_sign_link_text(who, a, url))
         if r == "ok":
             sent.append(f"WhatsApp +{wa_num}")
         else:
@@ -9372,7 +9994,11 @@ function bestTextOn(bgHex){ const dark='#04121f', light='#e6edf6'; return contra
    muted text, lines, button ink -- follows exactly as it did before. A
    background already on the right side of the line is left untouched, so a
    dark install in dark mode is pixel for pixel what it always was. */
+// "light" / "dark" fixed in Settings, or "system" to follow the device
 function prefersLight(){
+  const m=window.__THEME_MODE;
+  if(m==='light') return true;
+  if(m==='dark') return false;
   try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
   catch(e){ return false; }
 }
@@ -9397,6 +10023,8 @@ function ensureAccentVisible(accent,surface){
 }
 function applySignTheme(b){
   try{
+    window.__THEME_MODE=(b&&b.sign_mode)||'system';
+    try{ document.documentElement.style.colorScheme=window.__THEME_MODE==='system'?'':window.__THEME_MODE; }catch(e){}
     const bgType=b.bg_type==='gradient'?'gradient':'solid';
     const bgRaw=String(b.bg||'').trim();
     let bgA='#0a0d13', bgB='#121826';
@@ -9555,7 +10183,7 @@ body{font-family:'Rajdhani',sans-serif;margin:0;padding:28px 16px;padding-top:ma
     </div>
     <div class="btnrow">
       <button class="btn ghost" id="clearSign" style="display:none">🗑 CLEAR</button>
-      <button class="btn ghost" id="viewSign" style="display:none">🖼 VIEW SIGNATURE</button>
+      <button class="btn ghost" id="viewSign" style="display:none" disabled>📄 VIEW SIGNED COPY</button>
       <button class="btn" id="saveSign">✅ SUBMIT ACKNOWLEDGEMENT</button>
     </div>
   </div>
@@ -9735,7 +10363,9 @@ async function load(){
   const receivedBy = a.ReceivedBy || a.received_by || '';
   const notesReceived = a.NotesReceived || a.notes_received || '';
   const viewBtn=document.getElementById('viewSign');
-  if(viewBtn){ if(a.SignatureData){ viewBtn.style.display='block'; viewBtn.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+a.SignatureData+'">'); w.document.close();}; } else { viewBtn.style.display='none'; } }
+  // the signed copy is offered once this person has signed (see submit) --
+  // not from whatever signature the asset happened to hold before
+  if(viewBtn){ viewBtn.style.display='none'; viewBtn.disabled=true; }
   document.getElementById('assetIdBadge').textContent = a.AssetTag||a.asset_tag||'';
   document.getElementById('assetCard').innerHTML=
     '<table class=asset-table>'+
@@ -9753,7 +10383,9 @@ async function load(){
     '</table>';
 }
 document.getElementById('clearSign').addEventListener('click',()=>{clearSig();});
-document.getElementById('viewSign').addEventListener('click',()=>{const sig=(document.querySelector('meta[data-sig]')||{}).content||''; if(!sig){alert('No signature');return;} const w=window.open('','_blank'); w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+sig+'">'); w.document.close(); });
+/* VIEW SIGNED COPY is wired up by the submit handler, with the link the
+   server hands back; there used to be a second handler here that ran first
+   and popped "No signature" over the top of it */
 document.getElementById('saveSign').addEventListener('click',async()=>{
   const name=document.getElementById('signer').value.trim();
   const res=document.getElementById('result');
@@ -9789,7 +10421,7 @@ document.getElementById('saveSign').addEventListener('click',async()=>{
     sb.textContent='✓ SUBMITTED';
     res.scrollIntoView({block:'center',behavior:'smooth'});
     try{ if(navigator.vibrate) navigator.vibrate(60); }catch(e){}
-    sb.disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v){v.style.display='block';v.onclick=()=>{const w=window.open('','_blank');w.document.write('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Signature</title><style>html,body{background:#fff;margin:0;color-scheme:light}img{display:block;max-width:100%;height:auto;margin:24px auto;background:#fff;padding:12px;box-sizing:border-box}</style><img alt="Signature" src="'+data+'">'); w.document.close();};}}
+    sb.disabled=true;document.getElementById('signer').disabled=true;placeholder.classList.add('hidden');clearSig();const v=document.getElementById('viewSign');if(v&&j.copy_url){v.style.display='block';v.disabled=false;v.onclick=()=>{window.open(j.copy_url,'_blank','noopener');};}}
   else{res.className='err';res.textContent='❌ '+(j.error||'Failed');}
 });
 /*__PUBLIC_THEME_JS__*/
@@ -9988,7 +10620,7 @@ def _pdf_text(value):
         print("PDF: cannot shape right-to-left text (%s); printing it unshaped" % e)
         return s
 
-def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
+def _build_signed_asset_pdf(asset, signer_name, sig_data_url, returned=None, watermark=None):
     """One-page A4 PDF of the signed acknowledgement -- Asset ID front and
     center, full details, and the captured signature -- emailed to both the
     assigned user and the admin team the moment someone submits /sign."""
@@ -10073,6 +10705,9 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
         ["Notes", asset.get("Notes") or "—"],
         ["Signed By", signer_name or "—"],
     ]
+    if returned:
+        rows += [["Returned On", returned.get("returned_on") or "—"],
+                 ["Received Back By", returned.get("returned_to") or "—"]]
     if asset.get("EmployeeID"):
         rows += [
             ["Employee Name", asset.get("EmployeeName") or asset.get("EmployeeID")],
@@ -10120,6 +10755,8 @@ def _build_signed_asset_pdf(asset, signer_name, sig_data_url):
             cnv.drawImage(letterhead_path, 0, 0, width=A4[0], height=A4[1],
                            preserveAspectRatio=False, mask="auto")
             cnv.restoreState()
+        if watermark and (watermark.get("text") or "").strip():
+            _draw_watermark(cnv, A4, watermark)
 
     try:
         doc.build(story, onFirstPage=_draw_letterhead_bg, onLaterPages=_draw_letterhead_bg)
@@ -10190,7 +10827,7 @@ def _deliver_signed_asset_pdf(asset, signer_name, sig_data_url, emp_email, wa_nu
     body = (f"'{asset.get('Name','')}' (Asset ID: {tag}) was acknowledged and signed by "
             f"{signer_name}. The signed copy is attached as a PDF.")
     if wa_num:
-        r = wa.send(wa_num, f"{brand_name()}: {body}", pdf=pdf_bytes, file_name=fname)
+        r = wa.send(wa_num, f"{_wa_brand()}: {body}", pdf=pdf_bytes, file_name=fname)
         print(f"[whatsapp] signed copy of {tag} -> +{wa_num}: {r}", flush=True)
         if r == "ok":
             audit("system", "SIGNED_COPY_WHATSAPP", asset.get("_id", ""), f"signed copy sent on WhatsApp to +{wa_num}")
@@ -10210,6 +10847,145 @@ def _deliver_signed_asset_pdf(asset, signer_name, sig_data_url, emp_email, wa_nu
             _send_email_with_attachment(e, f"Signed asset acknowledgement: {asset.get('Name','')}", body, pdf_bytes, fname)
             sent_to.add(e.lower())
 
+
+def _ret_wm_settings():
+    """The RETURNED watermark as set under Settings > Branding."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT ret_wm_text, ret_wm_color, ret_wm_opacity, ret_wm_send, ret_auto_days FROM Settings WHERE id=1")
+        r = cur.fetchone() or {}; c.close()
+    except Exception:
+        r = {}
+    out = _clean_ret_wm(r.get("ret_wm_text"), r.get("ret_wm_color"),
+                        r.get("ret_wm_opacity"), r.get("ret_wm_send"))
+    out["auto_days"] = _clean_auto_days(r.get("ret_auto_days"))
+    return out
+
+
+def _clean_auto_days(v):
+    try:
+        return max(0, min(365, int(v or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _clean_ret_wm(text, color, opacity, send=1):
+    text = re.sub(r"\s+", " ", str("RETURNED" if text is None else text)).strip()[:40]
+    color = str(color or "").strip()
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", color):
+        color = "#d32f2f"
+    try:
+        opacity = max(5, min(100, int(opacity)))
+    except (TypeError, ValueError):
+        opacity = 18
+    return {"text": text, "color": color.lower(), "opacity": opacity,
+            "send": bool(1 if send is None else int(send or 0))}
+
+
+def _draw_watermark(cnv, pagesize, wm):
+    """One line of text, corner to corner, sized to fit the page diagonal."""
+    from reportlab.lib import colors
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    import math
+    text = _pdf_text(wm["text"])
+    w, h = pagesize
+    diag = math.hypot(w, h) * 0.78
+    size = min(120, diag / max(1.0, stringWidth(text, PDF_FONT_BOLD, 1)))
+    cnv.saveState()
+    cnv.setFillColor(colors.HexColor(wm.get("color") or "#d32f2f"))
+    try:
+        cnv.setFillAlpha(max(0.05, min(1.0, (wm.get("opacity") or 18) / 100.0)))
+    except Exception:
+        pass
+    cnv.translate(w / 2, h / 2)
+    cnv.rotate(math.degrees(math.atan2(h, w)))
+    cnv.setFont(PDF_FONT_BOLD, size)
+    cnv.drawCentredString(0, -size * 0.35, text)
+    cnv.restoreState()
+
+
+def _deliver_returned_copy(rc):
+    """The acknowledgement again, stamped with the RETURNED watermark and the
+    return date, to the employee who gave it back (email, and WhatsApp when
+    linked) and to IT -- both sides keep proof it came back."""
+    wm = _ret_wm_settings()
+    if not wm["send"]:
+        return
+    asset = rc["asset"]
+    try:
+        pdf_bytes = _build_signed_asset_pdf(asset, rc.get("signer"), rc.get("sig"),
+                                            returned=rc, watermark=wm)
+    except Exception as e:
+        print("returned pdf build error:", e); return
+    tag = asset.get("AssetTag") or asset.get("_id", "")
+    fname = f"{tag or 'asset'}_returned.pdf"
+    who = asset.get("EmployeeName") or asset.get("EmployeeID") or "the employee"
+    body = (f"'{asset.get('Name','')}' (Asset ID: {tag}) was returned by {who} on "
+            f"{rc.get('returned_on')} and received back by {rc.get('returned_to') or 'IT'}. "
+            f"The acknowledgement, marked returned, is attached as a PDF.")
+    subj = f"Asset returned: {asset.get('Name','') or tag}"
+    emp_email, wa_num = _signed_copy_plan(asset) if asset.get("EmployeeID") else ("", "")
+    if wa_num:
+        r = wa.send(wa_num, f"{_wa_brand()}: {body}", pdf=pdf_bytes, file_name=fname)
+        print(f"[whatsapp] returned copy of {tag} -> +{wa_num}: {r}", flush=True)
+    sent_to = set()
+    if emp_email:
+        _send_email_with_attachment(emp_email, subj, body, pdf_bytes, fname)
+        sent_to.add(emp_email.lower())
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT email FROM Users WHERE email<>''")
+        admin_emails = [r["email"] for r in cur.fetchall()]
+        c.close()
+    except Exception:
+        admin_emails = []
+    for e in admin_emails:
+        if e and e.lower() not in sent_to:
+            _send_email_with_attachment(e, subj, body, pdf_bytes, fname)
+            sent_to.add(e.lower())
+    if sent_to or wa_num:
+        audit("system", "RETURNED_COPY_SENT", asset.get("_id", ""),
+              "returned copy sent to " + ", ".join(sorted(sent_to) + ([f"WhatsApp +{wa_num}"] if wa_num else [])))
+
+
+@app.route("/api/settings/return-watermark", methods=["GET", "POST"])
+@auth_required(module="settings", level="write")
+def return_watermark_settings():
+    if request.method == "GET":
+        return jsonify(_ret_wm_settings())
+    d = request.get_json(force=True) or {}
+    wm = _clean_ret_wm(d.get("text"), d.get("color"), d.get("opacity"), 1 if d.get("send", True) else 0)
+    wm["auto_days"] = _clean_auto_days(d.get("auto_days", _ret_wm_settings()["auto_days"]))
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE Settings SET ret_wm_text=%s, ret_wm_color=%s, ret_wm_opacity=%s, ret_wm_send=%s, ret_auto_days=%s WHERE id=1",
+                (wm["text"], wm["color"], wm["opacity"], 1 if wm["send"] else 0, wm["auto_days"]))
+    c.commit(); c.close()
+    audit(session.get("user"), "SETTINGS", "", "returned assets settings updated")
+    return jsonify({"ok": True, **wm})
+
+
+def _returned_preview_pdf(wm, user="IT"):
+    sample = {"AssetTag": "AST-0001", "Name": "Sample Laptop", "Type": "Laptop",
+              "Serial": "SN-123456", "Location": "Head Office", "Status": "Returned",
+              "WarrantyMonths": 12, "NotesReceived": datetime.now().strftime("%Y-%m-%d"),
+              "Notes": "Preview only", "EmployeeID": "E001", "EmployeeName": "Sample Employee",
+              "Department": "IT", "Designation": "Engineer", "Email": "employee@example.com"}
+    rc = {"returned_on": datetime.now().strftime("%Y-%m-%d %H:%M"), "returned_to": user}
+    return _build_signed_asset_pdf(sample, "Sample Employee", "", returned=rc, watermark=wm)
+
+
+@app.route("/api/settings/return-watermark/preview")
+@auth_required(module="settings", level="write")
+def return_watermark_preview():
+    """A sample returned copy with the values in the form, saved or not, so
+    the look can be checked before anything is sent with it."""
+    a = request.args
+    wm = _clean_ret_wm(a.get("text"), a.get("color"), a.get("opacity"))
+    pdf = _returned_preview_pdf(wm, session.get("user") or "IT")
+    return Response(pdf, mimetype="application/pdf",
+                    headers={"Content-Disposition": "inline; filename=returned_preview.pdf",
+                             "Cache-Control": "no-store"})
+
 @app.route("/api/assets/sign/approve", methods=["POST"])
 def approve_asset():
     d = request.get_json(force=True) or {}
@@ -10223,8 +10999,12 @@ def approve_asset():
     if err:
         c.close()
         return jsonify({"error": err}), 400
-    cur.execute("SELECT Name FROM Assets WHERE _id=%s", [aid]); a = cur.fetchone()
-    if not a: c.close(); return jsonify({"error": "asset not found"}), 404
+    cur.execute("SELECT Name, Status, SignNonce, is_deleted FROM Assets WHERE _id=%s", [aid]); a = cur.fetchone()
+    if not a or a.get("is_deleted"): c.close(); return jsonify({"error": "asset not found"}), 404
+    if a.get("Status") in ("Returned", "Retired", "Lost/Stolen"):
+        c.close()
+        return jsonify({"error": "This asset is no longer assigned to you, so there is nothing to sign. Ask IT if this is wrong."}), 400
+    held_nonce = a.get("SignNonce") or ""
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     receivedBy = name
     notesReceived = datetime.now().strftime("%Y-%m-%d")
@@ -10242,8 +11022,14 @@ def approve_asset():
     # SignNonce is cleared in the same statement that records the signature,
     # so the link dies exactly when the acknowledgement lands -- not a moment
     # before, and never twice.
-    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s, SignNonce='' WHERE _id=%s",
-                (receivedBy, name, notesReceived, sigData, aid))
+    # Conditional on the nonce this request was checked against: two submits
+    # at once (a double tap) both passed the check above and both wrote, and
+    # everyone got two signed copies. Now the second finds the nonce gone.
+    cur.execute("UPDATE Assets SET Status='Checked-Out', ReceivedBy=%s, Notes=CONCAT(IFNULL(Notes,''),'\\nAcknowledged by ',%s,' on ',NOW()), NotesReceived=%s, SignatureData=%s, SignNonce='', UpdatedAt=NOW() WHERE _id=%s AND IFNULL(SignNonce,'')=%s",
+                (receivedBy, name, notesReceived, sigData, aid, held_nonce))
+    if not cur.rowcount:
+        c.rollback(); c.close()
+        return jsonify({"error": "This link has already been used -- the acknowledgement is on record."}), 409
     c.commit(); c.close()
     audit(session.get("user"), "ACKNOWLEDGE", aid, f"{name} acknowledged")
     emailed = whatsapped = False
@@ -10269,7 +11055,39 @@ def approve_asset():
     # Tells the sign page where the signed copy is headed: only to an inbox
     # that exists on a server with mail set up, and only to a WhatsApp that is
     # linked -- the page says "on its way", never "delivered".
-    return jsonify({"ok": True, "emailed": emailed, "whatsapp": whatsapped})
+    # copy_url lets the person who just signed open that copy themselves.
+    copy_tk = _sign_token({"copy": aid}, exp_hours=24 * 30)
+    return jsonify({"ok": True, "emailed": emailed, "whatsapp": whatsapped,
+                    "copy_url": f"/api/assets/sign/copy?t={quote(copy_tk)}"})
+
+
+@app.route("/api/assets/sign/copy")
+def signed_copy_pdf():
+    """The signed acknowledgement as a PDF, for the person who just signed.
+
+    Public like the sign page, so it needs the copy link approve_asset hands
+    back: signed with the install's secret, for one asset, good for 30 days.
+    It is built from the asset as it is now, so it is the same document the
+    signer and IT were sent."""
+    if not _public_throttle("signcopy:" + _client_ip(), limit=30, window=3600):
+        return jsonify({"error": "Too many requests just now."}), 429
+    data = _verify_token(request.args.get("t") or "")
+    aid = data.get("copy") if isinstance(data, dict) else None
+    if not aid:
+        return jsonify({"error": "This link has expired."}), 403
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [aid]); a = cur.fetchone()
+    if a and a.get("EmployeeID"):
+        cur.execute("SELECT EmployeeName, Department, Designation, Email FROM Employees WHERE EmployeeID=%s", [a["EmployeeID"]])
+        a.update({k: v or "" for k, v in (cur.fetchone() or {}).items()})
+    c.close()
+    if not a or not (a.get("SignatureData") or ""):
+        return jsonify({"error": "There is no signed copy for this asset any more."}), 404
+    pdf = _build_signed_asset_pdf(a, a.get("ReceivedBy") or "", a.get("SignatureData") or "")
+    fname = f"{(a.get('AssetTag') or 'asset')}_signed.pdf"
+    return Response(pdf, mimetype="application/pdf",
+                    headers={"Content-Disposition": f"inline; filename={fname}",
+                             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 @app.route("/api/assets/<aid>/signature")
 @auth_required(module="assets", level="read")
@@ -11115,8 +11933,16 @@ def _apply_restore_sql(content):
     c = conn(); cur = c.cursor()
     applied = 0
     for stmt in _split_sql_statements(content):
-        s = stmt.strip()
-        if not s or s.startswith("--"): continue
+        # Comment lines come before a statement, not instead of it: every
+        # table section is "-- == T ==" then "DELETE FROM T;", and with no ';'
+        # after the header the two arrive as one piece. Skipping any piece
+        # that started with "--" skipped every DELETE, so a restore only ever
+        # added rows back and never removed what came after the backup.
+        lines = stmt.strip().split("\n")
+        while lines and (not lines[0].strip() or lines[0].lstrip().startswith("--")):
+            lines.pop(0)
+        s = "\n".join(lines).strip()
+        if not s: continue
         try:
             cur.execute(s); applied += 1
         except Exception as e:
@@ -11461,9 +12287,23 @@ def setup_complete():
     audit(admin_user, "SETUP", "", "first-run setup completed")
     return jsonify({"ok": True})
 
+def _pw_fp(pw_hash):
+    """A short fingerprint of a stored password hash. A session carries the
+    one it was opened with; when the password changes -- by the user, an
+    admin or a reset -- every other session for that account stops matching."""
+    return hashlib.sha256(("itvault-session:" + str(pw_hash or "")).encode()).hexdigest()[:16]
+
+
 def _start_session(username, role, display, remember):
     """Establishes a logged-in session. `remember` decides whether it carries
     an idle expiry at all: without one it lasts until the user logs out."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT password FROM Users WHERE username=%s", [username])
+        session["pwfp"] = _pw_fp((cur.fetchone() or {}).get("password"))
+        c.close()
+    except Exception:
+        session["pwfp"] = ""
     session["user"] = username
     session["role"] = role
     session["display"] = display
@@ -11489,6 +12329,34 @@ def _enforce_session_timeout():
             return jsonify({"error": "Session expired -- please sign in again"}), 401
         return None  # page loads fall through and land on the login screen
     session["exp"] = time.time() + SHORT_SESSION_SECONDS
+    return None
+
+@app.before_request
+def _revalidate_session():
+    """A session is a signed cookie: it said who you were and what role you
+    had when you signed in, and nothing looked again. A deleted user, a
+    demoted admin or a changed password left every open session -- and every
+    "keep me signed in" one, forever -- exactly as it was. Now each request
+    reads the account back: gone or password changed means signed out, and
+    the role is whatever it is now."""
+    u = session.get("user")
+    if not u:
+        return None
+    if request.path.endswith((".js", ".css", ".png", ".jpg", ".svg", ".ico", ".woff2", ".ttf", ".webp")):
+        return None          # files, not data: no account lookup per image
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT role, display, password FROM Users WHERE username=%s", [u])
+        row = cur.fetchone(); c.close()
+    except Exception:
+        return None          # the database is down; every route will say so itself
+    if not row or session.get("pwfp") != _pw_fp(row.get("password")):
+        session.clear()
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Your sign-in is no longer valid -- please sign in again"}), 401
+        return None
+    if session.get("role") != row.get("role"):
+        session["role"] = row.get("role")
     return None
 
 @app.before_request
@@ -11519,7 +12387,7 @@ def index():
 
 @app.route("/<path:p>")
 def static_files(p):
-    if p in ("login.html", "index.html", "style.css", "app.js"):
+    if p in ("login.html", "index.html", "style.css", "app.js", "redesign.css", "redesign.js"):
         return send_from_directory(BASE, p)
     return jsonify({"error": "not found"}), 404
 
@@ -11572,12 +12440,24 @@ def _maybe_run_scheduled_backup():
     audit("system", "BACKUP", "", f"scheduled ({sched}) scope={scope} file={fname}")
     print(f"[itguy] scheduled backup completed: {fname}")
 
+_backup_fail_told = False
 def _backup_scheduler_loop():
     while True:
         try:
             _maybe_run_scheduled_backup()
         except Exception as e:
             print("[itguy] backup scheduler failed:", e)
+            global _backup_fail_told
+            if not _backup_fail_told:
+                _backup_fail_told = True
+                try:
+                    send_notification("IT-Vault: scheduled backup failed",
+                                      f"The scheduled backup did not complete: {e}. It will be tried again every hour.",
+                                      kind="backup.failed")
+                except Exception:
+                    pass
+        else:
+            _backup_fail_told = False
         time.sleep(3600)  # check hourly -- actual due-ness is decided by backup_last_run
 
 _backup_thread_started = False
@@ -11621,6 +12501,10 @@ def check_contract_expiry():
     within 3 days of its end_date -- once per expiry date (re-armed
     automatically if the contract is edited, since PUT resets
     expiry_notified_at)."""
+    # the "Contract or warranty expiring" switch in Settings > Notifications;
+    # nothing is marked as sent while it is off, so turning it on catches up
+    if not _notify_enabled("contract.expiring"):
+        return
     try:
         c = conn(); cur = c.cursor()
         cur.execute("SELECT * FROM Contracts WHERE is_deleted=0 AND end_date<>''")
@@ -11656,6 +12540,105 @@ def _contract_expiry_loop():
         except Exception as e:
             print("[itguy] contract expiry loop error:", e)
         time.sleep(21600)  # check every 6 hours
+
+def release_returned_assets():
+    """Returned -> Available once the wait set under Settings > Branding
+    (Returned assets) has passed. Off while that is 0. Counts from when the
+    asset was returned; one returned before that was recorded counts from its
+    last change. Each move is in the asset's History as done by 'system'."""
+    days = _ret_wm_settings()["auto_days"]
+    if not days:
+        return 0
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT _id, AssetTag FROM Assets WHERE Status='Returned' AND is_deleted=0 "
+                "AND COALESCE(ReturnedAt, UpdatedAt) <= NOW() - INTERVAL %s DAY", [days])
+    rows = cur.fetchall()
+    for r in rows:
+        # the WHERE repeats the status so an asset someone re-assigned a
+        # moment ago is not flipped back
+        cur.execute("UPDATE Assets SET Status='Available', ReturnedAt=NULL, UpdatedAt=NOW() "
+                    "WHERE _id=%s AND Status='Returned'", [r["_id"]])
+        if cur.rowcount:
+            cur.execute("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) "
+                        "VALUES (%s, NOW(), 'system', 'Status', 'Returned', 'Available')", [r["_id"]])
+    c.commit(); c.close()
+    for r in rows:
+        audit("system", "AUTO_AVAILABLE", r["_id"],
+              f"{r.get('AssetTag') or r['_id']} Available again {days} day(s) after it was returned")
+    if rows:
+        print(f"[itvault] {len(rows)} returned asset(s) made Available again", flush=True)
+    return len(rows)
+
+
+def _mode(v):
+    v = str(v or "").strip().lower()
+    return v if v in ("light", "dark") else "system"
+
+
+@app.route("/api/settings/modes", methods=["GET", "POST"])
+@auth_required(module="settings", level="read")
+def appearance_modes():
+    """Light / dark for the app, the acknowledgement + asset QR pages, and the
+    ticket portal: each "system" (follow the device), "light" or "dark"."""
+    keys = ("ui_mode", "sign_mode", "portal_mode")
+    if request.method == "POST":
+        if not _feature_allowed("settings.branding"):
+            return jsonify({"error": "No access"}), 403
+        d = request.get_json(force=True, silent=True) or {}
+        c = conn(); cur = c.cursor()
+        for k in keys:
+            if k in d:
+                cur.execute(f"UPDATE Settings SET {k}=%s WHERE id=1", [_mode(d[k])])
+        c.commit(); c.close()
+        audit(session.get("user"), "SETTINGS", "", "light/dark modes updated")
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT ui_mode, sign_mode, portal_mode FROM Settings WHERE id=1")
+    r = cur.fetchone() or {}; c.close()
+    return jsonify({"ok": True, **{k: _mode(r.get(k)) for k in keys}})
+
+
+def notify_sla_breaches():
+    """Report each open ticket that has gone past its due date, once.
+
+    check_sla_breach() existed and the "SLA breached" switch was in Settings,
+    but nothing ever looked, so no breach was ever reported. This goes through
+    send_notification, so the switch and the channels both apply."""
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT id, code, subject, priority, assignee, due_date FROM Tickets "
+                "WHERE status NOT IN ('Resolved','Closed') AND IFNULL(due_date,'')<>'' "
+                "AND IFNULL(sla_breach_sent,0)=0 AND COALESCE(STR_TO_DATE(due_date, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(due_date, '%Y-%m-%d') + INTERVAL 1 DAY) < NOW()")
+    rows = cur.fetchall()
+    for t in rows:
+        cur.execute("UPDATE Tickets SET sla_breach_sent=1 WHERE id=%s", [t["id"]])
+    c.commit(); c.close()
+    for t in rows:
+        send_notification(
+            f"SLA breached: {t.get('code') or '#' + str(t['id'])} {t.get('subject') or ''}".strip(),
+            f"Ticket {t.get('code') or t['id']} ('{t.get('subject') or ''}', priority {t.get('priority') or '-'}) "
+            f"was due {t.get('due_date')} and is still open. Assigned to: {t.get('assignee') or 'nobody'}.",
+            kind="sla.breach")
+    return len(rows)
+
+
+def _returned_release_loop():
+    while True:
+        try:
+            release_returned_assets()
+        except Exception as e:
+            print("[itvault] returned-asset release error:", e, flush=True)
+        try:
+            notify_sla_breaches()
+        except Exception as e:
+            print("[itvault] SLA breach check error:", e, flush=True)
+        time.sleep(3600)  # hourly: a day-level setting does not need more
+
+_returned_release_started = False
+def start_returned_release_scheduler():
+    global _returned_release_started
+    if _returned_release_started:
+        return
+    _returned_release_started = True
+    threading.Thread(target=_returned_release_loop, name="returned-release", daemon=True).start()
 
 _contract_expiry_thread_started = False
 def start_contract_expiry_scheduler():
@@ -11718,6 +12701,7 @@ if __name__ == "__main__":
     start_ldap_scheduler()
     start_backup_scheduler()
     start_contract_expiry_scheduler()
+    start_returned_release_scheduler()
     wa.resume()
     print("IT-Vault (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
     app.run(host="0.0.0.0", port=5000, debug=False)

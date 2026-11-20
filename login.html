@@ -253,7 +253,7 @@ async function login(){
       body:JSON.stringify({username:u,password:p,remember:document.getElementById('r').checked})});
     const d=await r.json().catch(()=>({}));
     if(r.ok && d.need_2fa){
-      tfaMethods=d.methods||[]; tfaActive=tfaMethods[0];
+      tfaMethods=d.methods||[]; tfaActive=tfaMethods[0]; tfaSentTo=d.sent_to||[];
       showStep2fa();
       return;
     }
@@ -281,16 +281,19 @@ function showStep2fa(){
   document.getElementById('code2fa').value='';
   document.getElementById('code2fa').focus();
 }
+var tfaSentTo=[];
 function renderTfaStep(){
   const isEmail=tfaActive==='email';
+  // the code goes to email and WhatsApp both -- say exactly where
+  const where=(tfaSentTo&&tfaSentTo.length)?tfaSentTo.join(' and '):'your email';
   document.getElementById('tfaMsg').textContent=isEmail
-    ? 'We emailed a 6-digit code to your address'
+    ? 'We sent a 6-digit code to '+where
     : 'Enter the 6-digit code from your authenticator app';
-  document.getElementById('tfaLabel').textContent=isEmail?'Email code':'Authenticator code';
+  document.getElementById('tfaLabel').textContent=isEmail?'Sign-in code':'Authenticator code';
   const sw=document.getElementById('switchMethod');
   if(tfaMethods.length>1){
     sw.style.display='';
-    sw.textContent=isEmail?'Use authenticator app instead':'Use email code instead';
+    sw.textContent=isEmail?'Use authenticator app instead':'Use a code by email / WhatsApp instead';
   } else { sw.style.display='none'; }
   document.getElementById('resendCode').style.display=isEmail?'':'none';
 }
@@ -402,6 +405,13 @@ async function submitReset(){
     const r=await fetch('/api/forgot-password/reset',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({code,new_password:pw1})});
     const d=await r.json().catch(()=>({}));
+    if(r.ok && d.need_2fa){
+      // the new password is set; an account with 2FA still has to pass it
+      document.getElementById('stepForgot').style.display='none';
+      tfaMethods=d.methods||[]; tfaActive=tfaMethods[0];
+      showStep2fa();
+      return;
+    }
     if(r.ok && d.ok){
       const me=await fetch('/api/me'); const j=await me.json();
       if(j.user){ window.location.replace('/'); return; }

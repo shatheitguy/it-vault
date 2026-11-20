@@ -48,9 +48,15 @@ class AssetAdapter(
                 // compete with the name beside it
                 setColor((tint and 0x00FFFFFF) or 0x1A000000)
             }
-            b.statusDot.background = android.graphics.drawable.GradientDrawable().apply {
-                shape = android.graphics.drawable.GradientDrawable.OVAL
-                setColor(tint)
+            // the category's icon in the install's accent, on a tile of it
+            val ctx = b.root.context
+            val accent = com.itguy.assetmanager.data.Palette.serverColours()?.accent
+                ?: androidx.core.content.ContextCompat.getColor(ctx, com.itguy.assetmanager.R.color.accent)
+            b.typeIcon.setImageResource(com.itguy.assetmanager.ui.TypeIcons.forType(a.Type))
+            b.typeIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
+            b.typeTile.background = android.graphics.drawable.GradientDrawable().apply {
+                cornerRadius = 11f * ctx.resources.displayMetrics.density
+                setColor((accent and 0x00FFFFFF) or 0x24000000)
             }
             b.root.setOnClickListener { onClick(a) }
             b.root.setOnLongClickListener {

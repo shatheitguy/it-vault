@@ -43,7 +43,7 @@ class AssetEditFragment : Fragment() {
     private var locations: List<LocationItem> = emptyList()
     private var employees: List<Employee> = emptyList()
 
-    private val STATUSES = listOf("Available", "Checked-Out", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen")
+    private val STATUSES = listOf("Available", "Checked-Out", "Returned", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen")
     private val ADD_NEW = "＋ Add new…"
     private val NONE = "-- select --"
     private val ALLOWED_INVOICE_EXT = setOf("pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff")
@@ -231,7 +231,9 @@ class AssetEditFragment : Fragment() {
         b.fSerial.setText(current.Serial)
         b.fMacAddress.setText(current.MacAddress)
         b.fPurchaseDate.setText(current.PurchaseDate)
-        b.fWarrantyMonths.setText(if (current.WarrantyMonths > 0) current.WarrantyMonths.toString() else "12")
+        // 12 is the default for a NEW asset only; an existing asset's 0 is
+        // a real value and used to come back from Save as 12
+        b.fWarrantyMonths.setText(if (assetId == null && current.WarrantyMonths <= 0) "12" else current.WarrantyMonths.toString())
         b.fPrice.setText(current.Price)
         b.fReceivedBy.setText(current.ReceivedBy)
         b.fNotesReceived.setText(current.NotesReceived)
@@ -491,9 +493,14 @@ class AssetEditFragment : Fragment() {
 
     // ---- Status (fixed list) ----
     private fun bindStatusSpinner() {
-        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, STATUSES)
+        // A status outside the list (an import's "Active") is kept as an
+        // option. Without it the spinner fell back to "Available" and Save
+        // wrote that over the real status.
+        val cur = current.Status.orEmpty().trim()
+        val items = if (cur.isNotEmpty() && cur !in STATUSES) STATUSES + cur else STATUSES
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, items)
         b.fStatus.adapter = adapter
-        val idx = STATUSES.indexOf(current.Status.ifBlank { "Available" }).coerceAtLeast(0)
+        val idx = items.indexOf(cur.ifBlank { "Available" }).coerceAtLeast(0)
         b.fStatus.setSelection(idx)
     }
 
@@ -566,8 +573,17 @@ class AssetEditFragment : Fragment() {
 
     // ---- Employee ----
     private fun bindEmployeeSpinner() {
-        val labels = mutableListOf(NONE) + employees.map { "${it.EmployeeName} (${it.EmployeeID})" }
-        val currentLabel = employees.firstOrNull { it.EmployeeID == current.EmployeeID }?.let { "${it.EmployeeName} (${it.EmployeeID})" } ?: NONE
+        val labels = (listOf(NONE) + employees.map { "${it.EmployeeName} (${it.EmployeeID})" }).toMutableList()
+        // An assignee who is not in the employee list (an import, a system
+        // user, or a stale cache) stays selectable. Without this the spinner
+        // showed "-- select --" and Save unassigned the asset. The id is the
+        // last "(...)" in the label, which is how save() reads it back.
+        val curId = current.EmployeeID.orEmpty().trim()
+        if (curId.isNotEmpty() && employees.none { it.EmployeeID == curId }) {
+            labels.add(1, "$curId - not in list ($curId)")
+        }
+        val currentLabel = employees.firstOrNull { it.EmployeeID == curId }?.let { "${it.EmployeeName} (${it.EmployeeID})" }
+            ?: if (curId.isNotEmpty()) "$curId - not in list ($curId)" else NONE
         val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, labels)
         b.fEmployeeID.adapter = adapter
         val idx = labels.indexOf(currentLabel).coerceAtLeast(0)
@@ -642,7 +658,7 @@ class AssetEditFragment : Fragment() {
             NotesReceived = b.fNotesReceived.text?.toString()?.trim().orEmpty(),
             Note = b.fNote.text?.toString()?.trim().orEmpty(),
             PurchaseDate = b.fPurchaseDate.text?.toString()?.trim().orEmpty(),
-            WarrantyMonths = b.fWarrantyMonths.text?.toString()?.toIntOrNull() ?: 12,
+            WarrantyMonths = b.fWarrantyMonths.text?.toString()?.trim()?.toIntOrNull() ?: if (assetId == null) 12 else current.WarrantyMonths,
             Price = b.fPrice.text?.toString()?.trim().ifNullOrBlank("0"),
             EmployeeID = employeeId
         )

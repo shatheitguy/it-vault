@@ -208,8 +208,9 @@ def normalize(phone, country_code="971"):
     return d if 8 <= len(d) <= 15 else ""
 
 
-def send(number, text="", pdf=None, file_name="", timeout=60):
-    """'ok' | 'not_linked' | 'not_on_whatsapp' | 'bad_number' | 'failed' | 'unavailable'."""
+def send(number, text="", pdf=None, file_name="", timeout=60, image=None, image_type="image/jpeg"):
+    """'ok' | 'not_linked' | 'not_on_whatsapp' | 'bad_number' | 'failed' | 'unavailable'.
+    With image, the text goes as that picture's caption (the banner)."""
     if installed():
         return "unavailable"
     if not number:
@@ -218,5 +219,8 @@ def send(number, text="", pdf=None, file_name="", timeout=60):
     if pdf:
         import base64
         payload.update(document=base64.b64encode(pdf).decode(), fileName=file_name or "document.pdf", caption=text)
+    elif image:
+        import base64
+        payload.update(image=base64.b64encode(image).decode(), imageType=image_type or "image/jpeg", caption=text)
     r = _call("POST", "/send", payload, timeout=timeout)
     return (r or {}).get("result") or "failed"

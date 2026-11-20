@@ -963,3 +963,70 @@ body.edit-layout #dashWidgets .widget:hover{transform:translateY(-1px);
 .wa-qr{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-top:12px}
 .wa-qr #waQr{background:#fff;padding:10px;border-radius:10px;line-height:0}
 .wa-qr #waQr svg{width:240px;height:240px;display:block}
+/* RETURNED watermark, Settings > Branding */
+.rw-box{margin-top:14px}
+.rw-grid{display:grid;grid-template-columns:minmax(0,1fr) 150px;gap:20px;align-items:start}
+.rw-fields{display:flex;flex-direction:column;gap:14px}
+.rw-fields .toggle{margin:0;font-size:13px;font-weight:500}
+.rw-pair{display:grid;grid-template-columns:110px minmax(0,1fr);gap:14px;align-items:end}
+.rw-days{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.field2 .rw-days input{width:84px;min-height:34px}
+.rw-days span{color:var(--muted);font-size:13px;margin-right:4px}
+.rw-val{color:var(--txt);font-family:var(--mono);margin-left:6px;text-transform:none}
+.rw-page{position:relative;aspect-ratio:210/297;background:#fff;border:1px solid var(--line);border-radius:6px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+.rw-lines{position:absolute;inset:14% 12% auto;display:flex;flex-direction:column;gap:9px}
+.rw-lines i{display:block;height:5px;border-radius:3px;background:#e4e6eb}
+.rw-lines i:nth-child(odd){width:70%}
+#rwSample{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%) rotate(-54.7deg);font-weight:800;font-size:22px;letter-spacing:1px;white-space:nowrap;font-family:var(--font)}
+@media (max-width:640px){.rw-grid{grid-template-columns:1fr}.rw-page{width:140px;justify-self:center}}
+.wa-settings{display:grid;grid-template-columns:minmax(0,220px) minmax(0,1fr);gap:18px 28px;align-items:start;margin-top:16px}
+.wa-sub{font-family:var(--font);font-weight:600;letter-spacing:.5px;color:var(--muted);font-size:11px;text-transform:uppercase}
+.wa-settings .toggle{margin-bottom:0;font-size:13px;font-weight:500}
+.wa-brand{display:grid;grid-template-columns:minmax(0,260px) minmax(0,1fr);gap:18px 28px;align-items:start;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.wa-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.wa-banner-prev{width:200px;aspect-ratio:2/1;border:1px dashed var(--line2);border-radius:10px;display:grid;place-items:center;overflow:hidden;background:var(--bg1);color:var(--muted);font-size:12px}
+.wa-banner-prev img{width:100%;height:100%;object-fit:cover}
+.wa-banner-acts{display:flex;gap:8px;flex-wrap:wrap}
+@media (max-width:640px){.wa-brand{grid-template-columns:1fr}.wa-banner-prev{width:100%}}
+.wa-test{display:flex;align-items:flex-end;gap:10px;margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.wa-test .field2{flex:0 1 260px}
+.wa-test .btn{min-height:38px;white-space:nowrap}
+.wa-msg{margin-top:8px;font-size:12.5px;min-height:1em}
+.wa-msg:empty{display:none}
+#waPanel .m-actions{margin-top:16px}
+/* buttons side by side that wrap together instead of stacking unevenly */
+.btn-row{display:flex;flex-wrap:wrap;gap:10px}
+.btn-row .btn{min-height:38px}
+/* A checkbox that ends up inside a form field is still a checkbox: without
+   this, .field2 input made it a 100%-wide, 38px-tall block and .field2 label
+   turned its caption into an upper-case field heading. */
+.field2 .toggle,.field2 .chk{text-transform:none;letter-spacing:normal;font-size:13px;color:var(--txt)}
+.field2 .toggle input,.field2 .chk input{width:16px;height:16px;min-height:0;padding:0;flex:none;box-shadow:none}
+@media (max-width:640px){
+  .wa-settings{grid-template-columns:1fr}
+  .wa-test{flex-wrap:wrap}
+  .wa-test .field2{flex:1 1 100%}
+  .wa-test .btn,.btn-row .btn{flex:1 1 auto}
+}
+
+/* in-app prompt/confirm (uiPrompt / uiConfirm in app.js): above any open
+   form, since it is usually asked from inside one */
+.modal.ui-dialog{z-index:400}
+.ui-dialog .modal-box{width:min(420px,92vw);max-width:420px}
+.ui-dialog-msg{margin:0;color:var(--txt);font-size:14px;line-height:1.5}
+.ui-dialog-input{width:100%;background:var(--bg1);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:10px 12px;font-family:var(--font);font-size:14px;min-height:42px}
+.ui-dialog-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.ui-dialog-input.ui-dialog-err{border-color:var(--red);box-shadow:0 0 0 3px color-mix(in srgb,var(--red) 22%,transparent)}
+.ui-dialog .m-actions{position:static;margin-top:18px}
+.btn.danger-solid{background:var(--red);color:#fff}
+/* Directory: employees added in the last two days, pinned to the top */
+tr.emp-new td{background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.new-tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.5px;vertical-align:1px;background:var(--accent);color:var(--btn-text,#04121f)}
+/* the Directory's employee form, opened over the asset form */
+#empModal.stacked{z-index:300}
+.btn.danger-solid:hover{filter:brightness(1.08)}
+/* sign dialog: one line per channel, ready or what to fix */
+.sd-line{font-size:13px;line-height:1.5;padding:2px 0}
+.sd-line.sd-on{color:var(--txt)}
+.sd-line.sd-off{color:var(--muted)}
+#signMailWho{display:flex;flex-direction:column;gap:2px;margin-bottom:12px}

@@ -32,7 +32,7 @@
         </com.google.android.material.textfield.TextInputLayout>
 
         <TextView style="@style/FieldLabel" android:text="Check type" />
-        <Spinner android:id="@+id/edKind" style="@style/Dropdown" />
+        <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/edKind" style="@style/Dropdown" />
 
         <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/edTargetWrap"

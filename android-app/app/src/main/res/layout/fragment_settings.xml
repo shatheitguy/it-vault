@@ -49,6 +49,12 @@
                     android:orientation="horizontal">
 
                     <RadioButton
+                        android:id="@+id/themeServer"
+                        style="@style/Pill"
+                        android:button="@null"
+                        android:text="Same as web" />
+
+                    <RadioButton
                         android:id="@+id/themeSystem"
                         style="@style/Pill"
                         android:button="@null"
