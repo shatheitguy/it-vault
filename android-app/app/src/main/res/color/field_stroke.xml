@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- a field's border: the accent while you are in it, a hairline otherwise (as on the web) -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:color="@color/accent" android:state_focused="true" />
+    <item android:color="@color/accent" android:state_hovered="true" />
+    <item android:color="@color/field_line" />
+</selector>

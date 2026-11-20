@@ -36,7 +36,12 @@ object Repository {
 
     suspend fun saveAsset(ctx: Context, asset: Asset, existingId: String?): SaveResult {
         val api = ApiClient.api()
-        if (NetworkUtils.isOnline(ctx)) {
+        // An asset made offline has only a "tmp-" id until its create syncs.
+        // The server has never heard of that id, so an edit to it belongs on
+        // the queued create, not in a PUT that 404s or an UPDATE that the sync
+        // throws away as "gone on server".
+        val unsynced = existingId?.startsWith("tmp-") == true
+        if (NetworkUtils.isOnline(ctx) && !unsynced) {
             try {
                 val resp: Response<*> = if (existingId == null)
                     api.createAsset(asset) else api.updateAsset(existingId, asset)
@@ -55,11 +60,14 @@ object Repository {
         // offline path
         val id = existingId ?: "tmp-${UUID.randomUUID().hex()}"
         optimisticAsset(asset.copy(id = id), delete = false)
+        // A create is queued under its tmp id, so a later edit or delete of the
+        // same asset collapses onto it (SyncStore.enqueue matches on serverId)
+        // instead of being queued separately against an id the server lacks.
         SyncStore.enqueue(SyncStore.PendingOp(
             localId = UUID.randomUUID().toString(),
             entity = SyncStore.Entity.ASSET,
             op = if (existingId == null) SyncStore.Op.CREATE else SyncStore.Op.UPDATE,
-            serverId = existingId ?: "",
+            serverId = id,
             payload = gson.toJson(asset),
             editedAt = System.currentTimeMillis()
         ))
@@ -68,7 +76,7 @@ object Repository {
 
     suspend fun deleteAsset(ctx: Context, id: String): SaveResult {
         val api = ApiClient.api()
-        if (NetworkUtils.isOnline(ctx)) {
+        if (NetworkUtils.isOnline(ctx) && !id.startsWith("tmp-")) {
             try {
                 val resp = api.deleteAsset(id)
                 if (resp.isSuccessful) { refreshAssetCache(ctx); return SaveResult.Synced(id) }

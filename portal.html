@@ -182,7 +182,11 @@
    the hue. Only the ground and the card surface are swung to the scheme in
    use -- everything else derives from those two exactly as it did before, so
    a dark install in dark mode is unchanged. */
+  // "light" / "dark" fixed in Settings, or "system" to follow the device
   function prefersLight(){
+    var m=window.__THEME_MODE;
+    if(m==='light') return true;
+    if(m==='dark') return false;
     try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
     catch(e){ return false; }
   }
@@ -246,6 +250,8 @@
     document.getElementById('appName').textContent = shortName + ' Request Portal';
     document.title = shortName + ' Request Portal';
     if(b.logo){ document.getElementById('logo').src='/icon.png?t='+Date.now(); }
+    window.__THEME_MODE = b.portal_mode || 'system';
+    try{ document.documentElement.style.colorScheme = window.__THEME_MODE==='system' ? '' : window.__THEME_MODE; }catch(e){}
     applyPortalTheme(b);
   }).catch(function(){});
 

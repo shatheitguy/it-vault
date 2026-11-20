@@ -62,6 +62,17 @@ object Branding {
                 // were being thrown away, which is why the app stayed red
                 // whatever the server was themed in.
                 Palette.store(body)
+                // the web's light/dark choice, followed while this phone is
+                // set to "Same as web"
+                (body["ui_mode"] as? String)?.let { m ->
+                    val mode = if (m == "light" || m == "dark") m else "system"
+                    if (mode != Prefs.serverUiMode) {
+                        Prefs.serverUiMode = mode
+                        if (Prefs.themeMode == "server") {
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { Prefs.applyThemeMode() }
+                        }
+                    }
+                }
             }
         }
 

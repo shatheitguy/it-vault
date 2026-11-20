@@ -79,10 +79,19 @@ object SyncManager {
         val assetTs = HashMap<String, Long>()
         val contractTs = HashMap<String, Long>()
         val employeeTs = HashMap<String, Long>()
+        // Every queued edit is judged against this snapshot: an id missing
+        // from it means "deleted on the server" and the edit is dropped. So a
+        // snapshot that did not arrive (401 after a key change, a 500) must
+        // stop the sync -- read as an empty list it dropped every queued edit.
         try {
-            api.listAssets().body()?.forEach { it.id?.let { id -> assetTs[id] = serverMillis(it.updatedAt) } }
-            api.contracts().body()?.forEach { contractTs[it.id.toString()] = serverMillis(it.updatedAt) }
-            api.listEmployees().body()?.forEach { it.id?.let { id -> employeeTs[id] = serverMillis(it.updatedAt) } }
+            val ra = api.listAssets(); val rc = api.contracts(); val re = api.listEmployees()
+            val la = ra.body(); val lc = rc.body(); val le = re.body()
+            if (!ra.isSuccessful || !rc.isSuccessful || !re.isSuccessful || la == null || lc == null || le == null) {
+                return Result(0, 0, 0, SyncStore.pendingCount())
+            }
+            la.forEach { it.id?.let { id -> assetTs[id] = serverMillis(it.updatedAt) } }
+            lc.forEach { contractTs[it.id.toString()] = serverMillis(it.updatedAt) }
+            le.forEach { it.id?.let { id -> employeeTs[id] = serverMillis(it.updatedAt) } }
         } catch (e: Exception) {
             return Result(0, 0, 0, SyncStore.pendingCount())   // can't reach server after all
         }
@@ -101,6 +110,10 @@ object SyncManager {
                     PushOutcome.SKIPPED -> { SyncStore.remove(op.localId); skipped++ }
                     PushOutcome.DROP -> SyncStore.remove(op.localId)
                     PushOutcome.RETRY -> { failed++; break }   // network gone; keep order, try later
+                    // the server said no to this one change (duplicate serial,
+                    // validation, no permission): keep it for the user to see,
+                    // but do not let it stop every change queued behind it
+                    PushOutcome.HELD -> { failed++ }
                 }
             } catch (e: java.io.IOException) { failed++; break }
             catch (e: Exception) { SyncStore.remove(op.localId); failed++ }
@@ -117,23 +130,32 @@ object SyncManager {
         return Result(pushed, skipped, failed, SyncStore.pendingCount())
     }
 
-    private enum class PushOutcome { PUSHED, SKIPPED, DROP, RETRY }
+    private enum class PushOutcome { PUSHED, SKIPPED, DROP, RETRY, HELD }
+
+    /** A refusal of this one change, as opposed to the server or the network
+     * being unavailable (5xx, 401 session, 408/429): those stop the sync and
+     * retry later in order; a refusal is held and the rest carry on. */
+    private fun outcomeOf(r: retrofit2.Response<*>): PushOutcome = when {
+        r.isSuccessful -> PushOutcome.PUSHED
+        r.code() in 400..499 && r.code() !in listOf(401, 408, 429) -> PushOutcome.HELD
+        else -> PushOutcome.RETRY
+    }
 
     private suspend fun pushAsset(op: SyncStore.PendingOp, ts: Map<String, Long>): PushOutcome {
         val api = ApiClient.api()
         return when (op.op) {
             SyncStore.Op.CREATE -> {
                 val a = gson.fromJson(op.payload, Asset::class.java)
-                if (api.createAsset(a).isSuccessful) PushOutcome.PUSHED else PushOutcome.RETRY
+                outcomeOf(api.createAsset(a.copy(id = null)))
             }
             SyncStore.Op.UPDATE -> {
                 val server = ts[op.serverId] ?: return PushOutcome.DROP   // gone on server
                 if (server > op.editedAt) return PushOutcome.SKIPPED       // server edited later
                 val a = gson.fromJson(op.payload, Asset::class.java)
-                if (api.updateAsset(op.serverId, a).isSuccessful) PushOutcome.PUSHED else PushOutcome.RETRY
+                outcomeOf(api.updateAsset(op.serverId, a))
             }
             SyncStore.Op.DELETE ->
-                if (api.deleteAsset(op.serverId).isSuccessful) PushOutcome.PUSHED else PushOutcome.RETRY
+                outcomeOf(api.deleteAsset(op.serverId))
             else -> PushOutcome.DROP
         }
     }

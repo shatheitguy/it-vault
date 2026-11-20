@@ -229,6 +229,14 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
         b = ActivityMainBinding.inflate(layoutInflater)
         setContentView(b.root)
+        // every screen's fields get their label above the box, as on the web
+        supportFragmentManager.registerFragmentLifecycleCallbacks(object :
+            androidx.fragment.app.FragmentManager.FragmentLifecycleCallbacks() {
+            override fun onFragmentViewCreated(fm: androidx.fragment.app.FragmentManager,
+                f: androidx.fragment.app.Fragment, v: android.view.View, savedInstanceState: Bundle?) {
+                com.itguy.assetmanager.ui.FormLabels.apply(v)
+            }
+        }, true)
         setSupportActionBar(b.toolbar)
 
         // Says what it is doing while it connects, and warms every cache

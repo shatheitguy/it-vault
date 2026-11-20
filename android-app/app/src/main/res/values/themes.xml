@@ -85,7 +85,7 @@
     <!-- ============ Components ============ -->
 
     <style name="Button.IT" parent="Widget.Material3.Button">
-        <item name="cornerRadius">16dp</item>
+        <item name="cornerRadius">12dp</item>
         <item name="android:paddingTop">15dp</item>
         <item name="android:paddingBottom">15dp</item>
         <item name="android:textAllCaps">false</item>
@@ -149,7 +149,11 @@
         <item name="android:layout_marginTop">14dp</item>
         <item name="android:layout_marginBottom">6dp</item>
         <item name="android:textColor">@color/text_soft</item>
-        <item name="android:textSize">12.5sp</item>
+        <!-- matches the labels FormLabels puts above text fields -->
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.05</item>
+        <item name="android:textAllCaps">true</item>
     </style>
 
     <!-- Rounded, outlined "widget" panel (matches the web dashboard cards) -->
@@ -219,22 +223,33 @@
 
     <!-- The field from the reference: a pale fill, a floating label, no box
          drawn around it. -->
-    <style name="Field" parent="Widget.Material3.TextInputLayout.FilledBox">
+    <!-- The field, as the web draws it: a filled box with a hairline border
+         that turns the accent when you are in it, and the label above it
+         (FormLabels moves each hint up there at run time). -->
+    <style name="Field" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="boxBackgroundMode">outline</item>
         <item name="boxBackgroundColor">@color/field_fill</item>
-        <item name="boxStrokeColor">@color/accent</item>
-        <item name="boxStrokeWidth">0dp</item>
+        <item name="boxStrokeColor">@color/field_stroke</item>
+        <item name="boxStrokeWidth">1dp</item>
         <item name="boxStrokeWidthFocused">2dp</item>
-        <item name="boxCornerRadiusTopStart">14dp</item>
-        <item name="boxCornerRadiusTopEnd">14dp</item>
-        <item name="boxCornerRadiusBottomStart">14dp</item>
-        <item name="boxCornerRadiusBottomEnd">14dp</item>
+        <item name="boxCornerRadiusTopStart">10dp</item>
+        <item name="boxCornerRadiusTopEnd">10dp</item>
+        <item name="boxCornerRadiusBottomStart">10dp</item>
+        <item name="boxCornerRadiusBottomEnd">10dp</item>
         <item name="hintTextColor">@color/text_soft</item>
         <item name="android:textColorHint">@color/text_faint</item>
     </style>
 
+    <!-- the label above a field: small, capitals, quiet -->
+    <style name="FieldLabelText">
+        <item name="android:textSize">11sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.05</item>
+    </style>
+
     <!-- The wide pill at the foot of a form. -->
     <style name="ButtonPill" parent="Widget.Material3.Button">
-        <item name="cornerRadius">28dp</item>
+        <item name="cornerRadius">12dp</item>
         <item name="android:minHeight">54dp</item>
         <item name="android:paddingTop">15dp</item>
         <item name="android:paddingBottom">15dp</item>
@@ -245,7 +260,7 @@
     </style>
 
     <style name="ButtonPillQuiet" parent="Widget.Material3.Button.TonalButton">
-        <item name="cornerRadius">28dp</item>
+        <item name="cornerRadius">12dp</item>
         <item name="android:minHeight">50dp</item>
         <item name="android:textAllCaps">false</item>
         <item name="android:textSize">14.5sp</item>

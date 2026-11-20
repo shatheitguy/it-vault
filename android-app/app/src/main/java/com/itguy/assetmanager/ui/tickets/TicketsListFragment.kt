@@ -148,6 +148,7 @@ class TicketsListFragment : Fragment(), Refreshable {
 
     private fun openCreateDialog() {
         val d = DialogTicketNewBinding.inflate(layoutInflater)
+        com.itguy.assetmanager.ui.FormLabels.apply(d.root)
         com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle("New ticket").setView(d.root)
             .setPositiveButton("Create") { _, _ ->
                 val subj = d.newSubject.text?.toString()?.trim().orEmpty()

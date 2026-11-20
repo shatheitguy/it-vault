@@ -6,7 +6,8 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20261116a">
+<link rel="stylesheet" href="/style.css?v=20261120h">
+<link rel="stylesheet" href="/redesign.css?v=20261120c">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -419,6 +420,14 @@
               <div class="field2"><label>Region</label><select id="uRegion"><option value="UAE">United Arab Emirates</option><option value="US">United States</option><option value="GB">United Kingdom</option><option value="IN">India</option><option value="FR">France</option></select></div>
             </div></div>
             <div class="m-actions"><button class="btn mag" id="saveUsetBtn">✓ SAVE GENERAL</button></div>
+            <div class="panel" style="margin-top:14px" id="pubUrlPanel"><div class="secthead">PUBLIC ADDRESS</div>
+              <p class="sec-hint">The address employees' phones and computers reach IT-Vault on. Every link that leaves the app is built from it: acknowledgement links by email and WhatsApp, QR labels, the ticket portal. Leave it empty and links use whatever address you opened the app on.</p>
+              <div class="pub-row">
+                <div class="field2"><label for="pubUrl">Address</label><input id="pubUrl" placeholder="e.g. http://192.168.1.10:5000 or https://itvault.yourcompany.com" inputmode="url" autocomplete="off"></div>
+                <button class="btn mag" id="pubUrlSave" type="button">✓ SAVE ADDRESS</button>
+              </div>
+              <div class="pub-state" id="pubUrlState"></div>
+            </div>
             <div class="panel" style="margin-top:14px"><div class="secthead">VERSION &amp; UPDATES</div>
               <div class="refcard">
                 <div class="rc-left"><div class="verbadge" id="verBadge">⚙</div></div>
@@ -452,6 +461,7 @@
     </div>
     <div class="field2"><label>Display name</label><input id="pDisplay" placeholder="Full name"></div>
     <div class="field2"><label>Email (for notifications)</label><input id="p_email" placeholder="you@company.com"></div>
+    <div class="field2"><label>Mobile (WhatsApp)</label><input id="p_phone" type="tel" inputmode="tel" placeholder="050 123 4567 or +971…"></div>
     <div class="secthead">API KEY</div>
     <div class="refcard" style="margin-bottom:12px">
       <input id="pApiKey" class="mono" readonly style="flex:1;min-width:0">
@@ -467,7 +477,7 @@
     </div>
             </div>
             <div class="panel" style="margin-top:14px"><div class="secthead">TWO-FACTOR AUTHENTICATION</div>
-              <p class="sec-hint">Add a second step at sign-in. You can enable an authenticator app (TOTP), email codes, or both.</p>
+              <p class="sec-hint">Add a second step at sign-in. Use an authenticator app, or sign-in codes that arrive by email and WhatsApp at the same time (whichever you have set up), or both.</p>
 
               <div class="refcard" style="margin-bottom:10px">
                 <div class="rc-left"><div class="avatar-prev" id="totpIcon">📱</div></div>
@@ -494,7 +504,7 @@
               <div class="refcard">
                 <div class="rc-left"><div class="avatar-prev" id="emailOtpIcon">✉️</div></div>
                 <div class="rc-info">
-                  <b>Email Codes</b><br>
+                  <b>Sign-in codes by email &amp; WhatsApp</b><br>
                   <span id="emailOtpStatusText" class="muted">Not enabled</span>
                 </div>
                 <div class="spacer"></div>
@@ -502,7 +512,7 @@
                 <button class="btn sm danger" id="emailOtpDisableBtn" style="display:none">DISABLE</button>
               </div>
               <div id="emailOtpSetupBox" style="display:none;margin-top:10px">
-                <div class="field2" style="max-width:200px"><label>Enter the code we emailed you</label><input id="emailOtpConfirmCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
+                <div class="field2" style="max-width:200px"><label>Enter the code we sent you</label><input id="emailOtpConfirmCode" inputmode="numeric" maxlength="6" placeholder="123456"></div>
                 <div class="m-actions" style="justify-content:flex-start">
                   <button class="btn" id="emailOtpConfirmBtn">✓ CONFIRM &amp; ENABLE</button>
                   <button class="btn ghost" id="emailOtpCancelBtn">CANCEL</button>
@@ -543,19 +553,32 @@
                 </div>
               </div>
               <div id="waQrBox" class="wa-qr" style="display:none"><div id="waQr"></div><div class="muted">Scan with WhatsApp &rsaquo; Linked devices. The code refreshes by itself.</div></div>
-              <div class="grid2" style="margin-top:12px">
-                <div class="field2"><label>Default country code</label><input id="waCc" inputmode="numeric" maxlength="4" placeholder="971"><span class="muted" style="font-size:12px">Used for numbers typed without one, e.g. 050 123 4567 becomes +971 50 123 4567</span></div>
-                <div class="field2"><label>Send on WhatsApp</label>
-                  <label class="chk"><input type="checkbox" id="waSendLink"> The acknowledgement link (SEND LINK in the sign dialog)</label>
-                  <label class="chk"><input type="checkbox" id="waSendPdf"> The signed PDF copy, once the employee signs</label>
+              <div class="wa-settings">
+                <div class="field2"><label for="waCc">Default country code</label><input id="waCc" inputmode="numeric" maxlength="4" placeholder="971"><span class="fhint">Used for numbers typed without one: 050 123 4567 becomes +971 50 123 4567</span></div>
+                <div class="field2"><span class="wa-sub">Send automatically on WhatsApp</span>
+                  <label class="toggle"><input type="checkbox" id="waSendLink"><span>The acknowledgement link, from SEND LINK in the sign dialog</span></label>
+                  <label class="toggle"><input type="checkbox" id="waSendPdf"><span>The signed PDF copy, once the employee signs</span></label>
                 </div>
               </div>
-              <div class="m-actions" style="justify-content:flex-start">
-                <button class="btn" id="waSaveBtn" type="button">Save WhatsApp</button>
-                <input id="waTestNum" type="tel" placeholder="Test number" style="max-width:180px">
-                <button class="btn ghost" id="waTestBtn" type="button">⚡ TEST MESSAGE</button>
-                <span id="waMsg" class="muted" style="margin-left:8px"></span>
+              <div class="wa-brand">
+                <div class="field2"><label for="waSender">Sender name</label><input id="waSender" maxlength="80" placeholder="Your company name"><span class="fhint" id="waSenderHint">Every message starts with this name.</span></div>
+                <div class="field2"><span class="wa-sub">Banner picture</span>
+                  <div class="wa-banner">
+                    <div class="wa-banner-prev" id="waBannerPrev"><span>No banner</span></div>
+                    <div class="wa-banner-acts">
+                      <label class="btn ghost sm">⬆ UPLOAD<input type="file" id="waBannerFile" accept="image/png,image/jpeg,image/webp" hidden></label>
+                      <button class="btn ghost sm" id="waBannerRm" type="button" style="display:none">🗑 REMOVE</button>
+                    </div>
+                  </div>
+                  <span class="fhint">Optional. Link and test messages arrive on this picture, with the message as its caption. A wide image (about 1200 × 600) looks best.</span>
+                </div>
               </div>
+              <div class="wa-test">
+                <div class="field2"><label for="waTestNum">Send a test message to</label><input id="waTestNum" type="tel" placeholder="e.g. 050 123 4567"></div>
+                <button class="btn ghost" id="waTestBtn" type="button">⚡ SEND TEST</button>
+              </div>
+              <div id="waMsg" class="muted wa-msg"></div>
+              <div class="m-actions"><button class="btn mag" id="waSaveBtn" type="button">✓ SAVE WHATSAPP</button></div>
             </div>
             <div class="panel" style="margin-top:14px"><div class="secthead">NOTIFICATION CHANNELS</div>
 <p class="sec-hint">Where every notification is delivered &mdash; asset events, tickets, SLA breaches, backups and Heartbeat outage alerts. With none set up they go to users who have an email on their profile. Test a channel before something has to rely on it.</p>
@@ -687,11 +710,58 @@
               </div>
               <img id="b_letterheadPrev" src="/letterhead.png?t=1" style="max-width:100%;max-height:160px;margin-top:10px;border:1px solid var(--line);border-radius:6px;display:none">
             </div>
+            <div class="invbox rw-box">
+              <label>RETURNED ASSETS</label>
+              <p class="sec-hint" style="margin:0 0 12px">When an asset's status is set to <b>Returned</b>, the employee is unassigned and the signed acknowledgement goes again to them and to IT, stamped with this watermark and the return date.</p>
+              <div class="rw-grid">
+                <div class="rw-fields">
+                  <div class="field2"><label for="rwText">Watermark text</label><input id="rwText" maxlength="40" placeholder="RETURNED"></div>
+                  <div class="rw-pair">
+                    <div class="field2"><label for="rwColor">Colour</label><input id="rwColor" type="color" value="#d32f2f"></div>
+                    <div class="field2"><label for="rwOpacity">Opacity <span id="rwOpacityVal" class="rw-val">18%</span></label><input id="rwOpacity" type="range" min="5" max="100" step="1" value="18"></div>
+                  </div>
+                  <label class="toggle"><input type="checkbox" id="rwSend" checked><span>Send the returned copy to the employee and IT</span></label>
+                  <div class="field2"><label for="rwAutoDays">Make Available again after</label>
+                    <div class="rw-days"><input id="rwAutoDays" type="number" min="0" max="365" step="1" value="0" inputmode="numeric"><span>days</span>
+                      <button class="btn sm ghost" type="button" data-days="7">1 week</button><button class="btn sm ghost" type="button" data-days="14">2 weeks</button><button class="btn sm ghost" type="button" data-days="0">Never</button></div>
+                    <span class="fhint" id="rwAutoHint">0 = never: Returned assets stay Returned until someone changes them.</span></div>
+                </div>
+                <div class="rw-page" aria-hidden="true"><div class="rw-lines"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span id="rwSample">RETURNED</span></div>
+              </div>
+              <div class="m-actions">
+                <button class="btn ghost" id="rwPreviewBtn" type="button">👁 PREVIEW PDF</button>
+                <button class="btn mag" id="rwSaveBtn" type="button">✓ SAVE</button>
+              </div>
+            </div>
             </div>
           </section>
           <!-- CUSTOMIZATION (appearance + theme, single unified section) -->
           <section class="cfg-sec" id="cfgCustomSec" data-sec="custom" style="display:none">
-            <div class="panel">
+            <div class="panel" id="modePanel">
+              <div class="secthead">LIGHT &amp; DARK</div>
+              <p class="sec-hint">System follows each person's phone or computer setting. Light or Dark fixes it for everyone. Colours and accents come from the theme below either way.</p>
+              <div class="mode-rows">
+                <div class="mode-row" data-key="ui_mode">
+                  <div class="mode-lbl"><b>The app</b><span>Everything you sign in to</span></div>
+                  <div class="seg" role="radiogroup" aria-label="The app">
+                    <button type="button" data-v="system">System</button><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button>
+                  </div>
+                </div>
+                <div class="mode-row" data-key="sign_mode">
+                  <div class="mode-lbl"><b>Acknowledgement pages</b><span>The sign link, the signed copy, and an asset's QR card</span></div>
+                  <div class="seg" role="radiogroup" aria-label="Acknowledgement pages">
+                    <button type="button" data-v="system">System</button><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button>
+                  </div>
+                </div>
+                <div class="mode-row" data-key="portal_mode">
+                  <div class="mode-lbl"><b>Ticket portal</b><span>Where staff raise and follow requests</span></div>
+                  <div class="seg" role="radiogroup" aria-label="Ticket portal">
+                    <button type="button" data-v="system">System</button><button type="button" data-v="light">Light</button><button type="button" data-v="dark">Dark</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="panel" style="margin-top:14px">
               <div class="secthead">PRESET THEMES</div>
               <div class="preset-grid" id="presetGrid">
                 <button type="button" class="preset-card" data-preset="deepdark">
@@ -1330,12 +1400,12 @@
   <div class="modal-scroll"><p class="sec-hint">Finds devices on your LAN via the ARP table, or a full ping sweep of any subnet with Deep scan. Adding a result opens a real Add Asset form pre-filled with its details, so you can review/edit before anything is saved.</p>
     <div class="invbox">
       <label>SCAN OPTIONS</label>
-      <div class="scanrow">
-        <button class="btn" id="scanBtn">⚡ SCAN</button>
+      <div class="scan-bar">
         <label class="toggle scan-deep"><input type="checkbox" id="scanDeep"><span>Deep scan</span></label>
-      </div>
-      <div class="scan-prefix-row" id="scanPrefixRow" style="display:none">
-        <input id="scanPrefix" class="scan-prefix" placeholder="e.g. 192.168.0.0/24 or 172.16.0.0/22">
+        <div class="scan-prefix-row" id="scanPrefixRow" style="display:none">
+          <input id="scanPrefix" class="scan-prefix" placeholder="Subnet, e.g. 192.168.0.0/24" aria-label="Subnet to scan">
+        </div>
+        <button class="btn" id="scanBtn">⚡ SCAN</button>
       </div>
       <p class="muted scan-hint">Deep scan needs a subnet in CIDR form (up to /20, 4096 addresses) and pings every address in it; without it, Scan just reads the ARP table (fast, no subnet needed).</p>
     </div>
@@ -1412,6 +1482,7 @@
   
   <div class="modal-scroll"><p>Send this link to the approver. They can sign the asset digitally. Link expires in 7 days.</p>
     <div class="field2"><label>Signature Link</label><input id="signUrl" readonly style="font-family:var(--mono);font-size:12.5px"></div>
+    <div class="sign-warn" id="signLocalWarn" style="display:none"></div>
     <div class="m-actions" style="justify-content:flex-start">
       <button class="btn" id="signCopyBtn" type="button">📋 COPY LINK</button>
       <button class="btn ghost" id="signShareBtn" type="button" style="display:none">🔗 SHARE</button>
@@ -1420,7 +1491,11 @@
          a mail client was the only way to do it. -->
     <div id="signMailRow" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line)">
       <div id="signMailWho" style="font-size:13px;color:var(--muted);margin-bottom:8px"></div>
-      <button class="btn" id="signMailBtn" type="button">📧 SEND LINK</button>
+      <div class="btn-row">
+        <button class="btn" id="signMailBtn" type="button">📧 SEND LINK</button>
+        <button class="btn ghost" id="signWaBtn" type="button">💬 OPEN IN WHATSAPP</button>
+      </div>
+      <div id="signWaWho" style="font-size:12px;color:var(--muted);margin-top:8px"></div>
     </div>
   </div>
   
@@ -1429,6 +1504,7 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20261116a"></script>
+<script src="/app.js?nocache=20261120i"></script>
+<script src="/redesign.js?v=20261120c"></script>
 </body>
 </html>

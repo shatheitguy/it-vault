@@ -63,7 +63,7 @@
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <TextView style="@style/FieldLabel" android:text="Item category" />
-                <Spinner android:id="@+id/f_Type" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Type" style="@style/Dropdown" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     style="@style/Field"
@@ -92,7 +92,7 @@
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <TextView style="@style/FieldLabel" android:text="Location" />
-                <Spinner android:id="@+id/f_Location" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Location" style="@style/Dropdown" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -107,10 +107,10 @@
                 android:padding="18dp">
 
                 <TextView style="@style/FieldLabel" android:layout_marginTop="0dp" android:text="Manufacturer" />
-                <Spinner android:id="@+id/f_Manufacturer" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Manufacturer" style="@style/Dropdown" />
 
                 <TextView style="@style/FieldLabel" android:text="Model" />
-                <Spinner android:id="@+id/f_Model" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Model" style="@style/Dropdown" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -178,10 +178,10 @@
                 android:padding="18dp">
 
                 <TextView style="@style/FieldLabel" android:layout_marginTop="0dp" android:text="Status" />
-                <Spinner android:id="@+id/f_Status" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Status" style="@style/Dropdown" />
 
                 <TextView style="@style/FieldLabel" android:text="Employee name" />
-                <Spinner android:id="@+id/f_EmployeeID" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_EmployeeID" style="@style/Dropdown" />
 
                 <com.google.android.material.textfield.TextInputLayout
                     style="@style/Field"

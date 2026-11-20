@@ -259,6 +259,7 @@ class HeartbeatFragment : Fragment(), Refreshable {
 
     private fun showEditDialog(existing: HbMonitor?) {
         val d = DialogHeartbeatEditBinding.inflate(layoutInflater)
+        com.itguy.assetmanager.ui.FormLabels.apply(d.root)
         d.edKind.adapter = ArrayAdapter(requireContext(),
             android.R.layout.simple_spinner_dropdown_item, kindLabels)
 

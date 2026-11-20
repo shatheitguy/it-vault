@@ -51,7 +51,7 @@ function applyLanguage(lang){
   });
   document.title=d.Dashboard||document.title;
 }
-const STATUSES=['Available','Checked-Out','Under-Maintenance','Reserved','Retired','Lost/Stolen'];
+const STATUSES=['Available','Checked-Out','Returned','Under-Maintenance','Reserved','Retired','Lost/Stolen'];
 {const _sf=document.getElementById('statusFilter'); if(_sf)_sf.innerHTML='<option value="">All statuses</option>'+STATUSES.map(s=>`<option>${s}</option>`).join('');}
 const LABEL_FIELD_KEYS=['Name','Type','AssetID','Serial','Status','Location','ReceivedBy','ReceiverDate','EmployeeID','EmployeeName','Department','Warranty','PurchaseDate','Note'];
 const ROLE_ADMIN='admin', ROLE_EDIT='read-write', ROLE_VIEW='read-only';
@@ -202,6 +202,62 @@ function drawMatrix(){
 function esc(v){return(v==null?'':String(v)).replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function statusClass(s){s=(s||'').toLowerCase();return s==='reserved'?'s-reserved':s==='retired'?'s-retired':s==='lost/stolen'?'s-lost':'s-default';}
 function toast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800);}
+
+/* ---------- in-app dialogs ----------
+   The browser's own prompt()/await uiConfirm() boxes are grey, say "localhost:5000
+   says", ignore the theme and look like a different program. These are the
+   same two questions in the app's own modal: uiPrompt resolves to the text
+   (or null on cancel), uiConfirm to true/false. Enter accepts, Esc cancels. */
+function _uiDialog({title,message,input,value,placeholder,okLabel,danger}){
+  return new Promise(resolve=>{
+    const wrap=document.createElement('div');
+    wrap.className='modal show ui-dialog';
+    wrap.innerHTML=`<div class="modal-box" role="dialog" aria-modal="true">
+      <h3>${esc(title)}</h3>
+      ${message?`<p class="ui-dialog-msg">${esc(message)}</p>`:''}
+      ${input?`<input class="ui-dialog-input" type="${input==='password'?'password':'text'}" maxlength="200" placeholder="${esc(placeholder||'')}" value="${esc(value||'')}" ${input==='password'?'autocomplete="current-password"':''}>`:''}
+      <div class="m-actions">
+        <button class="btn ghost" type="button" data-act="cancel">CANCEL</button>
+        <button class="btn ${danger?'danger-solid':''}" type="button" data-act="ok">${esc(okLabel||'OK')}</button>
+      </div></div>`;
+    const prevFocus=document.activeElement;
+    const inp=wrap.querySelector('.ui-dialog-input');
+    const okBtn=wrap.querySelector('[data-act="ok"]');
+    const done=v=>{window.removeEventListener('keydown',onKey,true);wrap.remove();try{prevFocus&&prevFocus.focus()}catch(e){}resolve(v);};
+    const ok=()=>{
+      if(inp){const v=inp.value.trim(); if(!v){inp.focus();inp.classList.add('ui-dialog-err');return;} done(v);}
+      else done(true);
+    };
+    const cancel=()=>done(input?null:false);
+    const onKey=e=>{
+      if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();cancel();}
+      else if(e.key==='Enter'&&(e.target===inp||e.target===okBtn||!inp)){e.preventDefault();e.stopImmediatePropagation();ok();}
+    };
+    wrap.addEventListener('click',e=>{
+      const a=e.target.closest('[data-act]');
+      if(a){a.dataset.act==='ok'?ok():cancel();}
+      else if(e.target===wrap)cancel();
+    });
+    if(inp)inp.addEventListener('input',()=>inp.classList.remove('ui-dialog-err'));
+    window.addEventListener('keydown',onKey,true);
+    document.body.appendChild(wrap);
+    setTimeout(()=>{ if(inp){inp.focus();inp.select();} else okBtn.focus(); },0);
+  });
+}
+// 'New category name:' -> title "New category", placeholder "Category name"
+function uiPrompt(label,opts={}){
+  const base=String(label||'').replace(/:\s*$/,'');
+  const title=opts.title||base.replace(/\s+name$/i,'');
+  const thing=base.replace(/^new\s+/i,'');
+  return _uiDialog({title,input:true,value:opts.value||'',
+    placeholder:opts.placeholder||(thing.charAt(0).toUpperCase()+thing.slice(1)),okLabel:opts.okLabel||'＋ ADD'});
+}
+const _UI_DANGER=/\b(delete|remove|permanently|cannot be undone|unlink|disable|reset|clear|regenerate|trash)\b/i;
+function uiConfirm(message,opts={}){
+  const danger=opts.danger!=null?opts.danger:_UI_DANGER.test(message);
+  return _uiDialog({title:opts.title||(danger?'Are you sure?':'Please confirm'),message,
+    okLabel:opts.okLabel||(danger?'YES, CONTINUE':'OK'),danger});
+}
 // Every request in the app goes through here, which makes it the one place
 // that can guarantee a failure is never silent. fetch() REJECTS on a dropped
 // connection, a reset by a proxy or tunnel, or a mixed-content block -- and an
@@ -264,7 +320,7 @@ async function undoDelete(){
 async function deleteSelected(){
   const ids=[...document.querySelectorAll('.row-chk:checked')].map(cb=>cb.dataset.id);
   if(!ids.length){ toast('No assets selected'); return; }
-  if(!confirm(`Delete ${ids.length} selected asset(s)? They go to Trash (recoverable 2 min via UNDO).`)) return;
+  if(!await uiConfirm(`Delete ${ids.length} selected asset(s)? They go to Trash (recoverable 2 min via UNDO).`)) return;
   let ok=0;
   for(const id of ids){ const r=await api('/api/assets/'+id,{method:'DELETE'}); if(r&&r.ok) ok++; }
   if(ok){ undoIds=ids.slice(); showUndoBar(ids); load(); loadDashboard(); }
@@ -398,10 +454,14 @@ function tempEmpId(e){
 function renderEmployees(list){
   const tbody=document.getElementById('empBody');
   document.getElementById('empEmpty').style.display=list.length?'none':'block';
-  tbody.innerHTML=list.map(e=>`<tr>
+  // anyone added in the last two days first, newest on top, then A-Z --
+  // otherwise a person just added is somewhere in the middle of the list
+  const ts=e=>e.created_at?Date.parse(e.created_at)||0:0;
+  list=[...list.filter(e=>e.is_new).sort((a,b)=>ts(b)-ts(a)),...list.filter(e=>!e.is_new)];
+  tbody.innerHTML=list.map(e=>`<tr class="${e.is_new?'emp-new':''}">
     <td class="${e.EmpCode?'':'muted'} mono">${esc(e.EmpCode)||tempEmpId(e)}</td>
     <td>${esc(e.EmployeeID)}</td>
-    <td>${esc(e.EmployeeName)}</td>
+    <td>${esc(e.EmployeeName)}${e.is_new?' <span class="new-tag">NEW</span>':''}</td>
     <td>${esc(e.Department)}</td>
     <td>${esc(e.Designation)}</td>
     <td>${esc(e.Email)}</td>
@@ -415,7 +475,7 @@ function renderEmployees(list){
 }
 async function delEmployee(id){
   const e=employees.find(x=>x._id===id);
-  if(!confirm('Delete employee "'+(e?e.EmployeeName||e.EmployeeID:'this employee')+'"? Any assets assigned to them will be unassigned.'))return;
+  if(!await uiConfirm('Delete employee "'+(e?e.EmployeeName||e.EmployeeID:'this employee')+'"? Any assets assigned to them will be unassigned.'))return;
   const r=await api('/api/employees/'+id,{method:'DELETE'});
   if(r&&r.ok){toast('✓ EMPLOYEE DELETED');loadEmployees();load();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -458,7 +518,7 @@ async function loadDepartmentOptions(selDept){
   }catch(e){}
   sel.innerHTML='<option value="">-- select department --</option>'+deps.map(d=>`<option value="${esc(d.name)}" ${d.name===selDept?'selected':''}>${esc(d.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=prompt('New department name:'); if(v&&v.trim()){const r=await api('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadDepartmentOptions(v.trim());}} else {sel.value=selDept;}}
+    if(sel.value==='__new'){const v=await uiPrompt('New department name:'); if(v&&v.trim()){const r=await api('/api/departments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadDepartmentOptions(v.trim());}} else {sel.value=selDept;}}
   };
 }
 async function loadDesignationOptions(selDes){
@@ -473,7 +533,7 @@ async function loadDesignationOptions(selDes){
   }catch(e){}
   sel.innerHTML='<option value="">-- select designation --</option>'+dess.map(d=>`<option value="${esc(d.name)}" ${d.name===selDes?'selected':''}>${esc(d.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=prompt('New designation name:'); if(v&&v.trim()){const r=await api('/api/designations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadDesignationOptions(v.trim());}} else {sel.value=selDes;}}
+    if(sel.value==='__new'){const v=await uiPrompt('New designation name:'); if(v&&v.trim()){const r=await api('/api/designations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadDesignationOptions(v.trim());}} else {sel.value=selDes;}}
   };
 }
 async function saveEmployee(){
@@ -487,10 +547,23 @@ async function saveEmployee(){
     Phone:document.getElementById('e_Phone').value.trim()
   };
   if(!body.EmployeeID&&!body.EmployeeName){toast('ID or Name required');return;}
+  // an asset links to its employee by Employee ID, so someone added from the
+  // asset form needs one: the EMP code stands in when it is left blank
+  if(_empPick&&!body.EmployeeID)body.EmployeeID=body.EmpCode;
+  if(!editingEmpId&&body.EmployeeID){
+    const known=[...(employees||[]),...(window.__employeesCache||[])];
+    if(known.some(e=>(e.EmployeeID||'').toLowerCase()===body.EmployeeID.toLowerCase())){toast('✕ Employee ID '+body.EmployeeID+' is already used');return;}
+  }
   const r=editingEmpId
     ? await api('/api/employees/'+editingEmpId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     : await api('/api/employees',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(r&&r.ok){toast('✓ EMPLOYEE SAVED');document.getElementById('empModal').classList.remove('show');loadEmployees();load();}
+  if(r&&r.ok){
+    const created=await r.clone().json().catch(()=>({}));
+    const pick=_empPick; _empPick=null;
+    toast('✓ EMPLOYEE SAVED');
+    if(pick){ document.getElementById('empModal').classList.remove('show','stacked'); pick({...body,...created}); }
+    else document.getElementById('empModal').classList.remove('show');
+    loadEmployees();load();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
 
@@ -586,38 +659,48 @@ function render(){
     if(q){const hay=Object.values(a).join(' ');if(!hay.toLowerCase().includes(q))return false;}
     return true;
   });
-  if(sortCol)rows.sort((a,b)=>{const x=(a[sortCol]||'').toString().toLowerCase(),y=(b[sortCol]||'').toString().toLowerCase();return(x<y?-1:x>y?1:0)*sortDir;});
+  if(sortCol)rows.sort((a,b)=>{
+    if(sortCol==='Price'||sortCol==='WarrantyMonths'){return((parseFloat(a[sortCol])||0)-(parseFloat(b[sortCol])||0))*sortDir;}
+    const x=(a[sortCol]||'').toString().toLowerCase(),y=(b[sortCol]||'').toString().toLowerCase();return(x<y?-1:x>y?1:0)*sortDir;});
   const head=document.getElementById('head'),body=document.getElementById('body');
   const VC=visCols();
   head.innerHTML='<th><input type="checkbox" id="chkAll"/></th>' + VC.map(c=>`<th data-c="${c}">${LABELS[c]||c}${sortCol===c?(sortDir>0?' ▲':' ▼'):''}</th>`).join('')+(canEdit()?'<th>ACTIONS</th>':'');
   document.getElementById('chkAll').addEventListener('change',e=>{toggleSelectAll(e.target.checked);});
   head.querySelectorAll('th[data-c]').forEach(th=>th.onclick=()=>{const c=th.dataset.c;if(sortCol===c)sortDir*=-1;else{sortCol=c;sortDir=1;}render();});
-  const rowHtml=a=>`<tr data-id="${a._id}"><td><input type="checkbox" class="row-chk" data-id="${a._id}" onchange="updateSelBtns()"/></td>${
+  const rowHtml=a=>`<tr data-id="${a._id}" class="arow"><td class="c-chk"><input type="checkbox" class="row-chk" data-id="${a._id}" onchange="updateSelBtns()"/></td>${
     VC.map(c=>{
       if(c==='AssetTag'){
-        return `<td class="mono">${esc(a.AssetTag||a._id)}</td>`;
+        return `<td class="mono c-AssetTag">${esc(a.AssetTag||a._id)}</td>`;
+      }
+      if(c==='Name'){
+        // the item's kind at a glance: an icon from its category (or the one
+        // picked for that category in the Product Catalog)
+        return `<td class="c-Name"><div class="nm">${window.typeIcon?window.typeIcon(a.Type):''}<div class="nm-t"><span class="nm-n">${esc(a.Name||'')}</span><span class="nm-s">${esc(a.Type||'')}</span></div></div></td>`;
       }
       if(c==='Status'){
-        const col=a.Status==='Available'?'var(--grn)':a.Status==='Checked-Out'?'var(--cyan)':a.Status==='Under-Maintenance'?'var(--amber)':a.Status==='Reserved'?'var(--muted)':'var(--red)';
-        return `<td><span class="status ${statusClass(a.Status)}"><span class="sev" style="color:${col}"></span>${esc(a.Status||'')}</span></td>`;
+        const col=a.Status==='Available'?'var(--grn)':a.Status==='Checked-Out'?'var(--cyan)':a.Status==='Returned'?'var(--accent2)':a.Status==='Under-Maintenance'?'var(--amber)':a.Status==='Reserved'?'var(--muted)':'var(--red)';
+        const pill=`<span class="sev" style="color:${col}"></span>${esc(a.Status||'')}`;
+        return canEdit()
+          ?`<td class="c-Status"><button type="button" class="status pill pill-btn ${statusClass(a.Status)}" style="--pc:${col}" onclick="openStatusMenu(event,'${a._id}')" title="Change status">${pill}<svg class="ic pill-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button></td>`
+          :`<td class="c-Status"><span class="status pill ${statusClass(a.Status)}" style="--pc:${col}">${pill}</span></td>`;
       }
       if(c==='WarrantyMonths'){
         const w=warrantyEnd(a);
-        return `<td>${a.WarrantyMonths||12} mo${w?`<br><small style="color:${w.expiring?'var(--amber)':'var(--muted)'}">${w.end}</small>`:''}</td>`;
+        return `<td class="c-WarrantyMonths">${a.WarrantyMonths||12} mo${w?`<br><small style="color:${w.expiring?'var(--amber)':'var(--muted)'}">${w.end}</small>`:''}</td>`;
       }
       if(c==='Price'){
-        return `<td class="mono">${fmtMoney(a.Price||0, CURRENCY)}</td>`;
+        return `<td class="mono c-Price">${fmtMoney(a.Price||0, CURRENCY)}</td>`;
       }
       if(c==='EmployeeID'){
         const eid=a[c]||'';
-        if(!eid) return `<td><span class="muted">—</span></td>`;
+        if(!eid) return `<td class="c-EmployeeID is-empty"><span class="muted">—</span></td>`;
         const emp=employees.find(e=>e.EmployeeID===eid);
-        return `<td>${emp?esc(emp.EmployeeName||eid):`<span class="mono">${esc(eid)}</span>`}</td>`;
+        return `<td class="c-EmployeeID">${emp?esc(emp.EmployeeName||eid):`<span class="mono">${esc(eid)}</span>`}</td>`;
       }
-      return `<td>${esc(a[c])}</td>`;
+      return `<td class="c-${c}">${esc(a[c])}</td>`;
     }).join('')
-  }${(canEdit()?`<td><div class="row-actions">
-        <button class="btn sm ghost row-more" onclick="toggleRowMenu(event,'${a._id}')" aria-label="Actions">⋮</button></td>`:(MY_ROLE===ROLE_VIEW?`<td><div class="row-actions"><button class="btn sm ghost" onclick="openQR('${a._id}')">QR</button><button class="btn sm ghost" onclick="printAsset('${a._id}')">PRINT</button></div></td>`:''))}</tr>`;
+  }${(canEdit()?`<td class="c-act"><div class="row-actions">
+        <button class="btn sm ghost row-more" onclick="toggleRowMenu(event,'${a._id}')" aria-label="Actions">⋮</button></td>`:(MY_ROLE===ROLE_VIEW?`<td class="c-act"><div class="row-actions"><button class="btn sm ghost" onclick="openQR('${a._id}')">QR</button><button class="btn sm ghost" onclick="printAsset('${a._id}')">PRINT</button></div></td>`:''))}</tr>`;
   if(groupBy){
     // group rows by the chosen column
     const groups={};
@@ -711,7 +794,7 @@ async function loadDashboard(){
   loadDashboardPage();
 }
 function statusColor(s){
-  return ({'Available':'var(--grn)','Checked-Out':'var(--cyan)','Under-Maintenance':'var(--amber)','Reserved':'var(--muted)','Retired':'var(--red)','Lost/Stolen':'var(--red)'})[s]||'var(--accent2)';
+  return ({'Available':'var(--grn)','Checked-Out':'var(--cyan)','Returned':'var(--accent2)','Under-Maintenance':'var(--amber)','Reserved':'var(--muted)','Retired':'var(--red)','Lost/Stolen':'var(--red)'})[s]||'var(--accent2)';
 }
 function renderBars(elId, obj, colorFn){
   const el=document.getElementById(elId); if(!el) return;
@@ -1033,7 +1116,11 @@ async function openModal(id,prefill){
   const renderField=c=>{
     const val=a?a[c]||'':'';
     if(c==='AssetTag')return`<div class="field2"><label>${LABELS[c]||c}</label><input id="f_${c}" class="mono" value="${esc(val)}" placeholder="${id?'':'(auto-generated if left blank, e.g. IT-1001)'}"></div>`;
-    if(c==='Status')return`<div class="field2"><label>${c}</label><select id="f_${c}">${STATUSES.map(o=>`<option ${o===val?'selected':''}>${o}</option>`).join('')}</select></div>`;
+    // a status outside the list (an import's "Active", say) stays what it
+    // is: with no matching option the browser picked "Available" and Save
+    // wrote it, so editing a Location quietly changed the status as well
+    if(c==='Status'){const opts=(val&&!STATUSES.includes(val))?[...STATUSES,val]:STATUSES;
+      return`<div class="field2"><label>${c}</label><select id="f_${c}">${opts.map(o=>`<option value="${esc(o)}" ${o===val?'selected':''}>${esc(o)}${STATUSES.includes(o)?'':' (not in list)'}</option>`).join('')}</select></div>`;}
     if(c==='EmployeeID')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_EmployeeID"><option value="">-- select employee --</option></select></div>`;
     if(c==='RequestedBy')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_RequestedBy"><option value="">-- select employee --</option></select></div>`;
     if(c==='Type')return`<div class="field2"><label>${LABELS[c]||c}</label><select id="f_Type"><option value="">-- select category --</option></select></div>`;
@@ -1110,6 +1197,22 @@ async function openModal(id,prefill){
     if(document.getElementById('f_EmployeeID')){
       await fetchEmployees(a?a.EmployeeID||'':'', a?a.RequestedBy||'':'');
     }
+    // Returned: the item is back with IT, so it is no longer anyone's. The
+    // server clears the assignment anyway; clearing it here shows that
+    // before Save, instead of the old name sitting there until the reload.
+    const stSel=document.getElementById('f_Status');
+    if(stSel){
+      const was=a?a.Status:'';
+      stSel.addEventListener('change',()=>{
+        if(stSel.value!=='Returned'||was==='Returned')return;
+        const emp=document.getElementById('f_EmployeeID');
+        const had=emp&&emp.value;
+        if(emp){emp.value='';emp.dataset.prev='';}
+        fillEmpDeptDesig('');
+        ['f_ReceivedBy','f_NotesReceived'].forEach(i=>{const el=document.getElementById(i);if(el)el.value='';});
+        if(had)toast('Employee unassigned. On save, the signed copy marked RETURNED goes to them and to IT.');
+      });
+    }
     // populate Manufacturer / Model / Category dropdowns from reference tables
     await loadMfrModelOptions(a?a.Manufacturer||'':'', a?a.Model||'':'');
     await loadCategoryOptions(a?a.Type||'':'');
@@ -1133,7 +1236,7 @@ async function loadMfrModelOptions(selMfr, selModel){
     }
     sel.innerHTML='<option value="">-- choose manufacturer --</option>'+mfrs.map(m=>`<option value="${esc(m.name)}" ${m.name===selMfr?'selected':''}>${esc(m.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
     sel.onchange=async()=>{
-      if(sel.value==='__new'){const v=prompt('New manufacturer name:'); if(v&&v.trim()){const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadMfrModelOptions(v.trim(),'');}} else {sel.value=selMfr;}}
+      if(sel.value==='__new'){const v=await uiPrompt('New manufacturer name:'); if(v&&v.trim()){const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadMfrModelOptions(v.trim(),'');}} else {sel.value=selMfr;}}
       else { await loadModelOptions('', sel.value, mfrs); }
     };
     await loadModelOptions(selModel, sel.value, mfrs);
@@ -1161,7 +1264,7 @@ async function loadModelOptions(selModel, mfrName, mfrs){
   }catch(e){}
   sel.innerHTML=opts;
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=prompt('New model name:'); if(v&&v.trim()){const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim(),manufacturer_id:mfrId})}); if(r&&r.ok){await loadModelOptions(v.trim(), mfrName, mfrs);}} else {sel.value=selModel;}}
+    if(sel.value==='__new'){const v=await uiPrompt('New model name:'); if(v&&v.trim()){const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim(),manufacturer_id:mfrId})}); if(r&&r.ok){await loadModelOptions(v.trim(), mfrName, mfrs);}} else {sel.value=selModel;}}
   };
 }
 // populate the Item Category <select> on the Add Asset form from the
@@ -1179,7 +1282,7 @@ async function loadCategoryOptions(selCat){
   }catch(e){}
   sel.innerHTML='<option value="">-- select category --</option>'+cats.map(c=>`<option value="${esc(c.name)}" ${c.name===selCat?'selected':''}>${esc(c.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=prompt('New category name:'); if(v&&v.trim()){const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadCategoryOptions(v.trim());}} else {sel.value=selCat;}}
+    if(sel.value==='__new'){const v=await uiPrompt('New category name:'); if(v&&v.trim()){const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadCategoryOptions(v.trim());}} else {sel.value=selCat;}}
   };
 }
 // populate the Location <select> on the Add Asset form from the Locations
@@ -1198,7 +1301,7 @@ async function loadLocationOptions(selLoc){
   }catch(e){}
   sel.innerHTML='<option value="">-- select location --</option>'+locs.map(l=>`<option value="${esc(l.name)}" ${l.name===selLoc?'selected':''}>${esc(l.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=prompt('New location name:'); if(v&&v.trim()){const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadLocationOptions(v.trim());}} else {sel.value=selLoc;}}
+    if(sel.value==='__new'){const v=await uiPrompt('New location name:'); if(v&&v.trim()){const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadLocationOptions(v.trim());}} else {sel.value=selLoc;}}
   };
 }
 async function loadAssetHistory(id){
@@ -1212,14 +1315,64 @@ async function fetchEmployees(selEmpId,selReqId){
   const list=r?await r.json():[];
   window.__employeesCache=list; // reused so Department/Designation can be pulled live without another API call
   const opts=list.map(e=>({id:e.EmployeeID,label:e.EmployeeName||e.EmployeeID}));
+  const addOpt='<option value="__newemp">＋ add new employee…</option>';
+  // someone the asset names who is not in the Directory (an import, a sync,
+  // a system user) still has to be an option, or the picker shows blank and
+  // Save writes "nobody" over the assignment
+  const keep=id=>(id&&!opts.some(o=>o.id===id))?`<option value="${esc(id)}" selected>${esc(id)} (not in Directory)</option>`:'';
   const sel=document.getElementById('f_EmployeeID');
   if(sel){
-    sel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selEmpId&&o.id===selEmpId?'selected':''}>${esc(o.label)}</option>`).join('');
-    sel.onchange=()=>fillEmpDeptDesig(sel.value);
+    sel.innerHTML='<option value="">-- select employee --</option>'+keep(selEmpId)+opts.map(o=>`<option value="${esc(o.id)}" ${selEmpId&&o.id===selEmpId?'selected':''}>${esc(o.label)}</option>`).join('')+addOpt;
+    sel.dataset.prev=sel.value;
+    sel.onchange=()=>empPickerChanged(sel,'f_RequestedBy');
   }
   const reqSel=document.getElementById('f_RequestedBy');
-  if(reqSel)reqSel.innerHTML='<option value="">-- select employee --</option>'+opts.map(o=>`<option value="${esc(o.id)}" ${selReqId&&o.id===selReqId?'selected':''}>${esc(o.label)}</option>`).join('');
+  if(reqSel){
+    reqSel.innerHTML='<option value="">-- select employee --</option>'+keep(selReqId)+opts.map(o=>`<option value="${esc(o.id)}" ${selReqId&&o.id===selReqId?'selected':''}>${esc(o.label)}</option>`).join('')+addOpt;
+    reqSel.dataset.prev=reqSel.value;
+    reqSel.onchange=()=>empPickerChanged(reqSel,'f_EmployeeID');
+  }
   fillEmpDeptDesig(selEmpId);
+}
+// "+ add new employee..." on the asset form: someone who is not in the
+// Directory yet used to mean leaving the half-filled asset, adding them on
+// the Employees page and starting again. Now they are added here, in a small
+// box, and picked straight away -- the rest of the form is left as it was.
+async function empPickerChanged(sel,otherId){
+  if(sel.value!=='__newemp'){
+    sel.dataset.prev=sel.value;
+    if(sel.id==='f_EmployeeID')fillEmpDeptDesig(sel.value);
+    return;
+  }
+  const prev=sel.dataset.prev||'';
+  sel.value=prev;
+  const emp=await quickAddEmployee();
+  if(!emp)return;
+  const other=document.getElementById(otherId);
+  const otherVal=other?other.value:'';
+  const empVal=sel.id==='f_EmployeeID'?emp.EmployeeID:(document.getElementById('f_EmployeeID')||{}).value||'';
+  const reqVal=sel.id==='f_RequestedBy'?emp.EmployeeID:otherVal;
+  await fetchEmployees(sel.id==='f_EmployeeID'?emp.EmployeeID:otherVal, reqVal);
+  if(sel.id==='f_RequestedBy'){const e=document.getElementById('f_EmployeeID'); if(e){e.value=empVal; e.dataset.prev=empVal; fillEmpDeptDesig(empVal);}}
+}
+// The Directory's own employee form, opened over the asset form, so adding
+// someone here is exactly the same as adding them on the Employees page --
+// same fields, same pickers. Resolves to the new employee, or null if the
+// form is closed without saving.
+let _empPick=null;
+function quickAddEmployee(){
+  return new Promise(async resolve=>{
+    const modal=document.getElementById('empModal');
+    _empPick=resolve;
+    modal.classList.add('stacked');
+    await openEmpModal(null);
+    let settled=false;
+    const done=v=>{ if(settled)return; settled=true; if(_empPick===done)_empPick=null; obs.disconnect(); modal.classList.remove('stacked'); resolve(v); };
+    _empPick=done;
+    // closed with CANCEL / the X / Esc: nothing was added
+    const obs=new MutationObserver(()=>{ if(!modal.classList.contains('show'))done(null); });
+    obs.observe(modal,{attributes:true,attributeFilter:['class']});
+  });
 }
 // Department/Designation are Employee-record fields, not Asset fields --
 // pulled live from the Directory whenever Employee Name is set/changed on
@@ -1233,33 +1386,47 @@ function fillEmpDeptDesig(empId){
 }
 
 async function delInvoice(id){
-  if(!confirm('Remove invoice file?'))return;
+  if(!await uiConfirm('Remove invoice file?'))return;
   const r=await api('/api/assets/'+id+'/invoice',{method:'DELETE'});
   if(r&&r.ok){toast('✕ INVOICE REMOVED');await openModal(id);}else if(r){toast('✕ '+await apiError(r));}
 }
+// Save used to report "✓ SAVED" and close the form whatever the server
+// said -- a refused or dropped save threw away what was typed -- and a
+// double click on COMMIT created the asset twice. Now the button holds
+// while a save is in flight, and the form only closes on a real success.
+let _saving=false;
 async function saveModal(){
+  if(_saving)return;
   const row={};COLUMNS.forEach(c=>{const el=document.getElementById('f_'+c);row[c]=el?el.value.trim():'';});
+  if(row.EmployeeID==='__newemp')row.EmployeeID='';
+  if(row.RequestedBy==='__newemp')row.RequestedBy='';
   const fileEl=document.getElementById('f_InvoiceFile');
-  if(editingId){
-    await api('/api/assets/'+editingId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
-    if(fileEl&&fileEl.files&&fileEl.files[0]){
-      const fd=new FormData();fd.append('file',fileEl.files[0]);
-      const r=await api('/api/assets/'+editingId+'/invoice',{method:'POST',body:fd});
-      if(r&&!r.ok){const j=await r.json().catch(()=>({}));toast('✕ invoice: '+(j.error||'upload failed'));}
-      else if(r&&r.ok)toast('✓ INVOICE SAVED');
+  const btn=document.getElementById('saveBtn'); const label=btn?btn.textContent:'';
+  _saving=true; if(btn){btn.disabled=true;btn.textContent='SAVING…';}
+  const upload=async id=>{
+    if(!(fileEl&&fileEl.files&&fileEl.files[0]))return '';
+    const fd=new FormData();fd.append('file',fileEl.files[0]);
+    const r=await api('/api/assets/'+id+'/invoice',{method:'POST',body:fd});
+    if(r&&r.ok)return ' + INVOICE';
+    return ' — but the invoice did not upload'+(r?': '+await apiError(r):'');
+  };
+  try{
+    if(editingId){
+      const r=await api('/api/assets/'+editingId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
+      if(!r){return;}                      // api() already said there was no response; keep the form
+      if(!r.ok){toast('✕ Not saved: '+await apiError(r));return;}
+      const inv=await upload(editingId);
+      toast((inv.startsWith(' —')?'⚠ SAVED':'✓ SAVED')+inv); closeModal(); load(); loadDashboard();
+    }else{
+      const r=await api('/api/assets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
+      if(!r){return;}
+      if(!r.ok){toast('✕ Not added: '+await apiError(r));return;}
+      const a=await r.json().catch(()=>({}));
+      const inv=a._id?await upload(a._id):'';
+      toast((inv.startsWith(' —')?'⚠ ADDED':'✓ ADDED')+inv); closeModal(); load(); loadDashboard();
     }
-    toast('✓ SAVED'); closeModal(); load(); loadDashboard();
-  }else{
-    const r=await api('/api/assets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(row)});
-    if(r&&r.ok){
-      const a=await r.json();
-      if(fileEl&&fileEl.files&&fileEl.files[0]){
-        const fd=new FormData();fd.append('file',fileEl.files[0]);
-        const r2=await api('/api/assets/'+a._id+'/invoice',{method:'POST',body:fd});
-        if(!r2||!r2.ok){const j=await r2.json().catch(()=>({}));toast('✕ invoice: '+(j.error||'upload failed'));}
-      }
-      toast('✓ ADDED');closeModal();load();loadDashboard();
-    }else if(r){toast('✕ '+await apiError(r));}
+  }finally{
+    _saving=false; if(btn){btn.disabled=false;btn.textContent=label;}
   }
 }
 function closeModal(){document.getElementById('modal').classList.remove('show');editingId=null;}
@@ -1275,7 +1442,7 @@ async function doCheckout(){
   if(r&&r.ok){document.getElementById('checkoutModal').classList.remove('show');toast('✓ CHECKED OUT');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function checkinAsset(id){
-  if(!confirm('CHECK IN this asset?'))return;
+  if(!await uiConfirm('CHECK IN this asset?'))return;
   const r=await api('/api/assets/'+id+'/checkin',{method:'POST'});
   if(r&&r.ok){toast('✓ CHECKED IN');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
@@ -1461,7 +1628,7 @@ function renderLostFound(){
   });
   body.querySelectorAll('.lf-del').forEach(btn=>{
     btn.onclick=async()=>{
-      if(!confirm('Delete this report? The asset itself is not touched.'))return;
+      if(!await uiConfirm('Delete this report? The asset itself is not touched.'))return;
       const r=await api('/api/lostfound/'+btn.dataset.id,{method:'DELETE'});
       if(r&&r.ok){ toast('✓ REPORT DELETED'); loadLostFound(); }
     };
@@ -1551,7 +1718,7 @@ async function openAudit(){
   document.getElementById('auditModal').classList.add('show');
 }
 async function clearAuditLog(){
-  if(!confirm('Clear the entire audit log? This cannot be undone.'))return;
+  if(!await uiConfirm('Clear the entire audit log? This cannot be undone.'))return;
   const r=await api('/api/audit',{method:'DELETE'});
   if(r&&r.ok){const j=await r.json();toast('🗑 LOG CLEARED ('+j.deleted+')');openAudit();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -1809,7 +1976,7 @@ function doBackup(){
   setTimeout(openBackup,800);
 }
 async function delBackup(file){
-  if(!confirm('Delete backup "'+file+'"? This cannot be undone.'))return;
+  if(!await uiConfirm('Delete backup "'+file+'"? This cannot be undone.'))return;
   const r=await api('/api/backups/'+encodeURIComponent(file),{method:'DELETE'});
   if(r&&r.ok){toast('✓ BACKUP DELETED');openBackup();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -1817,13 +1984,13 @@ async function delBackup(file){
 async function doRestore(){
   const file=document.getElementById('bkFile').files[0];
   if(!file){toast('Select a backup file');return;}
-  if(!confirm('Restore "'+file.name+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
+  if(!await uiConfirm('Restore "'+file.name+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
   const fd=new FormData();fd.append('file',file);
   const r=await api('/api/restore',{method:'POST',body:fd});
   if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){toast('✕ '+await apiError(r));}
 }
 async function restoreFromBackup(file){
-  if(!confirm('Restore "'+file+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
+  if(!await uiConfirm('Restore "'+file+'"? This replaces current data for everything in the backup and cannot be undone.'))return;
   const r=await api('/api/backups/'+encodeURIComponent(file)+'/restore',{method:'POST'});
   if(r&&r.ok){toast('✓ RESTORED');load();loadDashboard();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
@@ -1856,7 +2023,39 @@ async function openSign(id){
   if(!j.ok){toast('✕ '+(j.error||'failed'));return;}
   signAssetId=id;
   showSignLink(j.url);
+  // a link only this computer can open: say so before it is sent anywhere
+  const w=document.getElementById('signLocalWarn');
+  if(w){
+    w.style.display=j.local_only?'':'none';
+    w.innerHTML=j.local_only?'<b>This link only works on this computer.</b> It points to <span class="mono">localhost</span>, so an employee\'s phone cannot open it and WhatsApp will not make it tappable. Set the <a href="#" onclick="document.getElementById(\'signModal\').classList.remove(\'show\');showPage(\'page-usettings\');return false;">Public address in Settings › General</a>.':'';
+  }
   showSignMailTarget(j);
+  showSignWaTarget(j);
+}
+// "Open in WhatsApp": a wa.me link that opens WhatsApp (app or web) on this
+// device with the message already written, to the employee's number when one
+// is on file -- no linked company phone needed, the person at the desk sends it.
+let signWa={num:'',text:'',url:''};
+// The fallback for when the company WhatsApp cannot send it (not linked):
+// opens WhatsApp on this device with the message written, and the person at
+// the desk sends it. When the linked WhatsApp can send, SEND LINK does it
+// and this button is not shown.
+function showSignWaTarget(j){
+  signWa={num:j.wa_direct_number||'',text:j.wa_direct_text||'',url:j.url||''};
+  const btn=document.getElementById('signWaBtn');
+  const who=document.getElementById('signWaWho'); if(!who||!btn)return;
+  const fallback=!j.can_whatsapp&&j.whatsapp_reason==='not_linked'&&!!signWa.num;
+  btn.style.display=fallback?'':'none';
+  btn.textContent='💬 SEND FROM MY WHATSAPP';
+  who.innerHTML=fallback?'Company WhatsApp is not linked. This opens <b>your</b> WhatsApp with the message ready for <b>+'+esc(signWa.num)+'</b>.':'';
+  who.style.display=fallback?'':'none';
+}
+function openSignWhatsApp(){
+  const url=document.getElementById('signUrl').value;
+  // SEND LINK issues a new link, so the message has to carry the one in the box now
+  let text=signWa.text||('Please review and sign this asset acknowledgement: '+url);
+  if(signWa.url&&signWa.url!==url) text=text.split(signWa.url).join(url);
+  window.open('https://wa.me/'+(signWa.num||'')+'?text='+encodeURIComponent(text),'_blank','noopener');
 }
 function showSignLink(url){
   document.getElementById('signUrl').value=url;
@@ -1866,22 +2065,34 @@ function showSignLink(url){
 }
 // Say who the mail would go to, and when it can't go, say why -- an offer to
 // email with no address on file is just a button that fails.
+// SEND LINK goes out on every channel the employee can be reached on: their
+// email, and the company WhatsApp when it is linked and they have a mobile
+// number. This used to talk about email only and grey the button out without
+// one, so a linked WhatsApp was never offered at all.
 function showSignMailTarget(j){
   const row=document.getElementById('signMailRow');
   const who=document.getElementById('signMailWho');
   const btn=document.getElementById('signMailBtn');
   if(!row||!who||!btn)return;
-  btn.disabled=!j.can_email;
-  btn.textContent='📧 SEND LINK';
-  if(j.can_email){
-    who.innerHTML='Sends to <b>'+esc(j.assignee||'')+'</b> &lt;'+esc(j.assignee_email)+'&gt;';
-  }else if(!j.assignee){
-    who.textContent='Not assigned to anyone yet — assign the asset to email the link.';
-  }else if(!j.assignee_email){
-    who.innerHTML='No email on file for <b>'+esc(j.assignee)+'</b> — add one on the Employees page.';
-  }else{
-    who.textContent='Email is not set up — add an SMTP server under Settings.';
+  const name=esc(j.assignee||'');
+  if(!j.assignee){
+    btn.disabled=true; btn.textContent='📨 SEND LINK';
+    who.innerHTML='<div class="sd-line sd-off">Not assigned to anyone yet. Assign the asset first, then send the link.</div>';
+    return;
   }
+  const mail=j.can_email
+    ?'<div class="sd-line sd-on">📧 Email: <b>'+name+'</b> &lt;'+esc(j.assignee_email)+'&gt;</div>'
+    :'<div class="sd-line sd-off">📧 Email: '+(!j.assignee_email?'no email on file for <b>'+name+'</b>, add one on the Employees page':'not set up, add an SMTP server in Settings')+'</div>';
+  const waWhy={not_linked:'not linked, link it in Settings › Notifications',
+               no_phone:'no mobile number on file for <b>'+name+'</b>, add one on the Employees page',
+               bad_number:'the mobile number on file is not a valid number',
+               off:'switched off in Settings › Notifications'}[j.whatsapp_reason]||'not available';
+  const wa=j.can_whatsapp
+    ?'<div class="sd-line sd-on">💬 WhatsApp: <b>'+esc(j.assignee_phone)+'</b> (company WhatsApp)</div>'
+    :'<div class="sd-line sd-off">💬 WhatsApp: '+waWhy+'</div>';
+  who.innerHTML=mail+wa;
+  btn.disabled=!(j.can_email||j.can_whatsapp);
+  btn.textContent=j.can_email&&j.can_whatsapp?'📨 SEND BY EMAIL + WHATSAPP':j.can_whatsapp?'💬 SEND ON WHATSAPP':'📧 SEND BY EMAIL';
 }
 async function emailSignLink(){
   const btn=document.getElementById('signMailBtn');
@@ -1919,6 +2130,7 @@ async function shareSignLink(){
 document.getElementById('signCopyBtn').onclick=copySignLink;
 document.getElementById('signMailBtn').onclick=emailSignLink;
 document.getElementById('signShareBtn').onclick=shareSignLink;
+document.getElementById('signWaBtn').onclick=openSignWhatsApp;
 
 /* ---------- users ---------- */
 let editingUser=null;
@@ -1987,7 +2199,7 @@ async function addUser(){
   document.getElementById('userModal').classList.add('show');
 }
 async function delUser(un){
-  if(!confirm('DELETE USER?'))return;
+  if(!await uiConfirm('DELETE USER?'))return;
   const r=await api('/api/users/'+encodeURIComponent(un),{method:'DELETE'});
   if(r&&r.ok){toast('✓ User deleted');if(window.loadCfgUsers)loadCfgUsers();if(document.getElementById('usersModal').classList.contains('show'))openUsers();}else if(r){toast('✕ '+await apiError(r));}
 }
@@ -2099,7 +2311,7 @@ function editRoleForm(id,name,features){
 async function saveRole(){
   const body={name:document.getElementById('rl_name').value.trim(), features:checkedFeatures()};
   if(!editingRoleId && !body.name){toast('✕ Role name required');return;}
-  if(!body.features.length && !confirm('This role has no permissions at all. Save it anyway?'))return;
+  if(!body.features.length && !await uiConfirm('This role has no permissions at all. Save it anyway?'))return;
   const r=editingRoleId
     ? await api('/api/roles/'+editingRoleId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     : await api('/api/roles',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -2108,7 +2320,7 @@ async function saveRole(){
 }
 
 async function delRole(id){
-  if(!confirm('Delete this custom role?'))return;
+  if(!await uiConfirm('Delete this custom role?'))return;
   const r=await api('/api/roles/'+id,{method:'DELETE'});
   if(r&&r.ok){toast('✓ ROLE DELETED');loadRolesModal();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
@@ -2119,7 +2331,7 @@ document.getElementById('rl_save').onclick=saveRole;
 window.editRoleForm=editRoleForm;window.delRole=delRole;
 
 async function delRow(id){
-  if(!confirm('DELETE this asset permanently?'))return;
+  if(!await uiConfirm('DELETE this asset permanently?'))return;
   const r=await api('/api/assets/'+id,{method:'DELETE'});
   if(r&&r.ok){toast('✕ ASSET DELETED');load();loadDashboard();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -2201,7 +2413,17 @@ async function saveSettings(){
 }
 async function saveProfile(){
   const body={display:document.getElementById('pDisplay').value.trim(),email:document.getElementById('p_email').value.trim()};
-  const r=await api('/api/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const ph=document.getElementById('p_phone'); if(ph) body.phone=ph.value.trim();
+  let r=await api('/api/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r&&r.status===403){
+    const j=await r.clone().json().catch(()=>({}));
+    if(j.need_password){
+      // the email is where password resets go, so changing it asks for the password
+      const pw=await _uiDialog({title:'Confirm it\'s you',message:j.error||'Enter your current password to make this change.',input:'password',placeholder:'Current password',okLabel:'CONFIRM'});
+      if(!pw)return;
+      r=await api('/api/profile',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...body,password:pw})});
+    }
+  }
   if(r&&r.ok){toast('✓ PROFILE SAVED');}
   else if(r){toast('✕ '+await apiError(r));}
 }
@@ -2222,14 +2444,14 @@ async function saveLetterhead(){
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
 async function removeLetterhead(){
-  if(!confirm('Remove the letterhead? Prints/PDFs will go back to the plain logo header.'))return;
+  if(!await uiConfirm('Remove the letterhead? Prints/PDFs will go back to the plain logo header.'))return;
   const fd=new FormData();fd.append('remove_letterhead','1');
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ LETTERHEAD REMOVED');loadSettings();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
 async function removeLogo(){
-  if(!confirm('Remove the current logo? This cannot be undone.'))return;
+  if(!await uiConfirm('Remove the current logo? This cannot be undone.'))return;
   const fd=new FormData();fd.append('app_name',document.getElementById('b_name').value.trim());fd.append('logo_text',document.getElementById('b_logoText').value.trim());fd.append('remove_logo','1');
   const r=await api('/api/settings',{method:'PUT',body:fd});
   if(r&&r.ok){toast('✓ LOGO REMOVED');document.getElementById('b_logo').value='';applyBranding();}
@@ -2303,7 +2525,7 @@ document.getElementById('file').onchange=async()=>{
   const r=await api('/api/import',{method:'POST',body:fd});
   inp.value='';
   const j=r?await r.json().catch(()=>({})):{};
-  if(r&&r.ok){ toast(`✓ imported: ${j.added||0} added, ${j.updated||0} updated`); load(); loadDashboard(); }
+  if(r&&r.ok){ toast(`✓ imported: ${j.added||0} added, ${j.updated||0} updated`+(j.skipped?`, ${j.skipped} skipped (in Trash or empty)`:'')); load(); loadDashboard(); }
   else { toast('✕ '+(j.error||'import failed')); }
 };
 document.getElementById('ctImportBtn').onclick=()=>document.getElementById('ctFile').click();
@@ -2679,7 +2901,7 @@ async function saveHbMonitor(){
 window.hbEdit=(id)=>openHbModal(id);
 window.hbDel=async(id)=>{
   const m=(HB.monitors||[]).find(x=>x.id===id);
-  if(!confirm('Delete monitor "'+((m&&m.name)||id)+'" and its history?')) return;
+  if(!await uiConfirm('Delete monitor "'+((m&&m.name)||id)+'" and its history?')) return;
   const r=await api('/api/heartbeat/monitors/'+id,{method:'DELETE'});
   if(r&&r.ok){
     toast('✓ MONITOR DELETED');
@@ -2884,7 +3106,7 @@ window.hbcTest=async(id)=>{
 };
 window.hbcDel=async(id)=>{
   const c=(window.HB_CHAN_FULL||[]).find(x=>x.id===id);
-  if(!confirm('Delete channel "'+((c&&c.name)||id)+'"? Monitors using only this channel fall back to the notification address.')) return;
+  if(!await uiConfirm('Delete channel "'+((c&&c.name)||id)+'"? Monitors using only this channel fall back to the notification address.')) return;
   const r=await api('/api/heartbeat/channels/'+id,{method:'DELETE'});
   if(r&&r.ok){ toast('✓ CHANNEL DELETED'); hbcReset(); loadHbChannels(); loadHeartbeat(); }
   else if(r){ toast('✕ '+await apiError(r)); }
@@ -3096,14 +3318,14 @@ window.restoreAsset=async(id)=>{
   if(r&&r.ok){toast('♻ RESTORED');loadTrash();load();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'restore failed'));}
 };
 window.permaDeleteAsset=async(id)=>{
-  if(!confirm('Permanently delete this asset? This cannot be undone.'))return;
+  if(!await uiConfirm('Permanently delete this asset? This cannot be undone.'))return;
   const r=await api('/api/assets/'+id+'/permanent',{method:'DELETE'});
   if(r&&r.ok){toast('🗑 DELETED PERMANENTLY');loadTrash();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
 };
 async function restoreSelectedTrash(){
   const ids=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
   if(!ids.length)return;
-  if(!confirm(`Restore ${ids.length} asset(s)?`))return;
+  if(!await uiConfirm(`Restore ${ids.length} asset(s)?`))return;
   await Promise.all(ids.map(id=>api('/api/assets/'+id+'/restore',{method:'POST'})));
   toast('♻ '+ids.length+' RESTORED');
   loadTrash(); load();
@@ -3111,13 +3333,13 @@ async function restoreSelectedTrash(){
 async function deleteSelectedTrash(){
   const ids=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
   if(!ids.length)return;
-  if(!confirm(`Permanently delete ${ids.length} asset(s)? This cannot be undone.`))return;
+  if(!await uiConfirm(`Permanently delete ${ids.length} asset(s)? This cannot be undone.`))return;
   await Promise.all(ids.map(id=>api('/api/assets/'+id+'/permanent',{method:'DELETE'})));
   toast('🗑 '+ids.length+' DELETED PERMANENTLY');
   loadTrash();
 }
 async function emptyTrash(){
-  if(!confirm('Permanently delete ALL items in Trash? This cannot be undone.'))return;
+  if(!await uiConfirm('Permanently delete ALL items in Trash? This cannot be undone.'))return;
   const r=await api('/api/assets/trash/empty',{method:'POST'});
   if(r&&r.ok){const j=await r.json();toast('🗑 TRASH EMPTIED ('+j.deleted+')');loadTrash();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -3142,14 +3364,14 @@ window.restoreContract=async(id)=>{
   if(r&&r.ok){toast('♻ RESTORED');loadContractsTrash();loadContracts();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'restore failed'));}
 };
 window.permaDeleteContract=async(id)=>{
-  if(!confirm('Permanently delete this contract? This cannot be undone.'))return;
+  if(!await uiConfirm('Permanently delete this contract? This cannot be undone.'))return;
   const r=await api('/api/contracts/'+id+'/permanent',{method:'DELETE'});
   if(r&&r.ok){toast('🗑 DELETED PERMANENTLY');loadContractsTrash();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
 };
 async function restoreSelectedContractsTrash(){
   const ids=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
   if(!ids.length)return;
-  if(!confirm(`Restore ${ids.length} contract(s)?`))return;
+  if(!await uiConfirm(`Restore ${ids.length} contract(s)?`))return;
   await Promise.all(ids.map(id=>api('/api/contracts/'+id+'/restore',{method:'POST'})));
   toast('♻ '+ids.length+' RESTORED');
   loadContractsTrash(); loadContracts();
@@ -3157,13 +3379,13 @@ async function restoreSelectedContractsTrash(){
 async function deleteSelectedContractsTrash(){
   const ids=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
   if(!ids.length)return;
-  if(!confirm(`Permanently delete ${ids.length} contract(s)? This cannot be undone.`))return;
+  if(!await uiConfirm(`Permanently delete ${ids.length} contract(s)? This cannot be undone.`))return;
   await Promise.all(ids.map(id=>api('/api/contracts/'+id+'/permanent',{method:'DELETE'})));
   toast('🗑 '+ids.length+' DELETED PERMANENTLY');
   loadContractsTrash();
 }
 async function emptyContractsTrash(){
-  if(!confirm('Permanently delete ALL contracts in Trash? This cannot be undone.'))return;
+  if(!await uiConfirm('Permanently delete ALL contracts in Trash? This cannot be undone.'))return;
   const r=await api('/api/contracts/trash/empty',{method:'POST'});
   if(r&&r.ok){const j=await r.json();toast('🗑 TRASH EMPTIED ('+j.deleted+')');loadContractsTrash();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -3175,12 +3397,16 @@ async function loadCatalog(){
 }
 async function loadCatContractTypes(){
   const r=await api('/api/contract-types'); const list=r?await r.json():[];
-  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>`<tr><td>${esc(t.name)}</td><td class="col-del">${catActions('contract-types',t)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>`<tr><td><span class="ctype">${window.contractTypeIcon?contractTypeIcon(t.name):''}<span>${esc(t.name)}</span></span></td><td class="col-del">${catActions('contract-types',t)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   document.getElementById('ctTypeCatCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatCategories(){
   const r=await api('/api/categories'); const list=r?await r.json():[];
-  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td>${esc(c.name)}</td><td class="col-del">${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  // each category shows the icon (or photo) its assets get in the list, and
+  // clicking it lets you choose another or upload a product photo
+  window.__CATS=list;
+  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button><span>${esc(c.name)}</span></div></td><td class="col-del">${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  if(window.loadCategoryIcons)loadCategoryIcons();
   document.getElementById('catCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatManufacturers(){
@@ -3261,7 +3487,7 @@ document.getElementById('catEditCancel').onclick=()=>document.getElementById('ca
 document.getElementById('catEditName').addEventListener('keydown',e=>{ if(e.key==='Enter') saveCatalogEdit(); });
 
 async function delCatalogItem(kind,id){
-  if(!confirm('Delete this '+kind.slice(0,-1)+'? Assets already using it keep their saved value.'))return;
+  if(!await uiConfirm('Delete this '+kind.slice(0,-1)+'? Assets already using it keep their saved value.'))return;
   const r=await api('/api/'+kind,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   if(r&&r.ok){toast('🗑 DELETED');loadCatalog();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
@@ -3325,7 +3551,7 @@ async function loadDirDesignations(){
   document.getElementById('desCount').textContent=list.length?`(${list.length})`:'';
 }
 async function delDirItem(kind,id){
-  if(!confirm('Delete this '+kind.slice(0,-1)+'? Employees/assets already using it keep their saved value.'))return;
+  if(!await uiConfirm('Delete this '+kind.slice(0,-1)+'? Employees/assets already using it keep their saved value.'))return;
   const r=await api('/api/'+kind,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   if(r&&r.ok){toast('🗑 DELETED');loadDirectory();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
@@ -3402,8 +3628,8 @@ async function loadTickets(){
     }
     return `<tr onclick="openTicket(${t.id})" style="cursor:pointer"${slaClass}>
     <td class="mono tk-code" title="Click to copy" onclick="copyTicketCode(event,'${esc(t.code)}')">${esc(t.code)} <span class="tk-copy-ico">⧉</span></td><td>${esc(t.subject)}</td>
-    <td><span class="prio ${t.priority}">${esc(t.priority)}</span></td>
-    <td><span class="status s_${t.status.replace(' ','')}">${esc(t.status)}</span></td>
+    <td><span class="prio ${esc(String(t.priority||'').replace(/[^\w-]/g,''))}">${esc(t.priority)}</span></td>
+    <td><span class="status s_${esc(String(t.status||'').replace(/[^\w-]/g,''))}">${esc(t.status)}</span></td>
     <td>${esc(t.category||'—')}</td>
     <td>${esc(t.requester||'—')}</td><td><select class="rowassign" data-id="${t.id}" onclick="event.stopPropagation()" onchange="assignTicketFromRow(${t.id}, this.value)">${assignOpts(t.assignee)}</select></td>
     <td>${dueStr}</td><td>${t.reply_count||0}</td></tr>`;
@@ -3548,7 +3774,7 @@ async function uploadTicketPhotos(files){
 
 async function deleteTicketPhoto(attId){
   if(!curTicketId)return;
-  if(!confirm('Delete this photo? It cannot be recovered.'))return;
+  if(!await uiConfirm('Delete this photo? It cannot be recovered.'))return;
   const r=await api('/api/tickets/'+curTicketId+'/attachments/'+attId,{method:'DELETE'});
   if(r&&r.ok){toast('✓ PHOTO DELETED');openTicket(curTicketId);}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
@@ -3631,7 +3857,7 @@ async function saveTicketEdits(){
 async function deleteTicket(){
   if(!curTicketId)return;
   if(MY_ROLE!==ROLE_ADMIN){toast('✕ ADMIN ONLY');return;}
-  if(!confirm('Delete this ticket and its entire reply history? This cannot be undone.'))return;
+  if(!await uiConfirm('Delete this ticket and its entire reply history? This cannot be undone.'))return;
   const r=await api('/api/tickets/'+curTicketId,{method:'DELETE'});
   if(r&&r.ok){document.getElementById('tkModal').classList.remove('show');curTicketId=null;toast('✓ TICKET DELETED');await loadTickets();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
@@ -3723,7 +3949,7 @@ function renderContracts(){
     return true;
   });
   const tb=document.getElementById('ctBody');
-  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td class="mono" style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(contractIdFor(c))}</td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
+  const rowHtml=c=>`<tr data-id="${c.id}"><td><input type="checkbox" class="ct-row-chk" data-id="${c.id}" onchange="updateContractSelBtns()"/></td><td class="mono" style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(contractIdFor(c))}</td><td style="cursor:pointer" onclick="openContractModal(${c.id})">${esc(c.name)}</td><td>${c.type?`<span class="ctype">${window.contractTypeIcon?contractTypeIcon(c.type):''}<span>${esc(c.type)}</span></span>`:'—'}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td class="mono">${fmtMoney(c.cost||0, CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td class="mono">${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td><td><div class="row-actions"><button class="btn sm ghost row-more" onclick="toggleContractRowMenu(event,${c.id})" aria-label="Actions">⋮</button></div></td></tr>`;
   if(ctGroupBy){
     const groups={};
     rows.forEach(c=>{const k=(c[ctGroupBy]||'—').toString();(groups[k]=groups[k]||[]).push(c);});
@@ -3749,7 +3975,7 @@ function updateContractSelBtns(){
 async function deleteContractsSelected(){
   const ids=[...document.querySelectorAll('.ct-row-chk:checked')].map(c=>parseInt(c.dataset.id));
   if(!ids.length){toast('No contracts selected');return;}
-  if(!confirm(`Move ${ids.length} contract(s) to trash?`))return;
+  if(!await uiConfirm(`Move ${ids.length} contract(s) to trash?`))return;
   await Promise.all(ids.map(id=>api('/api/contracts',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})));
   toast('🗑 '+ids.length+' MOVED TO TRASH');
   loadContracts();
@@ -3760,7 +3986,7 @@ function printContractsSelected(){
   const list=contracts.filter(c=>ids.includes(c.id));
   const w=window.open('','_blank');
   if(!w){toast('✕ Popup blocked — allow popups for this site');return;}
-  const rowsHtml=list.map(c=>`<tr><td class="mono">${esc(contractIdFor(c))}</td><td>${esc(c.name)}</td><td>${esc(c.type||'—')}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
+  const rowsHtml=list.map(c=>`<tr><td class="mono">${esc(contractIdFor(c))}</td><td>${esc(c.name)}</td><td>${c.type?`<span class="ctype">${window.contractTypeIcon?contractTypeIcon(c.type):''}<span>${esc(c.type)}</span></span>`:'—'}</td><td>${esc(c.vendor||'—')}</td><td>${esc(c.start_date||'—')}</td><td>${esc(c.end_date||'—')}</td><td>${fmtMoney(c.cost||0,CURRENCY)}</td><td>${esc(c.billing_period||'One-Time')}</td><td>${esc(c.license_key||'—')}</td><td>${esc(assetLabelFor(c.asset_id)||'—')}</td></tr>`).join('');
   w.document.write(`<!doctype html><html><head><title>Contracts</title>
   <style>@page{size:A4;margin:${window.HAS_LETTERHEAD?'0':'14mm'}}body{font-family:'Segoe UI',Arial,sans-serif;color:#111}
   .phead{display:flex;align-items:center;gap:12px;margin-bottom:4px} .phead img{height:36px} .phead h2{margin:0}
@@ -3836,7 +4062,7 @@ function printContract(id){
 }
 window.printContract=printContract;
 async function deleteContractRow(id){
-  if(!confirm('Move this contract to trash?'))return;
+  if(!await uiConfirm('Move this contract to trash?'))return;
   const r=await api('/api/contracts',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})});
   if(r&&r.ok){toast('🗑 MOVED TO TRASH');loadContracts();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
 }
@@ -3866,7 +4092,7 @@ async function loadContractTypeOptions(selType){
   sel.innerHTML='<option value="">-- select type --</option>'+list.map(t=>`<option value="${esc(t.name)}" ${t.name===selType?'selected':''}>${esc(t.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
     if(sel.value==='__new'){
-      const v=prompt('New contract type:');
+      const v=await uiPrompt('New contract type:');
       if(v&&v.trim()){
         const r2=await api('/api/contract-types',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})});
         if(r2&&r2.ok){await loadContractTypeOptions(v.trim());}
@@ -3964,7 +4190,7 @@ async function saveContract(){
 }
 async function deleteContract(){
   if(!editingContractId)return;
-  if(!confirm('Move this contract to trash?'))return;
+  if(!await uiConfirm('Move this contract to trash?'))return;
   const r=await api('/api/contracts',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:editingContractId})});
   if(r&&r.ok){toast('🗑 MOVED TO TRASH');document.getElementById('contractModal').classList.remove('show');loadContracts();}
   else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
@@ -4085,6 +4311,8 @@ window.repairDashStructure=repairDashStructure;
   window.sessionUser=me.user;
   {const dz=document.getElementById('navDangerZone'); if(dz)dz.style.display=(MY_ROLE===ROLE_ADMIN)?'':'none';}
   applyTheme(me.theme||'dark');
+  setUiMode(me.ui_mode);
+  window.__ME_THEME=me;
   try{applyCustomVars(me);}catch(e){console.warn('theme vars skipped',e);}
   CURRENCY=me.currency||'AED';
   applyLanguage(me.language||'en');
@@ -4242,9 +4470,20 @@ function contrastRatio(a, b){
    muted text, lines, button ink -- follows exactly as it did before. A
    background already on the right side of the line is left untouched, so a
    dark install in dark mode is pixel for pixel what it always was. */
+// Settings > Customization > Light & dark: "system" follows the device,
+// "light" / "dark" are fixed whatever the device says
+window.UI_MODE=window.UI_MODE||'system';
+try{ const m=localStorage.getItem('itv-ui-mode'); if(m) window.UI_MODE=m; }catch(e){}
 function prefersLight(){
+  if(window.UI_MODE==='light') return true;
+  if(window.UI_MODE==='dark') return false;
   try{ return window.matchMedia('(prefers-color-scheme: light)').matches; }
   catch(e){ return false; }
+}
+function setUiMode(m){
+  window.UI_MODE=(m==='light'||m==='dark')?m:'system';
+  try{ localStorage.setItem('itv-ui-mode',window.UI_MODE); }catch(e){}
+  try{ document.documentElement.style.colorScheme=window.UI_MODE==='system'?'':window.UI_MODE; }catch(e){}
 }
 function mixHex(a,b,t){
   const x=hexRgb(a), y=hexRgb(b);
@@ -4520,6 +4759,7 @@ async function loadProfile(){
   const g = id => document.getElementById(id);
   if (g('pDisplay')) g('pDisplay').value = p.display || '';
   if (g('p_email')) g('p_email').value = p.email || '';
+  if (g('p_phone')) g('p_phone').value = p.phone || '';
   // The server keeps a hash, not the key, so there is nothing to show
   // here after the one moment it was generated.
   if (g('pApiKey')) {
@@ -4558,7 +4798,7 @@ async function loadProfile(){
   };
   const regen = g('regenKey');
   if (regen) regen.onclick = async () => {
-    if (!confirm('Regenerate API key? The old key stops working immediately, '
+    if (!await uiConfirm('Regenerate API key? The old key stops working immediately, '
                  + 'and the new one is shown once — copy it before you leave this page.')) return;
     const j = await api_json('/api/profile/apikey', { method:'POST' });
     if (j && j.api_key){
@@ -4598,9 +4838,13 @@ async function load2faStatus(){
   g('totpStatusText').textContent = s.totp_enabled ? 'Enabled ✓' : 'Not enabled';
   g('totpEnableBtn').style.display = s.totp_enabled ? 'none' : '';
   g('totpDisableBtn').style.display = s.totp_enabled ? '' : 'none';
-  g('emailOtpStatusText').textContent = s.email_otp_enabled ? `Enabled ✓ (${esc(s.email)})` : (s.email ? 'Not enabled' : 'Not enabled — set an email above first');
+  // one switch: each code goes to every place this account can get it
+  const where = (s.code_targets || []).join(' and ');
+  g('emailOtpStatusText').textContent = s.email_otp_enabled
+    ? (where ? `On — codes go to ${where}` : 'On — but nowhere to send codes: add an email or mobile')
+    : (where ? `Off — codes would go to ${where}` : 'Off — add an email (and mail set up) or a mobile with WhatsApp linked');
   g('emailOtpEnableBtn').style.display = s.email_otp_enabled ? 'none' : '';
-  g('emailOtpEnableBtn').disabled = !s.email || !s.smtp_configured;
+  g('emailOtpEnableBtn').disabled = !where;
   g('emailOtpDisableBtn').style.display = s.email_otp_enabled ? '' : 'none';
 }
 {
@@ -4627,7 +4871,7 @@ async function load2faStatus(){
   };
   const totpDisableBtn = g('totpDisableBtn');
   if (totpDisableBtn) totpDisableBtn.onclick = async () => {
-    if (!confirm('Disable the authenticator app for your account?')) return;
+    if (!await uiConfirm('Disable the authenticator app for your account?')) return;
     const r = await api('/api/2fa/totp/disable', { method:'POST' });
     if (r && r.ok){ toast('✓ DISABLED'); load2faStatus(); }
   };
@@ -4637,7 +4881,7 @@ async function load2faStatus(){
     const d = r ? await r.json().catch(()=>({})) : {};
     if (r && r.ok){
       g('emailOtpConfirmCode').value = '';
-      g('emailOtpSetupMsg').textContent = 'Code sent to ' + (d.sent_to || 'your email') + '.';
+      g('emailOtpSetupMsg').textContent = 'Code sent to ' + (d.sent_to || 'you') + '.';
       g('emailOtpSetupBox').style.display = '';
     } else { toast('✕ ' + (d.error || 'failed')); }
   };
@@ -4653,7 +4897,7 @@ async function load2faStatus(){
   };
   const emailOtpDisableBtn = g('emailOtpDisableBtn');
   if (emailOtpDisableBtn) emailOtpDisableBtn.onclick = async () => {
-    if (!confirm('Disable email sign-in codes for your account?')) return;
+    if (!await uiConfirm('Disable email sign-in codes for your account?')) return;
     const r = await api('/api/2fa/email-otp/disable', { method:'POST' });
     if (r && r.ok){ toast('✓ DISABLED'); load2faStatus(); }
   };
@@ -4768,6 +5012,7 @@ async function loadUserSettings(){
       const sec = btn.dataset.sec;
       document.querySelectorAll('.cfg-sec').forEach(s => s.style.display = (s.dataset.sec === sec) ? 'block' : 'none');
       if (sec === 'notif') waRefresh(); else waStopPolling();
+      if (sec === 'branding') retWmLoad();
     };
   });
   }
@@ -4811,7 +5056,7 @@ async function loadUserSettings(){
   };
   loadCfgUsers();
   window.adminReset2fa = async function(un){
-    if (!confirm(`Reset 2FA for "${un}"? They will be able to sign in with just their password again.`)) return;
+    if (!await uiConfirm(`Reset 2FA for "${un}"? They will be able to sign in with just their password again.`)) return;
     const r = await api(`/api/users/${encodeURIComponent(un)}/2fa/disable`, { method:'POST' });
     if (r && r.ok){ toast('✓ 2FA RESET'); loadCfgUsers(); }
     else if (r){ const j = await r.json().catch(()=>({})); toast('✕ ' + (j.error || 'failed')); }
@@ -4991,6 +5236,15 @@ function waRender(s){
   if(st==='unavailable'&&s.error){ m.textContent=s.error; m.style.color='var(--amber)'; }
   else if(s&&s.error&&s.error!=='logged_out'&&st!=='on'){ m.textContent='✕ '+s.error; m.style.color='var(--red)'; }
   if(s&&s.country_code!=null&&document.activeElement!==g('waCc')) g('waCc').value=s.country_code;
+  if(s&&g('waSender')&&document.activeElement!==g('waSender')){
+    g('waSender').value=s.sender_name||'';
+    g('waSender').placeholder=s.sender_default||'Your company name';
+    g('waSenderHint').textContent='Every message starts with this name'+(s.sender_default?' (blank = '+s.sender_default+')':'')+'.';
+  }
+  if(s&&g('waBannerPrev')){
+    g('waBannerPrev').innerHTML=s.banner?'<img alt="WhatsApp banner" src="'+s.banner+'">':'<span>No banner</span>';
+    g('waBannerRm').style.display=s.banner?'':'none';
+  }
   if(s&&s.send_link!=null) g('waSendLink').checked=!!s.send_link;
   if(s&&s.send_pdf!=null) g('waSendPdf').checked=!!s.send_pdf;
 }
@@ -5013,14 +5267,25 @@ async function waRefresh(){
     if(s) waRender(s); waRefresh();
   };
   g('waUnlinkBtn').onclick=async()=>{
-    if(!confirm('Unlink WhatsApp? IT-Vault stops sending on WhatsApp until it is linked again, and it is removed from the phone\'s Linked devices.')) return;
+    if(!await uiConfirm('Unlink WhatsApp? IT-Vault stops sending on WhatsApp until it is linked again, and it is removed from the phone\'s Linked devices.')) return;
     const r=await post('/api/whatsapp/unlink'); const s=r?await r.json().catch(()=>null):null;
     if(s) waRender(s); toast('✓ WHATSAPP UNLINKED');
   };
   g('waSaveBtn').onclick=async()=>{
-    const r=await post('/api/whatsapp/settings',{country_code:g('waCc').value.trim(),send_link:g('waSendLink').checked,send_pdf:g('waSendPdf').checked});
+    const r=await post('/api/whatsapp/settings',{country_code:g('waCc').value.trim(),send_link:g('waSendLink').checked,send_pdf:g('waSendPdf').checked,sender_name:(g('waSender')||{value:''}).value.trim()});
     const j=r?await r.json().catch(()=>({})):{};
     if(r&&r.ok) toast('✓ WHATSAPP SETTINGS SAVED'); else toast('✕ '+(j.error||'failed'));
+  };
+  if(g('waBannerFile')) g('waBannerFile').onchange=async e=>{
+    const f=e.target.files[0]; if(!f)return;
+    const fd=new FormData(); fd.append('banner',f);
+    const r=await api('/api/whatsapp/banner',{method:'POST',body:fd}); e.target.value='';
+    if(r&&r.ok){toast('✓ BANNER SAVED');waRefresh();} else if(r){toast('✕ '+await apiError(r));}
+  };
+  if(g('waBannerRm')) g('waBannerRm').onclick=async()=>{
+    if(!await uiConfirm('Remove the WhatsApp banner? Messages go back to plain text.'))return;
+    const r=await api('/api/whatsapp/banner',{method:'DELETE'});
+    if(r&&r.ok){toast('✓ BANNER REMOVED');waRefresh();}
   };
   g('waTestBtn').onclick=async()=>{
     const num=g('waTestNum').value.trim(); const m=g('waMsg');
@@ -5028,5 +5293,44 @@ async function waRefresh(){
     m.textContent='sending…'; m.style.color='';
     const r=await post('/api/whatsapp/test',{number:num}); const j=r?await r.json().catch(()=>({})):{};
     m.textContent=(j.ok?'✓ ':'✕ ')+(j.message||j.error||'failed'); m.style.color=j.ok?'var(--grn)':'var(--red)';
+  };
+})();
+
+/* ---------- RETURNED watermark (Settings > Branding) ----------
+   Stamped across the acknowledgement copy that goes to the employee and IT
+   when an asset is set to Returned. Preview builds a sample PDF from what is
+   in the form, saved or not. */
+function retWmVals(){
+  const g=id=>document.getElementById(id);
+  return {text:g('rwText').value.trim(),color:g('rwColor').value,opacity:+g('rwOpacity').value,send:g('rwSend').checked,auto_days:Math.max(0,Math.min(365,parseInt(g('rwAutoDays').value,10)||0))};
+}
+function retWmPaint(){
+  const g=id=>document.getElementById(id); if(!g('rwSample'))return;
+  const v=retWmVals();
+  g('rwOpacityVal').textContent=v.opacity+'%';
+  const s=g('rwSample'); s.textContent=v.text||' '; s.style.color=v.color; s.style.opacity=v.opacity/100;
+  const d=v.auto_days;
+  g('rwAutoHint').textContent=d?('A Returned asset becomes Available on its own '+d+' day'+(d>1?'s':'')+' after it was returned. Checked every hour.'):'0 = never: Returned assets stay Returned until someone changes them.';
+}
+async function retWmLoad(){
+  const g=id=>document.getElementById(id); if(!g('rwText'))return;
+  const r=await api('/api/settings/return-watermark'); if(!r||!r.ok)return;
+  const j=await r.json().catch(()=>null); if(!j)return;
+  g('rwText').value=j.text||''; g('rwColor').value=j.color||'#d32f2f';
+  g('rwOpacity').value=j.opacity||18; g('rwSend').checked=!!j.send; g('rwAutoDays').value=j.auto_days||0;
+  retWmPaint();
+}
+(function(){
+  const g=id=>document.getElementById(id); if(!g('rwText'))return;
+  ['rwText','rwColor','rwOpacity','rwAutoDays'].forEach(id=>g(id).addEventListener('input',retWmPaint));
+  document.querySelectorAll('.rw-days [data-days]').forEach(b=>b.onclick=()=>{g('rwAutoDays').value=b.dataset.days;retWmPaint();});
+  g('rwPreviewBtn').onclick=()=>{
+    const v=retWmVals();
+    window.open('/api/settings/return-watermark/preview?'+new URLSearchParams({text:v.text,color:v.color,opacity:v.opacity}),'_blank');
+  };
+  g('rwSaveBtn').onclick=async()=>{
+    const r=await api('/api/settings/return-watermark',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(retWmVals())});
+    const j=r?await r.json().catch(()=>({})):{};
+    if(r&&r.ok)toast('✓ RETURNED SETTINGS SAVED'); else toast('✕ '+(j.error||'failed'));
   };
 })();

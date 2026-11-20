@@ -94,10 +94,10 @@
                 android:padding="18dp">
 
                 <TextView style="@style/FieldLabel" android:layout_marginTop="0dp" android:text="Department" />
-                <Spinner android:id="@+id/fDepartment" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fDepartment" style="@style/Dropdown" />
 
                 <TextView style="@style/FieldLabel" android:text="Designation" />
-                <Spinner android:id="@+id/fDesignation" style="@style/Dropdown" />
+                <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/fDesignation" style="@style/Dropdown" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

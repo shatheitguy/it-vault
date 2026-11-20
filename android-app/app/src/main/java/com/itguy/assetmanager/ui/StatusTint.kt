@@ -31,6 +31,7 @@ object StatusTint {
         // assets
         "Available" -> GREEN
         "Checked-Out", "Checked Out" -> BLUE
+        "Returned" -> Color.parseColor("#7C5CC4")
         "Under-Maintenance", "Under Maintenance" -> AMBER
         "Retired" -> GREY
         "Lost/Stolen" -> RED

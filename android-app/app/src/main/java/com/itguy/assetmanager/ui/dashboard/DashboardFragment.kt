@@ -293,6 +293,7 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
     private fun statusColor(s: String): Int = when (s) {
         "Available" -> Color.parseColor("#2ECC71")
         "Checked-Out" -> Color.parseColor("#3BC9DB")
+        "Returned" -> Color.parseColor("#9B7BE0")
         "Under-Maintenance" -> Color.parseColor("#FFB84D")
         "Retired" -> Color.parseColor("#FF3B30")
         else -> Color.parseColor("#8A93A6")
