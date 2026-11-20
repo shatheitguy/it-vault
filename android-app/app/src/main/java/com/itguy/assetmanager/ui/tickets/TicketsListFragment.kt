@@ -25,6 +25,13 @@ import com.itguy.assetmanager.ui.generic.SimpleRow
 import kotlinx.coroutines.launch
 
 class TicketsListFragment : Fragment(), Refreshable {
+    companion object {
+        /** [openNew]: straight into "New ticket", as the dashboard's button does. */
+        fun newInstance(openNew: Boolean = false) = TicketsListFragment().apply {
+            arguments = Bundle().apply { putBoolean("openNew", openNew) }
+        }
+    }
+
     private var _b: FragmentTicketsListBinding? = null
     private val b get() = _b!!
     private var showClosed = false
@@ -47,6 +54,10 @@ class TicketsListFragment : Fragment(), Refreshable {
         b.searchInput.addTextChangedListener { render() }
         b.addFab.setOnClickListener { openCreateDialog() }
         load()
+        if (arguments?.getBoolean("openNew") == true) {
+            arguments?.putBoolean("openNew", false)       // once, not again on the way back
+            view.post { if (_b != null) openCreateDialog() }
+        }
     }
 
     private fun choose(closed: Boolean) {

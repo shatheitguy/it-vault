@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A choice from a fixed list, with the app's own picker sheet. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView android:id="@+id/rowLabel" style="@style/FieldLabel" />
+
+    <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/rowChoice" style="@style/Dropdown" />
+
+    <TextView
+        android:id="@+id/rowHelp"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textColor="@color/text_soft"
+        android:textSize="12sp"
+        android:visibility="gone" />
+</LinearLayout>

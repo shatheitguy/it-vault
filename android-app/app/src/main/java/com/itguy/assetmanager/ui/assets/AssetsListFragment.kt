@@ -17,6 +17,13 @@ import com.itguy.assetmanager.ui.Refreshable
 import kotlinx.coroutines.launch
 
 class AssetsListFragment : Fragment(), Refreshable {
+    companion object {
+        /** The list already filtered to one status, as the dashboard's donut opens it. */
+        fun newInstance(status: String? = null) = AssetsListFragment().apply {
+            arguments = Bundle().apply { if (status != null) putString("status", status) }
+        }
+    }
+
 
     private var _b: FragmentAssetsListBinding? = null
     private val b get() = _b!!
@@ -42,6 +49,7 @@ class AssetsListFragment : Fragment(), Refreshable {
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        arguments?.getString("status")?.let { if (filters.isEmpty) filters = AssetFilters(status = it) }
         adapter = AssetAdapter(
             onClick = { asset ->
                 (activity as? MainActivity)?.showFragment(AssetEditFragment.newInstance(asset.id), "Edit Asset", addToBackStack = true)
@@ -166,6 +174,9 @@ class AssetsListFragment : Fragment(), Refreshable {
                 b.emptyText.text = emptyMessage(query)
                 b.emptyText.visibility = if (shown.isEmpty()) View.VISIBLE else View.GONE
                 if (query.isBlank()) OfflineCache.saveAssets(list)
+                // pictures: one small request for which assets/models have a
+                // photo and which brands a logo; redraw only if it changed
+                if (com.itguy.assetmanager.data.Looks.refresh() && _b != null) adapter.notifyDataSetChanged()
             } catch (e: Exception) {
                 if (_b == null) return@launch
                 showFromCache(query, e)

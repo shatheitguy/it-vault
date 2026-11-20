@@ -114,6 +114,86 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- ==================== photo ==================== -->
+        <!-- The asset's own photo, or the one it shows from its model in the
+             Product Catalog: the same picture as in the list and on the web. -->
+        <TextView style="@style/SectionLabel" android:text="Photo" />
+
+        <com.google.android.material.card.MaterialCardView style="@style/Card">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="18dp">
+
+                <FrameLayout
+                    android:id="@+id/photoTile"
+                    android:layout_width="88dp"
+                    android:layout_height="88dp"
+                    android:layout_marginEnd="16dp">
+
+                    <ImageView
+                        android:id="@+id/photoIcon"
+                        android:layout_width="34dp"
+                        android:layout_height="34dp"
+                        android:layout_gravity="center"
+                        android:contentDescription="@null"
+                        android:src="@drawable/ic_t_box" />
+
+                    <ImageView
+                        android:id="@+id/photoImg"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="Asset photo"
+                        android:padding="4dp"
+                        android:scaleType="fitCenter"
+                        android:visibility="gone" />
+                </FrameLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/photoNote"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_soft"
+                        android:textSize="13sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:orientation="horizontal">
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/photoAddBtn"
+                            style="@style/ButtonPillQuiet"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minHeight="42dp"
+                            android:text="Add a photo"
+                            app:icon="@drawable/ic_t_image"
+                            app:iconSize="18dp" />
+
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/photoRemoveBtn"
+                            style="@style/ButtonPillQuiet"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="8dp"
+                            android:minHeight="42dp"
+                            android:text="Remove"
+                            android:visibility="gone" />
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- ==================== purchase and warranty ==================== -->
         <TextView style="@style/SectionLabel" android:text="Purchase &amp; warranty" />
 

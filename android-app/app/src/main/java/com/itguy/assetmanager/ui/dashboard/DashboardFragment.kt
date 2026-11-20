@@ -42,8 +42,8 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
         b.statTotal.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "TOTAL ASSETS"
         b.statOut.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "CHECKED OUT"
         b.statMaint.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "MAINTENANCE"
-        b.statDue.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "CHECKOUTS DUE SOON"
-        b.statWarr.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "WARRANTY EXPIRING"
+        b.statDue.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "DUE SOON"
+        b.statWarr.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel).text = "WARRANTY ≤30D"
         // One colour per role, as on the web. Five numbers all painted in the
         // accent read as one number repeated; the colour is what says which
         // of them is the one to worry about.
@@ -76,6 +76,18 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
      */
     private fun wireSeeAll() {
         val main = activity as? MainActivity
+        // the hero's three buttons: what people open the app to do
+        b.dashAddAsset.setOnClickListener {
+            main?.showFragment(AssetEditFragment.newInstance(null), "Add Asset", addToBackStack = true)
+        }
+        b.dashNewTicket.setOnClickListener {
+            main?.showFragment(com.itguy.assetmanager.ui.tickets.TicketsListFragment.newInstance(openNew = true),
+                               "Tickets", addToBackStack = true)
+        }
+        b.dashScan.visibility = if (com.itguy.assetmanager.data.Prefs.role.equals("read-only", true)) View.GONE else View.VISIBLE
+        b.dashScan.setOnClickListener {
+            main?.showFragment(com.itguy.assetmanager.ui.scan.NetworkScanFragment(), "Network Scan", addToBackStack = true)
+        }
         b.seeAllAssets.setOnClickListener {
             main?.showFragment(com.itguy.assetmanager.ui.assets.AssetsListFragment(),
                                "Assets", addToBackStack = true)
@@ -118,20 +130,31 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
      *  version of whatever that card is -- not a grey that would look like
      *  dirt on a red or a green. */
     private fun styleHero() = b.heroCard.post {
-        // Read off the card itself rather than from the palette.
-        //
-        // The card is painted by whichever of the two is in force -- the
-        // bundled accent, or the server's -- and asking the palette separately
-        // meant the text could be computed against one colour while sitting on
-        // the other. That is how this card ended up black-on-red.
-        val bg = b.heroCard.cardBackgroundColor.defaultColor
-        val onAccent = if (androidx.core.graphics.ColorUtils.calculateLuminance(bg) > 0.55)
-            android.graphics.Color.parseColor("#101828") else android.graphics.Color.WHITE
-        listOf(b.heroTitle, b.heroSub, b.heroCount).forEach { it.setTextColor(onAccent) }
-        // the track is the same colour at a quarter strength, so it belongs to
-        // the arc rather than looking like grey dirt on a coloured card
-        val track = (onAccent and 0x00FFFFFF) or 0x40000000
-        b.heroRing.setColors(onAccent, track, onAccent)
+        val bb = _b ?: return@post
+        val ctx = requireContext()
+        val accent = com.itguy.assetmanager.data.Palette.serverColours()?.accent
+            ?: androidx.core.content.ContextCompat.getColor(ctx, com.itguy.assetmanager.R.color.accent)
+        val strong = androidx.core.content.ContextCompat.getColor(ctx, com.itguy.assetmanager.R.color.text_strong)
+        val track = androidx.core.content.ContextCompat.getColor(ctx, com.itguy.assetmanager.R.color.divider)
+        // the web's band: the card, with the accent glowing in from a corner
+        bb.heroInner.background = android.graphics.drawable.GradientDrawable().apply {
+            gradientType = android.graphics.drawable.GradientDrawable.RADIAL_GRADIENT
+            gradientRadius = bb.heroInner.width.coerceAtLeast(1) * 0.9f
+            setGradientCenter(0f, 0f)
+            colors = intArrayOf((accent and 0x00FFFFFF) or 0x2E000000, 0x00000000)
+        }
+        bb.heroRing.setColors(accent, track, strong)
+    }
+
+    /** "18  with staff": the number bold, the words quiet. */
+    private fun figure(n: Int, words: String): CharSequence {
+        val num = n.toString()
+        return android.text.SpannableString("$num  $words").apply {
+            setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, num.length, 0)
+            setSpan(android.text.style.RelativeSizeSpan(1.3f), 0, num.length, 0)
+            setSpan(android.text.style.ForegroundColorSpan(
+                resources.getColor(com.itguy.assetmanager.R.color.text_strong, null)), 0, num.length, 0)
+        }
     }
 
     /**
@@ -152,7 +175,7 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
                 addTwoLineRow(b.recentAssets, a.Name.ifBlank { "(unnamed)" },
                               "${a.Type} · ${a.Serial}",
                               trailing = a.Status.replace("-", " "),
-                              trailingColor = statusColor(a.Status)) {
+                              trailingColor = statusColor(a.Status), asset = a) {
                     (activity as? MainActivity)?.showFragment(
                         AssetEditFragment.newInstance(a.id), "Edit Asset", addToBackStack = true)
                 }
@@ -189,10 +212,22 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
             val share = if (total > 0) out.toFloat() / total else 0f
             b.heroRing.progress = share
             b.heroRing.centerText = "${Math.round(share * 100)}%"
-            b.heroCount.text = if (total > 0) "$out of $total assets" else "Nothing in the register yet"
+            val ready = (d.by_status ?: emptyMap())["Available"] ?: 0
+            b.heroOut.text = figure(out, "with staff")
+            b.heroReady.text = figure(ready, "ready to issue")
+            b.heroTotal.text = figure(total, "in the register")
 
-            renderBars(b.statusBars, (d.by_status ?: emptyMap()), ::statusColor)
-            renderBars(b.typeBars, (d.by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent, null) }
+            // each card says what share of the register it is
+            fun share(card: com.itguy.assetmanager.databinding.ItemStatCardBinding, n: Int) {
+                val lbl = card.root.findViewById<TextView>(com.itguy.assetmanager.R.id.statLabel)
+                val base = lbl.text.toString().substringBefore("  ·")
+                lbl.text = if (total > 0 && n > 0) "$base  ·  ${Math.round(n * 100f / total)}%" else base
+            }
+            share(b.statOut, out); share(b.statMaint, d.maintenance)
+            share(b.statDue, d.due_soon); share(b.statWarr, d.warranty_expiring)
+
+            renderDonut(b.statusBars, (d.by_status ?: emptyMap()))
+            renderTypeBars(b.typeBars, (d.by_type ?: emptyMap()), 8)
             renderBars(b.contractsBars, (d.contracts_by_type ?: emptyMap())) { resources.getColor(com.itguy.assetmanager.R.color.accent2, null) }
             b.contractsExpiring.removeAllViews()
             val expiring = (d.expiring_contracts ?: emptyList()).take(GLANCE)
@@ -235,6 +270,7 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
                 if (_b != null && d != null) paintStats(d)
             } catch (e: Exception) {}
 
+            try { com.itguy.assetmanager.data.Looks.refresh() } catch (e: Exception) {}
             try {
                 val list = ApiClient.api().listAssets(order = "recent").body().orEmpty().take(GLANCE)
                 if (_b != null) {
@@ -244,7 +280,7 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
                         addTwoLineRow(b.recentAssets, a.Name.ifBlank { "(unnamed)" },
                                       "${a.Type} · ${a.Serial}",
                                       trailing = a.Status.replace("-", " "),
-                                      trailingColor = statusColor(a.Status)) {
+                                      trailingColor = statusColor(a.Status), asset = a) {
                             (activity as? MainActivity)?.showFragment(AssetEditFragment.newInstance(a.id), "Edit Asset", addToBackStack = true)
                         }
                     }
@@ -280,7 +316,7 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
                             a.action?.takeIf { it.isNotBlank() && it != what },
                         ).joinToString(" · ")
                         addTwoLineRow(b.activityFeed, what, who,
-                                      trailing = (a.ts ?: "").takeLast(5),
+                                      trailing = Regex("""(\d{1,2}:\d{2})(?::\d{2})?""").find(a.ts ?: "")?.groupValues?.get(1) ?: "",
                                       onClick = null)
                     }
                 }
@@ -290,13 +326,100 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
         }
     }
 
-    private fun statusColor(s: String): Int = when (s) {
+    private fun statusColor(s: String): Int = com.itguy.assetmanager.ui.StatusTint.of(s)
+
+    private fun statusColorOld(s: String): Int = when (s) {
         "Available" -> Color.parseColor("#2ECC71")
         "Checked-Out" -> Color.parseColor("#3BC9DB")
         "Returned" -> Color.parseColor("#9B7BE0")
         "Under-Maintenance" -> Color.parseColor("#FFB84D")
         "Retired" -> Color.parseColor("#FF3B30")
         else -> Color.parseColor("#8A93A6")
+    }
+
+    /** The status donut and its legend, as on the web: tap a status to see those assets. */
+    private fun renderDonut(container: LinearLayout, data: Map<String, Int>) {
+        container.removeAllViews()
+        val entries = data.toList().filter { it.second > 0 }.sortedByDescending { it.second }
+        if (entries.isEmpty()) { emptyRow(container, "No data yet"); return }
+        val ctx = requireContext(); val d = resources.displayMetrics.density
+        val total = entries.sumOf { it.second }
+        val row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+        val donut = com.itguy.assetmanager.ui.DonutView(ctx).apply {
+            setData(entries.map { it.second to statusColor(it.first) },
+                    resources.getColor(com.itguy.assetmanager.R.color.divider, null),
+                    resources.getColor(com.itguy.assetmanager.R.color.text_strong, null),
+                    resources.getColor(com.itguy.assetmanager.R.color.text_soft, null))
+        }
+        row.addView(donut, LinearLayout.LayoutParams((118 * d).toInt(), (118 * d).toInt()).also { it.rightMargin = (18 * d).toInt() })
+        val legend = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        for ((label, count) in entries) {
+            val line = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, (5 * d).toInt(), 0, (5 * d).toInt())
+                isClickable = true; isFocusable = true
+                setBackgroundResource(com.itguy.assetmanager.R.drawable.nav_item_bg)
+                setOnClickListener {
+                    (activity as? MainActivity)?.showFragment(
+                        com.itguy.assetmanager.ui.assets.AssetsListFragment.newInstance(status = label),
+                        "Assets", addToBackStack = true)
+                }
+            }
+            line.addView(View(ctx).apply {
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 3 * d; setColor(statusColor(label)) }
+            }, LinearLayout.LayoutParams((10 * d).toInt(), (10 * d).toInt()).also { it.rightMargin = (9 * d).toInt() })
+            line.addView(TextView(ctx).apply {
+                text = label.replace("-", " "); textSize = 13f; maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setTextColor(resources.getColor(com.itguy.assetmanager.R.color.text_strong, null))
+            }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            line.addView(TextView(ctx).apply {
+                text = count.toString(); textSize = 13f; setTypeface(typeface, android.graphics.Typeface.BOLD)
+                setTextColor(resources.getColor(com.itguy.assetmanager.R.color.text_strong, null))
+            })
+            line.addView(TextView(ctx).apply {
+                text = "${Math.round(count * 100f / total)}%"; textSize = 11.5f; gravity = android.view.Gravity.END
+                setTextColor(resources.getColor(com.itguy.assetmanager.R.color.text_soft, null))
+            }, LinearLayout.LayoutParams((40 * d).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT))
+            legend.addView(line)
+        }
+        row.addView(legend, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        container.addView(row)
+    }
+
+    /** Top asset types with the same icons as the list; the rest summed up in one line. */
+    private fun renderTypeBars(container: LinearLayout, data: Map<String, Int>, top: Int) {
+        val entries = data.toList().sortedByDescending { it.second }
+        val shown = entries.take(top); val rest = entries.drop(top)
+        renderBars(container, shown.toMap()) {
+            com.itguy.assetmanager.data.Palette.serverColours()?.accent
+                ?: resources.getColor(com.itguy.assetmanager.R.color.accent, null)
+        }
+        // an icon tile in front of each row
+        val ctx = requireContext(); val d = resources.displayMetrics.density
+        val accent = com.itguy.assetmanager.data.Palette.serverColours()?.accent
+            ?: resources.getColor(com.itguy.assetmanager.R.color.accent, null)
+        for (i in 0 until container.childCount) {
+            val rowView = container.getChildAt(i) as? LinearLayout ?: continue
+            val type = shown.getOrNull(i)?.first ?: continue
+            container.removeViewAt(i)
+            val wrap = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL }
+            val tile = android.widget.FrameLayout(ctx).apply {
+                background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 9 * d; setColor((accent and 0x00FFFFFF) or 0x24000000) }
+            }
+            tile.addView(android.widget.ImageView(ctx).apply {
+                setImageResource(com.itguy.assetmanager.ui.TypeIcons.forType(type))
+                imageTintList = android.content.res.ColorStateList.valueOf(accent)
+            }, android.widget.FrameLayout.LayoutParams((16 * d).toInt(), (16 * d).toInt(), android.view.Gravity.CENTER))
+            wrap.addView(tile, LinearLayout.LayoutParams((32 * d).toInt(), (32 * d).toInt()).also { it.rightMargin = (12 * d).toInt(); it.bottomMargin = (10 * d).toInt() })
+            wrap.addView(rowView, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            container.addView(wrap, i)
+        }
+        if (rest.isNotEmpty()) container.addView(TextView(ctx).apply {
+            text = "+ ${rest.size} more type${if (rest.size > 1) "s" else ""} · ${rest.sumOf { it.second }} assets"
+            textSize = 12.5f; setPadding((44 * d).toInt(), (2 * d).toInt(), 0, 0)
+            setTextColor(resources.getColor(com.itguy.assetmanager.R.color.text_soft, null))
+        })
     }
 
     /** Reproduces the web app's renderBars(): sorted desc by count, each row a label+count line over a proportional colored bar. */
@@ -349,7 +472,8 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
 
     private fun addTwoLineRow(
         container: LinearLayout, title: String, subtitle: String,
-        trailing: String? = null, trailingColor: Int? = null, onClick: (() -> Unit)?,
+        trailing: String? = null, trailingColor: Int? = null,
+        asset: com.itguy.assetmanager.data.model.Asset? = null, onClick: (() -> Unit)?,
     ) {
         val d = resources.displayMetrics.density
         fun px(v: Float) = (v * d).toInt()
@@ -376,7 +500,27 @@ class DashboardFragment : Fragment(), Refreshable, com.itguy.assetmanager.ui.Reb
             }
         }
 
-        row.addView(View(ctx).apply {
+        if (asset != null) {
+            // the asset's picture, as in the list: photo, else its type icon
+            val accent = com.itguy.assetmanager.data.Palette.serverColours()?.accent
+                ?: resources.getColor(com.itguy.assetmanager.R.color.accent, null)
+            val tile = android.widget.FrameLayout(ctx)
+            fun paint(c: Int) { tile.background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = px(9f).toFloat(); setColor(c) } }
+            paint((accent and 0x00FFFFFF) or 0x24000000)
+            val icon = android.widget.ImageView(ctx).apply {
+                setImageResource(com.itguy.assetmanager.ui.TypeIcons.forType(asset.Type))
+                imageTintList = android.content.res.ColorStateList.valueOf(accent)
+            }
+            val photo = android.widget.ImageView(ctx).apply { scaleType = android.widget.ImageView.ScaleType.FIT_CENTER; setPadding(px(2f), px(2f), px(2f), px(2f)); visibility = View.GONE }
+            tile.addView(icon, android.widget.FrameLayout.LayoutParams(px(17f), px(17f), android.view.Gravity.CENTER))
+            tile.addView(photo, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+            com.itguy.assetmanager.ui.Images.load(photo, com.itguy.assetmanager.data.Looks.pictureFor(asset), 120) { shown ->
+                photo.visibility = if (shown) View.VISIBLE else View.GONE
+                icon.visibility = if (shown) View.GONE else View.VISIBLE
+                if (shown) paint(android.graphics.Color.WHITE)
+            }
+            row.addView(tile, LinearLayout.LayoutParams(px(34f), px(34f)).also { it.rightMargin = px(12f) })
+        } else row.addView(View(ctx).apply {
             layoutParams = LinearLayout.LayoutParams(px(10f), px(10f))
                 .also { it.rightMargin = px(12f) }
             setBackgroundResource(com.itguy.assetmanager.R.drawable.rail_dot)

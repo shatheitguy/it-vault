@@ -235,7 +235,7 @@
         </div>
         <div class="invbox">
           <label>MANUFACTURERS <span id="mfrCatCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="mfrCatInput" placeholder="e.g. Apple, Dell, HP"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
+          <div class="catrow"><input id="mfrCatInput" placeholder="e.g. Apple, Dell, HP"><input id="mfrSiteInput" placeholder="Website for the logo (optional), e.g. dell.com"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
         </div>
         <div class="invbox">
@@ -312,6 +312,19 @@
         <div class="spacer"></div>
       </div>
 
+      <div class="dash-hero" id="dashHero">
+        <div class="dh-main">
+          <div class="dh-hello" id="dhHello">Welcome back</div>
+          <div class="dh-date" id="dhDate"></div>
+          <div class="dh-acts">
+            <button type="button" class="btn" onclick="showPage('page-assets');openModal(null)">＋ Add asset</button>
+            <button type="button" class="btn ghost" onclick="showPage('page-tickets');openNewTicket()">New ticket</button>
+            <button type="button" class="btn ghost" id="dhScan" onclick="(document.getElementById('navScan')||{click(){}}).click()">Scan network</button>
+          </div>
+        </div>
+        <div class="dh-ring" id="dhRing"></div>
+      </div>
+
       <div class="kpis" id="kpiRow">
         <div class="kpi c1"><div class="kpi-ico">▣</div><div class="kpi-body"><div class="kpi-v" id="kTotal">0</div><div class="kpi-k">Total Assets</div></div></div>
         <div class="kpi c2"><div class="kpi-ico">⇄</div><div class="kpi-body"><div class="kpi-v" id="kOut">0</div><div class="kpi-k">Checked Out</div></div></div>
@@ -341,7 +354,7 @@
       <div id="dashWidgets">
         <div class="panel widget" data-wkey="status"><div class="secthead">ASSET STATUS</div><div class="bars" id="statusBars"></div></div>
         <div class="panel widget" data-wkey="type"><div class="secthead">TOP ASSET TYPES</div><div class="bars" id="typeBars"></div></div>
-        <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>SERIAL</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
+        <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
         <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
         <div class="panel widget" data-wkey="heartbeat"><div class="secthead">HEARTBEAT</div><div class="hbcounts" id="dashHbCounts"></div><div class="tablewrap" style="max-height:320px"><table id="dashHb"><thead><tr><th>STATUS</th><th>MONITOR</th><th>HEARTBEAT</th><th>RESPONSE</th><th>UPTIME</th></tr></thead><tbody id="dashHbBody"></tbody></table><div class="empty" id="dashHbEmpty" style="display:none">NO MONITORS</div></div></div>
         <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>

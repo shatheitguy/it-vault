@@ -54,9 +54,28 @@ class AssetAdapter(
                 ?: androidx.core.content.ContextCompat.getColor(ctx, com.itguy.assetmanager.R.color.accent)
             b.typeIcon.setImageResource(com.itguy.assetmanager.ui.TypeIcons.forType(a.Type))
             b.typeIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
-            b.typeTile.background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = 11f * ctx.resources.displayMetrics.density
-                setColor((accent and 0x00FFFFFF) or 0x24000000)
+            val tileRadius = 11f * ctx.resources.displayMetrics.density
+            fun tile(colour: Int) {
+                b.typeTile.background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = tileRadius; setColor(colour)
+                }
+            }
+            tile((accent and 0x00FFFFFF) or 0x24000000)
+            b.typeTile.clipChildren = false
+            // the same picture the web shows: the asset's own photo, else its
+            // model's; the type icon until (or unless) one loads
+            val pic = com.itguy.assetmanager.data.Looks.pictureFor(a)
+            b.typePhoto.visibility = android.view.View.GONE
+            b.typeIcon.visibility = android.view.View.VISIBLE
+            com.itguy.assetmanager.ui.Images.load(b.typePhoto, pic, 160) { shown ->
+                b.typePhoto.visibility = if (shown) android.view.View.VISIBLE else android.view.View.GONE
+                b.typeIcon.visibility = if (shown) android.view.View.GONE else android.view.View.VISIBLE
+                if (shown) tile(android.graphics.Color.WHITE)
+            }
+            val logo = com.itguy.assetmanager.data.Looks.brandLogo(a)
+            b.brandBadge.visibility = android.view.View.GONE
+            com.itguy.assetmanager.ui.Images.load(b.brandBadge, logo, 64) { shown ->
+                b.brandBadge.visibility = if (shown) android.view.View.VISIBLE else android.view.View.GONE
             }
             b.root.setOnClickListener { onClick(a) }
             b.root.setOnLongClickListener {

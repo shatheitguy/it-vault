@@ -48,6 +48,30 @@
                 android:layout_gravity="center"
                 android:contentDescription="@null"
                 android:src="@drawable/ic_t_box" />
+
+            <!-- the asset's photo, or its model's, when there is one -->
+            <ImageView
+                android:id="@+id/typePhoto"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:padding="3dp"
+                android:scaleType="fitCenter"
+                android:visibility="gone" />
+
+            <!-- the brand's logo, small, on the corner -->
+            <ImageView
+                android:id="@+id/brandBadge"
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="bottom|end"
+                android:layout_marginEnd="-2dp"
+                android:layout_marginBottom="-2dp"
+                android:background="@drawable/brand_badge_bg"
+                android:contentDescription="@null"
+                android:padding="1.5dp"
+                android:scaleType="fitCenter"
+                android:visibility="gone" />
         </FrameLayout>
 
         <View

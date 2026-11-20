@@ -247,6 +247,15 @@
         <item name="android:letterSpacing">0.05</item>
     </style>
 
+    <!-- "18  with staff": one of the three figures beside the dashboard ring. -->
+    <style name="HeroFigure">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:layout_marginTop">4dp</item>
+        <item name="android:textColor">@color/text_soft</item>
+        <item name="android:textSize">13.5sp</item>
+    </style>
+
     <!-- The wide pill at the foot of a form. -->
     <style name="ButtonPill" parent="Widget.Material3.Button">
         <item name="cornerRadius">12dp</item>
