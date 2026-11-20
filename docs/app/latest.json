@@ -1,6 +1,6 @@
 {
-  "versionCode": 46,
-  "versionName": "2.9.2",
+  "versionCode": 47,
+  "versionName": "2.9.3",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
   "notes": "A new look: one set of icons everywhere, an icon for every kind of asset, labels above fields and the app's own pickers instead of Android's. Returned assets: set an asset to Returned and it is unassigned and the signed copy marked RETURNED goes to the employee and IT. Light, dark or same as the web, sign-in codes on WhatsApp as well as email, and many fixes so edits made offline are never lost."
 }

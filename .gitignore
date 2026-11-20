@@ -51,3 +51,4 @@ Thumbs.db
 whatsapp/*.json
 !whatsapp/package.json
 !whatsapp/package-lock.json
+.setup_done

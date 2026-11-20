@@ -3619,7 +3619,7 @@ async function loadTickets(){
   const list=await r.json();
   const now=new Date();
   const rowHtml=t=>{
-    let dueStr=t.due_date||'—';
+    let dueStr=t.due_date?esc(t.due_date):'—';
     let slaClass='';
     if(t.due_date && t.status!=='Resolved' && t.status!=='Closed'){
       const due=new Date(t.due_date.replace(' ','T'));
@@ -4732,7 +4732,7 @@ function renderSidebarAvatar(p){
   if(!avEl) return;
   const avSrc=String(p.avatar||'').trim();
   if(avSrc){
-    const src=avSrc.startsWith('data:')?avSrc:('data:image/png;base64,'+avSrc);
+    const src=(avSrc.startsWith('data:')||avSrc.startsWith('/'))?avSrc:('data:image/png;base64,'+avSrc);
     avEl.innerHTML='<img src="'+esc(src)+'" alt="me" style="width:100%;height:100%;border-radius:inherit;object-fit:cover">';
   } else {
     avEl.textContent=((p.user||p.display||'A')[0]||'A').toUpperCase();
@@ -4743,7 +4743,7 @@ function renderAvatarPreview(p){
   if (!box) return;
   const av = String(p.avatar || '').trim();
   if (av){
-    const src = av.startsWith('data:') ? av : ('data:image/png;base64,' + av);
+    const src = (av.startsWith('data:') || av.startsWith('/')) ? av : ('data:image/png;base64,' + av);
     box.innerHTML = '<img src="' + esc(src) + '" alt="avatar">';
     box.classList.add('has-img');
   } else {
