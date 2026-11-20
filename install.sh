@@ -1221,7 +1221,23 @@ else
             fi
             exit 0
         fi
-        step "Container '$NAME' exists but is $state -- starting it"
+        # Not running is offered the update too, and restarting first of all:
+        # a container stuck in a restart loop is almost always a bad image,
+        # and starting it again just restarts the same image. 2.9.0 did
+        # exactly that, and this used to "start" it and call it done.
+        say ""
+        if [ "$state" = "restarting" ]; then
+            warn "Container '$NAME' keeps restarting -- the app is crashing on start."
+            say  "  Updating to the latest image is the usual fix. Your data is kept."
+            say  "  See why:  $DK logs --tail 40 $NAME"
+        else
+            say "Container '$NAME' exists but is $state."
+        fi
+        if ask "Update IT-Vault to the latest image now?"; then
+            update_in_place
+            exit 0
+        fi
+        step "Starting it as it is"
         run start "$NAME"
         say ""
         say "${G}Started.${N} Open http://localhost:$PORT"
