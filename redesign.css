@@ -369,3 +369,21 @@ td.c-AssetTag{color:var(--muted);font-size:12.5px;white-space:nowrap}
 @media (prefers-reduced-motion:reduce){
   .side,.drawer-scrim,.btn,.nav a{transition:none!important}
 }
+
+/* ---- Settings fixes: Returned box switch, letterhead row, WhatsApp banner ---- */
+/* the switch inside a box was getting the box's caps heading style, and the
+   box's full-width input style turned the checkbox into a blob */
+.invbox label.toggle{display:flex;align-items:center;gap:10px;margin:0;padding:10px 12px;text-transform:none;
+  letter-spacing:normal;font-family:var(--font);font-size:13px;font-weight:500;color:var(--txt)}
+.invbox label.toggle input[type=checkbox]{width:34px;height:20px;min-height:0;padding:0;border:0;flex:none;box-shadow:none}
+.rw-days .btn{min-height:38px}
+.field2 .rw-days input{min-height:38px}
+/* file picker + its buttons on one line, buttons their natural size */
+.invrow.file-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.invrow.file-row input[type=file]{flex:1 1 240px;width:auto}
+.invrow.file-row .btn{flex:none;min-height:38px}
+/* banner: picture, then its buttons underneath -- same on every width */
+.wa-banner{flex-direction:column;align-items:flex-start;gap:10px}
+.wa-banner-acts .btn{min-height:34px}
+/* a file-picker button is a <label>; it must not take the field-label caps */
+.field2 label.btn,.invbox label.btn{display:inline-flex;align-items:center;gap:7px;text-transform:none;letter-spacing:normal;font-family:var(--font);font-size:13px;font-weight:600;color:var(--txt);margin:0}
