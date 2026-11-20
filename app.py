@@ -12442,12 +12442,12 @@ def _maybe_run_scheduled_backup():
 
 _backup_fail_told = False
 def _backup_scheduler_loop():
+    global _backup_fail_told
     while True:
         try:
             _maybe_run_scheduled_backup()
         except Exception as e:
             print("[itguy] backup scheduler failed:", e)
-            global _backup_fail_told
             if not _backup_fail_told:
                 _backup_fail_told = True
                 try:
