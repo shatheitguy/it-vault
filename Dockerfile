@@ -29,6 +29,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Compile every module with THIS image's Python before it ships. 2.9.0 was
+# built and published fine, then died on start with a SyntaxError the newer
+# Python it was tested on accepts -- a container stuck restarting. Now the
+# build fails instead.
+RUN python -m py_compile *.py
+
 # Node for the WhatsApp bridge, and the bridge's modules from the stage above.
 # The node binary links only against glibc and libstdc++, both already here.
 COPY --from=whatsapp /usr/local/bin/node /usr/local/bin/node
