@@ -2291,6 +2291,20 @@ def migrate_schema():
             cur.execute(f"ALTER TABLE Categories ADD COLUMN {col} {typ}")
         except Exception:
             pass
+    # Pictures for the catalogue and the assets: a brand's logo (ref = the
+    # Manufacturers id), a model's product photo (ref = the Models id) and an
+    # asset's own photo (ref = its _id). Kept apart from the rows they belong
+    # to so the lists, which SELECT * a lot, never drag image bytes along.
+    cur.execute("""CREATE TABLE IF NOT EXISTS CatalogImages (
+        kind VARCHAR(10) NOT NULL, ref VARCHAR(80) NOT NULL,
+        img MEDIUMBLOB, mime VARCHAR(20) DEFAULT 'image/png', v VARCHAR(16) DEFAULT '',
+        source VARCHAR(255) DEFAULT '', updated_at DATETIME NULL,
+        PRIMARY KEY (kind, ref)
+    )""")
+    try:
+        cur.execute("ALTER TABLE Manufacturers ADD COLUMN website VARCHAR(255) DEFAULT ''")
+    except Exception:
+        pass
     # When the asset came back, so the countdown above has a start
     try:
         cur.execute("ALTER TABLE Assets ADD COLUMN ReturnedAt DATETIME NULL")
@@ -3861,13 +3875,31 @@ def _catalog_rename_request(kind):
 def manufacturers_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
-        cur.execute("SELECT id, name FROM Manufacturers ORDER BY name"); rows = cur.fetchall(); c.close()
-        return jsonify([{"id": r["id"], "name": r["name"]} for r in rows])
+        cur.execute("SELECT id, name, IFNULL(website,'') AS website FROM Manufacturers ORDER BY name"); rows = cur.fetchall()
+        looks = _image_urls(cur, "brand"); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"], "website": r["website"],
+                         "logo": looks.get(str(r["id"]), "")} for r in rows])
     if request.method == "POST":
-        n = (request.get_json(force=True).get("name") or "").strip()
+        d = request.get_json(force=True) or {}
+        n = (d.get("name") or "").strip()
         if not n: return jsonify({"error": "name required"}), 400
-        cur.execute("INSERT IGNORE INTO Manufacturers (name) VALUES (%s)", [n]); c.commit(); c.close()
-        return jsonify({"ok": True})
+        site = _clean_site(d.get("website"))
+        cur.execute("INSERT IGNORE INTO Manufacturers (name, website) VALUES (%s, %s)", [n, site])
+        cur.execute("SELECT id FROM Manufacturers WHERE name=%s", [n]); mid = (cur.fetchone() or {}).get("id")
+        if site and mid:
+            cur.execute("UPDATE Manufacturers SET website=%s WHERE id=%s", [site, mid])
+        c.commit(); c.close()
+        # a website given with the name: fetch its logo straight away, so the
+        # brand shows with its logo the moment it is added
+        logo = ""
+        if site and mid:
+            try:
+                img, src = _logo_from_site(site)
+                _store_image("brand", str(mid), img, src)
+                logo = "ok"
+            except ValueError as e:
+                return jsonify({"ok": True, "id": mid, "logo_error": str(e)})
+        return jsonify({"ok": True, "id": mid, "logo": logo})
     if request.method == "PUT":
         c.close()
         return _catalog_rename_request("manufacturers")
@@ -3956,6 +3988,275 @@ def category_photo(cid):
                     headers={"Cache-Control": "private, max-age=31536000", "X-Content-Type-Options": "nosniff"})
 
 
+# ---------- brand logos, model photos, asset photos ----------
+IMAGE_KINDS = {"brand": 256, "model": 640, "asset": 800}   # longest side kept
+
+def _shrink_image(raw, max_px):
+    """Any PNG/JPEG/WebP/GIF/ICO -> a re-encoded PNG (keeps transparency) or
+    JPEG no bigger than max_px. Re-encoding is the safety: whatever was
+    uploaded or fetched, only plain pixels are ever stored and served."""
+    if len(raw) > 8 * 1024 * 1024:
+        raise ValueError("That picture is over 8 MB.")
+    try:
+        from PIL import Image as PILImage
+        im = PILImage.open(io.BytesIO(raw))
+        if im.format == "ICO":
+            sizes = sorted(im.info.get("sizes") or [], key=lambda wh: wh[0] * wh[1])
+            if sizes:
+                im.size = sizes[-1]
+        im.load()
+        if im.format not in ("PNG", "JPEG", "WEBP", "GIF", "ICO", "MPO"):
+            raise ValueError("format")
+        if im.width * im.height > 40_000_000:
+            raise ValueError("size")
+        im = im.convert("RGBA") if (im.mode in ("P", "LA", "RGBA") or "transparency" in im.info) else im.convert("RGB")
+        im.thumbnail((max_px, max_px))
+        out = io.BytesIO()
+        if im.mode == "RGBA":
+            im.save(out, format="PNG", optimize=True); kind = "image/png"
+        else:
+            im.save(out, format="JPEG", quality=86); kind = "image/jpeg"
+        return out.getvalue(), kind, im.width, im.height
+    except ValueError as e:
+        if str(e).startswith("That"):
+            raise
+        raise ValueError("That is not a picture we can use (PNG, JPEG, WebP, GIF or ICO).")
+    except Exception:
+        raise ValueError("That is not a picture we can use (PNG, JPEG, WebP, GIF or ICO).")
+
+
+def _public_host_ok(host):
+    """Only addresses on the internet: never this server, the LAN, or a
+    cloud metadata address. Checked on what the name RESOLVES to, for every
+    address it resolves to -- a name is not proof of where it points."""
+    import socket, ipaddress
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for inf in infos:
+        ip = ipaddress.ip_address(inf[4][0].split("%")[0])
+        if (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast
+                or ip.is_reserved or ip.is_unspecified):
+            return False
+    return True
+
+
+def _safe_fetch(url, max_bytes=3 * 1024 * 1024, accept="*/*"):
+    """GET a public http(s) URL. Redirects are followed by hand, at most 4,
+    and every hop is checked again -- a public page that redirects to an
+    internal address is refused rather than followed."""
+    import urllib.request, urllib.error
+    from urllib.parse import urlparse, urljoin
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None                      # hand the 3xx back; we check the next hop ourselves
+    opener = urllib.request.build_opener(_NoRedirect)
+    for _ in range(5):
+        u = urlparse(url)
+        if u.scheme not in ("http", "https") or not u.hostname:
+            raise ValueError("Only http:// and https:// links work here.")
+        if not _public_host_ok(u.hostname):
+            raise ValueError("That address is not on the public internet.")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (IT-Vault logo fetch)", "Accept": accept})
+        try:
+            r = opener.open(req, timeout=8)
+        except urllib.error.HTTPError as e:
+            if e.code in (301, 302, 303, 307, 308) and e.headers.get("Location"):
+                url = urljoin(url, e.headers["Location"]); continue
+            raise ValueError(f"The site answered {e.code}.")
+        except Exception:
+            raise ValueError("Could not reach that address.")
+        with r:
+            body = r.read(max_bytes + 1)
+            if len(body) > max_bytes:
+                raise ValueError("That file is too large.")
+            return body, r.geturl() or url, (r.headers.get("Content-Type") or "").lower()
+    raise ValueError("Too many redirects.")
+
+
+def _clean_site(v):
+    """'Dell', 'dell.com', 'https://www.dell.com/en-us' -> 'https://www.dell.com'
+    style origin, or '' for nothing usable."""
+    from urllib.parse import urlparse
+    v = (v or "").strip()
+    if not v:
+        return ""
+    if "://" not in v:
+        v = "https://" + v
+    u = urlparse(v)
+    host = (u.hostname or "").lower()
+    if u.scheme not in ("http", "https") or "." not in host or len(host) > 200:
+        return ""
+    return f"{u.scheme}://{host}"
+
+
+def _logo_from_site(site):
+    """Find a brand's logo on its own website: the icons the site declares for
+    phones and browsers (apple-touch-icon is a clean square logo on almost
+    every brand site), then the usual fallbacks. The biggest that decodes wins."""
+    from urllib.parse import urljoin
+    site = _clean_site(site)
+    if not site:
+        raise ValueError("Type the brand's website, like dell.com")
+    cands = []
+    try:
+        html, base, _ = _safe_fetch(site + "/", max_bytes=1_500_000, accept="text/html")
+        text = html.decode("utf-8", "ignore")
+        for tag in re.findall(r"<link\b[^>]*>", text, flags=re.I):
+            rel = (re.search(r'rel\s*=\s*["\']([^"\']+)', tag, re.I) or [None, ""])[1].lower()
+            href = (re.search(r'href\s*=\s*["\']([^"\']+)', tag, re.I) or [None, ""])[1]
+            if not href or href.lower().endswith(".svg") or "mask-icon" in rel:
+                continue
+            if "apple-touch-icon" in rel:
+                cands.append((0, urljoin(base, href)))
+            elif "icon" in rel:
+                m = re.search(r'sizes\s*=\s*["\'](\d+)x', tag, re.I)
+                cands.append((1 if (m and int(m.group(1)) >= 96) else 2, urljoin(base, href)))
+        m = re.search(r'<meta[^>]+property\s*=\s*["\']og:image["\'][^>]*content\s*=\s*["\']([^"\']+)', text, re.I)
+        if m:
+            cands.append((4, urljoin(base, m.group(1))))
+    except ValueError:
+        pass
+    cands += [(3, site + "/apple-touch-icon.png"), (5, site + "/favicon.ico")]
+    seen, best = set(), None
+    for _, url in sorted(cands, key=lambda c: c[0]):
+        if url in seen:
+            continue
+        seen.add(url)
+        try:
+            raw, _, _ = _safe_fetch(url, accept="image/*")
+            img = _shrink_image(raw, IMAGE_KINDS["brand"])
+        except Exception:
+            continue
+        if best is None or img[2] * img[3] > best[0][2] * best[0][3]:
+            best = (img, url)
+        if img[2] >= 120:            # big enough: no need to try the rest
+            break
+    if not best:
+        raise ValueError("No logo found on that website. Upload one, or paste a link to the picture.")
+    return best[0], best[1]
+
+
+def _store_image(kind, ref, img, source=""):
+    data, mime = img[0], img[1]
+    v = hashlib.sha1(data).hexdigest()[:12]
+    c = conn(); cur = c.cursor()
+    cur.execute("""INSERT INTO CatalogImages (kind, ref, img, mime, v, source, updated_at)
+                   VALUES (%s,%s,%s,%s,%s,%s,NOW())
+                   ON DUPLICATE KEY UPDATE img=VALUES(img), mime=VALUES(mime), v=VALUES(v),
+                                           source=VALUES(source), updated_at=NOW()""",
+                [kind, ref, data, mime, v, (source or "")[:255]])
+    c.commit(); c.close()
+    return f"/api/img/{kind}/{quote(ref)}?v={v}"
+
+
+def _image_urls(cur, kind):
+    cur.execute("SELECT ref, v FROM CatalogImages WHERE kind=%s AND img IS NOT NULL", [kind])
+    return {r["ref"]: f"/api/img/{kind}/{quote(str(r['ref']))}?v={r['v']}" for r in cur.fetchall()}
+
+
+def _image_target_ok(cur, kind, ref):
+    if kind == "brand":
+        cur.execute("SELECT id FROM Manufacturers WHERE id=%s", [ref])
+    elif kind == "model":
+        cur.execute("SELECT id FROM Models WHERE id=%s", [ref])
+    else:
+        cur.execute("SELECT _id FROM Assets WHERE _id=%s", [ref])
+    return bool(cur.fetchone())
+
+
+@app.route("/api/img/<kind>/<ref>")
+@auth_required(module="assets", level="read")
+def catalog_image(kind, ref):
+    if kind not in IMAGE_KINDS:
+        return jsonify({"error": "not found"}), 404
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT img, mime FROM CatalogImages WHERE kind=%s AND ref=%s", [kind, ref]); r = cur.fetchone(); c.close()
+    if not r or not r.get("img"):
+        return jsonify({"error": "not found"}), 404
+    # addressed by ?v=<hash of the picture>, so it can be kept until it changes
+    return Response(bytes(r["img"]), mimetype=r.get("mime") or "image/png",
+                    headers={"Cache-Control": "private, max-age=31536000", "X-Content-Type-Options": "nosniff"})
+
+
+@app.route("/api/img/<kind>/<ref>", methods=["POST", "DELETE"])
+@auth_required(module="assets", level="read")
+def catalog_image_set(kind, ref):
+    """Give a brand, model or asset its picture: an uploaded file (multipart
+    "photo"), a link to a picture ({"url": ...}), or -- brands only -- the
+    logo found on the brand's website ({"website": "dell.com"}). DELETE
+    takes it away. The catalogue is the admin/editor's; an asset's photo
+    needs asset write access."""
+    if kind not in IMAGE_KINDS:
+        return jsonify({"error": "not found"}), 404
+    role = session.get("role")
+    if not session.get("user"):
+        row = _resolve_session_from_api_key(); role = row["role"] if row else None
+    if kind in ("brand", "model"):
+        # the same people who can edit the rest of the catalogue
+        if role not in (ROLE_ADMIN, ROLE_EDIT):
+            return jsonify({"error": "The Product Catalog is edited by admins and editors."}), 403
+    elif not _module_write_allowed("assets"):
+        return jsonify({"error": "You can look at assets but not change them."}), 403
+    c = conn(); cur = c.cursor()
+    ok = _image_target_ok(cur, kind, ref); c.close()
+    if not ok:
+        return jsonify({"error": "not found"}), 404
+    if request.method == "DELETE":
+        c = conn(); cur = c.cursor()
+        cur.execute("DELETE FROM CatalogImages WHERE kind=%s AND ref=%s", [kind, ref]); c.commit(); c.close()
+        audit(session.get("user"), "PHOTO", ref, f"removed the {kind} picture")
+        return jsonify({"ok": True})
+    try:
+        f = request.files.get("photo") if request.files else None
+        if f:
+            img = _shrink_image(f.read(8 * 1024 * 1024 + 1), IMAGE_KINDS[kind]); src = "upload"
+        else:
+            d = request.get_json(force=True, silent=True) or {}
+            if d.get("website") and kind == "brand":
+                site = _clean_site(d["website"])
+                img, src = _logo_from_site(site)
+                c = conn(); cur = c.cursor()
+                cur.execute("UPDATE Manufacturers SET website=%s WHERE id=%s", [site, ref]); c.commit(); c.close()
+            elif d.get("url"):
+                raw, src, _ = _safe_fetch(str(d["url"]).strip(), accept="image/*")
+                img = _shrink_image(raw, IMAGE_KINDS[kind])
+            else:
+                return jsonify({"error": "Choose a picture, paste a link, or give the website."}), 400
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        return jsonify({"error": "Could not get that picture: " + type(e).__name__}), 400
+    url = _store_image(kind, ref, img, src)
+    audit(session.get("user"), "PHOTO", ref, f"set the {kind} picture ({'upload' if src == 'upload' else src[:120]})")
+    return jsonify({"ok": True, "url": url, "source": src})
+
+
+@app.route("/api/catalog/looks")
+@auth_required(module="assets", level="read")
+def catalog_looks():
+    """Everything the asset list needs to draw each row's picture, in one
+    small request: which brands have a logo, which models a photo, which
+    assets their own photo -- URLs only, never the pictures."""
+    c = conn(); cur = c.cursor()
+    brands = _image_urls(cur, "brand"); models = _image_urls(cur, "model"); assets = _image_urls(cur, "asset")
+    cur.execute("SELECT id, name FROM Manufacturers"); mfr = {str(r["id"]): r["name"] for r in cur.fetchall()}
+    cur.execute("SELECT m.id, m.name, IFNULL(man.name,'') AS mfr FROM Models m LEFT JOIN Manufacturers man ON m.manufacturer_id=man.id")
+    mods = cur.fetchall(); c.close()
+    by_brand = {mfr[k]: v for k, v in brands.items() if k in mfr}
+    by_model = {}
+    for m in mods:
+        u = models.get(str(m["id"]))
+        if u:
+            by_model[(m["mfr"] + "|" + m["name"]).lower()] = u
+            by_model.setdefault(("|" + m["name"]).lower(), u)   # model alone, when the asset has no maker
+    return jsonify({"brands": by_brand, "models": by_model, "assets": assets})
+
+
 @app.route("/api/contract-types", methods=["GET", "POST", "PUT", "DELETE"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
 def contract_types_api():
@@ -4017,8 +4318,9 @@ def models_api():
     if request.method == "GET":
         cur.execute("""SELECT m.id, m.name, m.manufacturer_id, COALESCE(man.name,'') AS manufacturer
                        FROM Models m LEFT JOIN Manufacturers man ON m.manufacturer_id=man.id ORDER BY m.name""")
-        rows = cur.fetchall(); c.close()
-        return jsonify([{"id": r["id"], "name": r["name"], "manufacturer_id": r["manufacturer_id"], "manufacturer": r["manufacturer"]} for r in rows])
+        rows = cur.fetchall(); looks = _image_urls(cur, "model"); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"], "manufacturer_id": r["manufacturer_id"], "manufacturer": r["manufacturer"],
+                         "photo": looks.get(str(r["id"]), "")} for r in rows])
     if request.method == "POST":
         d = request.get_json(force=True)
         n = (d.get("name") or "").strip(); mid = d.get("manufacturer_id") or None

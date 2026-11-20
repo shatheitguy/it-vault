@@ -382,7 +382,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             com.itguy.assetmanager.R.id.nav_directory -> showFragment(DirectoryFragment(), "Directory")
             com.itguy.assetmanager.R.id.nav_tickets -> showFragment(TicketsListFragment(), "Tickets")
             com.itguy.assetmanager.R.id.nav_contracts -> showFragment(ContractsListFragment(), "Contracts")
-            com.itguy.assetmanager.R.id.nav_catalog -> showFragment(GenericListFragment.newInstance(ListKind.CATALOG), "Product Catalog")
+            com.itguy.assetmanager.R.id.nav_catalog -> showFragment(com.itguy.assetmanager.ui.settings.SectionFragment.newInstance("catalog"), "Product Catalog")
             com.itguy.assetmanager.R.id.nav_lostfound -> showFragment(LostFoundFragment(), "Lost & Found")
             com.itguy.assetmanager.R.id.nav_trash -> showFragment(GenericListFragment.newInstance(ListKind.TRASH), "Trash")
             com.itguy.assetmanager.R.id.nav_audit -> showFragment(GenericListFragment.newInstance(ListKind.AUDIT), "Audit Log")
@@ -393,7 +393,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                 scanLauncher.launch(Intent(this, ScanActivity::class.java))
                 return true      // the bar keeps whatever tab it was on
             }
-            com.itguy.assetmanager.R.id.nav_settings -> showFragment(SettingsFragment(), "Settings")
+            com.itguy.assetmanager.R.id.nav_settings -> showFragment(com.itguy.assetmanager.ui.settings.SettingsHubFragment(), "Settings")
         }
         item.isChecked = true
         syncBottomNav(item.itemId)

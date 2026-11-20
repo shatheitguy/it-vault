@@ -222,6 +222,13 @@ class SettingsFragment : Fragment() {
             .setTitle("Change server?")
             .setMessage("You'll be logged out and asked to connect to a server again.")
             .setPositiveButton("Continue") { _, _ ->
+                // A queued offline edit belongs to the server it was made on: replayed
+                // against the next one it would create, change or delete records there.
+                // The cache and the pictures go with it, so nothing of this install
+                // is shown -- or matched by a scan -- under the next.
+                com.itguy.assetmanager.data.SyncStore.clear()
+                com.itguy.assetmanager.data.OfflineCache.clear()
+                com.itguy.assetmanager.ui.Images.clear()
                 Prefs.clear()
                 ApiClient.reset()
                 // don't carry one deployment's name/logo over to the next server

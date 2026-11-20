@@ -73,6 +73,45 @@ interface ApiService {
     @DELETE("api/assets/{id}/permanent")
     suspend fun permanentDeleteAsset(@Path("id") id: String): Response<OkResponse>
 
+    // ---- generic JSON calls, for the many settings sections that mirror the
+    // web one for one. Paths are relative ("api/settings"). ----
+    @GET
+    suspend fun getJson(@Url path: String): Response<com.google.gson.JsonElement>
+
+    @POST
+    suspend fun postJson(@Url path: String, @Body body: com.google.gson.JsonElement): Response<com.google.gson.JsonElement>
+
+    @PUT
+    suspend fun putJson(@Url path: String, @Body body: com.google.gson.JsonElement): Response<com.google.gson.JsonElement>
+
+    @DELETE
+    suspend fun deleteJson(@Url path: String): Response<com.google.gson.JsonElement>
+
+    /** The catalogue's DELETE reads the id from the body, as the web sends it. */
+    @HTTP(method = "DELETE", hasBody = true)
+    suspend fun deleteJsonBody(@Url path: String, @Body body: com.google.gson.JsonElement): Response<com.google.gson.JsonElement>
+
+    @Multipart
+    @POST
+    suspend fun postParts(@Url path: String, @Part parts: List<MultipartBody.Part>): Response<com.google.gson.JsonElement>
+
+    @Multipart
+    @PUT
+    suspend fun putParts(@Url path: String, @Part parts: List<MultipartBody.Part>): Response<com.google.gson.JsonElement>
+
+    /** Every brand logo / model photo / asset photo, as URLs. */
+    @GET("api/catalog/looks")
+    suspend fun catalogLooks(): Response<CatalogLooks>
+
+    /** kind: "brand", "model" or "asset". The part is named "photo". */
+    @Multipart
+    @POST("api/img/{kind}/{ref}")
+    suspend fun uploadImage(@Path("kind") kind: String, @Path("ref") ref: String,
+                            @Part photo: MultipartBody.Part): Response<ImageResponse>
+
+    @DELETE("api/img/{kind}/{ref}")
+    suspend fun deleteImage(@Path("kind") kind: String, @Path("ref") ref: String): Response<OkResponse>
+
     @Multipart
     @POST("api/assets/{id}/invoice")
     suspend fun uploadInvoice(@Path("id") id: String, @Part file: MultipartBody.Part): Response<OkResponse>

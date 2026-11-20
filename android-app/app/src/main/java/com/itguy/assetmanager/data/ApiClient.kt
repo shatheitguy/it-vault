@@ -98,6 +98,11 @@ object ApiClient {
         return parts.size > 1
     }
 
+    /** A server path ("/api/img/...") as a full URL on the current server. */
+    fun absolute(path: String): String =
+        if (path.startsWith("http://") || path.startsWith("https://")) path
+        else normalize(Prefs.serverUrl).trimEnd('/') + "/" + path.trimStart('/')
+
     fun normalize(raw: String): String {
         var v = raw.trim()
         if (!v.startsWith("http://") && !v.startsWith("https://")) v = "http://$v"

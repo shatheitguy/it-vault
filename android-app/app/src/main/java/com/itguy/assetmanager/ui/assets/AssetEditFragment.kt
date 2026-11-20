@@ -66,6 +66,83 @@ class AssetEditFragment : Fragment() {
         b.invoiceFileName.text = "$name (will be uploaded on save)"
     }
 
+    // The photo: for an existing asset it is sent the moment it is picked;
+    // a new asset has no id yet, so it is held and sent after the first save.
+    private var pendingPhotoUri: Uri? = null
+    private val pickPhotoLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val id = assetId
+        if (id == null) {
+            pendingPhotoUri = uri
+            renderPhotoBox()
+            return@registerForActivityResult
+        }
+        lifecycleScope.launch {
+            val url = uploadPhoto(id, uri)
+            if (url != null) {
+                com.itguy.assetmanager.data.Looks.setAssetPhoto(id, url)
+                if (_b != null) { Toast.makeText(requireContext(), "Photo saved", Toast.LENGTH_SHORT).show(); renderPhotoBox() }
+            }
+        }
+    }
+
+    /** Sends the picture; the server's URL for it, or null (with a message). */
+    private suspend fun uploadPhoto(id: String, uri: Uri): String? = try {
+        val bytes = withContext(Dispatchers.IO) {
+            requireContext().contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        }
+        if (bytes == null) null else {
+            val mime = requireContext().contentResolver.getType(uri) ?: "image/jpeg"
+            val part = MultipartBody.Part.createFormData("photo", "photo", bytes.toRequestBody(mime.toMediaTypeOrNull()))
+            val r = ApiClient.api().uploadImage("asset", id, part)
+            if (r.isSuccessful) r.body()?.url else {
+                val msg = try { com.google.gson.JsonParser.parseString(r.errorBody()?.string() ?: "").asJsonObject.get("error")?.asString } catch (e: Exception) { null }
+                if (_b != null) Toast.makeText(requireContext(), msg ?: "Photo not saved (${r.code()})", Toast.LENGTH_LONG).show()
+                null
+            }
+        }
+    } catch (e: Exception) {
+        if (_b != null) Toast.makeText(requireContext(), "Photo not saved: ${e.message}", Toast.LENGTH_LONG).show()
+        null
+    }
+
+    /** The photo box: what the asset shows now, and where that comes from. */
+    private fun renderPhotoBox() {
+        val bb = _b ?: return
+        val ctx = requireContext()
+        val accent = com.itguy.assetmanager.data.Palette.serverColours()?.accent
+            ?: androidx.core.content.ContextCompat.getColor(ctx, com.itguy.assetmanager.R.color.accent)
+        val d = resources.displayMetrics.density
+        fun tile(colour: Int) {
+            bb.photoTile.background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 18 * d; setColor(colour) }
+        }
+        tile((accent and 0x00FFFFFF) or 0x24000000)
+        bb.photoIcon.setImageResource(com.itguy.assetmanager.ui.TypeIcons.forType(current.Type))
+        bb.photoIcon.imageTintList = android.content.res.ColorStateList.valueOf(accent)
+        val pending = pendingPhotoUri
+        val source = com.itguy.assetmanager.data.Looks.sourceOf(current.copy())
+        bb.photoRemoveBtn.visibility = if (source == "asset" && pending == null) View.VISIBLE else View.GONE
+        bb.photoAddBtn.text = if (source == "asset" || pending != null) "Replace" else "Add a photo"
+        if (pending != null) {
+            bb.photoImg.setImageURI(pending); bb.photoImg.visibility = View.VISIBLE; bb.photoIcon.visibility = View.GONE
+            tile(android.graphics.Color.WHITE)
+            bb.photoNote.text = "Saved with the asset."
+            return
+        }
+        bb.photoNote.text = when (source) {
+            "asset" -> "This asset's own photo."
+            "model" -> "Using the photo of its model, from the Product Catalog."
+            else -> "No photo yet. Add one here, or give its model a photo in the Product Catalog and every asset of that model gets it."
+        }
+        bb.photoImg.visibility = View.GONE; bb.photoIcon.visibility = View.VISIBLE
+        com.itguy.assetmanager.ui.Images.load(bb.photoImg, com.itguy.assetmanager.data.Looks.pictureFor(current), 512) { shown ->
+            if (_b == null) return@load
+            bb.photoImg.visibility = if (shown) View.VISIBLE else View.GONE
+            bb.photoIcon.visibility = if (shown) View.GONE else View.VISIBLE
+            if (shown) tile(android.graphics.Color.WHITE)
+        }
+    }
+
     companion object {
         /** [assignNow] opens the Assign dialog as soon as the asset has
          * loaded, so the action can be reached in one tap from the list
@@ -110,6 +187,18 @@ class AssetEditFragment : Fragment() {
         b.fNotesReceived.isEnabled = false
 
         b.saveBtn.setOnClickListener { save() }
+        b.photoAddBtn.setOnClickListener { pickPhotoLauncher.launch("image/*") }
+        b.photoRemoveBtn.setOnClickListener {
+            val id = assetId ?: return@setOnClickListener
+            lifecycleScope.launch {
+                val ok = try { ApiClient.api().deleteImage("asset", id).isSuccessful } catch (e: Exception) { false }
+                if (_b == null) return@launch
+                if (ok) { com.itguy.assetmanager.data.Looks.setAssetPhoto(id, null); renderPhotoBox()
+                          Toast.makeText(requireContext(), "Photo removed", Toast.LENGTH_SHORT).show() }
+                else Toast.makeText(requireContext(), "Could not remove the photo", Toast.LENGTH_LONG).show()
+            }
+        }
+        renderPhotoBox()
         b.deleteBtn.setOnClickListener { confirmDelete() }
         b.invoicePickBtn.setOnClickListener { pickInvoiceLauncher.launch("*/*") }
         b.invoiceViewBtn.setOnClickListener { viewInvoice() }
@@ -216,6 +305,7 @@ class AssetEditFragment : Fragment() {
 
     /** Every spinner and field, from whatever [current] holds right now. */
     private fun bindAll() {
+        renderPhotoBox()
         bindStatusSpinner()
         bindCategorySpinner()
         bindLocationSpinner()
@@ -672,12 +762,18 @@ class AssetEditFragment : Fragment() {
                         // an invoice can only be attached to a real server id
                         val id = r.serverId ?: assetId
                         if (pickedInvoiceUri != null && id != null) uploadPickedInvoice(id)
+                        val photo = pendingPhotoUri
+                        if (photo != null && id != null) {
+                            uploadPhoto(id, photo)?.let { com.itguy.assetmanager.data.Looks.setAssetPhoto(id, it) }
+                            pendingPhotoUri = null
+                        }
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     }
                     is Repository.SaveResult.Queued -> {
                         android.widget.Toast.makeText(requireContext(),
                             "Saved offline — will sync when you're back online" +
-                                (if (pickedInvoiceUri != null) " (invoice uploads once online)" else ""),
+                                (if (pickedInvoiceUri != null) " (invoice uploads once online)" else "") +
+                                (if (pendingPhotoUri != null) ". Add the photo again once online." else ""),
                             android.widget.Toast.LENGTH_LONG).show()
                         requireActivity().onBackPressedDispatcher.onBackPressed()
                     }

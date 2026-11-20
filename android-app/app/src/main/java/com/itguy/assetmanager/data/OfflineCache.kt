@@ -43,6 +43,12 @@ object OfflineCache {
 
     fun saveDashboard(stats: DashboardStats) = save("dashboard", stats)
     fun loadDashboard(): DashboardStats? = load("dashboard", DashboardStats::class.java)
+    /** Everything cached from the server, for a change of server or user:
+     *  one install's records must never be shown, or matched against, on the next. */
+    fun clear() { if (::prefs.isInitialized) prefs.edit().clear().apply() }
+    fun saveLooks(l: com.itguy.assetmanager.data.model.CatalogLooks) = save("looks", l)
+    fun loadLooks(): com.itguy.assetmanager.data.model.CatalogLooks? =
+        load("looks", com.itguy.assetmanager.data.model.CatalogLooks::class.java)
 
     fun saveTickets(list: List<Ticket>) = save("tickets", list)
     fun loadTickets(): List<Ticket>? = load("tickets", object : TypeToken<List<Ticket>>() {}.type)

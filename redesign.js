@@ -486,3 +486,179 @@
     if (typeof loadDashboard === 'function') loadDashboard();
   }
 })();
+
+/* Pictures: brand logos, model photos, an asset's own photo.
+   What an asset shows, first one there wins:
+     its own photo  >  its model's photo  >  its category's photo  >  the type icon
+   and the brand's logo rides on the corner as a small badge. */
+(function () {
+  const escA = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  window.LOOKS = { brands: {}, models: {}, assets: {} };
+
+  async function loadLooks() {
+    try {
+      const r = await fetch('/api/catalog/looks');
+      if (!r.ok) return;
+      window.LOOKS = await r.json();
+      if (typeof render === 'function') { try { render(); } catch (e) { /* not on screen */ } }
+    } catch (e) { /* offline or signed out: icons still work */ }
+  }
+  window.loadLooks = loadLooks;
+
+  function picFor(a) {
+    const L = window.LOOKS || {};
+    const own = (L.assets || {})[a._id];
+    if (own) return { url: own, from: 'asset' };
+    const mk = String(a.Manufacturer || '').toLowerCase() + '|' + String(a.Model || '').toLowerCase();
+    const mod = a.Model && ((L.models || {})[mk] || (L.models || {})['|' + String(a.Model).toLowerCase()]);
+    if (mod) return { url: mod, from: 'model' };
+    const cat = (window.CAT_PHOTOS || {})[String(a.Type || '')];
+    if (cat) return { url: cat, from: 'category' };
+    return null;
+  }
+  window.assetPicture = picFor;
+
+  window.assetThumb = function (a) {
+    const p = picFor(a);
+    const logo = a.Manufacturer && ((window.LOOKS || {}).brands || {})[a.Manufacturer];
+    const badge = logo ? `<img class="brand-badge" src="${escA(logo)}" alt="" title="${escA(a.Manufacturer)}" loading="lazy">` : '';
+    if (p) return `<span class="ticon has-photo">${'<img src="' + escA(p.url) + '" alt="" loading="lazy">'}${badge}</span>`;
+    return (window.typeIcon ? window.typeIcon(a.Type) : '').replace(/<\/span>$/, badge + '</span>');
+  };
+
+  // the catalogue's own tiles
+  const initial = n => escA((String(n || '?').trim()[0] || '?').toUpperCase());
+  window.brandTile = m => m.logo
+    ? `<span class="ticon has-photo"><img src="${escA(m.logo)}" alt=""></span>`
+    : `<span class="ticon ticon-letter">${initial(m.name)}</span>`;
+  window.modelTile = m => m.photo
+    ? `<span class="ticon has-photo"><img src="${escA(m.photo)}" alt=""></span>`
+    : `<span class="ticon">${window.icon ? window.icon('image') : ''}</span>`;
+
+  /* One dialog for every picture: upload, paste a link, or (brands) fetch
+     the logo from the website. */
+  function openPictureDialog(o) {
+    const wrap = document.createElement('div');
+    wrap.className = 'modal show ui-dialog';
+    const prev = () => o.current
+      ? `<span class="ticon has-photo pic-prev"><img src="${escA(o.current)}" alt=""></span>`
+      : `<span class="ticon pic-prev">${window.icon ? window.icon(o.kind === 'brand' ? 'tag' : 'image') : ''}</span>`;
+    wrap.innerHTML = `<div class="modal-box look-box pic-box" role="dialog" aria-modal="true">
+      <h3>${escA(o.title)}</h3>
+      <p class="sec-hint" style="margin:0 0 14px">${escA(o.hint)}</p>
+      <div class="pic-top">
+        <div class="pic-slot">${prev()}</div>
+        <div class="pic-acts">
+          <label class="btn ghost sm">${window.icon ? window.icon('upload') : ''}<span>Upload a picture</span><input type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/x-icon" hidden></label>
+          ${o.current ? `<button type="button" class="btn ghost sm danger" data-act="rm">${window.icon ? window.icon('trash') : ''}<span>Remove</span></button>` : ''}
+        </div>
+      </div>
+      ${o.kind === 'brand' ? `<div class="pic-row"><label>From the brand's website</label>
+        <div class="pic-inline"><input data-f="site" placeholder="e.g. dell.com" value="${escA(o.website || '')}"><button type="button" class="btn sm" data-act="site">Get logo</button></div></div>` : ''}
+      <div class="pic-row"><label>From a link to a picture</label>
+        <div class="pic-inline"><input data-f="url" placeholder="https://…/picture.png"><button type="button" class="btn sm ghost" data-act="url">Use link</button></div></div>
+      <div class="pic-msg muted" aria-live="polite"></div>
+      <div class="m-actions"><button type="button" class="btn ghost" data-act="close">Done</button></div></div>`;
+    const msg = t => { wrap.querySelector('.pic-msg').textContent = t || ''; };
+    const finish = () => { wrap.remove(); if (o.onDone) o.onDone(); loadLooks(); };
+    const send = async (init, busy) => {
+      msg(busy);
+      wrap.querySelectorAll('button,input').forEach(b => b.disabled = true);
+      try {
+        const r = await fetch(`/api/img/${o.kind}/${encodeURIComponent(o.ref)}`, init);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { msg('✕ ' + (j.error || 'Not saved')); return; }
+        if (window.toast) toast(init.method === 'DELETE' ? '✓ Picture removed' : '✓ Picture saved');
+        finish();
+      } finally { wrap.querySelectorAll('button,input').forEach(b => b.disabled = false); }
+    };
+    const json = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    wrap.addEventListener('click', e => {
+      if (e.target === wrap || e.target.closest('[data-act="close"]')) return finish();
+      const act = (e.target.closest('[data-act]') || {}).dataset;
+      if (!act) return;
+      if (act.act === 'rm') send({ method: 'DELETE' }, 'Removing…');
+      if (act.act === 'site') { const v = wrap.querySelector('[data-f="site"]').value.trim(); if (v) send(json({ website: v }), 'Looking for the logo on ' + v + '…'); }
+      if (act.act === 'url') { const v = wrap.querySelector('[data-f="url"]').value.trim(); if (v) send(json({ url: v }), 'Fetching the picture…'); }
+    });
+    wrap.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      const f = e.target.dataset && e.target.dataset.f;
+      if (f) { e.preventDefault(); wrap.querySelector(`[data-act="${f}"]`).click(); }
+    });
+    wrap.querySelector('input[type=file]').addEventListener('change', e => {
+      const f = e.target.files[0]; if (!f) return;
+      const fd = new FormData(); fd.append('photo', f);
+      send({ method: 'POST', body: fd }, 'Uploading…');
+    });
+    document.body.appendChild(wrap);
+    const first = wrap.querySelector('[data-f="site"]') || wrap.querySelector('[data-f="url"]');
+    if (first && o.kind === 'brand' && !o.current) first.focus();
+  }
+  window.openPictureDialog = openPictureDialog;
+
+  window.openBrandLogo = function (id) {
+    const m = (window.__MFRS || []).find(x => x.id === id); if (!m) return;
+    openPictureDialog({ kind: 'brand', ref: id, title: m.name + ' logo', current: m.logo, website: m.website,
+      hint: 'Shown on every ' + m.name + ' asset. Type the brand\'s website and IT-Vault finds the logo for you, or upload one.',
+      onDone: () => { if (typeof loadCatManufacturers === 'function') loadCatManufacturers(); } });
+  };
+  window.openModelPhoto = function (id) {
+    const m = (window.__MODELS || []).find(x => x.id === id); if (!m) return;
+    openPictureDialog({ kind: 'model', ref: id, title: (m.manufacturer ? m.manufacturer + ' ' : '') + m.name, current: m.photo,
+      hint: 'The product photo for this model. Every asset of this model shows it, unless the asset has a photo of its own.',
+      onDone: () => { if (typeof loadCatModels === 'function') loadCatModels(); } });
+  };
+
+  /* The asset form's photo box */
+  let pending = null;
+  window.renderAssetPhotoBox = function (id, a) {
+    const box = document.getElementById('assetPhotoBox'); if (!box) return;
+    pending = null;
+    const p = id ? picFor(a || {}) : null;
+    const from = { asset: 'This asset\'s own photo.', model: 'Using the photo of its model, from the Product Catalog.',
+                   category: 'Using its category\'s photo, from the Product Catalog.' };
+    const draw = () => {
+      const has = p && p.from === 'asset';
+      box.innerHTML = `<label>PHOTO</label>
+        <div class="pic-top">
+          <div class="pic-slot">${pending ? '<span class="ticon has-photo pic-prev"><img id="apPrev" alt=""></span>'
+            : p ? `<span class="ticon has-photo pic-prev"><img src="${escA(p.url)}" alt=""></span>`
+            : `<span class="ticon pic-prev">${window.typeIcon ? '' : ''}${window.icon ? window.icon('image') : ''}</span>`}</div>
+          <div class="pic-side">
+            <div class="muted pic-note">${pending ? 'Saved with the asset.' : p ? from[p.from] : 'No photo yet. Add one here, or give its model a photo in the Product Catalog and every asset of that model gets it.'}</div>
+            <div class="pic-acts">
+              <label class="btn ghost sm">${window.icon ? window.icon('upload') : ''}<span>${has || pending ? 'Replace photo' : 'Add a photo'}</span><input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>
+              ${has ? '<button type="button" class="btn ghost sm danger" data-act="rm">' + (window.icon ? window.icon('trash') : '') + '<span>Remove</span></button>' : ''}
+            </div>
+          </div>
+        </div>`;
+      if (pending) { const rd = new FileReader(); rd.onload = () => { const i = document.getElementById('apPrev'); if (i) i.src = rd.result; }; rd.readAsDataURL(pending); }
+      box.querySelector('input[type=file]').addEventListener('change', async e => {
+        const f = e.target.files[0]; if (!f) return;
+        if (!id) { pending = f; draw(); return; }          // a new asset: sent once it is saved
+        const fd = new FormData(); fd.append('photo', f);
+        const r = await fetch(`/api/img/asset/${encodeURIComponent(id)}`, { method: 'POST', body: fd });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) { if (window.toast) toast('✕ ' + (j.error || 'Photo not saved')); return; }
+        if (window.toast) toast('✓ Photo saved');
+        await loadLooks(); window.renderAssetPhotoBox(id, a);
+      });
+      const rm = box.querySelector('[data-act="rm"]');
+      if (rm) rm.addEventListener('click', async () => {
+        const r = await fetch(`/api/img/asset/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        if (r.ok) { if (window.toast) toast('✓ Photo removed'); await loadLooks(); window.renderAssetPhotoBox(id, a); }
+      });
+    };
+    draw();
+  };
+  window.uploadPendingAssetPhoto = async function (newId) {
+    if (!pending) return;
+    const fd = new FormData(); fd.append('photo', pending); pending = null;
+    const r = await fetch(`/api/img/asset/${encodeURIComponent(newId)}`, { method: 'POST', body: fd });
+    if (!r.ok && window.toast) toast('⚠ Saved, but the photo was not: ' + ((await r.json().catch(() => ({}))).error || 'try again'));
+    loadLooks();
+  };
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadLooks); else loadLooks();
+})();

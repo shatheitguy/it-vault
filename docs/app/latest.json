@@ -1,6 +1,6 @@
 {
-  "versionCode": 47,
-  "versionName": "2.9.3",
+  "versionCode": 48,
+  "versionName": "2.9.4",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "A new look: one set of icons everywhere, an icon for every kind of asset, labels above fields and the app's own pickers instead of Android's. Returned assets: set an asset to Returned and it is unassigned and the signed copy marked RETURNED goes to the employee and IT. Light, dark or same as the web, sign-in codes on WhatsApp as well as email, and many fixes so edits made offline are never lost."
+  "notes": "Everything the web can do, now in the app: every Settings section (users and roles, WhatsApp linking, sign-in codes and authenticator 2FA, email, branding, Returned watermark, light and dark, LDAP, UniFi), the Product Catalog with brand logos and product photos, imports and exports, deleted contracts and notification channels. Assets show their photo and brand logo, and the dashboard has the web's in-use ring, status donut and quick actions."
 }

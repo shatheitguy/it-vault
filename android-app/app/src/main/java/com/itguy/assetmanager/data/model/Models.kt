@@ -133,6 +133,17 @@ data class UnifiClient(val hostname: String?, val ip: String?, val mac: String?,
 data class UnifiClientsResponse(val clients: List<UnifiClient>?, val error: String?)
 
 data class OkResponse(val ok: Boolean?, val error: String?)
+
+/** Which brands have a logo, which models a photo, which assets their own
+ *  photo -- URLs only (server paths like /api/img/model/6?v=...). Keys:
+ *  brands by name; models by "maker|model" lower-cased (and "|model" for an
+ *  asset with no maker); assets by _id. */
+data class CatalogLooks(
+    val brands: Map<String, String>? = null,
+    val models: Map<String, String>? = null,
+    val assets: Map<String, String>? = null,
+)
+data class ImageResponse(val ok: Boolean?, val url: String?, val error: String?)
 data class SignLinkResponse(val ok: Boolean?, val token: String?, val url: String?, val error: String?)
 data class IdRequest(val id: Int)
 

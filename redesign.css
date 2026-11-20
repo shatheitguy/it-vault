@@ -387,3 +387,222 @@ td.c-AssetTag{color:var(--muted);font-size:12.5px;white-space:nowrap}
 .wa-banner-acts .btn{min-height:34px}
 /* a file-picker button is a <label>; it must not take the field-label caps */
 .field2 label.btn,.invbox label.btn{display:inline-flex;align-items:center;gap:7px;text-transform:none;letter-spacing:normal;font-family:var(--font);font-size:13px;font-weight:600;color:var(--txt);margin:0}
+
+/* ---- pictures: brand logos, model and asset photos ---- */
+.ticon{position:relative}
+.ticon .brand-badge,.ticon.has-photo img.brand-badge{position:absolute;right:-5px;bottom:-5px;width:18px;height:18px;border-radius:6px;object-fit:contain;
+  background:#fff;border:1.5px solid var(--bg1, #111);box-shadow:0 1px 3px rgba(0,0,0,.35);padding:1px}
+.ticon.has-photo{overflow:visible}
+.ticon.has-photo>img:first-child{border-radius:inherit;overflow:hidden}
+.ticon.has-photo{background:#fff}
+.ticon-letter{font-weight:800;font-size:15px;color:var(--accent);background:var(--accent-soft, rgba(127,127,127,.15))}
+.cat-name{display:flex;flex-direction:column;min-width:0}
+.cat-site{font-size:11.5px;color:var(--muted);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cat-site:hover{color:var(--accent);text-decoration:underline}
+#page-catalog .col-del{white-space:nowrap}
+#page-catalog .catrow{flex-wrap:wrap}
+#mfrSiteInput{flex:1 1 180px}
+/* the picture dialog and the asset form's photo box */
+.pic-box{max-width:480px}
+.pic-top{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.pic-prev{width:96px!important;height:96px!important;border-radius:16px!important}
+.pic-prev .ic{width:34px;height:34px}
+.pic-prev.has-photo img{object-fit:contain}
+.pic-acts{display:flex;gap:8px;flex-wrap:wrap}
+.pic-side{display:flex;flex-direction:column;gap:10px;flex:1 1 220px;min-width:0}
+.pic-note{font-size:13px;line-height:1.45}
+.pic-row{margin-top:16px}
+.pic-row>label{display:block;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.pic-inline{display:flex;gap:8px}
+.pic-inline input{flex:1;min-width:0;min-height:38px}
+.pic-inline .btn{flex:none;min-height:38px}
+.pic-msg{min-height:18px;margin-top:10px;font-size:13px}
+.photobox .pic-prev{width:84px!important;height:84px!important}
+.pic-box .pic-inline input{background:var(--bg1);border:1px solid var(--line);border-radius:var(--r-md,10px);padding:0 12px;color:var(--txt);font:inherit;font-size:14px}
+.pic-box .pic-inline input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft,rgba(127,127,127,.2))}
+
+/* ---- dashboard: welcome band, fleet ring, glowing cards, donut, icon bars ---- */
+.dash-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;flex-wrap:wrap;margin:0 0 18px;
+  padding:22px 26px;border-radius:var(--r-lg,16px);border:1px solid var(--line);position:relative;overflow:hidden;
+  background:radial-gradient(120% 140% at 0% 0%,color-mix(in srgb,var(--accent) 16%,transparent) 0%,transparent 55%),
+             radial-gradient(90% 120% at 100% 100%,color-mix(in srgb,var(--cyan,#3b9eff) 12%,transparent) 0%,transparent 60%),var(--surface,var(--bg1))}
+.dh-hello{font-size:26px;font-weight:800;letter-spacing:-.3px;line-height:1.15}
+.dh-date{color:var(--muted);font-size:13.5px;margin-top:4px}
+.dh-acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.dh-ring{display:flex;align-items:center;gap:18px}
+.ring{width:118px;height:118px;flex:none}
+.ring-bg{fill:none;stroke:var(--line2,rgba(127,127,127,.25));stroke-width:11}
+.ring-fg{fill:none;stroke:var(--accent);stroke-width:11;stroke-linecap:round;filter:drop-shadow(0 0 6px color-mix(in srgb,var(--accent) 55%,transparent))}
+.ring-v{fill:var(--txt);font:800 24px var(--font);text-anchor:middle}
+.ring-k{fill:var(--muted);font:600 10.5px var(--font);text-anchor:middle;text-transform:uppercase;letter-spacing:.8px}
+.dh-ring-side{display:grid;gap:8px}
+.dh-ring-side div{display:flex;align-items:baseline;gap:8px}
+.dh-ring-side b{font-size:18px;font-weight:800;min-width:34px;text-align:right}
+.dh-ring-side span{color:var(--muted);font-size:13px}
+#kpiRow .kpi{position:relative;overflow:hidden;transition:transform .15s ease,border-color .15s ease,box-shadow .15s ease}
+#kpiRow .kpi::after{content:"";position:absolute;inset:auto -30% -60% auto;width:160px;height:160px;border-radius:50%;
+  background:var(--kc,var(--accent));opacity:.10;filter:blur(30px);pointer-events:none}
+#kpiRow .kpi:hover{transform:translateY(-2px);border-color:color-mix(in srgb,var(--kc,var(--accent)) 55%,var(--line));box-shadow:0 10px 26px -14px var(--kc,var(--accent))}
+#kpiRow .kpi.c1{--kc:var(--accent)} #kpiRow .kpi.c2{--kc:var(--cyan,#3b9eff)} #kpiRow .kpi.c3{--kc:var(--grn,#2ecc71)}
+#kpiRow .kpi.c4{--kc:var(--amber,#ffb454)} #kpiRow .kpi.c5{--kc:var(--red,#ff5d6c)}
+.kpi-share{font-size:11.5px;color:var(--muted);margin-top:2px}
+.donut-wrap{display:flex!important;align-items:center;gap:22px;flex-wrap:wrap}
+.donut{width:150px;height:150px;flex:none}
+.donut-bg{stroke:var(--line2,rgba(127,127,127,.2))}
+.donut circle:not(.donut-bg){transition:opacity .15s}
+.donut:hover circle:not(.donut-bg){opacity:.75}
+.donut circle:not(.donut-bg):hover{opacity:1}
+.donut-v{fill:var(--txt);font:800 26px var(--font);text-anchor:middle}
+.donut-k{fill:var(--muted);font:600 10.5px var(--font);text-anchor:middle;text-transform:uppercase;letter-spacing:.8px}
+.donut-legend{flex:1 1 180px;display:grid;gap:4px;min-width:0}
+.dl-row{display:grid;grid-template-columns:12px 1fr auto 42px;align-items:center;gap:10px;padding:6px 8px;border:0;border-radius:8px;
+  background:none;color:var(--txt);font:inherit;font-size:13.5px;text-align:left;cursor:pointer}
+.dl-row:hover{background:var(--surface2,rgba(127,127,127,.08))}
+.dl-dot{width:10px;height:10px;border-radius:3px}
+.dl-k{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-p{color:var(--muted);font-size:12px;text-align:right}
+.tbar{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.tbar-ico .ticon{width:32px;height:32px;border-radius:9px}
+.tbar-ico .ticon .ic{width:16px;height:16px}
+.tbar-main{flex:1;min-width:0}
+.tbar .bar-fill{background:linear-gradient(90deg,color-mix(in srgb,var(--accent) 55%,transparent),var(--accent))}
+.tbar-more{font-size:12.5px;margin-top:4px;padding-left:44px}
+.dpill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;white-space:nowrap;
+  color:var(--c);background:color-mix(in srgb,var(--c) 14%,transparent);border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+.dpill::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--c)}
+.prio-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--c);margin-right:9px;vertical-align:1px;box-shadow:0 0 0 3px color-mix(in srgb,var(--c) 20%,transparent)}
+#dashRecent .nm .ticon{width:30px;height:30px;border-radius:8px}
+@media (max-width:760px){
+  .dash-hero{padding:18px}
+  .dh-hello{font-size:21px}
+  .dh-ring{width:100%;justify-content:flex-start}
+  .ring{width:96px;height:96px}
+  .donut{width:130px;height:130px;margin:0 auto}
+}
+.tbar .bar-top{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px;color:var(--txt);font-weight:500}
+.tbar .bar-top b{font-weight:800}
+.bars.donut-wrap{flex-direction:row;align-items:center;justify-content:center}
+.donut-legend{flex:0 1 300px}
+@media (max-width:760px){
+  #dashRecent th:nth-child(2),#dashRecent td:nth-child(2),
+  #dashTickets th:nth-child(1),#dashTickets td:nth-child(1){display:none}
+}
+
+/* ---- dashboard: the Edit layout toolbar, laid out as one tidy panel ---- */
+body.edit-layout .dash-tools{flex-wrap:wrap;gap:10px;padding:12px 14px;margin:14px 0 10px;
+  border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));border-radius:var(--r-lg,14px);
+  background:color-mix(in srgb,var(--accent) 5%,var(--surface,transparent))}
+body.edit-layout .dash-tools>*{order:1}
+body.edit-layout #dashColsWrap{order:1;display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 4px 0 12px;
+  border:1px solid var(--line2);border-radius:var(--r-md);font-size:13px;font-weight:600;color:var(--muted);user-select:none}
+body.edit-layout #dashColsWrap select{height:30px;min-height:30px;border:0;background:transparent;padding:0 26px 0 6px;font-weight:700;color:var(--txt)}
+body.edit-layout #dashSaveLayout{order:2} body.edit-layout #dashResetLayout{order:3}
+body.edit-layout .dash-tools .spacer{order:4;flex:1 1 auto}
+body.edit-layout #dashFilter{order:5;flex:0 1 240px}
+/* the hint gets its own line under the buttons, never squeezed between them */
+body.edit-layout #dashLayoutMsg{order:6;flex:1 1 100%;font-size:12.5px;line-height:1.4;color:var(--muted)}
+body.edit-layout #dashLayoutMsg:empty{display:none}
+body.edit-layout .dashhidden{order:7;margin-top:0;padding-top:10px}
+@media (max-width:760px){
+  body.edit-layout #dashFilter{flex:1 1 100%}
+  body.edit-layout #dashSaveLayout,body.edit-layout #dashResetLayout{flex:1 1 auto}
+}
+.dashfilter{height:38px}
+/* sticky table headers must be solid: with a see-through theme surface the
+   rows scrolled underneath showed through the column titles */
+.tablewrap thead th{background-color:var(--bg1);background-image:linear-gradient(var(--surface),var(--surface));
+  box-shadow:inset 0 -1px 0 var(--line)}
+
+/* ---- the asset table fits the window instead of scrolling sideways ----
+   As the window narrows, the least needed columns step aside, one at a time:
+   Item Category first (it already shows under the asset name), then
+   Location, Serial, MAC and the rest. Phones get the card layout below 760. */
+@media (min-width:761px){
+  #grid td,#grid th{white-space:normal}
+  #grid td.c-Name .nm-n{overflow-wrap:anywhere}
+}
+@media (min-width:761px) and (max-width:1560px){
+  #grid th[data-c="Type"],#grid td.c-Type{display:none}
+}
+@media (min-width:761px) and (max-width:1400px){
+  #grid th[data-c="Location"],#grid td.c-Location,
+  #grid th[data-c="MacAddress"],#grid td.c-MacAddress,
+  #grid th[data-c="RequestedBy"],#grid td.c-RequestedBy,
+  #grid th[data-c="NotesReceived"],#grid td.c-NotesReceived{display:none}
+  #grid td,#grid th{padding-left:10px;padding-right:10px}
+}
+@media (min-width:761px) and (max-width:1240px){
+  #grid th[data-c="Serial"],#grid td.c-Serial,
+  #grid th[data-c="Manufacturer"],#grid td.c-Manufacturer,
+  #grid th[data-c="Model"],#grid td.c-Model,
+  #grid th[data-c="PurchaseDate"],#grid td.c-PurchaseDate,
+  #grid th[data-c="Price"],#grid td.c-Price,
+  #grid th[data-c="ReceivedBy"],#grid td.c-ReceivedBy{display:none}
+}
+@media (min-width:761px) and (max-width:980px){
+  #grid th[data-c="WarrantyMonths"],#grid td.c-WarrantyMonths,
+  #grid th[data-c="Note"],#grid td.c-Note{display:none}
+}
+
+/* ---- Directory, Tickets and Contracts fit the window the same way ----
+   (column numbers: Directory 1 EMP ID 2 USERNAME 3 NAME 4 DEPARTMENT
+   5 DESIGNATION 6 EMAIL 7 MOBILE 8 SOURCE 9 actions; Tickets 1 CODE
+   2 SUBJECT 3 PRIORITY 4 STATUS 5 CATEGORY 6 REQUESTER 7 ASSIGNEE 8 DUE
+   9 REPLIES; Contracts 1 chk 2 ID 3 NAME 4 TYPE 5 VENDOR 6 START 7 END
+   8 COST 9 PLAN 10 LICENSE KEY 11 LINKED ASSET 12 actions) */
+@media (min-width:761px){
+  #empGrid td,#tkGrid td,#tkGridClosed td,#ctGrid td,#ctTrashGrid td{white-space:normal;overflow-wrap:anywhere}
+}
+@media (min-width:761px) and (max-width:1560px){
+  #empGrid :is(th,td):nth-child(8),
+  #tkGrid :is(th,td):nth-child(9),#tkGridClosed :is(th,td):nth-child(9),
+  #ctGrid :is(th,td):nth-child(10),#ctGrid :is(th,td):nth-child(6){display:none}
+}
+@media (min-width:761px) and (max-width:1400px){
+  #empGrid :is(th,td):nth-child(2),#empGrid :is(th,td):nth-child(5),
+  #tkGrid :is(th,td):nth-child(5),#tkGridClosed :is(th,td):nth-child(5),
+  #ctGrid :is(th,td):nth-child(9),#ctGrid :is(th,td):nth-child(11){display:none}
+  #empGrid :is(th,td),#tkGrid :is(th,td),#tkGridClosed :is(th,td),#ctGrid :is(th,td){padding-left:10px;padding-right:10px}
+}
+@media (min-width:761px) and (max-width:1240px){
+  #empGrid :is(th,td):nth-child(7),
+  #tkGrid :is(th,td):nth-child(7),#tkGridClosed :is(th,td):nth-child(7),
+  #ctGrid :is(th,td):nth-child(5),#ctGrid :is(th,td):nth-child(8){display:none}
+}
+@media (min-width:761px) and (max-width:980px){
+  #empGrid :is(th,td):nth-child(4),
+  #tkGrid :is(th,td):nth-child(6),#tkGridClosed :is(th,td):nth-child(6),
+  #ctGrid :is(th,td):nth-child(4){display:none}
+}
+
+/* ---- dashboard widget tables fit their widget, however many columns the
+   dashboard is set to: sized by the widget's own width, not the window's ---- */
+#dashWidgets .widget{container-type:inline-size;min-width:0}
+#dashWidgets .widget td{white-space:normal;overflow-wrap:anywhere}
+@container (max-width:560px){
+  #dashRecent :is(th,td):nth-child(2),
+  #dashTickets :is(th,td):nth-child(1),
+  #dashHb :is(th,td):nth-child(4),
+  #dashContractsExp :is(th,td):nth-child(3),
+  #unifiDevices :is(th,td):nth-child(2),#unifiClients :is(th,td):nth-child(4){display:none}
+  #dashWidgets .widget :is(th,td){padding-left:10px;padding-right:10px}
+}
+@container (max-width:440px){
+  #dashRecent :is(th,td):nth-child(2),
+  #dashHb :is(th,td):nth-child(3),
+  #dashContractsExp :is(th,td):nth-child(2),
+  #unifiDevices :is(th,td):nth-child(4),#unifiClients :is(th,td):nth-child(3){display:none}
+}
+/* the catalog's model table: let the long names wrap */
+#page-catalog .dtable td{white-space:normal;overflow-wrap:anywhere}
+#dashWidgets .widget :is(td,th),#dashWidgets .widget .nm{min-width:0!important}
+#dashWidgets .widget .nm-t{min-width:0}
+#dashWidgets .widget .tablewrap{overflow-x:hidden;scrollbar-gutter:stable}
+@media (min-width:761px) and (max-width:1240px){
+  #grid td.c-Name .nm-n{white-space:normal}
+}
+/* small name lists (Directory's departments, designations, locations): the
+   Edit / Del buttons may sit on two lines rather than push the table wide */
+#page-employees .dtable td{white-space:normal;overflow-wrap:anywhere}
+#page-employees .dtable td.col-del,#page-employees .dtable td:last-child{white-space:normal}
+#page-employees .dtable td:last-child .btn{margin:2px 0}

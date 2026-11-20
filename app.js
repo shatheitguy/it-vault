@@ -675,7 +675,7 @@ function render(){
       if(c==='Name'){
         // the item's kind at a glance: an icon from its category (or the one
         // picked for that category in the Product Catalog)
-        return `<td class="c-Name"><div class="nm">${window.typeIcon?window.typeIcon(a.Type):''}<div class="nm-t"><span class="nm-n">${esc(a.Name||'')}</span><span class="nm-s">${esc(a.Type||'')}</span></div></div></td>`;
+        return `<td class="c-Name"><div class="nm">${window.assetThumb?window.assetThumb(a):(window.typeIcon?window.typeIcon(a.Type):'')}<div class="nm-t"><span class="nm-n">${esc(a.Name||'')}</span><span class="nm-s">${esc(a.Type||'')}</span></div></div></td>`;
       }
       if(c==='Status'){
         const col=a.Status==='Available'?'var(--grn)':a.Status==='Checked-Out'?'var(--cyan)':a.Status==='Returned'?'var(--accent2)':a.Status==='Under-Maintenance'?'var(--amber)':a.Status==='Reserved'?'var(--muted)':'var(--red)';
@@ -778,8 +778,9 @@ async function loadStats(){
 }
 async function loadDashboard(){
   const d=await loadStats(); if(!d)return;
-  renderBars('statusBars', d.by_status||{}, statusColor);
-  renderBars('typeBars', d.by_type||{}, ()=> 'var(--accent)');
+  renderDashHero(d);
+  renderDonut('statusBars', d.by_status||{}, statusColor);
+  renderTypeBars('typeBars', d.by_type||{}, 8);
   renderBars('contractsBars', d.contracts_by_type||{}, ()=> 'var(--accent2)');
   const exp=d.expiring_contracts||[];
   const eb=document.getElementById('dashContractsExpBody');
@@ -793,6 +794,53 @@ async function loadDashboard(){
   // previously these only reloaded when you navigated to the page
   loadDashboardPage();
 }
+// ---- the dashboard's look: greeting band, fleet ring, donut, icon bars ----
+function renderDashHero(d){
+  const h=new Date().getHours();
+  const who=(window.ME&&(ME.display||ME.user))||'';
+  const el=document.getElementById('dhHello');
+  if(el) el.textContent=(h<12?'Good morning':h<17?'Good afternoon':'Good evening')+(who?', '+String(who).split(' ')[0]:'');
+  const dt=document.getElementById('dhDate');
+  if(dt) dt.textContent=new Date().toLocaleDateString(undefined,{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+  const sc=document.getElementById('dhScan'); const ns=document.getElementById('navScan');
+  if(sc) sc.style.display=(ns&&ns.style.display!=='none')?'':'none';
+  const total=d.total||0, out=d.checked_out||0, avail=(d.by_status||{})['Available']||0;
+  const pct=total?Math.round(out/total*100):0;
+  const R=46, C=2*Math.PI*R;
+  const ring=document.getElementById('dhRing');
+  if(ring) ring.innerHTML=`<svg viewBox="0 0 120 120" class="ring"><circle cx="60" cy="60" r="${R}" class="ring-bg"/>
+      <circle cx="60" cy="60" r="${R}" class="ring-fg" stroke-dasharray="${(C*pct/100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 60 60)"/>
+      <text x="60" y="58" class="ring-v">${pct}%</text><text x="60" y="76" class="ring-k">in use</text></svg>
+    <div class="dh-ring-side"><div><b>${out}</b><span>with staff</span></div><div><b>${avail}</b><span>ready to issue</span></div><div><b>${total}</b><span>in the register</span></div></div>`;
+  // each card says what share of the register it is
+  const share=(id,n)=>{const k=document.getElementById(id); if(!k)return; const card=k.closest('.kpi'); if(!card)return;
+    let s=card.querySelector('.kpi-share'); if(!s){s=document.createElement('div');s.className='kpi-share';card.querySelector('.kpi-body').appendChild(s);}
+    s.textContent=total?Math.round((n||0)/total*100)+'% of assets':'';};
+  share('kOut',out); share('kMaint',d.maintenance); share('kDue',d.due_soon); share('kWarr',d.warranty_expiring);
+}
+function renderDonut(elId, obj, colorFn){
+  const el=document.getElementById(elId); if(!el) return;
+  const entries=Object.entries(obj).filter(e=>e[1]>0).sort((a,b)=>b[1]-a[1]);
+  const total=entries.reduce((s,e)=>s+e[1],0);
+  if(!total){ el.innerHTML='<div class="empty" style="padding:18px">No data yet.</div>'; return; }
+  const R=52, C=2*Math.PI*R; let off=0;
+  const arcs=entries.map(([k,v])=>{const len=C*v/total; const a=`<circle cx="70" cy="70" r="${R}" fill="none" stroke="${colorFn(k)}" stroke-width="18" stroke-dasharray="${Math.max(0,len-2).toFixed(2)} ${C.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 70 70)"><title>${esc(k)}: ${v}</title></circle>`; off+=len; return a;}).join('');
+  el.classList.add('donut-wrap');
+  el.innerHTML=`<svg viewBox="0 0 140 140" class="donut"><circle cx="70" cy="70" r="${R}" fill="none" class="donut-bg" stroke-width="18"/>${arcs}
+      <text x="70" y="68" class="donut-v">${total}</text><text x="70" y="86" class="donut-k">assets</text></svg>
+    <div class="donut-legend">${entries.map(([k,v])=>`<button type="button" class="dl-row" onclick="showPage('page-assets');setTimeout(()=>{const f=document.getElementById('statusFilter');if(f){f.value=${esc(JSON.stringify(k))};f.dispatchEvent(new Event('change'));}},60)"><span class="dl-dot" style="background:${colorFn(k)}"></span><span class="dl-k">${esc(k)}</span><b>${v}</b><span class="dl-p">${Math.round(v/total*100)}%</span></button>`).join('')}</div>`;
+}
+function renderTypeBars(elId, obj, top){
+  const el=document.getElementById(elId); if(!el) return;
+  const entries=Object.entries(obj).sort((a,b)=>b[1]-a[1]);
+  if(!entries.length){ el.innerHTML='<div class="empty" style="padding:18px">No data yet.</div>'; return; }
+  const max=Math.max(1,...entries.map(e=>e[1]));
+  const shown=entries.slice(0,top), rest=entries.slice(top);
+  el.innerHTML=shown.map(([k,v])=>`<div class="tbar"><span class="tbar-ico">${window.typeIcon?typeIcon(k):''}</span><div class="tbar-main"><div class="bar-top"><span>${esc(k)}</span><b>${v}</b></div><div class="bar-track"><div class="bar-fill" style="width:${Math.round(v/max*100)}%"></div></div></div></div>`).join('')
+    +(rest.length?`<div class="tbar-more muted">+ ${rest.length} more type${rest.length>1?'s':''} · ${rest.reduce((s,e)=>s+e[1],0)} assets</div>`:'');
+}
+function dashPill(s){return `<span class="dpill" style="--c:${statusColor(s)}">${esc(s||'—')}</span>`;}
+function prioColor(p){return ({Low:'var(--muted)',Normal:'var(--cyan)',High:'var(--amber)',Urgent:'var(--red)',Emergency:'var(--red)'})[p]||'var(--muted)';}
 function statusColor(s){
   return ({'Available':'var(--grn)','Checked-Out':'var(--cyan)','Returned':'var(--accent2)','Under-Maintenance':'var(--amber)','Reserved':'var(--muted)','Retired':'var(--red)','Lost/Stolen':'var(--red)'})[s]||'var(--accent2)';
 }
@@ -808,7 +856,7 @@ async function loadDashboardPage(){
   try{
     const r=await api('/api/assets?order=recent'); if(r){ const list=await r.json(); const top=(list||[]).slice(0,12);
       const tb=document.getElementById('dashRecentBody');
-      if(tb) tb.innerHTML=top.map(a=>`<tr><td>${esc(a.Name||'')}</td><td>${esc(a.Type||'')}</td><td class="mono">${esc(a.Serial||'')}</td><td>${esc(a.Status||'')}</td></tr>`).join('')||'';
+      if(tb) tb.innerHTML=top.map(a=>`<tr style="cursor:pointer" onclick="showPage('page-assets');openModal('${esc(a._id)}')"><td><div class="nm">${window.assetThumb?assetThumb(a):''}<div class="nm-t"><span class="nm-n">${esc(a.Name||'')}</span><span class="nm-s">${esc(a.AssetTag||'')}</span></div></div></td><td>${esc(a.Type||'')}</td><td>${dashPill(a.Status)}</td></tr>`).join('')||'';
       const emp=document.getElementById('dashRecentEmpty'); if(emp) emp.style.display=top.length?'none':'block';
     }
   }catch(e){}
@@ -816,7 +864,7 @@ async function loadDashboardPage(){
   try{
     const r=await api('/api/tickets'); if(r){ const list=await r.json(); const open=(list||[]).filter(t=>!['Resolved','Closed'].includes(t.status));
       const tb=document.getElementById('dashTicketsBody');
-      if(tb) tb.innerHTML=open.slice(0,12).map(t=>`<tr style="cursor:pointer" onclick="openTicketById(${t.id})"><td class="mono">${esc(t.code||'')}</td><td>${esc(t.subject||'')}</td><td>${esc(t.status||'')}</td></tr>`).join('')||'';
+      if(tb) tb.innerHTML=open.slice(0,12).map(t=>`<tr style="cursor:pointer" onclick="openTicketById(${t.id})"><td class="mono">${esc(t.code||'')}</td><td><span class="prio-dot" style="--c:${prioColor(t.priority)}" title="${esc(t.priority||'')}"></span>${esc(t.subject||'')}</td><td>${dashPill(t.status)}</td></tr>`).join('')||'';
       const emp=document.getElementById('dashTicketsEmpty'); if(emp) emp.style.display=open.length?'none':'block';
     }
   }catch(e){}
@@ -1036,7 +1084,7 @@ function setEditLayout(on){
   show('dashColsWrap', on);
   show('dashEditLayout', !on);
   document.getElementById('dashLayoutMsg').textContent=on
-    ? 'Drag to reorder, ✕ to hide — anything hidden is listed below to bring back — then SAVE'
+    ? 'Drag a widget to move it. ✕ hides it; hidden ones wait below. Save when done.'
     : '';
   decorateWidgets(on);
   renderHiddenChips(on);
@@ -1156,12 +1204,14 @@ async function openModal(id,prefill){
          <div><select id="f_Model"><option value="">-- choose model --</option></select></div>
        </div>
      </div>`+
+    `<div class="invbox photobox" id="assetPhotoBox"></div>`+
     groups.slice(1).map(g=>`<div class="invbox">
       <label>${g.label}</label>
       <div class="grid2">${g.cols.map(renderField).join('')}${g.label.indexOf('STATUS')===0?
         `<div class="field2"><label>Employee Department</label><input id="f_EmpDepartment" value="" readonly disabled></div>
          <div class="field2"><label>Employee Designation</label><input id="f_EmpDesignation" value="" readonly disabled></div>`:''}</div>
     </div>`).join('');
+  if(window.renderAssetPhotoBox)window.renderAssetPhotoBox(id,a);
   document.getElementById('noteInvoiceWrap').innerHTML=
     `<div class="invbox">
       <label>NOTE (optional internal note)</label>
@@ -1423,6 +1473,7 @@ async function saveModal(){
       if(!r.ok){toast('✕ Not added: '+await apiError(r));return;}
       const a=await r.json().catch(()=>({}));
       const inv=a._id?await upload(a._id):'';
+      if(a._id&&window.uploadPendingAssetPhoto)await window.uploadPendingAssetPhoto(a._id);
       toast((inv.startsWith(' —')?'⚠ ADDED':'✓ ADDED')+inv); closeModal(); load(); loadDashboard();
     }
   }finally{
@@ -2460,6 +2511,7 @@ async function removeLogo(){
 async function applyBranding(){
   const me=await fetch('/api/me').then(r=>r.json());
   const nm=me.app_name||me.display||'IT-Vault';
+  window.ME=me;
   window.APP_NAME=nm;
   window.HAS_LETTERHEAD=!!me.has_letterhead;
   // The sidebar shows Logo Text, which is a separate setting from the
@@ -3405,13 +3457,14 @@ async function loadCatCategories(){
   // each category shows the icon (or photo) its assets get in the list, and
   // clicking it lets you choose another or upload a product photo
   window.__CATS=list;
-  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button><span>${esc(c.name)}</span></div></td><td class="col-del">${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button><span>${esc(c.name)}</span></div></td><td class="col-del"><button class="btn sm ghost" onclick="openCatLook(${c.id})">Icon / photo</button> ${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   if(window.loadCategoryIcons)loadCategoryIcons();
   document.getElementById('catCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatManufacturers(){
   const r=await api('/api/manufacturers'); const list=r?await r.json():[];
-  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td class="col-del">${catActions('manufacturers',m)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  window.__MFRS=list;
+  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Logo" onclick="openBrandLogo(${m.id})">${window.brandTile?brandTile(m):''}</button><span class="cat-name"><span>${esc(m.name)}</span>${m.website?`<a class="cat-site" href="${esc(m.website)}" target="_blank" rel="noopener noreferrer">${esc(m.website.replace(/^https?:\/\//,''))}</a>`:''}</span></div></td><td class="col-del"><button class="btn sm ghost" onclick="openBrandLogo(${m.id})">Logo</button> ${catActions('manufacturers',m)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   CAT_MFRS=list;
   document.getElementById('mfrCatCount').textContent=list.length?`(${list.length})`:'';
   const sel=document.getElementById('modMfrSelect');
@@ -3420,7 +3473,8 @@ async function loadCatManufacturers(){
 }
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
-  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td>${esc(m.name)}</td><td>${esc(m.manufacturer||'—')}</td><td class="col-del">${catActions('models',m)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  window.__MODELS=list;
+  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button><span>${esc(m.name)}</span></div></td><td>${esc(m.manufacturer||'—')}</td><td class="col-del"><button class="btn sm ghost" onclick="openModelPhoto(${m.id})">Photo</button> ${catActions('models',m)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
   CAT_MODELS=list;
   document.getElementById('modCatCount').textContent=list.length?`(${list.length})`:'';
 }
@@ -3499,8 +3553,13 @@ document.getElementById('catAdd').onclick=async()=>{
 };
 document.getElementById('mfrCatAdd').onclick=async()=>{
   const el=document.getElementById('mfrCatInput'); const n=el.value.trim(); if(!n)return;
-  const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
-  if(r&&r.ok){el.value='';loadCatManufacturers();}
+  const se=document.getElementById('mfrSiteInput'); const site=se?se.value.trim():'';
+  const btn=document.getElementById('mfrCatAdd'); btn.disabled=true; if(site)toast('Getting the '+n+' logo…');
+  const r=await api('/api/manufacturers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,website:site})});
+  btn.disabled=false;
+  if(r&&r.ok){const j=await r.json().catch(()=>({}));el.value='';if(se)se.value='';
+    if(j.logo_error)toast('⚠ Added. No logo: '+j.logo_error);else if(j.logo)toast('✓ Added with its logo');
+    loadCatManufacturers();if(window.loadLooks)loadLooks();}
 };
 document.getElementById('ctTypeCatAdd').onclick=async()=>{
   const el=document.getElementById('ctTypeCatInput'); const n=el.value.trim(); if(!n)return;
