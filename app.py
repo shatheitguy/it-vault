@@ -361,8 +361,12 @@ def save_db_config(h, p, n, u, pw):
     global DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS
     DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS = h, int(p), n, u, pw
     try:
-        with open(CONFIG_PATH, "w") as f:
+        # 0600 from the start: it holds the database password
+        fd = os.open(CONFIG_PATH, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump({"db_host": h, "db_port": int(p), "db_name": n, "db_user": u, "db_pass": pw}, f, indent=2)
+        try: os.chmod(CONFIG_PATH, 0o600)   # a file written before this keeps its old mode otherwise
+        except Exception: pass
     except Exception:
         pass
 def _db_reachable(host, port, name, user, pw, timeout=6):
@@ -466,6 +470,23 @@ def persist_env_db_config():
 # nowhere to ask the user for one -- so instead of refusing to start, it
 # serves a setup wizard until a database answers and an admin exists.
 _setup_done = False
+# Written the first time the app sees a login in its database. It sits in the
+# data volume, so after a restart the app still knows it was set up even when
+# the database is not answering yet.
+SETUP_MARK = os.path.join(DATA_DIR, ".setup_done")
+
+def _mark_setup_done():
+    try:
+        if not os.path.exists(SETUP_MARK):
+            with open(SETUP_MARK, "w") as f:
+                f.write(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    except Exception:
+        pass
+
+def _was_set_up() -> bool:
+    """Has this install ever been configured? The marker, or a saved database
+    pointer (every install that ever reached its database has one)."""
+    return os.path.exists(SETUP_MARK) or os.path.exists(CONFIG_PATH)
 
 def _db_reachable(host=None, port=None, name=None, user=None, pw=None) -> bool:
     try:
@@ -493,10 +514,23 @@ def setup_needed() -> bool:
         c.close()
         if n > 0:
             _setup_done = True
+            _mark_setup_done()
             return False
         return True
+    except pymysql.err.ProgrammingError as e:
+        # the database answered and has no Users table: empty (fresh, or
+        # wiped from the Danger Zone) -- the wizard is exactly right
+        if e.args and e.args[0] == 1146:
+            return True
+        return not _was_set_up()
     except Exception:
-        return True
+        # The database did not answer. On a fresh install that is what the
+        # wizard is for. On one that was set up it is an outage, and the
+        # wizard must NOT open: it needs no login and its first step points
+        # the app at whatever database the visitor names. Before this, a
+        # restart while MariaDB was still coming up left /setup open to the
+        # network.
+        return not _was_set_up()
 
 # ---- release identity + update checks ----
 def _read_version():
@@ -1244,9 +1278,26 @@ def _security_headers(resp):
     return resp
 
 
+# The app's own scripts and styles. index.html and login.html reference them
+# with ?v=<a fingerprint of the file> (see _shell_html), so a URL only ever
+# means one version of the file and the browser may keep it for good.
+SHELL_ASSETS = ("/app.js", "/redesign.js", "/style.css", "/redesign.css")
+
 @app.after_request
 def _no_cache(resp):
-    # Prevent stale JS/HTML caching so dashboard always re-renders fresh
+    """Data is never cached. The app's own versioned scripts and styles are,
+    for a year: every page load used to download ~600 KB again, which was most
+    of why the app felt slow on Wi-Fi and phones. Routes that set their own
+    private long-lived cache (a category photo, the profile picture, both
+    addressed by a version) keep it."""
+    cc = resp.headers.get("Cache-Control", "")
+    if (request.path in SHELL_ASSETS and request.args.get("v") == _asset_version(request.path)
+            and resp.status_code in (200, 304)):
+        resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        resp.headers.pop("Pragma", None); resp.headers.pop("Expires", None)
+        return resp
+    if cc.startswith("private, max-age=") and resp.status_code == 200:
+        return resp
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"
@@ -2892,7 +2943,9 @@ def me():
                     "perms": _role_perms(session["role"]),
                     "features": sorted(_role_features(session["role"])),
                     "display": row.get("display", ""), "email": row.get("email", ""),
-                    "avatar": row.get("avatar", ""),
+                    # a URL, not the picture: /api/me is fetched on every load,
+                    # and a phone photo inline made it 66 KB each time
+                    "avatar": _avatar_url(row.get("avatar")),
                     # Only whether one exists. The value is a hash now, and a
                     # hash in a field labelled "your API key" is worse than
                     # nothing -- it looks copyable and is not.
@@ -4665,6 +4718,34 @@ def profile():
                     "avatar": u.get("avatar", ""), "api_key_set": bool(u.get("api_key")),
                     "last_login": u.get("last_login", "")})
 
+def _avatar_url(av):
+    av = (av or "").strip()
+    if not av:
+        return ""
+    return "/api/me/avatar?v=" + hashlib.sha1(av.encode()).hexdigest()[:12]
+
+
+@app.route("/api/me/avatar")
+@auth_required()
+def my_avatar():
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT avatar FROM Users WHERE username=%s", [session["user"]])
+    av = ((cur.fetchone() or {}).get("avatar") or "").strip(); c.close()
+    if not av:
+        return jsonify({"error": "no picture"}), 404
+    mt = "image/png"
+    m = re.match(r"data:(image/(?:png|jpeg|gif|webp));base64,", av)
+    if m:
+        mt = m.group(1); av = av[m.end():]
+    try:
+        img = base64.b64decode(av)
+    except Exception:
+        return jsonify({"error": "no picture"}), 404
+    # versioned by the ?v= hash in the URL, so it can be kept until it changes
+    return Response(img, mimetype=mt, headers={"Cache-Control": "private, max-age=31536000",
+                                               "X-Content-Type-Options": "nosniff"})
+
+
 @app.route("/api/profile/avatar", methods=["POST"])
 @auth_required()
 def profile_avatar():
@@ -6183,6 +6264,21 @@ def locations_api():
 
 # ---------- ticketing (osTicket-style) ----------
 PRIORITIES = ["Low", "Normal", "High", "Urgent", "Emergency"]
+
+def _clean_due(v):
+    """A ticket due date as the app writes it, or None if it is not one.
+    Free text here used to reach the Tickets list as HTML -- a "date" of
+    <img onerror=...> ran in every admin's browser."""
+    v = ("" if v is None else str(v)).strip().replace("T", " ")
+    if not v:
+        return ""
+    for fmt, out in (("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"), ("%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"),
+                     ("%Y-%m-%d", "%Y-%m-%d")):
+        try:
+            return datetime.strptime(v[:19], fmt).strftime(out)
+        except ValueError:
+            pass
+    return None
 TICKET_STATUSES = ["Open", "In Progress", "Pending", "Resolved", "Closed"]
 TICKET_CATEGORIES = ["Hardware", "Software", "Network", "Access/Permissions", "Email/Communication", "Printer", "CCTV/Security", "Other"]
 
@@ -6383,7 +6479,10 @@ def tickets_api():
     if not assignee:
         assignee = auto_assign_ticket(category)
     # auto due_date from SLA hours if not specified
-    due_date = d.get("due_date","") or ""
+    due_date = _clean_due(d.get("due_date"))
+    if due_date is None:
+        c.close()
+        return jsonify({"error": "Due date must be a date, like 2026-12-31."}), 400
     if not due_date:
         from datetime import datetime, timedelta
         due_date = (datetime.now() + timedelta(hours=sla_hours)).strftime("%Y-%m-%d %H:%M:%S")
@@ -6458,7 +6557,8 @@ def _portal_create_ticket():
         return jsonify({"ok": True, "id": dup["id"], "code": dup["code"],
                         "photos": saved, "photo_warnings": skipped})
     code = ticket_code()
-    priority = (d.get("priority") or "Normal") or "Normal"
+    # the public form can send anything; only a real priority is kept
+    priority = d.get("priority") if d.get("priority") in PRIORITIES else "Normal"
     category = d.get("category","") or ""
     sla_hours = sla_hours_for(priority)
     assignee = auto_assign_ticket(category)
@@ -6589,6 +6689,11 @@ def ticket_detail(ticket_id):
         cur.execute("SELECT * FROM Tickets WHERE id=%s", [ticket_id]); before = cur.fetchone() or {}
         fields = []
         params = []
+        if "due_date" in d:
+            d["due_date"] = _clean_due(d["due_date"])
+            if d["due_date"] is None:
+                c.close()
+                return jsonify({"error": "Due date must be a date, like 2026-12-31."}), 400
         for f in ["subject","description","priority","status","requester","requester_email","assignee","asset_id","due_date","sla_hours","category"]:
             if f in d:
                 fields.append(f"{f}=%s"); params.append(None if (d[f] in ("", None) and f in ("assignee","asset_id")) else d[f])
@@ -12262,6 +12367,7 @@ def setup_complete():
         return jsonify({"ok": False, "error": "Admin username is required"}), 400
     if len(admin_pass) < 8:
         return jsonify({"ok": False, "error": "Admin password must be at least 8 characters"}), 400
+    had_config = os.path.exists(CONFIG_PATH)
     try:
         # persist the DB config first so conn() (and the pool) pick it up
         save_db_config(d.get("db_host", "db"), int(d.get("db_port", 3306)),
@@ -12281,9 +12387,15 @@ def setup_complete():
                     (admin_user, hash_pw(admin_pass), ROLE_ADMIN, admin_user, ""))
         c.commit(); c.close()
     except Exception as e:
+        # a config this attempt wrote must not outlive it: it would mark the
+        # install as set up and close the wizard on a database that failed
+        if not had_config:
+            try: os.remove(CONFIG_PATH)
+            except Exception: pass
         return jsonify({"ok": False, "error": f"Setup failed: {e}"}), 500
     global _setup_done
     _setup_done = True
+    _mark_setup_done()
     audit(admin_user, "SETUP", "", "first-run setup completed")
     return jsonify({"ok": True})
 
@@ -12382,12 +12494,45 @@ def index():
         # after login) lets the WebView land straight on index.html instead
         # of the login page, without ever needing a fresh session cookie
         if not _resolve_session_from_api_key():
-            return send_from_directory(BASE, "login.html")
-    return send_from_directory(BASE, "index.html")
+            return _shell_html("login.html")
+    return _shell_html("index.html")
+
+
+_SHELL_CACHE = {}
+_SHELL_REF = re.compile(r"""(/(?:app|redesign)\.js|/(?:style|redesign)\.css)\?(?:v|nocache)=[^"']*""")
+
+def _asset_version(path):
+    try:
+        st = os.stat(os.path.join(BASE, path.lstrip("/")))
+        return hashlib.sha1(f"{st.st_mtime_ns}:{st.st_size}".encode()).hexdigest()[:10]
+    except OSError:
+        return "0"
+
+def _shell_html(name):
+    """index.html / login.html with each script and stylesheet URL carrying a
+    fingerprint of the file it names. The browser can then cache those files
+    for good (see _no_cache), and a changed file is a new URL -- so no copy is
+    ever stale and nobody has to remember to bump ?v= by hand."""
+    fp = os.path.join(BASE, name)
+    try:
+        key = (name, os.stat(fp).st_mtime_ns) + tuple(_asset_version(a) for a in SHELL_ASSETS)
+    except OSError:
+        return send_from_directory(BASE, name)
+    html = _SHELL_CACHE.get(key)
+    if html is None:
+        with open(fp, encoding="utf-8") as f:
+            raw = f.read()
+        html = _SHELL_REF.sub(lambda m: m.group(1) + "?v=" + _asset_version(m.group(1)), raw)
+        if len(_SHELL_CACHE) > 8:
+            _SHELL_CACHE.clear()
+        _SHELL_CACHE[key] = html
+    return Response(html, mimetype="text/html")
 
 @app.route("/<path:p>")
 def static_files(p):
-    if p in ("login.html", "index.html", "style.css", "app.js", "redesign.css", "redesign.js"):
+    if p in ("login.html", "index.html"):
+        return _shell_html(p)          # with fingerprinted script/style URLs
+    if p in ("style.css", "app.js", "redesign.css", "redesign.js"):
         return send_from_directory(BASE, p)
     return jsonify({"error": "not found"}), 404
 
@@ -12705,3 +12850,48 @@ if __name__ == "__main__":
     wa.resume()
     print("IT-Vault (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+
+# ---------- compression ----------
+import gzip as _gzip
+_GZ_TYPES = ("text/", "application/json", "application/javascript", "image/svg+xml")
+_GZ_CACHE = {}
+
+@app.after_request
+def _gzip_response(resp):
+    """Text goes out gzipped when the browser accepts it: app.js drops from
+    ~300 KB to ~70 KB, the asset and employee lists by about as much. The
+    unchanging files are compressed once and kept."""
+    try:
+        if resp.status_code != 200 or resp.headers.get("Content-Encoding"):
+            return resp
+        if "gzip" not in (request.headers.get("Accept-Encoding") or "").lower():
+            return resp
+        if not (resp.mimetype or "").startswith(_GZ_TYPES):
+            return resp
+        if resp.is_streamed and not resp.direct_passthrough:
+            return resp                      # a generator: leave it alone
+        resp.direct_passthrough = False
+        data = resp.get_data()
+        if len(data) < 1024:
+            return resp
+        etag = resp.headers.get("ETag")
+        key = (request.path, etag) if etag else None
+        gz = _GZ_CACHE.get(key) if key else None
+        if gz is None:
+            gz = _gzip.compress(data, 6)
+            if key:
+                if len(_GZ_CACHE) > 64:
+                    _GZ_CACHE.clear()
+                _GZ_CACHE[key] = gz
+        resp.set_data(gz)
+        resp.headers["Content-Encoding"] = "gzip"
+        resp.headers["Content-Length"] = str(len(gz))
+        vary = resp.headers.get("Vary", "")
+        if "accept-encoding" not in vary.lower():
+            resp.headers["Vary"] = (vary + ", " if vary else "") + "Accept-Encoding"
+        if etag and not etag.startswith("W/"):
+            resp.headers["ETag"] = "W/" + etag   # same file, different bytes on the wire
+    except Exception:
+        pass
+    return resp

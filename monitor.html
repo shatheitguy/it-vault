@@ -174,7 +174,12 @@ function applyTheme(b){
   }catch(e){}
 }
 
-function esc(s){ var d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+// Quotes too: these values also go inside attributes (title="..."), and the
+// old textContent trick left " alone -- a portal ticket subject could close
+// the attribute and add an event handler.
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+// a CSS class built from data: letters, digits and dashes only
+function cls(s){ return String(s==null?'':s).replace(/[^A-Za-z0-9_-]/g,''); }
 function parseDT(s){
   if(!s) return null;
   var iso = String(s).indexOf('T')>=0 ? s : String(s).replace(' ','T');
@@ -234,11 +239,11 @@ function render(list){
     var isSoon = d && !isOver && (d-now) < 1000*60*60*4;
     var rowClass = isOver ? 'overdue' : (isSoon ? 'soon' : '');
     var dueClass = isOver ? 'overdue' : (isSoon ? 'soon' : '');
-    var statusClass = 's_' + (t.status||'').replace(' ','');
+    var statusClass = 's_' + cls(t.status);
     return '<div class="trow '+rowClass+'">' +
       '<div class="code">'+esc(t.code)+'</div>' +
       '<div class="subj" title="'+esc(t.subject)+'">'+esc(t.subject||'')+'</div>' +
-      '<div><span class="prio '+esc(t.priority||'Normal')+'">'+esc(t.priority||'Normal')+'</span></div>' +
+      '<div><span class="prio '+cls(t.priority||'Normal')+'">'+esc(t.priority||'Normal')+'</span></div>' +
       '<div><span class="badge '+statusClass+'">'+esc(t.status||'')+'</span></div>' +
       '<div class="assignee">'+esc(t.assignee||'Unassigned')+'</div>' +
       '<div class="due '+dueClass+'">'+(isOver?'⚠ ':'')+fmtDue(d)+'</div>' +
