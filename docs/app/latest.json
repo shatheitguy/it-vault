@@ -1,6 +1,6 @@
 {
-  "versionCode": 49,
-  "versionName": "2.10.0",
+  "versionCode": 50,
+  "versionName": "2.11.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Departments: run IT, Facilities, Vehicles and more from one app. New assets and tickets ask which department they belong to, each department numbers its own asset IDs, and an asset shows the extra fields its department and category need. You only see the departments you work in, and where you are a viewer you can look but not change."
+  "notes": "Departments, finished: switch off the built-in fields a department doesn't use, keep item categories to one department, import and export one department at a time, and find every photo, invoice and signed handover in its department's folder. Clearer users: a role, then All departments or Only some, each Can change or Can only look. Access is now enforced on labels, invoices, scans and Lost & Found too. A cleaner Product Catalog, and maintenance only shows once you set it up."
 }
