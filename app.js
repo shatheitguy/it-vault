@@ -3528,39 +3528,46 @@ async function loadCatManufacturers(){
   CAT_MFRS=list;
   document.getElementById('mfrCatCount').textContent=list.length||'';
   cxApplySearch();
-  const sel=document.getElementById('modMfrSelect');
-  const cur=sel.value;
-  sel.innerHTML='<option value="">-- choose brand --</option>'+list.map(m=>`<option value="${m.id}" ${String(m.id)===cur?'selected':''}>${esc(m.name)}</option>`).join('');
+  drawModBrandSelect();
 }
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
-  window.__MODELS=list;
-  // one plain grid of models; the chips above pick a brand, one at a time
-  const brands=[...new Set(list.map(m=>m.manufacturer||''))].sort((a,b)=>!a?1:!b?-1:a.localeCompare(b,undefined,{sensitivity:'base'}));
-  if(cxModBrand!=='all' && !brands.includes(cxModBrand)) cxModBrand='all';
-  const f=document.getElementById('modBrandFilter');
-  if(f){
-    const n=k=>list.filter(m=>k==='all'||(m.manufacturer||'')===k).length;
-    f.innerHTML=[['all','All brands']].concat(brands.map(b=>[b,b||'No brand'])).map(([k,t])=>
-      `<option value="${esc(k)}" ${k===cxModBrand?'selected':''}>${esc(t)} (${n(k)})</option>`).join('');
-    f.onchange=()=>{cxModBrand=f.value; loadCatModels();};
-  }
-  const shown=list.filter(m=>cxModBrand==='all'||(m.manufacturer||'')===cxModBrand)
+  window.__MODELS=list; CAT_MODELS=list;
+  document.getElementById('modCatCount').textContent=list.length||'';
+  drawModBrandSelect(); drawModGrid();
+}
+// One brand dropdown does both jobs: it filters the models below, and a new
+// model is added to the brand it shows. "All brands" shows everything.
+function drawModBrandSelect(){
+  const sel=document.getElementById('modMfrSelect'); if(!sel)return;
+  const models=window.__MODELS||[], mfrs=window.__MFRS||[];
+  const n=name=>models.filter(m=>(m.manufacturer||'')===name).length;
+  const loose=models.filter(m=>!m.manufacturer).length;
+  if(cxModBrand && cxModBrand!=='none' && !mfrs.some(m=>String(m.id)===cxModBrand)) cxModBrand='';
+  sel.innerHTML=`<option value="">All brands (${models.length})</option>`
+    +mfrs.map(m=>`<option value="${m.id}">${esc(m.name)} (${n(m.name)})</option>`).join('')
+    +(loose?`<option value="none">No brand (${loose})</option>`:'');
+  sel.value=cxModBrand;
+  sel.onchange=()=>{ cxModBrand=sel.value; drawModGrid(); };
+}
+function drawModGrid(){
+  const models=window.__MODELS||[], mfr=(window.__MFRS||[]).find(m=>String(m.id)===cxModBrand);
+  const shown=models.filter(m=>!cxModBrand?true:cxModBrand==='none'?!m.manufacturer:(mfr&&m.manufacturer===mfr.name))
     .sort((x,y)=>x.name.localeCompare(y.name,undefined,{numeric:true,sensitivity:'base'}));
+  const inp=document.getElementById('modCatInput');
+  if(inp) inp.placeholder=mfr?`New ${mfr.name} model`:'Pick a brand on the left to add a model';
   document.getElementById('modCatBody').innerHTML=shown.map(m=>cxItem({name:m.name,
       tile:`<button type="button" class="cx-tile" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button>`,
       q:(m.name+' '+(m.manufacturer||'')),
       actions:`<button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}`
-    })).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
+    })).join('')||`<div class="cx-empty">${mfr?'No '+esc(mfr.name)+' models yet. Type one above and press Add model.':'Nothing here yet. Pick a brand above and add the first model.'}</div>`;
   cxApplySearch();
-  CAT_MODELS=list;
-  document.getElementById('modCatCount').textContent=list.length||'';
 }
 // Every catalogue row's buttons. The row's own values are stashed by id so
 // the editor does not have to re-fetch a list it has just drawn.
 let CAT_ROWS={}, CAT_MFRS=[], CAT_MODELS=[];
 // ---- the catalogue's layout: one list at a time, as cards, with a search
-let cxTab='cat', cxCatSpace='all', cxModBrand='all';
+let cxTab='cat', cxCatSpace='all', cxModBrand='';
 function cxItem(o){
   return `<div class="cx-item" data-q="${esc(String(o.q||o.name||'').toLowerCase())}">${o.tile||''}<div class="cx-body"><b title="${esc(o.name)}">${esc(o.name)}</b>${o.sub?`<div class="cx-sub">${o.sub}</div>`:''}</div><div class="cx-acts">${o.actions||''}</div></div>`;
 }
@@ -3690,7 +3697,7 @@ document.getElementById('ctTypeCatAdd').onclick=async()=>{
 document.getElementById('modCatAdd').onclick=async()=>{
   const mid=document.getElementById('modMfrSelect').value;
   const el=document.getElementById('modCatInput'); const n=el.value.trim();
-  if(!mid){toast('✕ choose a manufacturer first');return;}
+  if(!mid||mid==='none'){toast('✕ Pick a brand in the list first');document.getElementById('modMfrSelect').focus();return;}
   if(!n)return;
   const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,manufacturer_id:mid})});
   if(r&&r.ok){el.value='';loadCatModels();}

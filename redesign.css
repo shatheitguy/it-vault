@@ -913,9 +913,3 @@ label.fl-bi{cursor:pointer}
 .u-dep{display:inline-flex;align-items:center;gap:6px;margin:2px 10px 2px 0;font-size:12.5px;white-space:nowrap}
 .u-dep em{font-style:normal;font-size:11px;color:var(--muted)}
 @media (max-width:520px){.um-mode{grid-template-columns:1fr}}
-/* Models: a brand dropdown filters the list */
-.cx-fbar{display:flex;align-items:center;gap:10px;margin:0 0 12px}
-.cx-fbar label{margin:0;font-size:12px;font-weight:600;color:var(--muted);text-transform:none;letter-spacing:normal}
-.cx-fsel{min-width:220px;min-height:36px;padding:6px 11px;background:var(--bg1);border:1px solid var(--line);border-radius:8px;color:var(--txt);font:13px var(--font)}
-.cx-fsel:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-@media (max-width:760px){.cx-fsel{flex:1;min-width:0}}
