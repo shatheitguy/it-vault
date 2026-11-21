@@ -3,25 +3,40 @@
 <img src="docs/img/it-vault-logo.png" alt="IT-Vault — discover, manage, secure" width="360">
 
 
-[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-red.svg)](LICENSE)
-[![Image](https://img.shields.io/badge/ghcr.io-it--vault-red.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/itvault)
-[![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-red.svg)](https://shatheitguy.github.io/it-vault/)
-[![Android APK](https://img.shields.io/badge/Android-download%20APK-red.svg?logo=android&logoColor=white)](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-f1ff2e.svg)](LICENSE)
+[![Image](https://img.shields.io/badge/ghcr.io-it--vault-f1ff2e.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/itvault)
+[![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-f1ff2e.svg)](https://shatheitguy.github.io/it-vault/)
+[![Android APK](https://img.shields.io/badge/Android-download%20APK-f1ff2e.svg?logo=android&logoColor=white)](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)
 
-A self-hosted IT asset & helpdesk manager: track assets, employees, checkouts,
-maintenance history, support tickets (with a public portal + a live wallboard
-monitor), uptime monitoring with alerting, audit logging, LDAP/AD sync, network
-scanning, and full theming —
-built as a Flask backend with a single-file vanilla-JS frontend and MariaDB
-for storage.
+A self-hosted IT asset register and helpdesk for the person who is the whole IT
+department. Track hardware from purchase to disposal, hand it over with a signed
+acknowledgement, chase the contracts that renew, answer the tickets, and watch
+your services with Heartbeat, on your own server. Flask and MariaDB, with a web
+app and a native Android app that do the same things.
+
+**Highlights**
+
+- **Pictures everywhere:** product photos per model or per asset, and brand logos
+  fetched from the brand's own website, shown on every asset.
+- **Signed handovers** by email *and* WhatsApp, with a signed PDF to both sides, and
+  **Returned** assets stamped and released back to stock on their own.
+- **Helpdesk** with a public portal, SLAs, round-robin assignment and a live wallboard.
+- **Heartbeat** uptime monitoring with alerts by email, Slack, webhooks or Telegram.
+- **Fits any screen**, from a phone to a 4K monitor, in light, dark or system mode,
+  with your own name, logo and colours.
+- **Secure by default:** 2FA (authenticator app, or codes by email and WhatsApp),
+  per-feature roles, rate limits, and a full audit log.
 
 ## Android app
 
-A native Android companion app — assets, tickets, contracts and the directory on
-your phone, with **offline-first editing** that syncs when you're back online, QR /
-barcode scanning, and **built-in updates** (the app checks for new versions itself,
-no store required). It also picks up your server's own name and logo after login,
-so it wears your branding rather than the defaults.
+A native Android app that does **everything the web does**: assets with their photos
+and brand logos, tickets, contracts, the directory, the Product Catalog, every
+Settings section (users and roles, WhatsApp linking, 2FA, branding, LDAP, UniFi),
+imports and exports. **Offline-first editing** syncs when you're back online, QR /
+barcode scanning is built in, it **updates itself** (no store required), and it
+wears your server's own name, logo and colours.
+
+![The IT-Vault Android app: the asset list with product photos and brand logos, Settings with every web section, and the Product Catalog with brand logos](docs/img/android.png)
 
 **[⬇ Download IT-Vault.apk](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)**
 
@@ -31,11 +46,11 @@ Once installed, the app updates itself from **Settings → Check for updates**.
 
 ## Screenshots
 
-![The IT-Vault dashboard: asset totals, status breakdown, top asset types, recent assets and the open ticket queue](docs/img/dashboard.png)
+![The IT-Vault dashboard: the fleet in-use ring with quick actions, status cards with their share, the status donut and top asset types](docs/img/dashboard.png)
 
 | The register | Tickets |
 |---|---|
-| [![The asset register, listing hardware with IDs, serials, status and location](docs/img/assets.png)](docs/img/assets.png) | [![The ticket queue with codes, subjects, priorities and status](docs/img/tickets.png)](docs/img/tickets.png) |
+| [![The asset register: each asset with its product photo and brand logo, a status pill and who has it](docs/img/assets.png)](docs/img/assets.png) | [![The ticket queue with codes, subjects, priorities and status](docs/img/tickets.png)](docs/img/tickets.png) |
 
 <table>
 <tr>
@@ -43,7 +58,7 @@ Once installed, the app updates itself from **Settings → Check for updates**.
 <td>
 
 **What the employee gets.** Assign an asset and they receive one button by
-email — no account, no login. The link opens this page on their phone: they
+email and WhatsApp — no account, no login. The link opens this page on their phone: they
 check the details, type their name, sign with a finger. On submit a signed
 PDF goes to them *and* to every admin with an address on file, the asset
 flips to `Checked-Out`, and the signature stays attached to it.
@@ -52,8 +67,8 @@ flips to `Checked-Out`, and the signature stays attached to it.
 </tr>
 </table>
 
-*A factory-new install — the theme, layout and branding above are what you
-get on first run. Every asset, name and serial is invented.*
+*Shown in the dark theme with a yellow accent; theme, colours and branding are
+yours to change. Every asset, name and serial is invented.*
 
 ## Heartbeat — uptime monitoring
 
@@ -282,22 +297,30 @@ Prefer to do it yourself? The rest of this README is the manual route.
 ## Signed handovers, without the paperwork
 
 Handing someone a laptop is normally a form, a signature, a scan, and a folder
-nobody can find a year later. IT-Vault does it in one email:
+nobody can find a year later. IT-Vault does it in one message:
 
 1. **Assign the asset** to an employee.
-2. **They get an email with a single button** — no account, no login, nothing
+2. **They get a link by email and WhatsApp** — no account, no login, nothing
    to install.
 3. **They sign on their phone**: the link opens the asset's details, they type
    their name and sign with a finger.
-4. **Copies go out by themselves.** A signed PDF is emailed to the employee
-   *and* to every admin account with an address on file.
+4. **Copies go out by themselves.** A signed PDF goes to the employee (email
+   and WhatsApp) *and* to every admin account with an address on file. The
+   sign page offers **View signed copy** straight away.
 5. **It's on the record.** The asset flips to `Checked-Out`, and the
    signature, signer name and date stay attached to it — viewable and
    printable later.
 
-The sign page only claims "sent to your inbox" when a copy really went, which
-needs SMTP configured under Settings → Notifications and an email address on
-the employee's record.
+6. **When it comes back**, set it to **Returned**: the employee is unassigned
+   and both sides get the signed copy again, stamped **RETURNED** with the date
+   (text, colour and opacity under Settings → Branding). It can go back to
+   **Available** on its own after the number of days you choose.
+
+The sign page only claims a copy is on its way when one really went: email needs
+SMTP under Settings → Notifications, WhatsApp needs the company WhatsApp linked
+there (scan its QR code, as for WhatsApp Web). Set **Settings → General → Public
+address** to the address people reach the server on, or links point at
+`localhost`, which nobody else can open.
 
 Other things that run without being asked:
 
@@ -308,6 +331,8 @@ Other things that run without being asked:
 | LDAP / AD sync | your directory pulled in on a schedule rather than by hand |
 | Warranty watch | anything inside 30 days surfaces on the dashboard on its own |
 | Update checks | the app spots a new release and installs it in one click |
+| Returned assets | back to Available on their own after the days you set |
+| SLA breaches | IT is told when a ticket misses its deadline |
 | Audit trail | every change recorded with who and when, with no opt-in |
 
 ## Step 1 — get a database
