@@ -9,7 +9,7 @@
 [![Android APK](https://img.shields.io/badge/Android-download%20APK-f1ff2e.svg?logo=android&logoColor=white)](https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk)
 
 A self-hosted IT asset register and helpdesk for the person who is the whole IT
-department. Track hardware from purchase to disposal, hand it over with a signed
+department, and for the Facilities, Vehicles and other teams down the hall. Track hardware from purchase to disposal, hand it over with a signed
 acknowledgement, chase the contracts that renew, answer the tickets, and watch
 your services with Heartbeat, on your own server. Flask and MariaDB, with a web
 app and a native Android app that do the same things.
@@ -21,6 +21,8 @@ app and a native Android app that do the same things.
   its own tickets, extra fields per item category, preventive maintenance
   schedules and locations as building › floor › room. Staff see only the
   departments they work in, as an **editor** or a **viewer**.
+- **One Trash page** for deleted assets and contracts, with *All / Assets /
+  Contracts* filters, restore and empty in one place.
 - **Pictures everywhere:** product photos per model or per asset, and brand logos
   fetched from the brand's own website, shown on every asset.
 - **Signed handovers** by email *and* WhatsApp, with a signed PDF to both sides, and
@@ -48,6 +50,46 @@ wears your server's own name, logo and colours.
 Android will warn that the app is from an unknown developer — that's expected for
 any app installed outside the Play Store. Tap **More details → Install anyway**.
 Once installed, the app updates itself from **Settings → Check for updates**.
+
+## Departments
+
+IT-Vault started as an IT register; since 2.10.0 it runs every department from
+one install. **Settings → Departments** adds one from a template, or a blank one.
+
+| Template | Asset IDs | Item categories | Fields and schedules it adds |
+|---|---|---|---|
+| IT | `IT-1001` | Laptop, Desktop, Monitor, Mobile Phone, Printer, Switch, Server, UPS… | RAM, storage, IMEI, IP address, rack |
+| Facilities | `FM-1001` | Air Conditioner, Generator, Elevator, Fire Extinguisher, Pump, CCTV… | kVA and fuel, tonnage, extinguisher expiry; generator service every 6 months |
+| Vehicles | `VH-1001` | Car, Van, Truck, Bus, Forklift, Motorcycle | Plate, VIN, mileage, registration and insurance expiry; service every 6 months |
+| Furniture | `FR-1001` | Desk, Chair, Cabinet, Table, Sofa, Shelf | Material, colour |
+| Tools & Equipment | `EQ-1001` | Power Tool, Hand Tool, Ladder, Test Equipment, Projector | Calibration due; yearly calibration, ladder checks |
+| Medical | `MD-1001` | Monitor, Defibrillator, Infusion Pump, Bed, Wheelchair | Model number, calibration due, risk class |
+
+- **Fields that follow the item category.** A Generator asks for its kVA rating,
+  a Vehicle for its plate. Add your own per department or per category: text,
+  number, date, choice or checkbox, required or optional.
+- **Preventive maintenance on the asset.** Book a job "every 6 months"; *Maintenance
+  due* on the Assets page and a dashboard card show what's coming, and *Done*
+  logs it and books the next one.
+- **Locations as building › floor › room**, so two buildings can each have a "Store".
+- **One Assets page with a tab per department.** The dashboard and exports follow
+  the tab you're on.
+- **Tickets per department.** Each department works its own queue. A new ticket
+  asks which department it's for, auto-assign only picks that department's
+  editors, and a ticket raised in the wrong place can be moved; the move is
+  kept in its history. The public portal asks the requester too, once there's
+  more than one department.
+- **A role per department.** In **Settings → Users** each person is an **Editor**,
+  a **Viewer** or has no access, department by department: an Editor in Facilities
+  can be a Viewer in IT. Viewers open everything but can't add, change, delete or
+  restore, and the server refuses it even if the screen is bypassed. Admins see
+  every department.
+- **Trash follows the same rules.** You only see, restore and empty what's in
+  departments you edit.
+
+The Android app does all of this too: new assets and tickets ask for the
+department, the asset ID follows it, and the form shows that category's extra
+fields.
 
 ## Screenshots
 

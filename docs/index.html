@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="IT-Vault is a self-hosted IT asset register and helpdesk: assets, employees, contracts, tickets, LDAP sync, QR labels, e-signed handovers. Bring your own MariaDB or MySQL.">
+<meta name="description" content="IT-Vault is a self-hosted asset register and helpdesk for IT and every other department: assets, employees, contracts, tickets, LDAP sync, QR labels, e-signed handovers. Bring your own MariaDB or MySQL.">
 <meta name="color-scheme" content="light dark">
 <meta property="og:title" content="IT-Vault">
-<meta property="og:description" content="IT-Vault is a self-hosted IT asset register and helpdesk: assets, employees, contracts, tickets, LDAP sync, QR labels, e-signed handovers. Bring your own MariaDB or MySQL.">
+<meta property="og:description" content="IT-Vault is a self-hosted asset register and helpdesk for IT and every other department: assets, employees, contracts, tickets, LDAP sync, QR labels, e-signed handovers. Bring your own MariaDB or MySQL.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://shatheitguy.github.io/it-vault/">
 <link rel="canonical" href="https://shatheitguy.github.io/it-vault/">
@@ -750,7 +750,8 @@
           IT-Vault is an asset register and helpdesk for the person who is the
           whole IT department. Track hardware from purchase to disposal, print
           the labels that go on it, chase the contracts that renew, and answer
-          the tickets it generates &mdash; on your own server.
+          the tickets it generates &mdash; on your own server. Facilities, Vehicles
+          and the rest can run their own departments in it too.
           <strong>It brings no database of its own</strong>, so the data stays
           somewhere you already know how to back up.
         </p>
@@ -957,15 +958,15 @@
         <span class="fld">Assets</span>
         <div class="cell">
           <h3>Hardware, from invoice to disposal</h3>
-          <p>Auto-numbered asset IDs, check-out and check-in against people, maintenance history, uploaded invoices, warranty dates, and a recycle bin for the ones deleted by accident.</p>
-          <div class="tags"><span>AST-0001</span><span>Bulk import</span><span>Recycle bin</span><span>Warranty alerts</span></div>
+          <p>Auto-numbered asset IDs, check-out and check-in against people, maintenance history, uploaded invoices, warranty dates, and one Trash page for the assets and contracts deleted by accident.</p>
+          <div class="tags"><span>AST-0001</span><span>Bulk import</span><span>Trash with filters</span><span>Warranty alerts</span></div>
         </div>
 
         <span class="fld">Departments</span>
         <div class="cell">
           <h3>Not just IT: every department, one app</h3>
-          <p>Start Facilities, Vehicles, Furniture, Tools or Medical from a template. Each department numbers its own assets, asks for the fields its item categories need, books preventive maintenance and keeps its own ticket queue. Staff see only their departments, as an editor or a viewer.</p>
-          <div class="tags"><span>FM-1001</span><span>Templates</span><span>Fields per category</span><span>Planned maintenance</span><span>Building › floor › room</span></div>
+          <p>Start Facilities, Vehicles, Furniture, Tools or Medical from a template. Each department numbers its own assets, asks for the fields its item categories need, books preventive maintenance and keeps its own ticket queue. Each person is an editor in some departments and a viewer in others; viewers can look but not change, and the server enforces it.</p>
+          <div class="tags"><span>FM-1001</span><span>Templates</span><span>Fields per category</span><span>Planned maintenance</span><span>Building › floor › room</span><span>Editor &middot; Viewer</span></div>
         </div>
 
         <span class="fld">People</span>
@@ -985,8 +986,8 @@
         <span class="fld">Tickets</span>
         <div class="cell">
           <h3>A helpdesk your staff can actually reach</h3>
-          <p>A public portal for raising and following tickets without an account, SLA timers and automation on the inside, and a live wallboard for the screen on the office wall.</p>
-          <div class="tags"><span>Public portal</span><span>SLA timers</span><span>Wallboard</span></div>
+          <p>A public portal for raising and following tickets without an account, SLA timers and automation on the inside, and a live wallboard for the screen on the office wall. Each department works its own queue, and auto-assign picks only that department's editors.</p>
+          <div class="tags"><span>Public portal</span><span>SLA timers</span><span>Wallboard</span><span>Queue per department</span></div>
         </div>
 
         <span class="fld">Directory</span>
@@ -1020,8 +1021,8 @@
         <span class="fld">Access</span>
         <div class="cell">
           <h3>Roles down to the module</h3>
-          <p>Build your own roles: this person sees assets only, that one gets tickets and the directory but never Settings. Every change lands in an audit log with who and when.</p>
-          <div class="tags"><span>Per-module rights</span><span>2FA</span><span>Audit log</span></div>
+          <p>Build your own roles: this person sees assets only, that one gets tickets and the directory but never Settings. On top of that, choose per department who edits and who only views. Every change lands in an audit log with who and when.</p>
+          <div class="tags"><span>Per-module rights</span><span>Per-department roles</span><span>2FA</span><span>Audit log</span></div>
         </div>
 
         <span class="fld">Data</span>
@@ -1292,8 +1293,8 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
           <h2>Everything the web does, in your pocket.</h2>
           <p>
             A native Android app with the whole of IT-Vault in it: assets with their photos
-            and brand logos, tickets, contracts, the directory, the Product Catalog, every
-            Settings section, imports and exports. Edits made offline sync the moment you're
+            and brand logos, departments and their extra fields, tickets, contracts, the directory,
+            the Product Catalog, every Settings section, imports and exports. Edits made offline sync the moment you're
             back on the network, QR and barcode scanning is built in, and it wears your
             server's name, logo and colours. No app store required.
           </p>
@@ -1309,6 +1310,7 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
         <li><b>The same dashboard</b>In-use ring, quick actions, status donut and type icons.</li>
         <li><b>Photos and logos</b>Product photos and brand logos on every asset, also offline.</li>
         <li><b>Every Settings section</b>Users and roles, WhatsApp linking, 2FA, branding, LDAP, UniFi and more.</li>
+        <li><b>Departments</b>New assets and tickets ask for the department; the asset ID and the extra fields follow it.</li>
         <li><b>Product Catalog</b>Category icons, model photos, and brand logos found on the brand's website.</li>
         <li><b>Imports and exports</b>Excel in and out for assets, contracts, the directory and the catalog.</li>
         <li><b>Offline first</b>Work with no signal; changes sync when you're back.</li>
