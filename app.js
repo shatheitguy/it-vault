@@ -3541,9 +3541,9 @@ async function loadCatModels(){
   const f=document.getElementById('modBrandFilter');
   if(f){
     const n=k=>list.filter(m=>k==='all'||(m.manufacturer||'')===k).length;
-    f.innerHTML=[['all','All']].concat(brands.map(b=>[b,b||'No brand'])).map(([k,t])=>
-      `<button type="button" class="${k===cxModBrand?'active':''}" data-k="${esc(k)}">${esc(t)} <span>${n(k)}</span></button>`).join('');
-    f.querySelectorAll('button').forEach(x=>x.onclick=()=>{cxModBrand=x.dataset.k; loadCatModels();});
+    f.innerHTML=[['all','All brands']].concat(brands.map(b=>[b,b||'No brand'])).map(([k,t])=>
+      `<option value="${esc(k)}" ${k===cxModBrand?'selected':''}>${esc(t)} (${n(k)})</option>`).join('');
+    f.onchange=()=>{cxModBrand=f.value; loadCatModels();};
   }
   const shown=list.filter(m=>cxModBrand==='all'||(m.manufacturer||'')===cxModBrand)
     .sort((x,y)=>x.name.localeCompare(y.name,undefined,{numeric:true,sensitivity:'base'}));
