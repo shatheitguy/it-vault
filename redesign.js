@@ -150,7 +150,7 @@
 
   /* ---- the sidebar and the dashboard cards ---- */
   const NAV = { navHome: 'home', navAssets: 'laptop', navContracts: 'file', navTickets: 'ticket', navDirectory: 'users',
-    navCatalog: 'folder', navLostFound: 'search', navTrash: 'trash', navAudit: 'list', navScan: 'radar',
+    navCatalog: 'folder', navDepartments: 'building', navLostFound: 'search', navTrash: 'trash', navAudit: 'list', navScan: 'radar',
     navHeartbeat: 'activity', navBackup: 'database', navSettings: 'settings' };
   function iconNav() {
     for (const [id, name] of Object.entries(NAV)) {

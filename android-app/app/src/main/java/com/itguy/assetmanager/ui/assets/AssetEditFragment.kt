@@ -355,6 +355,8 @@ class AssetEditFragment : Fragment() {
                 val picked = choices[position].id
                 if (picked == current.SpaceID) return
                 current = current.copy(SpaceID = picked)
+                // the category list follows the department
+                bindCategorySpinnerWithSelection(spinnerText(b.fType).ifBlank { current.Type })
                 // a new asset takes the next ID of the department it goes into
                 if (assetId == null) lifecycleScope.launch {
                     val tag = try { ApiClient.api().nextAssetTag(picked).body()?.tag } catch (e: Exception) { null }
@@ -732,25 +734,22 @@ class AssetEditFragment : Fragment() {
     }
 
     // ---- Category (Type) ----
-    private fun bindCategorySpinner() {
-        val labels = mutableListOf(NONE) + categories.map { it.name } + ADD_NEW
-        val sel = current.Type
-        val list = if (sel.isNotBlank() && categories.none { it.name == sel }) {
-            (mutableListOf(NONE, sel) + categories.map { it.name } + ADD_NEW)
-        } else labels
-        setSpinner(b.fType, list, sel, onSelected = { refreshExtraFields() }) { newVal ->
-            ApiClient.api().addCategory(NameOnly(newVal))
-            categories = ApiClient.api().categories().body().orEmpty()
-            bindCategorySpinnerWithSelection(newVal)
-        }
+    // A category kept to one department (Product Catalog) is only offered on
+    // that department's assets; the one this asset already has always stays.
+    private fun categoryNamesFor(sel: String): List<String> {
+        val sid = current.SpaceID
+        val names = categories.filter { it.space_id == null || sid == null || it.space_id == sid || it.name == sel }.map { it.name }
+        return if (sel.isNotBlank() && names.none { it == sel }) listOf(NONE, sel) + names + ADD_NEW
+        else listOf(NONE) + names + ADD_NEW
     }
+    private suspend fun addCategoryHere(newVal: String) {
+        ApiClient.api().addCategoryIn(NewCategory(newVal, current.SpaceID))
+        categories = ApiClient.api().categories().body().orEmpty()
+        bindCategorySpinnerWithSelection(newVal)
+    }
+    private fun bindCategorySpinner() = bindCategorySpinnerWithSelection(current.Type)
     private fun bindCategorySpinnerWithSelection(sel: String) {
-        val list = mutableListOf(NONE) + categories.map { it.name } + ADD_NEW
-        setSpinner(b.fType, list, sel, onSelected = { refreshExtraFields() }) { newVal ->
-            ApiClient.api().addCategory(NameOnly(newVal))
-            categories = ApiClient.api().categories().body().orEmpty()
-            bindCategorySpinnerWithSelection(newVal)
-        }
+        setSpinner(b.fType, categoryNamesFor(sel), sel, onSelected = { refreshExtraFields() }) { newVal -> addCategoryHere(newVal) }
     }
 
     // ---- Location ----

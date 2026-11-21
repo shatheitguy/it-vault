@@ -3872,8 +3872,7 @@ SPACE_TEMPLATES = {
                       "Air Conditioner": [("tonnage", "Tonnage", "number", "", 0), ("refrigerant", "Refrigerant", "text", "", 0)],
                       "Generator": [("kva", "Rating (kVA)", "number", "", 1), ("fuel", "Fuel", "choice", "Diesel,Petrol,Gas", 0)],
                       "Fire Extinguisher": [("ext_type", "Type", "choice", "CO2,Powder,Foam,Water", 1), ("expiry", "Refill / expiry date", "date", "", 1)]},
-           "plans": {"Air Conditioner": ("Filter clean and service", 3, "months"), "Generator": ("Service and load test", 6, "months"),
-                     "Fire Extinguisher": ("Inspection", 12, "months"), "Elevator": ("Statutory inspection", 12, "months")}},
+           },
     "furniture": {"name": "Furniture", "prefix": "FR", "icon": "box", "color": "#b07d4f",
            "categories": {"Desk": "box", "Chair": "box", "Cabinet": "box", "Table": "box", "Sofa": "box", "Shelf": "box"},
            "fields": {"": [("material", "Material", "text", "", 0), ("color", "Colour", "text", "", 0)]}},
@@ -3882,16 +3881,16 @@ SPACE_TEMPLATES = {
            "fields": {"": [("plate", "Plate number", "text", "", 1), ("vin", "VIN / chassis", "text", "", 0),
                            ("mileage", "Mileage (km)", "number", "", 0), ("reg_expiry", "Registration expiry", "date", "", 0),
                            ("insurance_expiry", "Insurance expiry", "date", "", 0), ("fuel", "Fuel", "choice", "Petrol,Diesel,Electric,Hybrid", 0)]},
-           "plans": {"*": ("Service", 6, "months")}},
+           },
     "tools": {"name": "Tools & Equipment", "prefix": "EQ", "icon": "box", "color": "#e74c3c",
            "categories": {"Power Tool": "box", "Hand Tool": "box", "Ladder": "box", "Test Equipment": "box", "Projector": "projector"},
            "fields": {"": [("calibration_due", "Calibration due", "date", "", 0)]},
-           "plans": {"Test Equipment": ("Calibration", 12, "months"), "Ladder": ("Safety inspection", 6, "months")}},
+           },
     "medical": {"name": "Medical", "prefix": "MD", "icon": "box", "color": "#e84393",
            "categories": {"Monitor": "monitor", "Defibrillator": "battery", "Infusion Pump": "box", "Bed": "box", "Wheelchair": "box"},
            "fields": {"": [("model_no", "Model number", "text", "", 0), ("calibration_due", "Calibration due", "date", "", 0),
                            ("risk", "Risk class", "choice", "I,IIa,IIb,III", 0)]},
-           "plans": {"*": ("Preventive maintenance", 6, "months")}},
+           },
     "blank": {"name": "", "prefix": "", "icon": "box", "color": "", "categories": {}, "fields": {}},
 }
 
@@ -4115,6 +4114,13 @@ def maint_due():
     except Exception: days = 30
     sc, sp = _space_sql(request.args.get("space"))
     c = conn(); cur = c.cursor()
+    if request.args.get("count"):
+        # how many schedules exist at all: the page shows nothing about
+        # maintenance until someone has added one
+        cur.execute("SELECT COUNT(*) AS n FROM MaintPlans p JOIN Assets a ON a._id=p.asset_id "
+                    "WHERE p.active=1 AND a.is_deleted=0" + (" AND a." + sc if sc else ""), sp)
+        n = cur.fetchone()["n"]; c.close()
+        return jsonify({"plans": int(n or 0)})
     cur.execute("SELECT p.*, a.Name, a.AssetTag, a.Type, a.Location FROM MaintPlans p JOIN Assets a ON a._id=p.asset_id "
                 "WHERE p.active=1 AND a.is_deleted=0 AND p.next_due IS NOT NULL AND p.next_due <= CURDATE() + INTERVAL %s DAY"
                 + (" AND a." + sc if sc else "") + " ORDER BY p.next_due", [days] + sp)
@@ -4714,6 +4720,12 @@ def categories_api():
         if not n: return jsonify({"error": "name required"}), 400
         try: _sid = int(_d.get("space_id")) if _d.get("space_id") else None
         except Exception: _sid = None
+        if _sid is not None:
+            cur.execute("SELECT id FROM Spaces WHERE id=%s", [_sid])
+            if not cur.fetchone():
+                _sid = None                  # a department that is gone: shared, as before
+            elif not _space_writable(_sid):
+                c.close(); return jsonify({"error": _VIEWER_MSG}), 403
         cur.execute("INSERT IGNORE INTO Categories (name, space_id) VALUES (%s,%s)", [n, _sid]); c.commit(); c.close()
         return jsonify({"ok": True})
     if request.method == "PUT":
@@ -4723,6 +4735,35 @@ def categories_api():
         cid = request.get_json(force=True).get("id")
         cur.execute("DELETE FROM Categories WHERE id=%s", [cid]); c.commit(); c.close()
         return jsonify({"ok": True})
+
+@app.route("/api/categories/<int:cid>/space", methods=["POST"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def category_space(cid):
+    """Which department an item category belongs to. {"space_id": null}
+    shares it with every department; a number keeps it to that department,
+    so only that department's asset form offers it."""
+    d = request.get_json(force=True, silent=True) or {}
+    raw = d.get("space_id")
+    sid = None if raw in (None, "", 0, "0") else _num(raw, None, int, "Department", 1)
+    c = conn(); cur = c.cursor()
+    try:
+        cur.execute("SELECT id, name, space_id FROM Categories WHERE id=%s", [cid]); cat = cur.fetchone()
+        if not cat:
+            return jsonify({"error": "not found"}), 404
+        if sid is not None:
+            cur.execute("SELECT id, name FROM Spaces WHERE id=%s", [sid]); sp = cur.fetchone()
+            if not sp:
+                return jsonify({"error": "No such department."}), 400
+            if not _space_writable(sid):
+                return jsonify({"error": _VIEWER_MSG}), 403
+        if cat.get("space_id") and not _space_writable(cat["space_id"]):
+            return jsonify({"error": _VIEWER_MSG}), 403
+        cur.execute("UPDATE Categories SET space_id=%s WHERE id=%s", [sid, cid]); c.commit()
+    finally:
+        c.close()
+    audit(session.get("user"), "CATALOG_DEPARTMENT", "", "category %s -> %s" % (cat["name"], sid if sid else "all departments"))
+    return jsonify({"ok": True, "space_id": sid})
+
 
 CATEGORY_ICONS = {"laptop", "desktop", "monitor", "smartphone", "tablet", "router", "switch", "wifi", "shield",
                   "server", "drive", "camera", "printer", "headphones", "battery", "keyboard", "projector", "box"}

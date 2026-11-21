@@ -111,8 +111,10 @@ data class CreateTicketResponse(val ok: Boolean?, val id: Int?, val code: String
 data class TicketReply(val id: Int, val ticket_id: Int, val author: String, val author_role: String, val body: String, val created_at: String)
 data class ReplyRequest(val body: String)
 
-data class NamedItem(val id: Int, val name: String)
+// space_id is only sent for item categories: the department that uses it (null = every department)
+data class NamedItem(val id: Int, val name: String, val space_id: Int? = null)
 data class NameOnly(val name: String)
+data class NewCategory(val name: String, val space_id: Int?)
 data class LocationItem(val id: Int, val name: String, val parent_id: Int = 0)
 data class ModelItem(val id: Int, val name: String, val manufacturer_id: Int?, val manufacturer: String?)
 

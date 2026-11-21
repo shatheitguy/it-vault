@@ -807,3 +807,67 @@ body.edit-layout .dashhidden{order:7;margin-top:0;padding-top:10px}
   #page-tickets .tablewrap tbody td:nth-child(3){grid-row:3;grid-column:1}
   #page-tickets .tablewrap tbody td:nth-child(6){grid-row:3;grid-column:2}
 }
+
+/* 2.10.1: the department field editor, laid out like the rest of the app */
+.fl-dialog .fl-add{display:grid;grid-template-columns:1fr 140px;gap:10px;margin-top:12px;padding-top:14px;border-top:1px solid var(--line)}
+.fl-dialog .fl-add input:not([type=checkbox]),.fl-dialog .fl-add select{width:100%;min-height:38px;padding:8px 11px;background:var(--bg1);
+  border:1px solid var(--line);border-radius:8px;color:var(--txt);font-family:var(--font);font-size:13px;box-shadow:none;outline:none}
+.fl-dialog .fl-add input:not([type=checkbox]):focus,.fl-dialog .fl-add select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.fl-dialog .fl-add #flOpts{grid-column:1/-1}
+.fl-dialog .fl-add .toggle{grid-column:1;justify-self:start;display:inline-flex;align-items:center;gap:9px;margin:0;height:38px;padding:0 12px;
+  font-size:13px;font-weight:600;border:1px solid var(--line);border-radius:8px;background:transparent}
+.fl-dialog .fl-add .toggle input[type=checkbox]{width:34px;height:20px;min-height:0;padding:0;border:0;flex:none}
+.fl-dialog .fl-add #flAdd{grid-column:2;height:38px;width:100%}
+.fl-dialog #flList .muted:only-child{margin:4px 0 0}
+.fl-dialog .fl-row b{min-width:120px}
+@media (max-width:520px){.fl-dialog .fl-add{grid-template-columns:1fr}.fl-dialog .fl-add .toggle,.fl-dialog .fl-add #flAdd{grid-column:1}}
+.widget.mt-none{display:none!important}
+
+/* 2.10.1: Product Catalog, one list at a time as cards */
+#page-catalog .cx-hint{margin:2px 0 14px;max-width:760px}
+.cx-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.cx-tabs{display:inline-flex;gap:4px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--surface2,var(--bg1));flex-wrap:wrap}
+.cx-tabs button{border:0;background:transparent;color:var(--muted);font:600 13px var(--font);padding:8px 14px;border-radius:9px;cursor:pointer;display:inline-flex;align-items:center;gap:7px}
+.cx-tabs button:hover{color:var(--txt)}
+.cx-tabs button.active{background:var(--accent);color:var(--btn-text,#04121f)}
+.cx-n{font-size:11px;font-weight:700;opacity:.75}
+.cx-n:empty{display:none}
+.cx-search{margin-left:auto;flex:0 1 260px;min-width:160px;min-height:38px;padding:8px 12px;background:var(--bg1);border:1px solid var(--line);border-radius:10px;color:var(--txt);font:13px var(--font)}
+.cx-search:focus,.cx-add input:focus,.cx-add select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.cx-pane[hidden]{display:none!important}
+.cx-add{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface2,var(--bg1));margin-bottom:12px}
+.cx-add input,.cx-add select{flex:1 1 200px;min-width:0;min-height:38px;padding:8px 11px;background:var(--bg1);border:1px solid var(--line);border-radius:8px;color:var(--txt);font:13px var(--font)}
+.cx-add select{flex:0 1 210px}
+.cx-add .btn{flex:none;min-height:38px}
+.cx-filter{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+.cx-filter button{border:1px solid var(--line);background:transparent;color:var(--muted);font:600 12px var(--font);padding:6px 11px;border-radius:999px;cursor:pointer}
+.cx-filter button span{opacity:.7;margin-left:3px}
+.cx-filter button:hover{color:var(--txt);border-color:var(--line2)}
+.cx-filter button.active{color:var(--accent);border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}
+.cx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:10px}
+.cx-item{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface,transparent);min-width:0;transition:border-color .12s}
+.cx-item:hover{border-color:var(--line2)}
+.cx-tile{padding:0;border:0;background:none;cursor:pointer;border-radius:10px;flex:none;display:grid}
+button.cx-tile:hover .ticon{outline:2px solid var(--accent);outline-offset:2px}
+.cx-tile .ticon{width:40px;height:40px}
+.cx-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.cx-body b{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cx-sub{min-width:0;display:flex}
+.cx-sub .cat-site{display:block;max-width:100%}
+.cx-acts{display:flex;flex:none;gap:4px}
+.cx-acts .ibtn{width:28px;height:28px;font-size:13px;margin:0!important}
+.cx-chip-sel{appearance:none;-webkit-appearance:none;max-width:100%;border:1px solid var(--line);border-radius:999px;background:transparent;color:var(--muted);
+  font:600 11px var(--font);padding:2px 22px 2px 9px;cursor:pointer;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 11px) 50%,calc(100% - 7px) 50%;background-size:4px 4px;background-repeat:no-repeat}
+.cx-chip-sel:hover,.cx-chip-sel:focus{color:var(--accent);border-color:var(--accent);outline:none}
+.cx-chip-sel option{color:var(--txt);background:var(--bg1)}
+.cx-empty{grid-column:1/-1;padding:28px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;font-size:13px}
+@media (max-width:760px){
+  .cx-search{margin-left:0;flex:1 1 100%}
+  .cx-tabs{width:100%;display:grid;grid-template-columns:1fr 1fr}
+  .cx-tabs button{justify-content:center;padding:8px 6px}
+  .cx-grid{grid-template-columns:1fr}
+  .cx-add select{flex:1 1 100%}
+  .cx-add .btn{flex:1 1 100%}
+}

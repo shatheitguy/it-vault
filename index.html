@@ -6,8 +6,8 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20261121b">
-<link rel="stylesheet" href="/redesign.css?v=20261121b">
+<link rel="stylesheet" href="/style.css?v=20261122a">
+<link rel="stylesheet" href="/redesign.css?v=20261122a">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -31,6 +31,7 @@
       <div class="nav-grp">Records</div>
       <a id="navDirectory" style="display:none"><span class="ni">👥</span>Directory</a>
       <a id="navCatalog" style="display:none"><span class="ni">🗂️</span>Product Catalog</a>
+      <a id="navDepartments" style="display:none"><span class="ni">🏢</span>Departments</a>
       <a id="navLostFound" style="display:none" data-i18n="LostFound"><span class="ni">🔎</span>Lost &amp; Found</a>
       <a id="navTrash" style="display:none" data-i18n="Trash"><span class="ni">🗑️</span>Trash</a>
       <a id="navAudit" data-i18n="AuditLog"><span class="ni">📋</span>Log</a>
@@ -123,6 +124,14 @@
           <div class="empty" id="lfEmpty" style="display:none">NOTHING REPORTED LOST OR FOUND</div>
         </div>
       </div>
+    </div>
+
+    <div id="page-departments" style="display:none">
+      <div class="topbar">
+        <div><div class="crumb">IT GUY / DEPARTMENTS</div><h2>Departments</h2></div>
+        <div class="spacer"></div>
+      </div>
+      <div class="panel" id="spacesPanel"></div>
     </div>
 
     <div id="page-trash" style="display:none">
@@ -227,33 +236,53 @@
         <button class="btn ghost" id="catImportBtn">⬆ IMPORT EXCEL/CSV</button>
         <input type="file" id="catImportFile" accept=".xlsx,.xls,.csv" style="display:none">
       </div>
-      <p class="sec-hint">Reference lists used on the Add Asset and Contract forms -- item categories, manufacturers, models, and contract types. Add everything here in bulk, then just pick it from a dropdown. Import an .xlsx/.xls/.csv with any of these column headers: <b>Category</b>, <b>Manufacturer</b>, <b>Model</b> -- a row can fill in just one, or a Manufacturer+Model pair.</p>
-      <div class="grid2 catalog-grid">
-        <div class="invbox">
-          <label>ITEM CATEGORIES <span id="catCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="catInput" placeholder="e.g. Mobile, Network, CCTV"><button class="btn sm" id="catAdd">＋ Add</button></div>
-          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="catBody"></tbody></table></div>
+      <p class="sec-hint cx-hint">The lists the asset and contract forms pick from. Import an .xlsx or .csv with <b>Category</b>, <b>Manufacturer</b> and <b>Model</b> columns to fill them in bulk.</p>
+
+      <div class="cx-bar">
+        <div class="cx-tabs" id="cxTabs" role="tablist">
+          <button type="button" class="active" data-cx="cat">Categories <span id="catCount" class="cx-n"></span></button>
+          <button type="button" data-cx="mfr">Brands <span id="mfrCatCount" class="cx-n"></span></button>
+          <button type="button" data-cx="mod">Models <span id="modCatCount" class="cx-n"></span></button>
+          <button type="button" data-cx="ct">Contract types <span id="ctTypeCatCount" class="cx-n"></span></button>
         </div>
-        <div class="invbox">
-          <label>MANUFACTURERS <span id="mfrCatCount" class="cat-count"></span></label>
-          <div class="catrow cat-add2"><input id="mfrCatInput" placeholder="Brand, e.g. Dell"><input id="mfrSiteInput" placeholder="Website, e.g. dell.com" title="Optional. IT-Vault fetches the brand's logo from it."><button class="btn sm" id="mfrCatAdd">＋ Add</button></div>
-          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
-        </div>
-        <div class="invbox">
-          <label>CONTRACT TYPES <span id="ctTypeCatCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="ctTypeCatInput" placeholder="e.g. AMC, License, Subscription"><button class="btn sm" id="ctTypeCatAdd">＋ Add</button></div>
-          <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="ctTypeCatBody"></tbody></table></div>
-        </div>
+        <input id="cxSearch" class="cx-search" type="search" placeholder="Search" autocomplete="off">
       </div>
-      <div class="invbox" style="margin-top:14px">
-        <label>MODELS <span id="modCatCount" class="cat-count"></span></label>
-        <div class="catrow">
-          <select id="modMfrSelect"><option value="">-- choose manufacturer --</option></select>
-          <input id="modCatInput" placeholder="e.g. iPhone 13 Pro Max">
-          <button class="btn sm" id="modCatAdd">＋ Add</button>
+
+      <section class="cx-pane" data-cx="cat">
+        <div class="cx-add">
+          <input id="catInput" placeholder="New category, e.g. Generator">
+          <select id="catSpaceSel" class="cx-space" title="Which department's assets can use it"></select>
+          <button class="btn" id="catAdd">＋ Add category</button>
         </div>
-        <div class="tablewrap"><table class="dtable"><thead><tr><th>Model</th><th>Manufacturer</th><th class="col-del"></th></tr></thead><tbody id="modCatBody"></tbody></table></div>
-      </div>
+        <div class="cx-filter" id="catSpaceFilter"></div>
+        <div class="cx-grid" id="catBody"></div>
+      </section>
+
+      <section class="cx-pane" data-cx="mfr" hidden>
+        <div class="cx-add">
+          <input id="mfrCatInput" placeholder="Brand, e.g. Dell">
+          <input id="mfrSiteInput" placeholder="Website, e.g. dell.com (for the logo)" title="Optional. IT-Vault fetches the brand's logo from it.">
+          <button class="btn" id="mfrCatAdd">＋ Add brand</button>
+        </div>
+        <div class="cx-grid" id="mfrCatBody"></div>
+      </section>
+
+      <section class="cx-pane" data-cx="mod" hidden>
+        <div class="cx-add">
+          <select id="modMfrSelect"><option value="">-- choose brand --</option></select>
+          <input id="modCatInput" placeholder="Model, e.g. Latitude 5440">
+          <button class="btn" id="modCatAdd">＋ Add model</button>
+        </div>
+        <div class="cx-grid" id="modCatBody"></div>
+      </section>
+
+      <section class="cx-pane" data-cx="ct" hidden>
+        <div class="cx-add">
+          <input id="ctTypeCatInput" placeholder="Contract type, e.g. AMC, Licence, Subscription">
+          <button class="btn" id="ctTypeCatAdd">＋ Add type</button>
+        </div>
+        <div class="cx-grid" id="ctTypeCatBody"></div>
+      </section>
     </div>
 
     <!-- Rename a catalogue entry.
@@ -424,7 +453,6 @@
           <button class="cfgitem active" data-sec="general">⚙ General</button>
           <button class="cfgitem" data-sec="account">🧑 My Account</button>
           <button class="cfgitem" data-sec="users">👤 Users</button>
-          <button class="cfgitem" data-sec="spaces">🏢 Departments</button>
           <button class="cfgitem" data-sec="notif">🔔 Notifications</button>
           <button class="cfgitem" data-sec="sla">⏱ SLA & Automation</button>
           <button class="cfgitem" data-sec="database">🗄 Database</button>
@@ -872,7 +900,6 @@
             <div class="m-actions"><button class="btn ghost" id="resetCustomBtn">↺ RESET</button><button class="btn mag" id="saveCustomBtn">✓ SAVE THEME</button></div>
           </section>
           <!-- ASSET LABEL (QR / print label — separate from Branding) -->
-          <section class="cfg-sec" data-sec="spaces" style="display:none"><div class="panel" id="spacesPanel"></div></section>
           <section class="cfg-sec" data-sec="label" style="display:none">
             <div class="panel">
               <div class="secthead">TAG MODEL</div>
@@ -1530,8 +1557,8 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20261121b"></script>
-<script src="/redesign.js?v=20261121b"></script>
-<script src="/spaces.js?v=20261121b"></script>
+<script src="/app.js?nocache=20261122a"></script>
+<script src="/redesign.js?v=20261122a"></script>
+<script src="/spaces.js?v=20261122a"></script>
 </body>
 </html>

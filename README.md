@@ -54,7 +54,8 @@ Once installed, the app updates itself from **Settings → Check for updates**.
 ## Departments
 
 IT-Vault started as an IT register; since 2.10.0 it runs every department from
-one install. **Settings → Departments** adds one from a template, or a blank one.
+one install. **Departments**, in the sidebar, adds one from a template, or a blank one.
+A template sets up the ID prefix, item categories and their fields; nothing else.
 
 | Template | Asset IDs | Item categories | Fields and schedules it adds |
 |---|---|---|---|
@@ -68,9 +69,13 @@ one install. **Settings → Departments** adds one from a template, or a blank o
 - **Fields that follow the item category.** A Generator asks for its kVA rating,
   a Vehicle for its plate. Add your own per department or per category: text,
   number, date, choice or checkbox, required or optional.
-- **Preventive maintenance on the asset.** Book a job "every 6 months"; *Maintenance
-  due* on the Assets page and a dashboard card show what's coming, and *Done*
-  logs it and books the next one.
+- **Categories per department.** In the **Product Catalog**, set each item category
+  to *Every department* or to one department only. The asset form then offers
+  only the categories of the department the asset is in, on the web and on Android.
+- **Preventive maintenance, only when you want it.** Open an asset and book a job
+  "every 6 months". Once there's at least one schedule, *Maintenance due* appears
+  on the Assets page and the dashboard; *Done* logs it and books the next one.
+  Until then, nothing about maintenance shows.
 - **Locations as building › floor › room**, so two buildings can each have a "Store".
 - **One Assets page with a tab per department.** The dashboard and exports follow
   the tab you're on.

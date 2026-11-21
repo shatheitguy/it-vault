@@ -136,12 +136,13 @@ function applyNavPermissions(){
   show('navImport', canDo('assets.import'));
   show('navExport', canDo('assets.export'));
   show('navCatalog', canDo('assets.catalog'));
+  show('navDepartments', MY_ROLE===ROLE_ADMIN);
   show('navTrash',   canDo('assets.trash'));
   show('navLostFound', canDo('assets.lostfound'));
 
   // Group headings are noise when everything under them is hidden.
   const groups=[
-    ['Records', ['navDirectory','navCatalog','navLostFound','navTrash','navAudit']],
+    ['Records', ['navDirectory','navCatalog','navDepartments','navLostFound','navTrash','navAudit']],
     ['Tools',   ['navScan','navHeartbeat','navBackup']],
   ];
   document.querySelectorAll('.nav-grp').forEach(g=>{
@@ -1321,6 +1322,7 @@ async function loadModelOptions(selModel, mfrName, mfrs){
 // populate the Item Category <select> on the Add Asset form from the
 // Categories reference table, auto-adding it if it's genuinely new (e.g. an
 // existing asset's Type value from before this became a picker)
+function formSpaceId(){ const e=document.getElementById('f_SpaceID'); return e&&e.value?Number(e.value):null; }
 async function loadCategoryOptions(selCat){
   const sel=document.getElementById('f_Type'); if(!sel)return;
   let cats=[];
@@ -1331,9 +1333,13 @@ async function loadCategoryOptions(selCat){
       if(r2&&r2.ok){ const r3=await api('/api/categories'); cats=r3?await r3.json():cats; }
     }
   }catch(e){}
+  // a category kept to one department only shows on that department's assets;
+  // the one this asset already has always stays in the list
+  const sid=formSpaceId();
+  if(sid) cats=cats.filter(c=>!c.space_id||c.space_id===sid||c.name===selCat);
   sel.innerHTML='<option value="">-- select category --</option>'+cats.map(c=>`<option value="${esc(c.name)}" ${c.name===selCat?'selected':''}>${esc(c.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
-    if(sel.value==='__new'){const v=await uiPrompt('New category name:'); if(v&&v.trim()){const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadCategoryOptions(v.trim());}} else {sel.value=selCat;}}
+    if(sel.value==='__new'){const v=await uiPrompt('New category name:'); if(v&&v.trim()){const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim(),space_id:formSpaceId()})}); if(r&&r.ok){await loadCategoryOptions(v.trim());}} else {sel.value=selCat;}}
   };
 }
 // populate the Location <select> on the Add Asset form from the Locations
@@ -3315,6 +3321,7 @@ document.getElementById('ctGroupBy').onchange=(e)=>{ctGroupBy=e.target.value;ren
 document.getElementById('ctPrintSelBtn').onclick=printContractsSelected;
 document.getElementById('ctDelSelBtn').onclick=deleteContractsSelected;
 document.getElementById('navCatalog').onclick=()=>showPage('page-catalog');
+document.getElementById('navDepartments').onclick=()=>showPage('page-departments');
 document.getElementById('ldapCancel').onclick=()=>document.getElementById('ldapModal').classList.remove('show');
 document.getElementById('coSave').onclick=doCheckout;
 window.loadCfgUsers=window.loadCfgUsers||function(){};window.editRow=openModal;window.delRow=delRow;window.editUser=editUser;window.delUser=delUser;window.delInvoice=delInvoice;
@@ -3325,11 +3332,11 @@ window.openBackup=openBackup;window.doBackup=doBackup;window.doRestore=doRestore
 window.openEmpModal=openEmpModal;window.openLdapImport=openLdapImport;
 
 function showPage(id){
-  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-lostfound','page-tickets','page-contracts','page-catalog','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
+  const PAGES=['page-dashboard','page-assets','page-employees','page-trash','page-lostfound','page-tickets','page-contracts','page-catalog','page-departments','page-usettings','page-scan','page-heartbeat','page-audit','page-import','page-export'];
   PAGES.forEach(p=>{const el=document.getElementById(p);if(el)el.style.display=(p===id?'block':'none');});
   document.querySelectorAll('.nav a').forEach(a=>a.classList.remove('active'));
   const map={  'page-dashboard':'navHome','page-employees':'navDirectory','page-trash':'navTrash','page-lostfound':'navLostFound','page-tickets':'navTickets',
-    'page-contracts':'navContracts','page-catalog':'navCatalog',
+    'page-contracts':'navContracts','page-catalog':'navCatalog','page-departments':'navDepartments',
     'page-usettings':'navSettings','page-scan':'navScan','page-heartbeat':'navHeartbeat',
     'page-audit':'navAudit','page-import':'navImport','page-export':'navExport','page-assets':'navAssets'};
   const n=map[id]?document.getElementById(map[id]):null;
@@ -3344,6 +3351,7 @@ function showPage(id){
   else if(id==='page-tickets')loadTickets();
   else if(id==='page-contracts')loadContracts();
   else if(id==='page-catalog')loadCatalog();
+  else if(id==='page-departments'){ if(window.loadSpacesPanel) loadSpacesPanel(); }
   else if(id==='page-usettings'){loadUserSettings();loadSettings();loadCustom();}
   else if(id==='page-scan')openScan();
   else if(id==='page-heartbeat'){loadHeartbeat();startHbAuto();}
@@ -3453,38 +3461,108 @@ async function loadCatalog(){
 }
 async function loadCatContractTypes(){
   const r=await api('/api/contract-types'); const list=r?await r.json():[];
-  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>`<tr><td><span class="ctype">${window.contractTypeIcon?contractTypeIcon(t.name):''}<span>${esc(t.name)}</span></span></td><td class="col-del">${catActions('contract-types',t)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
-  document.getElementById('ctTypeCatCount').textContent=list.length?`(${list.length})`:'';
+  document.getElementById('ctTypeCatBody').innerHTML=list.map(t=>cxItem({name:t.name,tile:`<span class="cx-tile">${window.contractTypeIcon?contractTypeIcon(t.name):''}</span>`,
+    actions:catActions('contract-types',t)})).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
+  document.getElementById('ctTypeCatCount').textContent=list.length||'';
+  cxApplySearch();
 }
 async function loadCatCategories(){
   const r=await api('/api/categories'); const list=r?await r.json():[];
   // each category shows the icon (or photo) its assets get in the list, and
   // clicking it lets you choose another or upload a product photo
   window.__CATS=list;
-  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button><span>${esc(c.name)}</span></div></td><td class="col-del"><button class="ibtn" title="Icon or photo" aria-label="Icon or photo" onclick="openCatLook(${c.id})">🖼</button><button class="ibtn" title="Extra fields for this category" aria-label="Extra fields" onclick='openFieldsEditor({category:${esc(JSON.stringify(c.name))},space_id:null,title:${esc(JSON.stringify(c.name+": fields"))}})'>☰</button>${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  const sps=window.SPACES||[], multi=sps.length>1;
+  // which department a category belongs to: chips to filter by, a picker on each card
+  const f=document.getElementById('catSpaceFilter');
+  if(f){
+    f.style.display=multi?'':'none';
+    if(multi){
+      const n=k=>list.filter(c=>k==='all'?true:k==='shared'?!c.space_id:c.space_id===k).length;
+      f.innerHTML=[['all','All'],['shared','Every department']].concat(sps.map(s=>[s.id,s.name]))
+        .map(([k,t])=>`<button type="button" class="${String(k)===String(cxCatSpace)?'active':''}" data-k="${k}">${esc(t)} <span>${n(k)}</span></button>`).join('');
+      f.querySelectorAll('button').forEach(b=>b.onclick=()=>{cxCatSpace=/^\d+$/.test(b.dataset.k)?Number(b.dataset.k):b.dataset.k;loadCatCategories();});
+    }
+  }
+  const add=document.getElementById('catSpaceSel');
+  if(add){ add.style.display=multi?'':'none'; const keep=add.value;
+    add.innerHTML='<option value="">Every department</option>'+sps.map(s=>`<option value="${s.id}">${esc(s.name)} only</option>`).join('');
+    add.value=keep||(typeof cxCatSpace==='number'?String(cxCatSpace):''); }
+  const shown=list.filter(c=>cxCatSpace==='all'?true:cxCatSpace==='shared'?!c.space_id:c.space_id===cxCatSpace);
+  const spSel=c=>multi?`<select class="cx-chip-sel" title="Which department's assets can use this category" onchange="setCategorySpace(${c.id},this.value)">`
+      +`<option value="" ${c.space_id?'':'selected'}>Every department</option>`
+      +sps.map(s=>`<option value="${s.id}" ${c.space_id===s.id?'selected':''}>${esc(s.name)} only</option>`).join('')+'</select>':'';
+  document.getElementById('catBody').innerHTML=shown.map(c=>cxItem({name:c.name,
+      tile:`<button type="button" class="cx-tile" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button>`,
+      sub:spSel(c),
+      actions:`<button class="ibtn" title="Icon or photo" aria-label="Icon or photo" onclick="openCatLook(${c.id})">🖼</button><button class="ibtn" title="Extra fields for this category" aria-label="Extra fields" onclick='openFieldsEditor({category:${esc(JSON.stringify(c.name))},space_id:null,title:${esc(JSON.stringify(c.name+": fields"))}})'>☰</button>${catActions('categories',c)}`
+    })).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
   if(window.loadCategoryIcons)loadCategoryIcons();
-  document.getElementById('catCount').textContent=list.length?`(${list.length})`:'';
+  document.getElementById('catCount').textContent=list.length||'';
+  cxApplySearch();
 }
 async function loadCatManufacturers(){
   const r=await api('/api/manufacturers'); const list=r?await r.json():[];
   window.__MFRS=list;
-  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Logo" onclick="openBrandLogo(${m.id})">${window.brandTile?brandTile(m):''}</button><span class="cat-name"><span>${esc(m.name)}</span>${m.website?`<a class="cat-site" href="${esc(m.website)}" target="_blank" rel="noopener noreferrer">${esc(m.website.replace(/^https?:\/\//,''))}</a>`:`<a class="cat-site cat-site-add" href="#" onclick="event.preventDefault();editCatalogItem('manufacturers','${m.id}')">＋ Add website</a>`}</span></div></td><td class="col-del"><button class="ibtn" title="Logo" aria-label="Logo" onclick="openBrandLogo(${m.id})">🖼</button>${catActions('manufacturers',m)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('mfrCatBody').innerHTML=list.map(m=>cxItem({name:m.name,
+      tile:`<button type="button" class="cx-tile" title="Logo" onclick="openBrandLogo(${m.id})">${window.brandTile?brandTile(m):''}</button>`,
+      sub:m.website?`<a class="cat-site" href="${esc(m.website)}" target="_blank" rel="noopener noreferrer">${esc(m.website.replace(/^https?:\/\//,''))}</a>`:`<a class="cat-site cat-site-add" href="#" onclick="event.preventDefault();editCatalogItem('manufacturers','${m.id}')">＋ Add website</a>`,
+      actions:`<button class="ibtn" title="Logo" aria-label="Logo" onclick="openBrandLogo(${m.id})">🖼</button>${catActions('manufacturers',m)}`
+    })).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
   CAT_MFRS=list;
-  document.getElementById('mfrCatCount').textContent=list.length?`(${list.length})`:'';
+  document.getElementById('mfrCatCount').textContent=list.length||'';
+  cxApplySearch();
   const sel=document.getElementById('modMfrSelect');
   const cur=sel.value;
-  sel.innerHTML='<option value="">-- choose manufacturer --</option>'+list.map(m=>`<option value="${m.id}" ${String(m.id)===cur?'selected':''}>${esc(m.name)}</option>`).join('');
+  sel.innerHTML='<option value="">-- choose brand --</option>'+list.map(m=>`<option value="${m.id}" ${String(m.id)===cur?'selected':''}>${esc(m.name)}</option>`).join('');
 }
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
   window.__MODELS=list;
-  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button><span class="cat-name"><span>${esc(m.name)}</span>${m.manufacturer?`<span class="cat-site mfr-sub">${esc(m.manufacturer)}</span>`:''}</span></div></td><td>${esc(m.manufacturer||'—')}</td><td class="col-del"><button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  document.getElementById('modCatBody').innerHTML=list.map(m=>cxItem({name:m.name,
+      tile:`<button type="button" class="cx-tile" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button>`,
+      sub:m.manufacturer?`<span class="cat-site">${esc(m.manufacturer)}</span>`:'',
+      actions:`<button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}`
+    })).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
+  cxApplySearch();
   CAT_MODELS=list;
-  document.getElementById('modCatCount').textContent=list.length?`(${list.length})`:'';
+  document.getElementById('modCatCount').textContent=list.length||'';
 }
 // Every catalogue row's buttons. The row's own values are stashed by id so
 // the editor does not have to re-fetch a list it has just drawn.
 let CAT_ROWS={}, CAT_MFRS=[], CAT_MODELS=[];
+// ---- the catalogue's layout: one list at a time, as cards, with a search
+let cxTab='cat', cxCatSpace='all';
+function cxItem(o){
+  return `<div class="cx-item" data-q="${esc(String(o.name||'').toLowerCase())}">${o.tile||''}<div class="cx-body"><b title="${esc(o.name)}">${esc(o.name)}</b>${o.sub?`<div class="cx-sub">${o.sub}</div>`:''}</div><div class="cx-acts">${o.actions||''}</div></div>`;
+}
+function cxApplySearch(){
+  const q=((document.getElementById('cxSearch')||{}).value||'').trim().toLowerCase();
+  document.querySelectorAll('#page-catalog .cx-pane').forEach(p=>{
+    let shown=0;
+    p.querySelectorAll('.cx-item').forEach(it=>{const ok=!q||it.dataset.q.includes(q); it.style.display=ok?'':'none'; if(ok)shown++;});
+    let none=p.querySelector('.cx-nomatch');
+    const items=p.querySelectorAll('.cx-item').length;
+    if(q&&items&&!shown){ if(!none){none=document.createElement('div');none.className='cx-empty cx-nomatch';p.appendChild(none);} none.textContent='Nothing matches "'+q+'".'; none.style.display=''; }
+    else if(none) none.style.display='none';
+  });
+}
+function cxShow(tab){
+  cxTab=tab;
+  document.querySelectorAll('#cxTabs button').forEach(b=>b.classList.toggle('active',b.dataset.cx===tab));
+  document.querySelectorAll('#page-catalog .cx-pane').forEach(p=>p.hidden=p.dataset.cx!==tab);
+  try{localStorage.setItem('cxTab',tab);}catch(e){}
+}
+(function(){
+  try{const t=localStorage.getItem('cxTab'); if(t)cxShow(t);}catch(e){}
+  document.querySelectorAll('#cxTabs button').forEach(b=>b.onclick=()=>cxShow(b.dataset.cx));
+  const s=document.getElementById('cxSearch'); if(s)s.oninput=cxApplySearch;
+})();
+async function setCategorySpace(id,v){
+  const r=await api('/api/categories/'+id+'/space',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({space_id:v?Number(v):null})});
+  if(r&&r.ok){ const sp=(window.SPACES||[]).find(s=>String(s.id)===String(v)); toast(sp?'✓ Only '+sp.name+' assets offer it now':'✓ Every department can use it'); loadCatCategories(); }
+  else if(r){ const j=await r.json().catch(()=>({})); toast('✕ '+(j.error||'failed')); loadCatCategories(); }
+}
+window.setCategorySpace=setCategorySpace;
 function catActions(kind,row){
   CAT_ROWS[kind+':'+row.id]=row;
   return `<button class="ibtn" title="Edit" aria-label="Edit" onclick="editCatalogItem('${kind}','${row.id}')">✎</button>`
@@ -3561,7 +3639,8 @@ async function delCatalogItem(kind,id){
 window.delCatalogItem=delCatalogItem;
 document.getElementById('catAdd').onclick=async()=>{
   const el=document.getElementById('catInput'); const n=el.value.trim(); if(!n)return;
-  const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,space_id:(window.currentSpace&&currentSpace())||null})});
+  const ss=document.getElementById('catSpaceSel');
+  const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,space_id:ss&&ss.value?Number(ss.value):null})});
   if(r&&r.ok){el.value='';loadCatCategories();}
 };
 document.getElementById('mfrCatAdd').onclick=async()=>{
@@ -3587,6 +3666,8 @@ document.getElementById('modCatAdd').onclick=async()=>{
   const r=await api('/api/models',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,manufacturer_id:mid})});
   if(r&&r.ok){el.value='';loadCatModels();}
 };
+[['catInput','catAdd'],['mfrCatInput','mfrCatAdd'],['mfrSiteInput','mfrCatAdd'],['modCatInput','modCatAdd'],['ctTypeCatInput','ctTypeCatAdd']]
+  .forEach(([i,b])=>{const el=document.getElementById(i); if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();document.getElementById(b).click();}});});
 document.getElementById('catImportBtn').onclick=()=>document.getElementById('catImportFile').click();
 document.getElementById('catImportFile').onchange=async()=>{
   const inp=document.getElementById('catImportFile');
@@ -4409,6 +4490,7 @@ window.repairDashStructure=repairDashStructure;
     navContracts: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navTrash: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
     navCatalog: me.role===ROLE_ADMIN || me.role===ROLE_EDIT,
+    navDepartments: me.role===ROLE_ADMIN,
     navBackup: me.role===ROLE_ADMIN
   };
   Object.entries(navShow).forEach(([id,show])=>{ const el=document.getElementById(id); if(el) el.style.display = show ? 'flex' : 'none'; });

@@ -177,6 +177,8 @@ interface ApiService {
     suspend fun categories(): Response<List<NamedItem>>
     @POST("api/categories")
     suspend fun addCategory(@Body body: NameOnly): Response<OkResponse>
+    @POST("api/categories")
+    suspend fun addCategoryIn(@Body body: NewCategory): Response<OkResponse>
     @HTTP(method = "DELETE", path = "api/categories", hasBody = true)
     suspend fun deleteCategory(@Body body: IdRequest): Response<OkResponse>
 

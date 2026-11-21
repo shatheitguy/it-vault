@@ -96,6 +96,8 @@
       ff.insertBefore(box, ff.firstChild);
       box.querySelectorAll('input[name=f_space]').forEach(r => r.onchange = async () => {
         $('f_SpaceID').value = r.value;
+        // the category list follows the department
+        if (typeof loadCategoryOptions === 'function') { const ty = $('f_Type'); await loadCategoryOptions(ty ? ty.value : ''); }
         if (!id) {   // a new asset takes the next ID of the department it goes into
           const t = $('f_AssetTag'); const res = await fetch('/api/assets/next-tag?space=' + r.value);
           if (t && res.ok) t.value = (await res.json()).tag || t.value;
@@ -176,12 +178,12 @@
       </div>`;
     mb.querySelector('#plAdd').onclick = async () => {
       const r = await fetch(`/api/assets/${formId}/plans`, J({ title: $('plTitle').value.trim(), every_n: $('plN').value, every_unit: $('plUnit').value, last_done: $('plLast').value }));
-      if (r.ok) { say('Schedule added'); drawPlans(); } else say(await errOf(r), false);
+      if (r.ok) { say('Schedule added'); drawPlans(); updateMaintCount(); } else say(await errOf(r), false);
     };
     mb.querySelectorAll('[data-done]').forEach(b => b.onclick = () => markDone(b.dataset.done, drawPlans));
     mb.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
       if (!(await uiConfirm('Remove this maintenance schedule? The history of jobs already done stays.'))) return;
-      const r = await fetch('/api/plans/' + b.dataset.del, { method: 'DELETE' }); if (r.ok) drawPlans(); else say(await errOf(r), false);
+      const r = await fetch('/api/plans/' + b.dataset.del, { method: 'DELETE' }); if (r.ok) { drawPlans(); updateMaintCount(); } else say(await errOf(r), false);
     });
   }
 
@@ -203,8 +205,20 @@
   }
   const openAsset = id => { if (typeof openModal === 'function') { showPage('page-assets'); openModal(id); } };
 
+  // Nothing about maintenance shows until someone adds a schedule to an asset.
+  async function hasPlans() {
+    try { const r = await fetch('/api/maint/due?count=1' + spaceQuery('&')); return r.ok ? ((await r.json()).plans || 0) > 0 : false; } catch (e) { return false; }
+  }
+  window.refreshMaintVisibility = async function () {
+    const any = await hasPlans();
+    const mb = $('maintBtn'); if (mb) mb.style.display = any ? '' : 'none';
+    const pg = $('maintPanel'); if (pg && !any) pg.style.display = 'none';
+    const w = $('dashMaint') && $('dashMaint').closest('.widget'); if (w) w.classList.toggle('mt-none', !any);
+    return any;
+  };
   async function updateMaintCount() {
     const b = $('maintCount'); if (!b) return;
+    if (!(await window.refreshMaintVisibility())) { b.textContent = ''; return; }
     const rows = await fetchDue(7);
     b.textContent = rows.length ? rows.length : '';
     b.classList.toggle('late', rows.some(p => p.days_left < 0));
@@ -245,8 +259,7 @@
   async function loadSpacesPanel() {
     const p = $('spacesPanel'); if (!p) return;
     await loadSpaces();
-    p.innerHTML = `<div class="secthead">DEPARTMENTS</div>
-      <p class="sec-hint">Run more than IT from one place: Facilities, Fleet, Furniture, Tools… Each department has its own asset ID prefix (IT-1001, FM-1001), categories and extra fields, and you choose which staff see which department under Users.</p>
+    p.innerHTML = `<p class="sec-hint" style="margin-top:0">Run more than IT from one place: Facilities, Fleet, Furniture, Tools… Each department has its own asset ID prefix (IT-1001, FM-1001), categories and extra fields. Who can edit or only view each one is set per person in Settings › Users.</p>
       <div class="sp-cards">${window.SPACES.map(s => `<div class="sp-card">
           <span class="sp-dot big" style="background:${h(s.color || 'var(--accent)')}"></span>
           <div class="sp-info"><b>${h(s.name)}</b><span class="muted">IDs ${h(s.prefix)}-${s.next_no}… · ${s.assets} asset${s.assets === 1 ? '' : 's'}</span></div>
@@ -270,7 +283,7 @@
     const wrap = document.createElement('div'); wrap.className = 'modal show ui-dialog';
     wrap.innerHTML = `<div class="modal-box sp-dialog" role="dialog" aria-modal="true">
       <h3>${sp ? 'Edit ' + h(sp.name) : 'Add a department'}</h3>
-      ${sp ? '' : `<p class="sec-hint" style="margin:0 0 10px">Start from a template: it sets up the ID prefix, categories, their icons, the fields each asks for, and suggested maintenance.</p>
+      ${sp ? '' : `<p class="sec-hint" style="margin:0 0 10px">Start from a template: it sets up the ID prefix, the item categories and the fields each asks for. Nothing else is created: maintenance schedules are only ever added by you, on an asset.</p>
         <div class="tpl-grid">${tpls.map((t, i) => `<label class="tpl"><input type="radio" name="tpl" value="${h(t.key)}" ${i === 0 ? 'checked' : ''}>
           <span><b>${h(t.name)}</b><em>${t.prefix ? h(t.prefix) + '-1001' : 'your own'}</em><small>${h((t.categories || []).slice(0, 5).join(', '))}${(t.categories || []).length > 5 ? '…' : ''}</small></span></label>`).join('')}</div>`}
       <div class="grid2" style="margin-top:12px">
@@ -365,7 +378,6 @@
     }
     drawDashMaint();
     document.addEventListener('click', e => {
-      const it = e.target.closest('.cfgitem[data-sec="spaces"]'); if (it) setTimeout(loadSpacesPanel, 30);
       if (e.target.closest('#addUserBtn,[onclick*="addUser"]')) setTimeout(() => fillUserSpaces(''), 60);
     });
   }
