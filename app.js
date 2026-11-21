@@ -3547,7 +3547,10 @@ async function loadCatModels(){
   document.getElementById('modCatBody').innerHTML=brands.map(b=>{
       const ms=byBrand[b].sort((x,y)=>x.name.localeCompare(y.name,undefined,{numeric:true,sensitivity:'base'}));
       const mf=mfrOf(b);
-      return `<section class="cx-group"><div class="cx-ghead">${b&&window.brandTile?brandTile(mf):''}<b>${b?esc(b):'No brand'}</b><span class="cx-gn">${ms.length} model${ms.length===1?'':'s'}</span>`
+      const key=b||'__none', open=cxOpenGroups().has(key);
+      return `<section class="cx-group${open?'':' shut'}" data-g="${esc(key)}"><div class="cx-ghead">`
+        +`<button type="button" class="cx-gtoggle" aria-expanded="${open}" onclick="cxToggleGroup(this.closest('.cx-group'))">`
+        +`<span class="cx-chev" aria-hidden="true">▸</span>${b&&window.brandTile?brandTile(mf):''}<b>${b?esc(b):'No brand'}</b><span class="cx-gn">${ms.length} model${ms.length===1?'':'s'}</span></button>`
         +`${b&&mf.id?`<button type="button" class="ibtn cx-gadd" title="Add a ${esc(b)} model" aria-label="Add a model" onclick="cxAddModelFor(${mf.id})">＋</button>`:''}</div>`
         +`<div class="cx-grid">${ms.map(item).join('')}</div></section>`;
     }).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
@@ -3568,13 +3571,31 @@ function cxApplySearch(){
   document.querySelectorAll('#page-catalog .cx-pane').forEach(p=>{
     let shown=0;
     p.querySelectorAll('.cx-item').forEach(it=>{const ok=!q||it.dataset.q.includes(q); it.style.display=ok?'':'none'; if(ok)shown++;});
-    p.querySelectorAll('.cx-group').forEach(g=>{ g.style.display=[...g.querySelectorAll('.cx-item')].some(it=>it.style.display!=='none')?'':'none'; });
+    p.querySelectorAll('.cx-group').forEach(g=>{
+      const hit=[...g.querySelectorAll('.cx-item')].some(it=>it.style.display!=='none');
+      g.style.display=hit?'':'none';
+      // while searching, a brand with a match is shown open; afterwards it goes back as it was
+      g.classList.toggle('shut', q ? !hit : !cxOpenGroups().has(g.dataset.g));
+      const t=g.querySelector('.cx-gtoggle'); if(t)t.setAttribute('aria-expanded', String(!g.classList.contains('shut')));
+    });
     let none=p.querySelector('.cx-nomatch');
     const items=p.querySelectorAll('.cx-item').length;
     if(q&&items&&!shown){ if(!none){none=document.createElement('div');none.className='cx-empty cx-nomatch';p.appendChild(none);} none.textContent='Nothing matches "'+q+'".'; none.style.display=''; }
     else if(none) none.style.display='none';
   });
 }
+// which brand groups are open, remembered in this browser
+function cxOpenGroups(){ try{ return new Set(JSON.parse(localStorage.getItem('cxOpen')||'[]')); }catch(e){ return new Set(); } }
+function cxSaveOpen(set){ try{ localStorage.setItem('cxOpen', JSON.stringify([...set])); }catch(e){} }
+function cxToggleGroup(g, force){
+  if(!g)return;
+  const open = force===undefined ? g.classList.contains('shut') : force;
+  g.classList.toggle('shut', !open);
+  const t=g.querySelector('.cx-gtoggle'); if(t)t.setAttribute('aria-expanded', String(open));
+  const s=cxOpenGroups(); open ? s.add(g.dataset.g) : s.delete(g.dataset.g); cxSaveOpen(s);
+}
+function cxAllGroups(open){ document.querySelectorAll('#modCatBody .cx-group').forEach(g=>cxToggleGroup(g, open)); }
+window.cxToggleGroup=cxToggleGroup; window.cxAllGroups=cxAllGroups;
 // the ＋ on a brand's heading: that brand is picked, type the model
 function cxAddModelFor(mid){
   const sel=document.getElementById('modMfrSelect'); if(sel)sel.value=String(mid);

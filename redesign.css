@@ -922,3 +922,16 @@ label.fl-bi{cursor:pointer}
 .cx-gn{font-size:12px;color:var(--muted)}
 .cx-gadd{margin-left:auto}
 .cx-group .cx-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr))}
+
+/* brand groups open and close */
+.cx-gbar{display:flex;justify-content:flex-end;gap:8px;margin:0 0 10px}
+.cx-group{border:1px solid var(--line);border-radius:12px;padding:6px 10px 10px}
+.cx-group.shut{padding-bottom:6px}
+.cx-group .cx-ghead{margin:0}
+.cx-group:not(.shut) .cx-ghead{margin-bottom:8px}
+.cx-gtoggle{display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:6px 4px;border:0;background:none;color:var(--txt);font:inherit;cursor:pointer;text-align:left;border-radius:8px}
+.cx-gtoggle:hover b{color:var(--accent)}
+.cx-chev{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;font-size:15px;line-height:1;color:var(--txt);background:color-mix(in srgb,var(--txt) 8%,transparent);transition:transform .15s;flex:none}
+.cx-group:not(.shut) .cx-chev{transform:rotate(90deg)}
+.cx-group.shut>.cx-grid{display:none}
+.cx-groups{gap:10px}
