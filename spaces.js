@@ -435,24 +435,61 @@
   };
 
   // ---------------------------------------------------------------- Users: which departments
-  // One row per department: no access / editor / viewer. Stored as "1,3:r".
+  // Stored as "1,3:r": a bare id = works there with their role, ":r" = can
+  // only look there. Empty = every department. On screen that is one plain
+  // choice, "All departments" or "Only some", and a row per department.
+  let userSp = { mode: 'all', on: {} };
   window.fillUserSpaces = function (csv) {
-    const box = $('u_spaces'); if (!box) return;
     const on = {};
     String(csv || '').split(',').filter(Boolean).forEach(x => { const [id, m] = x.split(':'); on[id] = m === 'r' ? 'r' : 'w'; });
-    const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${t}</option>`;
-    box.innerHTML = '<div class="sp-roles">' + window.SPACES.map(s => {
-      const cur = on[String(s.id)] || '';
-      return `<div class="sp-role-row"><span class="sp-role-name"><i class="sp-dot" style="background:${h(s.color || 'var(--accent)')}"></i>${h(s.name)}</span>`
-        + `<select data-sid="${s.id}">${opt('', cur, 'No access')}${opt('w', cur, 'Editor')}${opt('r', cur, 'Viewer')}</select></div>`;
-    }).join('') + '</div>'
-      + '<span class="muted sp-role-note">Editor: can add and change things there. Viewer: can only look. All set to "No access" = editor everywhere. Admins always have every department.</span>';
-    box.closest('.field2').style.display = window.SPACES.length > 1 ? '' : 'none';
+    userSp = { mode: Object.keys(on).length ? 'some' : 'all', on };
+    drawUserSpaces();
   };
+  window.drawUserSpaces = function () {
+    const box = $('u_spaces'); if (!box) return;
+    const wrap = box.closest('.field2'); const head = wrap && wrap.previousElementSibling;
+    const many = (window.SPACES || []).length > 1;
+    [wrap, head && head.classList.contains('um-sec') ? head : null].forEach(e => { if (e) e.style.display = many ? '' : 'none'; });
+    if (!many) return;
+    const role = ($('u_role') || {}).value || '';
+    if (role === 'admin') { box.innerHTML = '<p class="um-hint" style="margin:0">Admins always have every department.</p>'; return; }
+    const ro = role === 'read-only';
+    const opt = (v, cur, t) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${t}</option>`;
+    box.innerHTML = `<div class="um-mode">
+        <label class="${userSp.mode === 'all' ? 'on' : ''}"><input type="radio" name="uSpMode" value="all" ${userSp.mode === 'all' ? 'checked' : ''}><b>All departments</b><span>Now and any added later</span></label>
+        <label class="${userSp.mode === 'some' ? 'on' : ''}"><input type="radio" name="uSpMode" value="some" ${userSp.mode === 'some' ? 'checked' : ''}><b>Only some</b><span>Choose below</span></label>
+      </div>` + (userSp.mode === 'some' ? '<div class="sp-roles">' + window.SPACES.map(s => {
+        const cur = userSp.on[String(s.id)] || '';
+        return `<div class="sp-role-row${cur ? ' is-on' : ''}"><span class="sp-role-name"><i class="sp-dot" style="background:${h(s.color || 'var(--accent)')}"></i>${h(s.name)}</span>`
+          + `<select data-sid="${s.id}">${opt('', cur, 'No access')}${ro ? opt('r', cur === 'w' ? 'r' : cur, 'Can look') : opt('w', cur, 'Can change') + opt('r', cur, 'Can only look')}</select></div>`;
+      }).join('') + '</div>' : '');
+    box.querySelectorAll('input[name=uSpMode]').forEach(r => r.onchange = () => { userSp.mode = r.value; drawUserSpaces(); });
+    box.querySelectorAll('select[data-sid]').forEach(sel => sel.onchange = () => {
+      if (sel.value) userSp.on[sel.dataset.sid] = sel.value; else delete userSp.on[sel.dataset.sid];
+      sel.closest('.sp-role-row').classList.toggle('is-on', !!sel.value);
+    });
+  };
+  // "" = all; null = "Only some" with none picked (the dialog refuses to save)
   window.collectUserSpaces = function () {
-    const box = $('u_spaces'); if (!box) return '';
-    return [...box.querySelectorAll('select[data-sid]')].filter(x => x.value)
-      .map(x => x.value === 'r' ? x.dataset.sid + ':r' : x.dataset.sid).join(',');
+    if (!$('u_spaces') || (window.SPACES || []).length < 2) return '';
+    const role = ($('u_role') || {}).value || '';
+    if (role === 'admin' || userSp.mode === 'all') return '';
+    const ids = Object.keys(userSp.on).filter(k => window.SPACES.some(s => String(s.id) === k));
+    if (!ids.length) return null;
+    // a Viewer is saved as exactly what the screen shows: "look" everywhere,
+    // so a later promotion to Editor doesn't quietly turn into "change"
+    const lookOnly = role === 'read-only';
+    return ids.sort((a, b) => a - b).map(k => (lookOnly || userSp.on[k] === 'r') ? k + ':r' : k).join(',');
+  };
+  // one line for the users list: "All", or "IT · Facilities (look only)"
+  window.userSpacesSummary = function (u) {
+    if (u.role === 'admin' || (window.SPACES || []).length < 2) return '<span class="muted">All</span>';
+    const parts = String(u.spaces || '').split(',').filter(Boolean);
+    if (!parts.length) return '<span class="muted">All</span>';
+    const out = parts.map(x => { const [id, m] = x.split(':'); const s = spaceById(id); if (!s) return '';
+      return `<span class="u-dep${m === 'r' ? ' ro' : ''}" title="${m === 'r' ? 'can only look' : 'can change'}"><i class="sp-dot" style="background:${h(s.color || 'var(--accent)')}"></i>${h(s.name)}${m === 'r' ? ' <em>look only</em>' : ''}</span>`; }).join('');
+    // its departments were all deleted: it sees nothing until given one
+    return out || '<span class="muted">None (edit to choose)</span>';
   };
 
   // ---------------------------------------------------------------- wiring

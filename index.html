@@ -273,7 +273,7 @@
           <input id="modCatInput" placeholder="Model, e.g. Latitude 5440">
           <button class="btn" id="modCatAdd">＋ Add model</button>
         </div>
-        <div class="cx-grid" id="modCatBody"></div>
+        <div class="cx-groups" id="modCatBody"></div>
       </section>
 
       <section class="cx-pane" data-cx="ct" hidden>
@@ -579,9 +579,9 @@
           <!-- USERS -->
           <section class="cfg-sec" data-sec="users" style="display:none">
             <div class="panel"><div class="secthead">SYSTEM USERS</div>
-              <p class="sec-hint">Login accounts for this system — the people who sign in to this app. Besides the built-in Admin / Read-write / Read-only tiers, use <b>Manage Roles</b> to build a custom role with per-module access (e.g. a user who can reach Assets only), then pick it as that user's Role. Staff imported from Active Directory are <b>Employees</b>, not system users, and are managed on the Employees page.</p>
+              <p class="sec-hint">The people who sign in to IT-Vault. Each one has a <b>role</b> (what they can do) and <b>departments</b> (where they can do it). Need something in between? <b>Manage roles</b> builds your own, e.g. "Assets only". Staff from Active Directory are <b>Employees</b>, not users.</p>
               <div class="m-actions" style="justify-content:flex-start;margin-bottom:10px"><button class="btn" id="cfgAddUser">＋ ADD USER</button><button class="btn ghost" id="cfgManageRoles" type="button">🛡 MANAGE ROLES</button></div>
-              <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Display name</th><th>Email</th><th>2FA</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
+              <div class="tablewrap"><table id="cfgUsers"><thead><tr><th>Username</th><th>Role</th><th>Departments</th><th>Full name</th><th>Email</th><th>2FA</th><th></th></tr></thead><tbody id="cfgUsersBody"></tbody></table></div>
             </div>
           </section>
           <!-- NOTIFICATIONS -->
@@ -1264,14 +1264,19 @@
 <div class="modal" id="userModal"><div class="modal-box">
   <h3 id="userModalTitle">ADD USER</h3>
   
-  <div class="modal-scroll"><div class="grid2">
-      <div class="field2"><label>Username</label><input id="u_username"></div>
-      <div class="field2"><label>Display name</label><input id="u_display"></div>
-      <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com"></div>
-      <div class="field2"><label>Role</label><select id="u_role"><option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option></select></div>
-      <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="set / change"></div>
-      <div class="field2" style="grid-column:1/-1"><label>Departments</label><div id="u_spaces" class="space-checks"></div></div>
+  <div class="modal-scroll">
+    <div class="um-sec">1 · SIGN-IN</div>
+    <div class="grid2">
+      <div class="field2"><label>Username</label><input id="u_username" autocomplete="off"></div>
+      <div class="field2"><label>Full name</label><input id="u_display" autocomplete="off"></div>
+      <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com" autocomplete="off"></div>
+      <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="new password (leave empty to keep)" autocomplete="new-password"></div>
     </div>
+    <div class="um-sec">2 · WHAT THEY CAN DO</div>
+    <div class="field2"><select id="u_role"><option value="read-only">Viewer</option><option value="read-write">Editor</option><option value="admin">Admin</option></select>
+      <p class="um-hint" id="u_roleHint"></p></div>
+    <div class="um-sec">3 · WHICH DEPARTMENTS</div>
+    <div class="field2"><div id="u_spaces" class="space-checks"></div></div>
   </div>
   
   <div class="m-actions"><button class="btn ghost" id="userCancel">CANCEL</button><button class="btn" id="userSave">SAVE</button></div>

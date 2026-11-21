@@ -95,11 +95,13 @@ A template sets up the ID prefix, item categories and their fields; nothing else
   editors, and a ticket raised in the wrong place can be moved; the move is
   kept in its history. The public portal asks the requester too, once there's
   more than one department.
-- **A role per department.** In **Settings → Users** each person is an **Editor**,
-  a **Viewer** or has no access, department by department: an Editor in Facilities
-  can be a Viewer in IT. Viewers open everything but can't add, change, delete or
-  restore, and the server refuses it even if the screen is bypassed. Admins see
-  every department.
+- **A role, then departments.** In **Settings → Users** each person gets a role
+  (Viewer, Editor, Admin or one of your own) and then *All departments* or
+  *Only some*, each set to **Can change** or **Can only look**: someone can change
+  things in Facilities and only look in IT. Labels, invoices, pictures, scans,
+  Lost & Found and the catalog all follow it, and the server refuses anything
+  outside it even if the screen is bypassed. Admins have every department, and
+  every backup carries departments, roles and who can reach what.
 - **Trash follows the same rules.** You only see, restore and empty what's in
   departments you edit.
 

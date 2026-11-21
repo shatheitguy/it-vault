@@ -3618,12 +3618,14 @@ def resolve_asset(ref):
     ref = (ref or "").strip()[:64]
     if not ref:
         return jsonify({"error": "nothing to resolve"}), 400
+    _sc, _sp = _space_sql(None)
     cols = ("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
-            + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0 AND ")
+            + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0 AND "
+            + (_sc + " AND " if _sc else ""))
     c = conn(); cur = c.cursor()
     row = None
     for clause in ("PublicCode=%s", "AssetTag=%s", "_id=%s"):
-        cur.execute(cols + clause + " LIMIT 1", [ref])
+        cur.execute(cols + clause + " LIMIT 1", _sp + [ref])
         row = cur.fetchone()
         if row:
             break
@@ -3729,7 +3731,7 @@ def _allowed_spaces():
         cur.execute("SELECT spaces FROM Users WHERE username=%s", [user])
         raw = ((cur.fetchone() or {}).get("spaces") or "").strip(); c.close()
     except Exception:
-        return None
+        return set()                         # could not tell: nothing, never everything
     ids = set(_space_entries(raw))
     return ids or None
 
@@ -4237,7 +4239,7 @@ def _json_must_be_object():
 @app.before_request
 def _guard_ticket_space():
     m = re.match(r"^/api/tickets/(\d+)(?:/|$)", request.path or "")
-    if not m or not (session.get("user") or request.headers.get("X-Api-Key")):
+    if not m or not (session.get("user") or request.headers.get("X-Api-Key") or request.cookies.get("itguy_api_key")):
         return None
     allowed = _allowed_spaces()
     if allowed is None:
@@ -4246,7 +4248,7 @@ def _guard_ticket_space():
         c = conn(); cur = c.cursor()
         cur.execute("SELECT SpaceID FROM Tickets WHERE id=%s", [int(m.group(1))]); r = cur.fetchone(); c.close()
     except Exception:
-        return None
+        return jsonify({"error": "Could not check access just now."}), 503
     if r and int(r.get("SpaceID") or 1) not in allowed:
         return jsonify({"error": "not found"}), 404
     return None
@@ -4255,11 +4257,12 @@ def _guard_ticket_space():
 def _guard_space_viewer():
     """A viewer in a department can open its assets, tickets and plans but
     not change them."""
-    if request.method in ("GET", "HEAD", "OPTIONS"):
-        return None
     path = request.path or ""
+    # the sign link is fetched with GET but hands out a link to sign: a change
+    if request.method in ("GET", "HEAD", "OPTIONS") and not re.match(r"^/api/assets/[^/]+/sign/link$", path):
+        return None
     q = None
-    m = re.match(r"^/api/assets/([0-9a-f]{32})(?:/|$)", path)
+    m = re.match(r"^/api/(?:assets|img/asset)/([^/]+)(?:/|$)", path)
     if m: q = ("SELECT SpaceID FROM Assets WHERE _id=%s", m.group(1))
     m = m or re.match(r"^/api/tickets/(\d+)(?:/|$)", path)
     if m and not q: q = ("SELECT SpaceID FROM Tickets WHERE id=%s", int(m.group(1)))
@@ -4273,7 +4276,7 @@ def _guard_space_viewer():
     try:
         c = conn(); cur = c.cursor(); cur.execute(q[0], [q[1]]); r = cur.fetchone(); c.close()
     except Exception:
-        return None
+        return jsonify({"error": "Could not check access just now."}), 503
     if r and int(r.get("SpaceID") or 1) in ro:
         return jsonify({"error": _VIEWER_MSG}), 403
     return None
@@ -4292,21 +4295,35 @@ def portal_departments():
 def _guard_asset_space():
     """An asset in a department this account cannot see is treated as not
     there, on every /api/assets/<id>/... and picture route."""
-    m = re.match(r"^/api/(?:assets|img/asset)/([0-9a-f]{32})(?:/|$)", request.path or "")
-    if not m:
+    path = request.path or ""
+    q = None
+    m = re.match(r"^/(?:api/assets|api/img/asset|label)/([^/]+)(?:/|$)", path)
+    if m: q = ("SELECT SpaceID FROM Assets WHERE _id=%s", m.group(1))
+    m = re.match(r"^/api/plans/(\d+)(?:/|$)", path)
+    if m: q = ("SELECT a.SpaceID FROM MaintPlans p JOIN Assets a ON a._id=p.asset_id WHERE p.id=%s", int(m.group(1)))
+    m = re.match(r"^/invoice/(.+)$", path)
+    if m: q = ("SELECT SpaceID FROM Assets WHERE InvoiceFile=%s", os.path.basename(m.group(1)))
+    m = re.match(r"^/api/lostfound/(\d+)$", path)
+    if m: q = ("SELECT a.SpaceID FROM LostFound lf JOIN Assets a ON a._id=lf.asset_id WHERE lf.id=%s", int(m.group(1)))
+    if not q:
         return None
     if not (session.get("user") or request.headers.get("X-Api-Key") or request.cookies.get("itguy_api_key")):
         return None
     allowed = _allowed_spaces()
-    if allowed is None:
+    ro = _readonly_spaces() if request.method not in ("GET", "HEAD", "OPTIONS") else set()
+    if allowed is None and not ro:
         return None
     try:
         c = conn(); cur = c.cursor()
-        cur.execute("SELECT SpaceID FROM Assets WHERE _id=%s", [m.group(1)]); r = cur.fetchone(); c.close()
+        cur.execute(q[0], [q[1]]); r = cur.fetchone(); c.close()
     except Exception:
-        return None
-    if r and int(r.get("SpaceID") or 1) not in allowed:
-        return jsonify({"error": "not found"}), 404
+        return jsonify({"error": "Could not check access just now."}), 503
+    if r:
+        sid = int(r.get("SpaceID") or 1)
+        if allowed is not None and sid not in allowed:
+            return jsonify({"error": "not found"}), 404
+        if sid in ro:
+            return jsonify({"error": _VIEWER_MSG}), 403
     return None
 
 @app.route("/api/assets/next-tag")
@@ -4751,6 +4768,10 @@ def categories_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
         cur.execute("SELECT id, name, icon, photo_v, (photo IS NOT NULL) AS has_photo, space_id FROM Categories ORDER BY name"); rows = cur.fetchall(); c.close()
+        # a category kept to a department this account can't see isn't listed
+        _al = _allowed_spaces()
+        if _al is not None:
+            rows = [r for r in rows if not r.get("space_id") or r["space_id"] in _al]
         return jsonify([{"id": r["id"], "name": r["name"], "icon": r.get("icon") or "", "space_id": r.get("space_id"),
                          "photo": (f"/api/categories/{r['id']}/photo?v={r.get('photo_v') or 0}" if r.get("has_photo") else "")}
                         for r in rows])
@@ -5612,18 +5633,37 @@ def list_users():
                      "totp_enabled": bool(r.get("totp_enabled")), "email_otp_enabled": bool(r.get("email_otp_enabled")),
                      "spaces": r.get("spaces") or ""} for r in rows])
 
+def _user_spaces_value(cur, v):
+    """A user's departments as given, checked. Empty means every department --
+    so it must be asked for (None, "", []), never what a typo or a list of
+    departments that no longer exist collapses into."""
+    if v in (None, "", []) or (isinstance(v, str) and not v.strip()):
+        return "", None
+    entries = _space_entries(v)
+    if not entries:
+        return None, "Departments must be a list like \"1,3:r\"."
+    cur.execute("SELECT id FROM Spaces")
+    real = {r["id"] for r in cur.fetchall()}
+    gone = [i for i in entries if i not in real]
+    if gone:
+        return None, "No such department: %s." % ", ".join(str(i) for i in gone)
+    return _clean_spaces_value(entries and ",".join(f"{i}:r" if m == "r" else str(i) for i, m in entries.items())), None
+
 @app.route("/api/users", methods=["POST"])
 @auth_required([ROLE_ADMIN])
 def create_user():
     d = request.get_json(force=True)
     u = (d.get("username") or "").strip(); pw = d.get("password", ""); role = d.get("role", ROLE_VIEW); disp = d.get("display", "") or u; em = d.get("email", "").strip()
     if not u or not pw: return jsonify({"error": "username and password required"}), 400
+    if len(str(pw)) < 8: return jsonify({"error": "The password needs at least 8 characters."}), 400
     if not _valid_role(role): return jsonify({"error": "invalid role"}), 400
     c = conn(); cur = c.cursor()
     cur.execute("SELECT username FROM Users WHERE username=%s", [u])
     if cur.fetchone(): c.close(); return jsonify({"error": "user exists"}), 409
+    spaces, err = _user_spaces_value(cur, d.get("spaces"))
+    if err: c.close(); return jsonify({"error": err}), 400
     cur.execute("INSERT INTO Users (username, password, role, display, email, spaces) VALUES (%s,%s,%s,%s,%s,%s)",
-                (u, hash_pw(pw), role, disp, em, _clean_spaces_value(d.get("spaces")))); c.commit(); c.close()
+                (u, hash_pw(pw), role, disp, em, spaces)); c.commit(); c.close()
     return jsonify({"ok": True})
 
 @app.route("/api/users/<u>", methods=["PUT"])
@@ -5633,15 +5673,23 @@ def update_user(u):
     c = conn(); cur = c.cursor()
     cur.execute("SELECT username, role FROM Users WHERE username=%s", [u]); existing = cur.fetchone()
     if not existing: c.close(); return jsonify({"error": "not found"}), 404
-    if existing["role"] == ROLE_ADMIN and d.get("role") != ROLE_ADMIN:
+    if "role" in d and not _valid_role(d["role"]):
+        c.close(); return jsonify({"error": "invalid role"}), 400
+    if existing["role"] == ROLE_ADMIN and "role" in d and d.get("role") != ROLE_ADMIN:
         cur.execute("SELECT COUNT(*) AS n FROM Users WHERE role=%s", [ROLE_ADMIN]); cnt = cur.fetchone()["n"]
         if cnt <= 1: c.close(); return jsonify({"error": "cannot demote last admin"}), 403
     sets = []; vals = []
     if "role" in d and _valid_role(d["role"]): sets.append("role=%s"); vals.append(d["role"])
     if "display" in d: sets.append("display=%s"); vals.append(d["display"])
     if "email" in d: sets.append("email=%s"); vals.append(d["email"].strip())
-    if d.get("password"): sets.append("password=%s"); vals.append(hash_pw(d["password"]))
-    if "spaces" in d: sets.append("spaces=%s"); vals.append(_clean_spaces_value(d.get("spaces")))
+    if d.get("password"):
+        if len(str(d["password"])) < 8:
+            c.close(); return jsonify({"error": "The password needs at least 8 characters."}), 400
+        sets.append("password=%s"); vals.append(hash_pw(d["password"]))
+    if "spaces" in d:
+        spaces, err = _user_spaces_value(cur, d.get("spaces"))
+        if err: c.close(); return jsonify({"error": err}), 400
+        sets.append("spaces=%s"); vals.append(spaces)
     if sets:
         cur.execute("UPDATE Users SET " + ", ".join(sets) + " WHERE username=%s", vals + [u]); c.commit()
     c.close(); return jsonify({"ok": True})
@@ -9763,7 +9811,9 @@ def labels_page():
     base = _public_base()
     c = conn(); cur = c.cursor()
     placeholders = ",".join(["%s"] * len(ids))
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + f", InvoiceFile FROM Assets WHERE _id IN ({placeholders})", ids)
+    _sc, _sp = _space_sql(None)
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + f", InvoiceFile FROM Assets WHERE _id IN ({placeholders})"
+                + (" AND " + _sc if _sc else ""), ids + _sp)
     rows = cur.fetchall(); c.close()
     if not rows:
         return "No matching assets found", 404
@@ -10912,9 +10962,11 @@ def public_lostfound_report():
 @auth_required(module="assets", level="read")
 def lostfound_list():
     c = conn(); cur = c.cursor()
+    _sc, _sp = _space_sql(None)
     cur.execute("SELECT lf.*, a.Name AS asset_name, a.Status AS asset_status, "
                 "a.EmployeeID AS employee_id FROM LostFound lf "
-                "LEFT JOIN Assets a ON a._id=lf.asset_id ORDER BY lf.id DESC")
+                "LEFT JOIN Assets a ON a._id=lf.asset_id"
+                + (" WHERE a." + _sc if _sc else "") + " ORDER BY lf.id DESC", _sp)
     rows = [dict(r) for r in cur.fetchall()]
     c.close()
     for r in rows:
@@ -10935,11 +10987,13 @@ def lostfound_create():
     if not ref:
         return jsonify({"error": "asset required"}), 400
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, AssetTag, Name, EmployeeID FROM Assets "
+    cur.execute("SELECT _id, AssetTag, Name, EmployeeID, SpaceID FROM Assets "
                 "WHERE (_id=%s OR AssetTag=%s) AND is_deleted=0 LIMIT 1", (ref, ref))
     a = cur.fetchone()
-    if not a:
+    if not a or not _space_allowed(a.get("SpaceID") or 1):
         c.close(); return jsonify({"error": "asset not found"}), 404
+    if not _space_writable(a.get("SpaceID") or 1):
+        c.close(); return jsonify({"error": _VIEWER_MSG}), 403
     cur.execute("INSERT INTO LostFound (asset_id, asset_tag, kind, status, admin_note, "
                 "handled_by, reported_at, updated_at) "
                 "VALUES (%s,%s,'lost','lost',%s,%s,NOW(),NOW())",
@@ -12869,6 +12923,13 @@ ASSET_SCOPE_TABLES = [
 BACKUP_CONFIG_TABLES = ["Settings", "Users", "Roles",
                         "HeartbeatChannels", "HeartbeatMonitors"]
 
+# In both: departments and the fields they ask for are set up like settings,
+# and every user's department access points at them -- but every asset and
+# ticket does too. A settings backup without them restores users whose
+# departments may not exist; an assets backup without them restores assets
+# in departments that may not exist. So each scope carries them.
+BACKUP_SHARED_TABLES = ["Spaces", "FieldDefs"]
+
 # Raw per-check telemetry. It is written every few seconds per monitor and
 # never pruned, so including it would grow every nightly archive without
 # bound -- and it rolls up into HeartbeatHourly, which IS backed up, so the
@@ -12908,10 +12969,12 @@ def _backup_tables(cur, scope):
         return [by_lower[n.lower()] for n in names if n.lower() in by_lower]
 
     if scope == "config":
-        return real(BACKUP_CONFIG_TABLES)
+        return real(BACKUP_CONFIG_TABLES) + real(BACKUP_SHARED_TABLES)
 
     known = cfg_l | skip | {"auditlog"}
-    ordered = [t for t in real(ASSET_SCOPE_TABLES) if t.lower() not in known]
+    # departments first: everything after them points at one
+    ordered = real(BACKUP_SHARED_TABLES) + [t for t in real(ASSET_SCOPE_TABLES)
+                                           if t.lower() not in known and t.lower() not in {x.lower() for x in BACKUP_SHARED_TABLES}]
     seen = {t.lower() for t in ordered} | known
     # whatever the schema has that nobody thought to order: alphabetical, and
     # present, which is the part that matters

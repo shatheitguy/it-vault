@@ -2199,14 +2199,25 @@ let editingUser=null;
 // alongside admin / read-write / read-only.
 async function populateRoleSelect(selectedRole){
   const sel=document.getElementById('u_role'); if(!sel)return;
-  const built='<option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option>';
+  const built='<option value="read-only">Viewer: can look, can\'t change anything</option><option value="read-write">Editor: can add and change records</option><option value="admin">Admin: everything, including Settings and users</option>';
   let custom='';
   try{
     const r=await api('/api/roles'); const roles=r?await r.json():[];
-    custom=roles.map(x=>`<option value="${esc(x.name)}">${esc(x.name)} (custom)</option>`).join('');
+    custom=roles.map(x=>`<option value="${esc(x.name)}">${esc(x.name)} (your own role)</option>`).join('');
   }catch(e){}
   sel.innerHTML=built+custom;
   if(selectedRole)sel.value=selectedRole;
+  sel.onchange=userRoleChanged; userRoleChanged();
+}
+// What the chosen role means, in a line, and the department part follows it
+function userRoleChanged(){
+  const v=(document.getElementById('u_role')||{}).value||'';
+  const hint={'admin':'Sees and changes everything, in every department, and manages Settings and users.',
+    'read-write':'Adds, edits and deletes assets, contracts and tickets in the departments below.',
+    'read-only':'Opens and searches everything in the departments below, but cannot change anything. Can still reply on tickets.'}[v]
+    ||'Your own role: what it can reach is set in Manage roles. The departments below limit where.';
+  const e=document.getElementById('u_roleHint'); if(e)e.textContent=hint;
+  if(window.drawUserSpaces)drawUserSpaces();
 }
 let userModalFromList=false; // true only if userModal was opened from the legacy usersModal list (Profile -> Users)
 async function openUsers(){
@@ -2223,6 +2234,7 @@ function editUser(un){
   userModalFromList=document.getElementById('usersModal').classList.contains('show');
   document.getElementById('u_username').readOnly=true;
   document.getElementById('userModalTitle').textContent='Edit user';
+  document.getElementById('u_password').placeholder='New password (leave empty to keep)';
   // minimal prefetch
   api('/api/users').then(r=>r.json()).then(async list=>{const u=list.find(x=>x.username===un)||{};if(window.fillUserSpaces)fillUserSpaces(u.spaces||'');document.getElementById('u_username').value=u.username||un;document.getElementById('u_display').value=u.display||'';document.getElementById('u_email').value=u.email||'';await populateRoleSelect(u.role||'read-only');document.getElementById('u_password').value='';document.getElementById('usersModal').classList.remove('show');document.getElementById('userModal').classList.add('show');});
 }
@@ -2230,7 +2242,7 @@ async function saveUser(){
   const username=document.getElementById('u_username').value.trim();
   const pw=document.getElementById('u_password').value;
   const body={display:document.getElementById('u_display').value.trim(),email:document.getElementById('u_email').value.trim(),role:document.getElementById('u_role').value};
-  if(window.collectUserSpaces)body.spaces=collectUserSpaces();
+  if(window.collectUserSpaces){ const sp=collectUserSpaces(); if(sp===null){ toast('✕ Pick at least one department, or choose "All departments"'); return; } body.spaces=sp; }
   if(pw)body.password=pw;
   let r;
   if(editingUser){
@@ -2252,9 +2264,11 @@ async function addUser(){
   document.getElementById('usersModal').classList.remove('show');
   document.getElementById('u_username').readOnly=false;
   document.getElementById('userModalTitle').textContent='Add user';
+  document.getElementById('u_password').placeholder='Password (at least 8 characters)';
   document.getElementById('u_username').value='';
   document.getElementById('u_display').value='';
   document.getElementById('u_email').value='';
+  if(window.fillUserSpaces)fillUserSpaces('');
   await populateRoleSelect('read-only');
   document.getElementById('u_password').value='';
   document.getElementById('userModal').classList.add('show');
@@ -3459,7 +3473,8 @@ window.permaDeleteContract=async(id)=>{
 
 // ---------- Product Catalog page: Categories / Manufacturers / Models ----------
 async function loadCatalog(){
-  await Promise.all([loadCatCategories(), loadCatManufacturers(), loadCatModels(), loadCatContractTypes()]);
+  // brands first: the model groups wear their logos
+  await Promise.all([loadCatCategories(), loadCatManufacturers().then(loadCatModels), loadCatContractTypes()]);
 }
 async function loadCatContractTypes(){
   const r=await api('/api/contract-types'); const list=r?await r.json():[];
@@ -3520,11 +3535,22 @@ async function loadCatManufacturers(){
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
   window.__MODELS=list;
-  document.getElementById('modCatBody').innerHTML=list.map(m=>cxItem({name:m.name,
+  // grouped under their brand: Fortinet's FortiGates together, Ubiquiti's UniFis together
+  const byBrand={};
+  list.forEach(m=>{ const k=m.manufacturer||''; (byBrand[k]=byBrand[k]||[]).push(m); });
+  const brands=Object.keys(byBrand).sort((a,b)=>!a?1:!b?-1:a.localeCompare(b,undefined,{sensitivity:'base'}));
+  const mfrOf=n=>(window.__MFRS||[]).find(x=>x.name===n)||{name:n||'?'};
+  const item=m=>cxItem({name:m.name,
       tile:`<button type="button" class="cx-tile" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button>`,
-      sub:m.manufacturer?`<span class="cat-site">${esc(m.manufacturer)}</span>`:'',
-      actions:`<button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}`
-    })).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
+      sub:'', q:(m.name+' '+(m.manufacturer||'')),
+      actions:`<button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}`});
+  document.getElementById('modCatBody').innerHTML=brands.map(b=>{
+      const ms=byBrand[b].sort((x,y)=>x.name.localeCompare(y.name,undefined,{numeric:true,sensitivity:'base'}));
+      const mf=mfrOf(b);
+      return `<section class="cx-group"><div class="cx-ghead">${b&&window.brandTile?brandTile(mf):''}<b>${b?esc(b):'No brand'}</b><span class="cx-gn">${ms.length} model${ms.length===1?'':'s'}</span>`
+        +`${b&&mf.id?`<button type="button" class="ibtn cx-gadd" title="Add a ${esc(b)} model" aria-label="Add a model" onclick="cxAddModelFor(${mf.id})">＋</button>`:''}</div>`
+        +`<div class="cx-grid">${ms.map(item).join('')}</div></section>`;
+    }).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
   cxApplySearch();
   CAT_MODELS=list;
   document.getElementById('modCatCount').textContent=list.length||'';
@@ -3535,19 +3561,26 @@ let CAT_ROWS={}, CAT_MFRS=[], CAT_MODELS=[];
 // ---- the catalogue's layout: one list at a time, as cards, with a search
 let cxTab='cat', cxCatSpace='all';
 function cxItem(o){
-  return `<div class="cx-item" data-q="${esc(String(o.name||'').toLowerCase())}">${o.tile||''}<div class="cx-body"><b title="${esc(o.name)}">${esc(o.name)}</b>${o.sub?`<div class="cx-sub">${o.sub}</div>`:''}</div><div class="cx-acts">${o.actions||''}</div></div>`;
+  return `<div class="cx-item" data-q="${esc(String(o.q||o.name||'').toLowerCase())}">${o.tile||''}<div class="cx-body"><b title="${esc(o.name)}">${esc(o.name)}</b>${o.sub?`<div class="cx-sub">${o.sub}</div>`:''}</div><div class="cx-acts">${o.actions||''}</div></div>`;
 }
 function cxApplySearch(){
   const q=((document.getElementById('cxSearch')||{}).value||'').trim().toLowerCase();
   document.querySelectorAll('#page-catalog .cx-pane').forEach(p=>{
     let shown=0;
     p.querySelectorAll('.cx-item').forEach(it=>{const ok=!q||it.dataset.q.includes(q); it.style.display=ok?'':'none'; if(ok)shown++;});
+    p.querySelectorAll('.cx-group').forEach(g=>{ g.style.display=[...g.querySelectorAll('.cx-item')].some(it=>it.style.display!=='none')?'':'none'; });
     let none=p.querySelector('.cx-nomatch');
     const items=p.querySelectorAll('.cx-item').length;
     if(q&&items&&!shown){ if(!none){none=document.createElement('div');none.className='cx-empty cx-nomatch';p.appendChild(none);} none.textContent='Nothing matches "'+q+'".'; none.style.display=''; }
     else if(none) none.style.display='none';
   });
 }
+// the ＋ on a brand's heading: that brand is picked, type the model
+function cxAddModelFor(mid){
+  const sel=document.getElementById('modMfrSelect'); if(sel)sel.value=String(mid);
+  const inp=document.getElementById('modCatInput'); if(inp){ inp.focus(); inp.scrollIntoView({block:'center',behavior:'smooth'}); }
+}
+window.cxAddModelFor=cxAddModelFor;
 function cxShow(tab){
   cxTab=tab;
   document.querySelectorAll('#cxTabs button').forEach(b=>b.classList.toggle('active',b.dataset.cx===tab));
@@ -5209,6 +5242,7 @@ async function loadUserSettings(){
       body.innerHTML = (list || []).map(u => `<tr>`
         + `<td>${esc(u.username||'')}</td>`
         + `<td>${esc(ROLE_LABELS[u.role] || u.role || '')}</td>`
+        + `<td class="u-depts">${window.userSpacesSummary?userSpacesSummary(u):''}</td>`
         + `<td>${esc(u.display||'')}</td>`
         + `<td>${esc(u.email||'')}</td>`
         + `<td>${esc(tfaLabel(u))}</td>`
@@ -5216,7 +5250,7 @@ async function loadUserSettings(){
         + ((u.totp_enabled||u.email_otp_enabled)?`<button class="btn sm ghost" onclick="adminReset2fa('${esc(u.username)}')">Reset 2FA</button>`:'')
         + `<button class="btn sm danger" onclick="delUser('${esc(u.username)}')">Delete</button></td>`
         + `</tr>`).join('')
-        || '<tr><td colspan="6" class="empty">No system users yet.</td></tr>';
+        || '<tr><td colspan="7" class="empty">No system users yet.</td></tr>';
     } catch(e) {}
   };
   loadCfgUsers();
