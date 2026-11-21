@@ -204,7 +204,8 @@
     });
   }
   function calmLabel(el) {
-    if (el.closest('.bnav,.seg,.row-more')) return;
+    // filter chips hold real names (APC, HP, a department): never re-cased
+    if (el.closest('.bnav,.seg,.row-more,.cx-filter,.cx-tabs')) return;
     el.childNodes.forEach(n => {
       if (n.nodeType !== 3) return;
       const v = n.nodeValue;

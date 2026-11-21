@@ -3535,25 +3535,23 @@ async function loadCatManufacturers(){
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
   window.__MODELS=list;
-  // grouped under their brand: Fortinet's FortiGates together, Ubiquiti's UniFis together
-  const byBrand={};
-  list.forEach(m=>{ const k=m.manufacturer||''; (byBrand[k]=byBrand[k]||[]).push(m); });
-  const brands=Object.keys(byBrand).sort((a,b)=>!a?1:!b?-1:a.localeCompare(b,undefined,{sensitivity:'base'}));
-  const mfrOf=n=>(window.__MFRS||[]).find(x=>x.name===n)||{name:n||'?'};
-  const item=m=>cxItem({name:m.name,
+  // one plain grid of models; the chips above pick a brand, one at a time
+  const brands=[...new Set(list.map(m=>m.manufacturer||''))].sort((a,b)=>!a?1:!b?-1:a.localeCompare(b,undefined,{sensitivity:'base'}));
+  if(cxModBrand!=='all' && !brands.includes(cxModBrand)) cxModBrand='all';
+  const f=document.getElementById('modBrandFilter');
+  if(f){
+    const n=k=>list.filter(m=>k==='all'||(m.manufacturer||'')===k).length;
+    f.innerHTML=[['all','All']].concat(brands.map(b=>[b,b||'No brand'])).map(([k,t])=>
+      `<button type="button" class="${k===cxModBrand?'active':''}" data-k="${esc(k)}">${esc(t)} <span>${n(k)}</span></button>`).join('');
+    f.querySelectorAll('button').forEach(x=>x.onclick=()=>{cxModBrand=x.dataset.k; loadCatModels();});
+  }
+  const shown=list.filter(m=>cxModBrand==='all'||(m.manufacturer||'')===cxModBrand)
+    .sort((x,y)=>x.name.localeCompare(y.name,undefined,{numeric:true,sensitivity:'base'}));
+  document.getElementById('modCatBody').innerHTML=shown.map(m=>cxItem({name:m.name,
       tile:`<button type="button" class="cx-tile" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button>`,
-      sub:'', q:(m.name+' '+(m.manufacturer||'')),
-      actions:`<button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}`});
-  document.getElementById('modCatBody').innerHTML=brands.map(b=>{
-      const ms=byBrand[b].sort((x,y)=>x.name.localeCompare(y.name,undefined,{numeric:true,sensitivity:'base'}));
-      const mf=mfrOf(b);
-      const key=b||'__none', open=cxOpenGroups().has(key);
-      return `<section class="cx-group${open?'':' shut'}" data-g="${esc(key)}"><div class="cx-ghead">`
-        +`<button type="button" class="cx-gtoggle" aria-expanded="${open}" onclick="cxToggleGroup(this.closest('.cx-group'))">`
-        +`<span class="cx-chev" aria-hidden="true">▸</span>${b&&window.brandTile?brandTile(mf):''}<b>${b?esc(b):'No brand'}</b><span class="cx-gn">${ms.length} model${ms.length===1?'':'s'}</span></button>`
-        +`${b&&mf.id?`<button type="button" class="ibtn cx-gadd" title="Add a ${esc(b)} model" aria-label="Add a model" onclick="cxAddModelFor(${mf.id})">＋</button>`:''}</div>`
-        +`<div class="cx-grid">${ms.map(item).join('')}</div></section>`;
-    }).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
+      q:(m.name+' '+(m.manufacturer||'')),
+      actions:`<button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}`
+    })).join('')||'<div class="cx-empty">Nothing here yet. Add the first one above.</div>';
   cxApplySearch();
   CAT_MODELS=list;
   document.getElementById('modCatCount').textContent=list.length||'';
@@ -3562,7 +3560,7 @@ async function loadCatModels(){
 // the editor does not have to re-fetch a list it has just drawn.
 let CAT_ROWS={}, CAT_MFRS=[], CAT_MODELS=[];
 // ---- the catalogue's layout: one list at a time, as cards, with a search
-let cxTab='cat', cxCatSpace='all';
+let cxTab='cat', cxCatSpace='all', cxModBrand='all';
 function cxItem(o){
   return `<div class="cx-item" data-q="${esc(String(o.q||o.name||'').toLowerCase())}">${o.tile||''}<div class="cx-body"><b title="${esc(o.name)}">${esc(o.name)}</b>${o.sub?`<div class="cx-sub">${o.sub}</div>`:''}</div><div class="cx-acts">${o.actions||''}</div></div>`;
 }
@@ -3571,37 +3569,12 @@ function cxApplySearch(){
   document.querySelectorAll('#page-catalog .cx-pane').forEach(p=>{
     let shown=0;
     p.querySelectorAll('.cx-item').forEach(it=>{const ok=!q||it.dataset.q.includes(q); it.style.display=ok?'':'none'; if(ok)shown++;});
-    p.querySelectorAll('.cx-group').forEach(g=>{
-      const hit=[...g.querySelectorAll('.cx-item')].some(it=>it.style.display!=='none');
-      g.style.display=hit?'':'none';
-      // while searching, a brand with a match is shown open; afterwards it goes back as it was
-      g.classList.toggle('shut', q ? !hit : !cxOpenGroups().has(g.dataset.g));
-      const t=g.querySelector('.cx-gtoggle'); if(t)t.setAttribute('aria-expanded', String(!g.classList.contains('shut')));
-    });
     let none=p.querySelector('.cx-nomatch');
     const items=p.querySelectorAll('.cx-item').length;
     if(q&&items&&!shown){ if(!none){none=document.createElement('div');none.className='cx-empty cx-nomatch';p.appendChild(none);} none.textContent='Nothing matches "'+q+'".'; none.style.display=''; }
     else if(none) none.style.display='none';
   });
 }
-// which brand groups are open, remembered in this browser
-function cxOpenGroups(){ try{ return new Set(JSON.parse(localStorage.getItem('cxOpen')||'[]')); }catch(e){ return new Set(); } }
-function cxSaveOpen(set){ try{ localStorage.setItem('cxOpen', JSON.stringify([...set])); }catch(e){} }
-function cxToggleGroup(g, force){
-  if(!g)return;
-  const open = force===undefined ? g.classList.contains('shut') : force;
-  g.classList.toggle('shut', !open);
-  const t=g.querySelector('.cx-gtoggle'); if(t)t.setAttribute('aria-expanded', String(open));
-  const s=cxOpenGroups(); open ? s.add(g.dataset.g) : s.delete(g.dataset.g); cxSaveOpen(s);
-}
-function cxAllGroups(open){ document.querySelectorAll('#modCatBody .cx-group').forEach(g=>cxToggleGroup(g, open)); }
-window.cxToggleGroup=cxToggleGroup; window.cxAllGroups=cxAllGroups;
-// the ＋ on a brand's heading: that brand is picked, type the model
-function cxAddModelFor(mid){
-  const sel=document.getElementById('modMfrSelect'); if(sel)sel.value=String(mid);
-  const inp=document.getElementById('modCatInput'); if(inp){ inp.focus(); inp.scrollIntoView({block:'center',behavior:'smooth'}); }
-}
-window.cxAddModelFor=cxAddModelFor;
 function cxShow(tab){
   cxTab=tab;
   document.querySelectorAll('#cxTabs button').forEach(b=>b.classList.toggle('active',b.dataset.cx===tab));
