@@ -129,6 +129,7 @@
             <select id="category"><option>Hardware</option><option>Software</option><option>Network</option><option>Access/Permissions</option><option>Email/Communication</option><option>Printer</option><option>CCTV/Security</option><option>Other</option></select>
           </div>
         </div>
+        <div id="deptRow" style="display:none"><label>Department</label><select id="space_id"></select></div>
         <label>Description</label><textarea id="description" required placeholder="Describe the issue or request in detail..."></textarea>
         <label>Photos <span style="color:var(--mut2)">- optional, up to 4</span></label>
         <div class="drop" id="drop">
@@ -346,6 +347,7 @@
       subject: document.getElementById('subject').value.trim(),
       priority: document.getElementById('priority').value,
       category: document.getElementById('category').value,
+      space_id: document.getElementById('space_id').value || '1',
       description: document.getElementById('description').value.trim(),
       token: token
     };
@@ -455,6 +457,14 @@
     lookupTicket(code, false);
   };
 })();
+
+// Departments: shown only when the organisation runs more than one
+fetch('/api/portal/departments').then(function(r){ return r.ok ? r.json() : []; }).then(function(list){
+  var sel = document.getElementById('space_id');
+  if(!sel || !list || list.length < 2) return;
+  sel.innerHTML = list.map(function(d){ return '<option value="'+d.id+'">'+String(d.name).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; })+'</option>'; }).join('');
+  document.getElementById('deptRow').style.display = '';
+}).catch(function(){});
 </script>
 </body>
 </html>

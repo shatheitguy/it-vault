@@ -43,11 +43,34 @@ data class Asset(
      * Only /api/assets/{id} returns it -- the list does not carry it, which
      * is why a sheet printed from the cache leaves a line to sign instead. */
     var SignatureData: String = "",
-    @SerializedName("UpdatedAt") var updatedAt: String = ""
+    @SerializedName("UpdatedAt") var updatedAt: String = "",
+    /** Department; null = leave it as it is. */
+    var SpaceID: Int? = null,
+    /** The department/category extra fields, by key. */
+    var Extra: Map<String, String>? = null
 )
 
 data class CreateAssetResponse(val ok: Boolean?, @SerializedName("_id") val id: String?, val error: String?)
 data class NextTagResponse(val tag: String?)
+
+/** A department (IT, Facilities, ...). can_edit is false where this account
+ * is only a viewer. */
+data class SpaceItem(
+    val id: Int = 1,
+    val name: String = "",
+    val prefix: String? = null,
+    val color: String? = null,
+    val can_edit: Boolean = true,
+)
+
+/** An extra field an asset of this department + category carries. */
+data class FieldDef(
+    val key: String = "",
+    val label: String = "",
+    val type: String = "text",      // text, number, date, choice, checkbox
+    val options: String? = null,    // "a, b, c" for a choice
+    val required: Boolean = false,
+)
 data class CheckoutRequest(val username: String, val signed_date: String, val expected: String, val note: String)
 
 data class Employee(
@@ -79,7 +102,8 @@ data class Ticket(
     val source: String? = null,
     val created_at: String? = null,
     val updated_at: String? = null,
-    val reply_count: Int = 0
+    val reply_count: Int = 0,
+    var SpaceID: Int? = null
 )
 
 data class TicketDetail(val ticket: Ticket, val replies: List<TicketReply>)

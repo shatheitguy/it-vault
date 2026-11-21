@@ -1,6 +1,6 @@
 {
-  "versionCode": 48,
-  "versionName": "2.9.4",
+  "versionCode": 49,
+  "versionName": "2.10.0",
   "apkUrl": "https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk",
-  "notes": "Everything the web can do, now in the app: every Settings section (users and roles, WhatsApp linking, sign-in codes and authenticator 2FA, email, branding, Returned watermark, light and dark, LDAP, UniFi), the Product Catalog with brand logos and product photos, imports and exports, deleted contracts and notification channels. Assets show their photo and brand logo, and the dashboard has the web's in-use ring, status donut and quick actions."
+  "notes": "Departments: run IT, Facilities, Vehicles and more from one app. New assets and tickets ask which department they belong to, each department numbers its own asset IDs, and an asset shows the extra fields its department and category need. You only see the departments you work in, and where you are a viewer you can look but not change."
 }

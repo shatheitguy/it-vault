@@ -6,8 +6,8 @@
 <title>IT-Vault</title>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/style.css?v=20261120h">
-<link rel="stylesheet" href="/redesign.css?v=20261120d">
+<link rel="stylesheet" href="/style.css?v=20261121b">
+<link rel="stylesheet" href="/redesign.css?v=20261121b">
 <!-- The install's own logo, so a browser tab is identifiable and the
      dashboard's icon lookup finds something when pointed at itself. -->
 <link rel="icon" href="/icon.png">
@@ -85,7 +85,7 @@
         </div>
         <div class="invbox">
           <label>LOCATIONS <span id="dirLocCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="dirLocInput" placeholder="e.g. HQ, Warehouse"><button class="btn sm" id="dirLocAdd">＋ ADD</button></div>
+          <div class="catrow"><input id="dirLocInput" placeholder="e.g. HQ, Block A, Floor 2, Room 204"><select id="dirLocParent"><option value="0">Top level</option></select><select id="dirLocKind"><option value="">Kind…</option><option value="site">Site</option><option value="building">Building</option><option value="floor">Floor</option><option value="room">Room</option><option value="area">Area</option></select><button class="btn sm" id="dirLocAdd">＋ ADD</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="dirLocBody"></tbody></table></div>
         </div>
         <div class="invbox">
@@ -131,34 +131,34 @@
         <div class="spacer"></div>
       </div>
 
-      <div class="panel" style="margin-bottom:16px">
-        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <span>DELETED ASSETS</span>
-          <div style="display:flex;gap:8px">
-            <button class="btn sm ghost" id="trashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
-            <button class="btn sm danger" id="trashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
-            <button class="btn sm danger" id="trashEmptyBtn">🗑 EMPTY</button>
+      <div class="panel trash-panel">
+        <div class="trash-bar">
+          <div class="space-tabs trash-tabs" id="trashTabs">
+            <button type="button" data-tf="all" class="on">All<span class="sp-n" id="trashNAll">0</span></button>
+            <button type="button" data-tf="assets">Assets<span class="sp-n" id="trashNAssets">0</span></button>
+            <button type="button" data-tf="contracts">Contracts<span class="sp-n" id="trashNContracts">0</span></button>
+          </div>
+          <div class="trash-actions">
+            <button class="btn sm ghost" id="trashRestoreSelBtn" disabled>♻ Restore selected</button>
+            <button class="btn sm danger" id="trashDelSelBtn" disabled>🗑 Delete selected</button>
+            <button class="btn sm danger" id="trashEmptyBtn">🗑 Empty</button>
           </div>
         </div>
-        <div class="tablewrap">
-          <table id="trashGrid"><thead><tr><th><input type="checkbox" id="trashChkAll"></th><th>ASSET ID</th><th>ASSET NAME</th><th>ITEM CATEGORY</th><th>SERIAL</th><th>LOCATION</th><th>STATUS</th><th></th></tr></thead><tbody id="trashBody"></tbody></table>
-          <div class="empty" id="trashEmpty" style="display:none">TRASH IS EMPTY</div>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="secthead" style="display:flex;align-items:center;justify-content:space-between;gap:10px">
-          <span>DELETED CONTRACTS</span>
-          <div style="display:flex;gap:8px">
-            <button class="btn sm ghost" id="ctTrashRestoreSelBtn" disabled>♻ RESTORE SELECTED</button>
-            <button class="btn sm danger" id="ctTrashDelSelBtn" disabled>🗑 DELETE SELECTED</button>
-            <button class="btn sm danger" id="ctTrashEmptyBtn">🗑 EMPTY</button>
+        <div class="trash-sec" data-tf="assets">
+          <div class="trash-sub">Assets</div>
+          <div class="tablewrap">
+            <table id="trashGrid"><thead><tr><th><input type="checkbox" id="trashChkAll"></th><th>ASSET ID</th><th>ASSET NAME</th><th>ITEM CATEGORY</th><th>SERIAL</th><th>LOCATION</th><th>STATUS</th><th></th></tr></thead><tbody id="trashBody"></tbody></table>
+            <div class="empty" id="trashEmpty" style="display:none">No deleted assets</div>
           </div>
         </div>
-        <div class="tablewrap">
-          <table id="ctTrashGrid"><thead><tr><th><input type="checkbox" id="ctTrashChkAll"></th><th>CONTRACT ID</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>END DATE</th><th>COST</th><th></th></tr></thead><tbody id="ctTrashBody"></tbody></table>
-          <div class="empty" id="ctTrashEmpty" style="display:none">CONTRACTS TRASH IS EMPTY</div>
+        <div class="trash-sec" data-tf="contracts">
+          <div class="trash-sub">Contracts</div>
+          <div class="tablewrap">
+            <table id="ctTrashGrid"><thead><tr><th><input type="checkbox" id="ctTrashChkAll"></th><th>CONTRACT ID</th><th>NAME</th><th>TYPE</th><th>VENDOR</th><th>END DATE</th><th>COST</th><th></th></tr></thead><tbody id="ctTrashBody"></tbody></table>
+            <div class="empty" id="ctTrashEmpty" style="display:none">No deleted contracts</div>
+          </div>
         </div>
+        <div class="empty" id="trashAllEmpty" style="display:none">Trash is empty</div>
       </div>
     </div>
 
@@ -170,6 +170,7 @@
         <button class="btn ghost" id="openMonitorBtn">🖥 OPEN MONITOR</button>
         <button class="btn ghost" id="sharePortalBtn">🔗 SHARE PORTAL LINK</button>
       </div>
+      <div class="space-tabs" data-space-tabs="tickets"></div>
       <div class="toolbar">
         <input id="tkSearch" placeholder="⌕ search subject, code, requester…">
         <select id="tkStatus"><option value="">ALL STATUS</option><option>Open</option><option>In Progress</option><option>Pending</option><option>Resolved</option><option>Closed</option></select>
@@ -230,17 +231,17 @@
       <div class="grid2 catalog-grid">
         <div class="invbox">
           <label>ITEM CATEGORIES <span id="catCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="catInput" placeholder="e.g. Mobile, Network, CCTV"><button class="btn sm" id="catAdd">＋ ADD</button></div>
+          <div class="catrow"><input id="catInput" placeholder="e.g. Mobile, Network, CCTV"><button class="btn sm" id="catAdd">＋ Add</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="catBody"></tbody></table></div>
         </div>
         <div class="invbox">
           <label>MANUFACTURERS <span id="mfrCatCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="mfrCatInput" placeholder="e.g. Apple, Dell, HP"><input id="mfrSiteInput" placeholder="Website for the logo (optional), e.g. dell.com"><button class="btn sm" id="mfrCatAdd">＋ ADD</button></div>
+          <div class="catrow cat-add2"><input id="mfrCatInput" placeholder="Brand, e.g. Dell"><input id="mfrSiteInput" placeholder="Website, e.g. dell.com" title="Optional. IT-Vault fetches the brand's logo from it."><button class="btn sm" id="mfrCatAdd">＋ Add</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="mfrCatBody"></tbody></table></div>
         </div>
         <div class="invbox">
           <label>CONTRACT TYPES <span id="ctTypeCatCount" class="cat-count"></span></label>
-          <div class="catrow"><input id="ctTypeCatInput" placeholder="e.g. AMC, License, Subscription"><button class="btn sm" id="ctTypeCatAdd">＋ ADD</button></div>
+          <div class="catrow"><input id="ctTypeCatInput" placeholder="e.g. AMC, License, Subscription"><button class="btn sm" id="ctTypeCatAdd">＋ Add</button></div>
           <div class="tablewrap"><table class="dtable"><thead><tr><th>Name</th><th class="col-del"></th></tr></thead><tbody id="ctTypeCatBody"></tbody></table></div>
         </div>
       </div>
@@ -249,7 +250,7 @@
         <div class="catrow">
           <select id="modMfrSelect"><option value="">-- choose manufacturer --</option></select>
           <input id="modCatInput" placeholder="e.g. iPhone 13 Pro Max">
-          <button class="btn sm" id="modCatAdd">＋ ADD</button>
+          <button class="btn sm" id="modCatAdd">＋ Add</button>
         </div>
         <div class="tablewrap"><table class="dtable"><thead><tr><th>Model</th><th>Manufacturer</th><th class="col-del"></th></tr></thead><tbody id="modCatBody"></tbody></table></div>
       </div>
@@ -263,6 +264,10 @@
   <h3 id="catEditTitle">RENAME</h3>
   <div class="modal-scroll">
     <div class="field2"><label id="catEditLabel">Name</label><input id="catEditName" autocomplete="off"></div>
+    <div class="field2" id="catEditSiteWrap" style="display:none;margin-top:10px">
+      <label>Website <span class="muted" style="font-weight:400">(the logo comes from here)</span></label>
+      <input id="catEditSite" placeholder="e.g. dell.com" autocomplete="off">
+    </div>
     <div class="field2" id="catEditMfrWrap" style="display:none">
       <label>Manufacturer</label>
       <select id="catEditMfr"><option value="">-- none --</option></select>
@@ -311,6 +316,7 @@
         <div><div class="crumb">IT GUY / DASHBOARD</div><h2 id="dashTitle">Dashboard</h2></div>
         <div class="spacer"></div>
       </div>
+      <div class="space-tabs" data-space-tabs></div>
 
       <div class="dash-hero" id="dashHero">
         <div class="dh-main">
@@ -355,6 +361,7 @@
         <div class="panel widget" data-wkey="status"><div class="secthead">ASSET STATUS</div><div class="bars" id="statusBars"></div></div>
         <div class="panel widget" data-wkey="type"><div class="secthead">TOP ASSET TYPES</div><div class="bars" id="typeBars"></div></div>
         <div class="panel widget" data-wkey="recent"><div class="secthead">RECENT ASSETS</div><div class="tablewrap" style="max-height:320px"><table id="dashRecent"><thead><tr><th>NAME</th><th>TYPE</th><th>STATUS</th></tr></thead><tbody id="dashRecentBody"></tbody></table><div class="empty" id="dashRecentEmpty" style="display:none">NO ASSETS</div></div></div>
+        <div class="panel widget" data-wkey="maint"><div class="secthead">MAINTENANCE DUE</div><div id="dashMaint"></div></div>
         <div class="panel widget" data-wkey="tickets"><div class="secthead">OPEN TICKETS</div><div class="tablewrap" style="max-height:320px"><table id="dashTickets"><thead><tr><th>CODE</th><th>SUBJECT</th><th>STATUS</th></tr></thead><tbody id="dashTicketsBody"></tbody></table><div class="empty" id="dashTicketsEmpty" style="display:none">NO TICKETS</div></div></div>
         <div class="panel widget" data-wkey="heartbeat"><div class="secthead">HEARTBEAT</div><div class="hbcounts" id="dashHbCounts"></div><div class="tablewrap" style="max-height:320px"><table id="dashHb"><thead><tr><th>STATUS</th><th>MONITOR</th><th>HEARTBEAT</th><th>RESPONSE</th><th>UPTIME</th></tr></thead><tbody id="dashHbBody"></tbody></table><div class="empty" id="dashHbEmpty" style="display:none">NO MONITORS</div></div></div>
         <div class="panel widget" data-wkey="feed"><div class="secthead">RECENT ACTIVITY</div><div class="feed" id="dashFeed"></div><div class="empty" id="dashFeedEmpty" style="display:none">NO ACTIVITY</div></div>
@@ -371,9 +378,12 @@
         <div><div class="crumb" id="crumbText">Assets</div><h2 id="dashTitle">Asset Registry</h2></div>
         <div class="spacer"></div>
         <button class="btn mag" id="addBtn2">+ Add asset</button>
+        <button class="btn ghost" id="maintBtn" type="button">🛠 Maintenance due <span class="mt-count" id="maintCount"></span></button>
         <button class="btn ghost" id="importBtn2">Import</button>
         <button class="btn ghost" id="exportBtn2">Export</button>
       </div>
+      <div class="space-tabs" data-space-tabs></div>
+      <div class="panel maint-panel" id="maintPanel" style="display:none"></div>
 
       <div class="stats">
         <div class="stat c1"><div class="k">Total Assets</div><div class="v" id="stTotal">0</div></div>
@@ -414,6 +424,7 @@
           <button class="cfgitem active" data-sec="general">⚙ General</button>
           <button class="cfgitem" data-sec="account">🧑 My Account</button>
           <button class="cfgitem" data-sec="users">👤 Users</button>
+          <button class="cfgitem" data-sec="spaces">🏢 Departments</button>
           <button class="cfgitem" data-sec="notif">🔔 Notifications</button>
           <button class="cfgitem" data-sec="sla">⏱ SLA & Automation</button>
           <button class="cfgitem" data-sec="database">🗄 Database</button>
@@ -861,6 +872,7 @@
             <div class="m-actions"><button class="btn ghost" id="resetCustomBtn">↺ RESET</button><button class="btn mag" id="saveCustomBtn">✓ SAVE THEME</button></div>
           </section>
           <!-- ASSET LABEL (QR / print label — separate from Branding) -->
+          <section class="cfg-sec" data-sec="spaces" style="display:none"><div class="panel" id="spacesPanel"></div></section>
           <section class="cfg-sec" data-sec="label" style="display:none">
             <div class="panel">
               <div class="secthead">TAG MODEL</div>
@@ -1231,6 +1243,7 @@
       <div class="field2"><label>Email</label><input id="u_email" placeholder="user@company.com"></div>
       <div class="field2"><label>Role</label><select id="u_role"><option value="read-only">read-only</option><option value="read-write">read-write</option><option value="admin">admin</option></select></div>
       <div class="field2"><label>Password</label><input id="u_password" type="password" placeholder="set / change"></div>
+      <div class="field2" style="grid-column:1/-1"><label>Departments</label><div id="u_spaces" class="space-checks"></div></div>
     </div>
   </div>
   
@@ -1517,7 +1530,8 @@
 
 
 <div class="toast" id="toast"></div>
-<script src="/app.js?nocache=20261121a"></script>
-<script src="/redesign.js?v=20261120c"></script>
+<script src="/app.js?nocache=20261121b"></script>
+<script src="/redesign.js?v=20261121b"></script>
+<script src="/spaces.js?v=20261121b"></script>
 </body>
 </html>

@@ -16,6 +16,11 @@ app and a native Android app that do the same things.
 
 **Highlights**
 
+- **Every department, one app:** run IT, Facilities, Vehicles, Furniture, Tools or
+  Medical from ready-made templates. Each department has its own asset ID prefix,
+  its own tickets, extra fields per item category, preventive maintenance
+  schedules and locations as building › floor › room. Staff see only the
+  departments they work in, as an **editor** or a **viewer**.
 - **Pictures everywhere:** product photos per model or per asset, and brand logos
   fetched from the brand's own website, shown on every asset.
 - **Signed handovers** by email *and* WhatsApp, with a signed PDF to both sides, and
@@ -30,7 +35,7 @@ app and a native Android app that do the same things.
 ## Android app
 
 A native Android app that does **everything the web does**: assets with their photos
-and brand logos, tickets, contracts, the directory, the Product Catalog, every
+and brand logos, departments and the extra fields each one asks for, tickets, contracts, the directory, the Product Catalog, every
 Settings section (users and roles, WhatsApp linking, 2FA, branding, LDAP, UniFi),
 imports and exports. **Offline-first editing** syncs when you're back online, QR /
 barcode scanning is built in, it **updates itself** (no store required), and it

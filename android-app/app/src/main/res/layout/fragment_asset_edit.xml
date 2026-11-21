@@ -27,6 +27,33 @@
         android:paddingTop="6dp"
         android:paddingBottom="32dp">
 
+        <!-- ======================= department ======================= -->
+        <LinearLayout
+            android:id="@+id/spaceSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+            <TextView style="@style/SectionLabel" android:layout_marginTop="4dp" android:text="Department" />
+            <com.google.android.material.card.MaterialCardView style="@style/Card">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="18dp">
+                    <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Space" style="@style/Dropdown" />
+                    <TextView
+                        android:id="@+id/spaceNote"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:textColor="@color/accent"
+                        android:textSize="13sp"
+                        android:visibility="gone" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
+
         <!-- ========================= identity ========================= -->
         <TextView style="@style/SectionLabel" android:layout_marginTop="4dp" android:text="Identity" />
 
@@ -95,6 +122,27 @@
                 <com.itguy.assetmanager.ui.widget.AppSpinner android:id="@+id/f_Location" style="@style/Dropdown" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
+
+        <!-- ========== extra fields of this department + category ========== -->
+        <LinearLayout
+            android:id="@+id/extraSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:visibility="gone">
+            <TextView android:id="@+id/extraTitle" style="@style/SectionLabel" android:text="Details" />
+            <com.google.android.material.card.MaterialCardView style="@style/Card">
+                <LinearLayout
+                    android:id="@+id/extraBox"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="6dp"
+                    android:paddingBottom="18dp" />
+            </com.google.android.material.card.MaterialCardView>
+        </LinearLayout>
 
         <!-- ==================== manufacturer and model ==================== -->
         <TextView style="@style/SectionLabel" android:text="Manufacturer &amp; model" />

@@ -158,9 +158,22 @@ class TicketsListFragment : Fragment(), Refreshable {
     }
 
     private fun openCreateDialog() {
+        lifecycleScope.launch {
+            val spaces = try { ApiClient.api().spaces().body().orEmpty().filter { it.can_edit } } catch (e: Exception) { emptyList() }
+            if (_b == null) return@launch
+            if (spaces.size > 1) {
+                // more than one department: ask which team this is for
+                com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle("Which department?")
+                    .setItems(spaces.map { it.name }.toTypedArray()) { _, i -> openCreateDialog(spaces[i]) }
+                    .setNegativeButton("Cancel", null).show()
+            } else openCreateDialog(spaces.firstOrNull())
+        }
+    }
+
+    private fun openCreateDialog(space: com.itguy.assetmanager.data.model.SpaceItem?) {
         val d = DialogTicketNewBinding.inflate(layoutInflater)
         com.itguy.assetmanager.ui.FormLabels.apply(d.root)
-        com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle("New ticket").setView(d.root)
+        com.itguy.assetmanager.ui.BrandDialog(requireContext()).setTitle(if (space != null) "New ${space.name} ticket" else "New ticket").setView(d.root)
             .setPositiveButton("Create") { _, _ ->
                 val subj = d.newSubject.text?.toString()?.trim().orEmpty()
                 if (subj.isBlank()) return@setPositiveButton
@@ -168,6 +181,7 @@ class TicketsListFragment : Fragment(), Refreshable {
                     subject = subj,
                     description = d.newDescription.text?.toString()?.trim().orEmpty(),
                     requester = Prefs.displayName.ifBlank { Prefs.username },
+                    SpaceID = space?.id,
                 )
                 lifecycleScope.launch {
                     try { ApiClient.api().createTicket(ticket); load() } catch (e: Exception) { }

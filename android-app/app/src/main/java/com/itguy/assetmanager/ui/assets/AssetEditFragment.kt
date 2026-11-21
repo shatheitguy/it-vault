@@ -16,6 +16,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
+import com.itguy.assetmanager.R
 import com.itguy.assetmanager.data.ApiClient
 import com.itguy.assetmanager.data.OfflineCache
 import com.itguy.assetmanager.data.Repository
@@ -42,6 +43,13 @@ class AssetEditFragment : Fragment() {
     private var models: List<ModelItem> = emptyList()
     private var locations: List<LocationItem> = emptyList()
     private var employees: List<Employee> = emptyList()
+    // departments and the extra fields of the chosen department + category
+    private var spaces: List<SpaceItem> = emptyList()
+    private var extraDefs: List<FieldDef> = emptyList()
+    private var extraDefsKnown = false
+    private val extraVals = mutableMapOf<String, String>()
+    private val extraViews = mutableMapOf<String, View>()
+    private var extraFor: Pair<Int, String>? = null
 
     private val STATUSES = listOf("Available", "Checked-Out", "Returned", "Under-Maintenance", "Reserved", "Retired", "Lost/Stolen")
     private val ADD_NEW = "＋ Add new…"
@@ -272,13 +280,17 @@ class AssetEditFragment : Fragment() {
                     .takeIf { it.isNotEmpty() }?.let { locations = it; cache.saveLocations(it) }
                 safe { api.listEmployees().body().orEmpty() }
                     .takeIf { it.isNotEmpty() }?.let { employees = it; cache.saveEmployees(it) }
+                safe { api.spaces().body().orEmpty() }.takeIf { it.isNotEmpty() }?.let { spaces = it }
+                // a new asset goes into the first department this account edits
+                val homeSpace = spaces.firstOrNull { it.can_edit }?.id
 
                 val fresh = if (assetId != null) {
                     try { api.getAsset(assetId!!).body() } catch (e: Exception) { null }
                         ?: cachedAsset
                         ?: Asset()
                 } else Asset(
-                    AssetTag = try { api.nextAssetTag().body()?.tag.orEmpty() } catch (e: Exception) { "" },
+                    SpaceID = homeSpace,
+                    AssetTag = try { api.nextAssetTag(homeSpace).body()?.tag.orEmpty() } catch (e: Exception) { "" },
                     Name = arguments?.getString("prefillName").orEmpty(),
                     MacAddress = arguments?.getString("prefillMac").orEmpty(),
                     Type = arguments?.getString("prefillType").orEmpty(),
@@ -313,6 +325,131 @@ class AssetEditFragment : Fragment() {
         bindModelSpinner(current.Manufacturer)
         bindEmployeeSpinner()
         populatePlainFields()
+        extraVals.clear(); current.Extra?.let { extraVals.putAll(it) }
+        extraFor = null
+        bindSpaceSpinner()
+        refreshExtraFields()
+    }
+
+    // ---- Department ----
+    private fun spaceOf(id: Int?): SpaceItem? = spaces.firstOrNull { it.id == (id ?: 1) }
+
+    private fun bindSpaceSpinner() {
+        val home = spaceOf(current.SpaceID)
+        val viewOnly = assetId != null && home != null && !home.can_edit
+        val choices = spaces.filter { it.can_edit }.toMutableList()
+        if (home != null && choices.none { it.id == home.id }) choices.add(0, home)
+        b.spaceSection.visibility = if (spaces.size > 1) View.VISIBLE else View.GONE
+        b.spaceNote.visibility = if (viewOnly) View.VISIBLE else View.GONE
+        if (viewOnly) b.spaceNote.text = "View only: you are a viewer in ${home!!.name}, so changes here can't be saved."
+        b.saveBtn.isEnabled = !viewOnly
+        b.fSpace.isEnabled = !viewOnly
+        if (choices.isEmpty()) return
+        val names = choices.map { it.name }
+        val adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, names)
+        b.fSpace.adapter = adapter
+        val idx = choices.indexOfFirst { it.id == (current.SpaceID ?: home?.id) }.coerceAtLeast(0)
+        b.fSpace.setSelection(idx, false)
+        b.fSpace.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                val picked = choices[position].id
+                if (picked == current.SpaceID) return
+                current = current.copy(SpaceID = picked)
+                // a new asset takes the next ID of the department it goes into
+                if (assetId == null) lifecycleScope.launch {
+                    val tag = try { ApiClient.api().nextAssetTag(picked).body()?.tag } catch (e: Exception) { null }
+                    if (_b != null && !tag.isNullOrBlank()) b.fAssetTag.setText(tag)
+                }
+                refreshExtraFields()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
+    }
+
+    // ---- Extra fields (they depend on the department and the item category) ----
+    private fun keepTypedExtra() {
+        for ((k, v) in extraViews) {
+            extraVals[k] = when (v) {
+                is android.widget.CheckBox -> if (v.isChecked) "1" else ""
+                is android.widget.Spinner -> v.selectedItem?.toString()?.takeIf { it != NONE }.orEmpty()
+                is EditText -> v.text?.toString()?.trim().orEmpty()
+                else -> extraVals[k].orEmpty()
+            }
+        }
+    }
+
+    private fun refreshExtraFields() {
+        val space = current.SpaceID ?: 1
+        val cat = spinnerText(b.fType).ifBlank { current.Type }
+        if (extraFor == space to cat) return
+        extraFor = space to cat
+        keepTypedExtra()
+        lifecycleScope.launch {
+            val defs = try { ApiClient.api().assetFields(space, cat).body() } catch (e: Exception) { null }
+            if (_b == null || extraFor != space to cat) return@launch
+            extraDefsKnown = defs != null
+            extraDefs = defs.orEmpty()
+            drawExtraFields(cat)
+        }
+    }
+
+    private fun drawExtraFields(cat: String) {
+        val box = b.extraBox
+        box.removeAllViews(); extraViews.clear()
+        b.extraSection.visibility = if (extraDefs.isEmpty()) View.GONE else View.VISIBLE
+        b.extraTitle.text = if (cat.isNotBlank()) "$cat details" else "Details"
+        val inf = LayoutInflater.from(requireContext())
+        for (d in extraDefs) {
+            val label = d.label + if (d.required) " *" else ""
+            val v = extraVals[d.key].orEmpty()
+            when (d.type) {
+                "checkbox" -> {
+                    val cb = com.google.android.material.checkbox.MaterialCheckBox(requireContext())
+                    cb.text = label; cb.isChecked = v == "1" || v.equals("true", true)
+                    cb.setTextColor(resources.getColor(R.color.text_strong, null))
+                    box.addView(cb); extraViews[d.key] = cb
+                }
+                "choice" -> {
+                    val row = inf.inflate(R.layout.item_extra_choice, box, false)
+                    row.findViewById<android.widget.TextView>(R.id.extraLabel).text = label
+                    val sp = row.findViewById<android.widget.Spinner>(R.id.extraSpinner)
+                    val opts = (d.options ?: "").split(",").map { it.trim() }.filter { it.isNotEmpty() }.toMutableList()
+                    if (v.isNotBlank() && v !in opts) opts.add(v)   // never lose a value already saved
+                    val items = listOf(NONE) + opts
+                    sp.adapter = ArrayAdapter(requireContext(), android.R.layout.simple_spinner_dropdown_item, items)
+                    sp.setSelection(items.indexOf(v).coerceAtLeast(0))
+                    box.addView(row); extraViews[d.key] = sp
+                }
+                else -> {
+                    val til = inf.inflate(R.layout.item_extra_text, box, false) as com.google.android.material.textfield.TextInputLayout
+                    til.hint = label
+                    val et = til.findViewById<EditText>(R.id.extraInput)
+                    et.setText(v)
+                    when (d.type) {
+                        "number" -> et.inputType = android.text.InputType.TYPE_CLASS_NUMBER or
+                            android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL or android.text.InputType.TYPE_NUMBER_FLAG_SIGNED
+                        "date" -> {
+                            et.isFocusable = false; et.isClickable = true
+                            et.setOnClickListener { pickDateInto(et) }
+                        }
+                    }
+                    box.addView(til); extraViews[d.key] = et
+                }
+            }
+        }
+    }
+
+    private fun pickDateInto(et: EditText) {
+        val c = Calendar.getInstance()
+        val parts = et.text?.toString()?.split("-")
+        if (parts != null && parts.size == 3) {
+            parts[0].toIntOrNull()?.let { c.set(Calendar.YEAR, it) }
+            parts[1].toIntOrNull()?.let { c.set(Calendar.MONTH, it - 1) }
+            parts[2].toIntOrNull()?.let { c.set(Calendar.DAY_OF_MONTH, it) }
+        }
+        DatePickerDialog(requireContext(), { _, y, m, d ->
+            et.setText(String.format(java.util.Locale.US, "%04d-%02d-%02d", y, m + 1, d))
+        }, c.get(Calendar.YEAR), c.get(Calendar.MONTH), c.get(Calendar.DAY_OF_MONTH)).show()
     }
 
     private fun populatePlainFields() {
@@ -601,7 +738,7 @@ class AssetEditFragment : Fragment() {
         val list = if (sel.isNotBlank() && categories.none { it.name == sel }) {
             (mutableListOf(NONE, sel) + categories.map { it.name } + ADD_NEW)
         } else labels
-        setSpinner(b.fType, list, sel) { newVal ->
+        setSpinner(b.fType, list, sel, onSelected = { refreshExtraFields() }) { newVal ->
             ApiClient.api().addCategory(NameOnly(newVal))
             categories = ApiClient.api().categories().body().orEmpty()
             bindCategorySpinnerWithSelection(newVal)
@@ -609,7 +746,7 @@ class AssetEditFragment : Fragment() {
     }
     private fun bindCategorySpinnerWithSelection(sel: String) {
         val list = mutableListOf(NONE) + categories.map { it.name } + ADD_NEW
-        setSpinner(b.fType, list, sel) { newVal ->
+        setSpinner(b.fType, list, sel, onSelected = { refreshExtraFields() }) { newVal ->
             ApiClient.api().addCategory(NameOnly(newVal))
             categories = ApiClient.api().categories().body().orEmpty()
             bindCategorySpinnerWithSelection(newVal)
@@ -727,6 +864,10 @@ class AssetEditFragment : Fragment() {
         b.formError.visibility = View.GONE
         val name = b.fName.text?.toString()?.trim().orEmpty()
         if (name.isBlank()) { b.formError.text = "Name is required"; b.formError.visibility = View.VISIBLE; return }
+        keepTypedExtra()
+        extraDefs.firstOrNull { it.required && it.type != "checkbox" && extraVals[it.key].isNullOrBlank() }?.let {
+            b.formError.text = "${it.label} is required for this kind of asset"; b.formError.visibility = View.VISIBLE; return
+        }
 
         val employeeLabel = b.fEmployeeID.selectedItem?.toString() ?: NONE
         val employeeId = if (employeeLabel == NONE) "" else {
@@ -750,7 +891,10 @@ class AssetEditFragment : Fragment() {
             PurchaseDate = b.fPurchaseDate.text?.toString()?.trim().orEmpty(),
             WarrantyMonths = b.fWarrantyMonths.text?.toString()?.trim()?.toIntOrNull() ?: if (assetId == null) 12 else current.WarrantyMonths,
             Price = b.fPrice.text?.toString()?.trim().ifNullOrBlank("0"),
-            EmployeeID = employeeId
+            EmployeeID = employeeId,
+            // without the department list (offline) the asset keeps what it had
+            SpaceID = if (spaces.isEmpty()) current.SpaceID else (current.SpaceID ?: 1),
+            Extra = if (extraDefsKnown || current.Extra != null) HashMap(extraVals) else null
         )
 
         b.formProgress.visibility = View.VISIBLE
