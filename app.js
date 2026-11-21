@@ -1,6 +1,6 @@
 const APP_VERSION='20260828c';
 const COLUMNS=['AssetTag','Name','Type','Serial','MacAddress','Location','Status','Manufacturer','Model','ReceivedBy','NotesReceived','Note','PurchaseDate','WarrantyMonths','Price','EmployeeID','RequestedBy'];
-const LABELS={'AssetTag':'Asset ID','Name':'Asset Name','ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee Name','RequestedBy':'Requested By','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
+const LABELS={'AssetTag':'Asset ID','SpaceName':'Department','Name':'Asset Name','ReceivedBy':'Signed By','NotesReceived':'Signed Date','Note':'Note','WarrantyMonths':'Warranty','EmployeeID':'Employee Name','RequestedBy':'Requested By','Type':'Item Category','Price':'Price','MacAddress':'MAC Address','PurchaseDate':'Purchased Date'};
 
 // --- currency: stored base = AED; display converts via rate and shows symbol ---
 const MONEY={AED:{s:'AED',r:1},USD:{s:'$',r:0.272},EUR:{s:'€',r:0.25},INR:{s:'₹',r:22.7}};
@@ -468,8 +468,8 @@ function renderEmployees(list){
     <td class="mono">${esc(e.Phone)}</td>
     <td>${esc(e.source||'manual')}</td>
     <td><div class="row-actions">
-      <button class="btn sm ghost" onclick="openEmpModal('${e._id}')">EDIT</button>
-      <button class="btn sm danger" onclick="delEmployee('${e._id}')">DEL</button>
+      <button class="btn sm ghost" onclick="openEmpModal('${e._id}')">Edit</button>
+      <button class="btn sm danger" onclick="delEmployee('${e._id}')">Delete</button>
     </div></td>
   </tr>`).join('');
 }
@@ -603,7 +603,7 @@ async function load(){
   console.log('[ITGUY] load start');
   dbg('load() called');
   let r;
-  try{ r=await api('/api/assets'+location.search); }
+  try{ r=await api('/api/assets'+(window.spaceQuery?spaceQuery('?'):'')); }
   catch(e){ dbg('FETCH ERROR: '+e.message); showAssetError('network/fetch error: '+e.message); console.error(e); return; }
   if(!r){dbg('api() returned null (likely 401 -> redirected)');showAssetError('unauthorized (api returned null)');return;}
   dbg('api /api/assets status='+r.status);
@@ -631,7 +631,7 @@ function toggleRowMenu(e,id){
     ?`<button onclick="closeRowMenu();checkinAsset('${id}')">CHECK-IN</button>`
     :'';
   menu.innerHTML=`
-    <button onclick="closeRowMenu();editRow('${id}')">EDIT</button>
+    <button onclick="closeRowMenu();editRow('${id}')">Edit</button>
     ${checkoutItem}
     <button onclick="closeRowMenu();openSign('${id}')">SIGN</button>
     <button onclick="closeRowMenu();openQR('${id}')">QR</button>
@@ -704,7 +704,7 @@ function render(){
   if(groupBy){
     // group rows by the chosen column
     const groups={};
-    rows.forEach(a=>{const k=(a[groupBy]||'—').toString();(groups[k]=groups[k]||[]).push(a);});
+    rows.forEach(a=>{const k=((groupBy==='SpaceName'&&window.spaceNameOf)?spaceNameOf(a):(a[groupBy]||'—')).toString();(groups[k]=groups[k]||[]).push(a);});
     const keys=Object.keys(groups).sort((x,y)=>x.toLowerCase()<y.toLowerCase()?-1:1);
     body.innerHTML=keys.map(k=>{
       const g=groups[k];
@@ -769,7 +769,7 @@ function syncHScroll(){
    any code and sat on their hardcoded 0 forever. */
 function setKV(id,v){ const e=document.getElementById(id); if(e) e.textContent=v; }
 async function loadStats(){
-  const r=await api('/api/dashboard'); if(!r)return null; const d=await r.json();
+  const r=await api('/api/dashboard'+(window.spaceQuery?spaceQuery('?'):'')); if(!r)return null; const d=await r.json();
   setKV('kTotal',d.total);  setKV('kOut',d.checked_out);  setKV('kMaint',d.maintenance);
   setKV('kDue',d.due_soon); setKV('kWarr',d.warranty_expiring);
   setKV('stTotal',d.total); setKV('stOut',d.checked_out); setKV('stMaint',d.maintenance);
@@ -854,7 +854,7 @@ function renderBars(elId, obj, colorFn){
 async function loadDashboardPage(){
   // recent assets
   try{
-    const r=await api('/api/assets?order=recent'); if(r){ const list=await r.json(); const top=(list||[]).slice(0,12);
+    const r=await api('/api/assets?order=recent'+(window.spaceQuery?spaceQuery('&'):'')); if(r){ const list=await r.json(); const top=(list||[]).slice(0,12);
       const tb=document.getElementById('dashRecentBody');
       if(tb) tb.innerHTML=top.map(a=>`<tr style="cursor:pointer" onclick="showPage('page-assets');openModal('${esc(a._id)}')"><td><div class="nm">${window.assetThumb?assetThumb(a):''}<div class="nm-t"><span class="nm-n">${esc(a.Name||'')}</span><span class="nm-s">${esc(a.AssetTag||'')}</span></div></div></td><td>${esc(a.Type||'')}</td><td>${dashPill(a.Status)}</td></tr>`).join('')||'';
       const emp=document.getElementById('dashRecentEmpty'); if(emp) emp.style.display=top.length?'none':'block';
@@ -862,7 +862,7 @@ async function loadDashboardPage(){
   }catch(e){}
   // open tickets
   try{
-    const r=await api('/api/tickets'); if(r){ const list=await r.json(); const open=(list||[]).filter(t=>!['Resolved','Closed'].includes(t.status));
+    const r=await api('/api/tickets'+(window.spaceQuery?spaceQuery('?'):'')); if(r){ const list=await r.json(); const open=(list||[]).filter(t=>!['Resolved','Closed'].includes(t.status));
       const tb=document.getElementById('dashTicketsBody');
       if(tb) tb.innerHTML=open.slice(0,12).map(t=>`<tr style="cursor:pointer" onclick="openTicketById(${t.id})"><td class="mono">${esc(t.code||'')}</td><td><span class="prio-dot" style="--c:${prioColor(t.priority)}" title="${esc(t.priority||'')}"></span>${esc(t.subject||'')}</td><td>${dashPill(t.status)}</td></tr>`).join('')||'';
       const emp=document.getElementById('dashTicketsEmpty'); if(emp) emp.style.display=open.length?'none':'block';
@@ -1212,6 +1212,7 @@ async function openModal(id,prefill){
          <div class="field2"><label>Employee Designation</label><input id="f_EmpDesignation" value="" readonly disabled></div>`:''}</div>
     </div>`).join('');
   if(window.renderAssetPhotoBox)window.renderAssetPhotoBox(id,a);
+  if(window.renderSpaceBits)window.renderSpaceBits(id,a);
   document.getElementById('noteInvoiceWrap').innerHTML=
     `<div class="invbox">
       <label>NOTE (optional internal note)</label>
@@ -1242,7 +1243,7 @@ async function openModal(id,prefill){
   try{
     if(!id && !(prefill&&prefill.AssetTag)){
       const tagEl=document.getElementById('f_AssetTag');
-      if(tagEl){ const r=await api('/api/assets/next-tag'); if(r&&r.ok){ const j=await r.json(); tagEl.value=j.tag||''; } }
+      if(tagEl){ const r=await api('/api/assets/next-tag?space='+(window.formSpace?formSpace():'')); if(r&&r.ok){ const j=await r.json(); tagEl.value=j.tag||''; } }
     }
     if(document.getElementById('f_EmployeeID')){
       await fetchEmployees(a?a.EmployeeID||'':'', a?a.RequestedBy||'':'');
@@ -1344,12 +1345,12 @@ async function loadLocationOptions(selLoc){
   let locs=[];
   try{
     const r=await api('/api/locations'); locs=r?await r.json():[];
-    if(selLoc && !locs.some(l=>l.name===selLoc)){
+    if(selLoc && !locs.some(l=>l.name===selLoc||l.path===selLoc)){
       const r2=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:selLoc})});
       if(r2&&r2.ok){ const r3=await api('/api/locations'); locs=r3?await r3.json():locs; }
     }
   }catch(e){}
-  sel.innerHTML='<option value="">-- select location --</option>'+locs.map(l=>`<option value="${esc(l.name)}" ${l.name===selLoc?'selected':''}>${esc(l.name)}</option>`).join('')+'<option value="__new">＋ type new…</option>';
+  sel.innerHTML='<option value="">-- select location --</option>'+locs.map(l=>{const v=l.path||l.name;return `<option value="${esc(v)}" ${(v===selLoc||l.name===selLoc&&!(l.depth))?'selected':''}>${'\u00a0\u00a0'.repeat(l.depth||0)}${esc(l.name)}</option>`;}).join('')+'<option value="__new">＋ type new…</option>';
   sel.onchange=async()=>{
     if(sel.value==='__new'){const v=await uiPrompt('New location name:'); if(v&&v.trim()){const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:v.trim()})}); if(r&&r.ok){await loadLocationOptions(v.trim());}} else {sel.value=selLoc;}}
   };
@@ -1450,6 +1451,7 @@ async function saveModal(){
   const row={};COLUMNS.forEach(c=>{const el=document.getElementById('f_'+c);row[c]=el?el.value.trim():'';});
   if(row.EmployeeID==='__newemp')row.EmployeeID='';
   if(row.RequestedBy==='__newemp')row.RequestedBy='';
+  if(window.collectSpaceFields){ const err=collectSpaceFields(row); if(err){ toast('✕ '+err); return; } }
   const fileEl=document.getElementById('f_InvoiceFile');
   const btn=document.getElementById('saveBtn'); const label=btn?btn.textContent:'';
   _saving=true; if(btn){btn.disabled=true;btn.textContent='SAVING…';}
@@ -1501,7 +1503,7 @@ let maintAsset=null;
 async function openMaint(id){
   maintAsset=id; const r=await api('/api/assets/'+id+'/maintenance'); const list=r?await r.json():[];
   const tbody=document.getElementById('maintList');
-  tbody.innerHTML=list.map(x=>`<tr><td>${esc(x.date||x.ts||'')}</td><td>${esc(x.mtype||x.type||'')}</td><td class="mono">${fmtMoney(x.cost||0, CURRENCY)}</td><td>${esc(x.note||x.detail||'')}</td><td><button class="btn sm ghost" onclick="delMaint('${x.id||x._id||''}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">no records</td></tr>';
+  tbody.innerHTML=list.map(x=>`<tr><td>${esc(x.date||x.ts||'')}</td><td>${esc(x.mtype||x.type||'')}</td><td class="mono">${fmtMoney(x.cost||0, CURRENCY)}</td><td>${esc(x.note||x.detail||'')}</td><td><button class="btn sm ghost" onclick="delMaint('${x.id||x._id||''}')">Delete</button></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">no records</td></tr>';
   document.getElementById('maintModal').classList.add('show');
 }
 document.getElementById('mAdd').onclick=addMaint;
@@ -1527,7 +1529,7 @@ async function loadMaintInline(id){
   maintAsset=id;
   const r=await api('/api/assets/'+id+'/maintenance'); const list=r?await r.json():[];
   const tbody=document.getElementById('maintListInline'); if(!tbody)return;
-  tbody.innerHTML=list.map(x=>`<tr><td>${esc(x.date||x.ts||'')}</td><td>${esc(x.mtype||x.type||'')}</td><td class="mono">${fmtMoney(x.cost||0, CURRENCY)}</td><td>${esc(x.note||x.detail||'')}</td><td><button class="btn sm ghost" onclick="delMaintInline('${x.id||x._id||''}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">no records</td></tr>';
+  tbody.innerHTML=list.map(x=>`<tr><td>${esc(x.date||x.ts||'')}</td><td>${esc(x.mtype||x.type||'')}</td><td class="mono">${fmtMoney(x.cost||0, CURRENCY)}</td><td>${esc(x.note||x.detail||'')}</td><td><button class="btn sm ghost" onclick="delMaintInline('${x.id||x._id||''}')">Delete</button></td></tr>`).join('')||'<tr><td colspan=5 style="color:var(--muted)">no records</td></tr>';
 }
 async function addMaintInline(){
   const body={mtype:document.getElementById('mType2').value.trim(),cost:document.getElementById('mCost2').value,note:document.getElementById('mNote2').value.trim(),date:document.getElementById('mDate2').value};
@@ -2203,7 +2205,7 @@ let userModalFromList=false; // true only if userModal was opened from the legac
 async function openUsers(){
   const r=await api('/api/users');if(!r)return; const us=await r.json();
   const tbody=document.getElementById('usersBody');
-  tbody.innerHTML=us.map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.display||'')}</td><td><button class="btn sm ghost" onclick="editUser('${u.username}')">EDIT</button><button class="btn sm danger" onclick="delUser('${u.username}')">DEL</button></td></tr>`).join('');
+  tbody.innerHTML=us.map(u=>`<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${esc(u.display||'')}</td><td><button class="btn sm ghost" onclick="editUser('${u.username}')">Edit</button><button class="btn sm danger" onclick="delUser('${u.username}')">Delete</button></td></tr>`).join('');
   document.getElementById('usersModal').classList.add('show');
 }
 function closeUsersReturnProfile(){
@@ -2215,12 +2217,13 @@ function editUser(un){
   document.getElementById('u_username').readOnly=true;
   document.getElementById('userModalTitle').textContent='Edit user';
   // minimal prefetch
-  api('/api/users').then(r=>r.json()).then(async list=>{const u=list.find(x=>x.username===un)||{};document.getElementById('u_username').value=u.username||un;document.getElementById('u_display').value=u.display||'';document.getElementById('u_email').value=u.email||'';await populateRoleSelect(u.role||'read-only');document.getElementById('u_password').value='';document.getElementById('usersModal').classList.remove('show');document.getElementById('userModal').classList.add('show');});
+  api('/api/users').then(r=>r.json()).then(async list=>{const u=list.find(x=>x.username===un)||{};if(window.fillUserSpaces)fillUserSpaces(u.spaces||'');document.getElementById('u_username').value=u.username||un;document.getElementById('u_display').value=u.display||'';document.getElementById('u_email').value=u.email||'';await populateRoleSelect(u.role||'read-only');document.getElementById('u_password').value='';document.getElementById('usersModal').classList.remove('show');document.getElementById('userModal').classList.add('show');});
 }
 async function saveUser(){
   const username=document.getElementById('u_username').value.trim();
   const pw=document.getElementById('u_password').value;
   const body={display:document.getElementById('u_display').value.trim(),email:document.getElementById('u_email').value.trim(),role:document.getElementById('u_role').value};
+  if(window.collectUserSpaces)body.spaces=collectUserSpaces();
   if(pw)body.password=pw;
   let r;
   if(editingUser){
@@ -2342,8 +2345,8 @@ async function loadRolesModal(){
       <td>${esc(x.name)}</td>
       <td>${roleSummary(x)}</td>
       <td class="row-actions">
-        <button class="btn sm ghost" onclick='editRoleForm(${JSON.stringify(x.id)},${JSON.stringify(x.name)},${JSON.stringify(x.features||[])})'>EDIT</button>
-        <button class="btn sm danger" onclick="delRole(${x.id})">DEL</button>
+        <button class="btn sm ghost" onclick='editRoleForm(${JSON.stringify(x.id)},${JSON.stringify(x.name)},${JSON.stringify(x.features||[])})'>Edit</button>
+        <button class="btn sm danger" onclick="delRole(${x.id})">Delete</button>
       </td>
     </tr>`).join('')||'<tr><td colspan=3 style="color:var(--muted)">No custom roles yet</td></tr>';
   roleFormReset();
@@ -2781,8 +2784,8 @@ function renderHeartbeat(){
       <td class="muted">${esc(hbAgo(m.last_change))}</td>
       <td><div class="row-actions">
         <button class="btn sm ghost" onclick="hbToggle(${m.id})" title="${paused?'resume checking':'stop checking, keep the monitor'}">${paused?'▶':'❚❚'}</button>
-        <button class="btn sm" onclick="hbEdit(${m.id})">EDIT</button>
-        <button class="btn sm danger" onclick="hbDel(${m.id})">DEL</button>
+        <button class="btn sm" onclick="hbEdit(${m.id})">Edit</button>
+        <button class="btn sm danger" onclick="hbDel(${m.id})">Delete</button>
       </div></td></tr>`;
   }).join('');
 }
@@ -3088,8 +3091,8 @@ async function loadHbChannels(){
       <td>${c.enabled?'<span class="hbpill up">ACTIVE</span>':'<span class="hbpill paused">OFF</span>'}</td>
       <td><div class="row-actions">
         <button class="btn sm ghost" onclick="hbcTest(${c.id})">TEST</button>
-        <button class="btn sm" onclick="hbcEdit(${c.id})">EDIT</button>
-        <button class="btn sm danger" onclick="hbcDel(${c.id})">DEL</button>
+        <button class="btn sm" onclick="hbcEdit(${c.id})">Edit</button>
+        <button class="btn sm danger" onclick="hbcDel(${c.id})">Delete</button>
       </div></td></tr>`;
   }).join('');
   document.getElementById('hbChanEmpty').style.display=list.length?'none':'block';
@@ -3276,12 +3279,10 @@ document.getElementById('scanDeep').onchange=e=>{
 document.getElementById('navBackup').onclick=openBackup;
 document.getElementById('bkDownload').onclick=doBackup;
 document.getElementById('bkFile').onchange=doRestore;
-document.getElementById('trashRestoreSelBtn').onclick=restoreSelectedTrash;
-document.getElementById('trashDelSelBtn').onclick=deleteSelectedTrash;
-document.getElementById('trashEmptyBtn').onclick=emptyTrash;
-document.getElementById('ctTrashRestoreSelBtn').onclick=restoreSelectedContractsTrash;
-document.getElementById('ctTrashDelSelBtn').onclick=deleteSelectedContractsTrash;
-document.getElementById('ctTrashEmptyBtn').onclick=emptyContractsTrash;
+document.getElementById('trashRestoreSelBtn').onclick=()=>trashBulk('restore');
+document.getElementById('trashDelSelBtn').onclick=()=>trashBulk('delete');
+document.getElementById('trashEmptyBtn').onclick=trashEmpty;
+document.getElementById('trashTabs').onclick=e=>{const b=e.target.closest('[data-tf]'); if(!b)return; trashFilter=b.dataset.tf; drawTrashView();};
 document.getElementById('addEmpBtn').onclick=()=>openEmpModal('');
 document.getElementById('importLdapBtn').onclick=openLdapImport;
 document.getElementById('empSearch').oninput=loadEmployees;
@@ -3353,17 +3354,68 @@ window.showPage=showPage;
 async function loadTrash(){
   const r=await api('/api/assets/trash'); if(!r)return; const list=await r.json();
   const tb=document.getElementById('trashBody');
-  tb.innerHTML=list.map(a=>`<tr><td><input type="checkbox" class="trash-chk" data-id="${a._id}" onchange="updateTrashSelBtns()"/></td><td class="mono">${esc(a.AssetTag||a._id)}</td><td>${esc(a.Name||'')}</td><td>${esc(a.Type||'')}</td><td class="mono">${esc(a.Serial||'')}</td><td>${esc(a.Location||'')}</td><td>${esc(a.Status||'')}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreAsset('${a._id}')">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteAsset('${a._id}')">DEL</button></div></td></tr>`).join('');
+  tb.innerHTML=list.map(a=>`<tr><td><input type="checkbox" class="trash-chk" data-id="${a._id}" onchange="updateTrashSelBtns()"/></td><td class="mono">${esc(a.AssetTag||a._id)}</td><td>${esc(a.Name||'')}</td><td>${esc(a.Type||'')}</td><td class="mono">${esc(a.Serial||'')}</td><td>${esc(a.Location||'')}</td><td>${esc(a.Status||'')}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreAsset('${a._id}')">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteAsset('${a._id}')">Delete</button></div></td></tr>`).join('');
   document.getElementById('trashEmpty').style.display=list.length?'none':'block';
+  trashN.assets=list.length; setTimeout(drawTrashView,0);
   const chkAll=document.getElementById('trashChkAll');
   if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.trash-chk').forEach(c=>c.checked=chkAll.checked); updateTrashSelBtns(); }; }
   updateTrashSelBtns();
 }
+// One Trash page: a filter (All / Assets / Contracts) and one button row
+// that acts on whatever is showing.
+let trashFilter='all', trashN={assets:0,contracts:0};
+function trashShows(kind){ return trashFilter==='all'||trashFilter===kind; }
+function drawTrashView(){
+  document.querySelectorAll('#trashTabs [data-tf]').forEach(b=>b.classList.toggle('on',b.dataset.tf===trashFilter));
+  const set=(id,v)=>{const e=document.getElementById(id); if(e)e.textContent=v;};
+  set('trashNAll',trashN.assets+trashN.contracts); set('trashNAssets',trashN.assets); set('trashNContracts',trashN.contracts);
+  document.querySelectorAll('#page-trash .trash-sec').forEach(sec=>{
+    const k=sec.dataset.tf;
+    // in "All" an empty kind steps aside instead of printing its own empty box
+    sec.style.display=trashShows(k)&&(trashFilter!=='all'||trashN[k])?'':'none';
+    sec.querySelector('.trash-sub').style.display=trashFilter==='all'?'':'none';
+  });
+  const allE=document.getElementById('trashAllEmpty'); if(allE) allE.style.display=(trashFilter==='all'&&!trashN.assets&&!trashN.contracts)?'block':'none';
+  // ticks hidden by the filter don't count
+  if(!trashShows('assets')) document.querySelectorAll('.trash-chk:checked').forEach(c=>c.checked=false);
+  if(!trashShows('contracts')) document.querySelectorAll('.ct-trash-chk:checked').forEach(c=>c.checked=false);
+  const eb=document.getElementById('trashEmptyBtn');
+  if(eb) eb.disabled=!((trashShows('assets')&&trashN.assets)||(trashShows('contracts')&&trashN.contracts));
+  updateTrashSelBtns();
+}
 function updateTrashSelBtns(){
-  const n=document.querySelectorAll('.trash-chk:checked').length;
+  const n=document.querySelectorAll('.trash-chk:checked,.ct-trash-chk:checked').length;
   const rb=document.getElementById('trashRestoreSelBtn'), db=document.getElementById('trashDelSelBtn');
-  if(rb) rb.disabled = n===0;
-  if(db) db.disabled = n===0;
+  if(rb){ rb.disabled = n===0; rb.textContent='♻ Restore selected'+(n?` (${n})`:''); }
+  if(db){ db.disabled = n===0; db.textContent='🗑 Delete selected'+(n?` (${n})`:''); }
+}
+async function trashBulk(what){
+  const aIds=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
+  const cIds=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
+  const n=aIds.length+cIds.length; if(!n)return;
+  const parts=[aIds.length?`${aIds.length} asset(s)`:'',cIds.length?`${cIds.length} contract(s)`:''].filter(Boolean).join(' and ');
+  if(what==='restore'){ if(!await uiConfirm(`Restore ${parts}?`))return; }
+  else if(!await uiConfirm(`Permanently delete ${parts}? This cannot be undone.`))return;
+  const rs=await Promise.all([
+    ...aIds.map(id=>what==='restore'?api('/api/assets/'+id+'/restore',{method:'POST'}):api('/api/assets/'+id+'/permanent',{method:'DELETE'})),
+    ...cIds.map(id=>what==='restore'?api('/api/contracts/'+id+'/restore',{method:'POST'}):api('/api/contracts/'+id+'/permanent',{method:'DELETE'}))]);
+  const ok=rs.filter(r=>r&&r.ok).length;
+  toast((what==='restore'?'♻ ':'🗑 ')+ok+(what==='restore'?' RESTORED':' DELETED PERMANENTLY')+(ok<n?` · ${n-ok} failed`:''));
+  if(aIds.length){ loadTrash(); if(what==='restore')load(); }
+  if(cIds.length){ loadContractsTrash(); if(what==='restore'&&typeof loadContracts==='function')loadContracts(); }
+}
+async function trashEmpty(){
+  const doA=trashShows('assets')&&trashN.assets, doC=trashShows('contracts')&&trashN.contracts;
+  if(!doA&&!doC)return;
+  const what=doA&&doC?'everything in Trash (assets and contracts)':doA?'all deleted assets':'all deleted contracts';
+  if(!await uiConfirm(`Permanently delete ${what}? This cannot be undone.`))return;
+  let n=0;
+  const jobs=[]; if(doA)jobs.push('/api/assets/trash/empty'); if(doC)jobs.push('/api/contracts/trash/empty');
+  for(const url of jobs){
+    const r=await api(url,{method:'POST'});
+    if(r&&r.ok){n+=((await r.json()).deleted||0);} else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
+  }
+  toast('🗑 TRASH EMPTIED ('+n+')'); loadTrash(); loadContractsTrash();
 }
 window.restoreAsset=async(id)=>{
   const r=await api('/api/assets/'+id+'/restore',{method:'POST'});
@@ -3374,43 +3426,17 @@ window.permaDeleteAsset=async(id)=>{
   const r=await api('/api/assets/'+id+'/permanent',{method:'DELETE'});
   if(r&&r.ok){toast('🗑 DELETED PERMANENTLY');loadTrash();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
 };
-async function restoreSelectedTrash(){
-  const ids=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
-  if(!ids.length)return;
-  if(!await uiConfirm(`Restore ${ids.length} asset(s)?`))return;
-  await Promise.all(ids.map(id=>api('/api/assets/'+id+'/restore',{method:'POST'})));
-  toast('♻ '+ids.length+' RESTORED');
-  loadTrash(); load();
-}
-async function deleteSelectedTrash(){
-  const ids=[...document.querySelectorAll('.trash-chk:checked')].map(c=>c.dataset.id);
-  if(!ids.length)return;
-  if(!await uiConfirm(`Permanently delete ${ids.length} asset(s)? This cannot be undone.`))return;
-  await Promise.all(ids.map(id=>api('/api/assets/'+id+'/permanent',{method:'DELETE'})));
-  toast('🗑 '+ids.length+' DELETED PERMANENTLY');
-  loadTrash();
-}
-async function emptyTrash(){
-  if(!await uiConfirm('Permanently delete ALL items in Trash? This cannot be undone.'))return;
-  const r=await api('/api/assets/trash/empty',{method:'POST'});
-  if(r&&r.ok){const j=await r.json();toast('🗑 TRASH EMPTIED ('+j.deleted+')');loadTrash();}
-  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
-}
 async function loadContractsTrash(){
   const r=await api('/api/contracts/trash'); if(!r)return; const list=await r.json();
   const tb=document.getElementById('ctTrashBody');
-  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td class="mono">${esc(contractIdFor(c))}</td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td class="mono">${fmtMoney(c.cost||0,CURRENCY)}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">DEL</button></div></td></tr>`).join('');
+  tb.innerHTML=list.map(c=>`<tr><td><input type="checkbox" class="ct-trash-chk" data-id="${c.id}" onchange="updateContractTrashSelBtns()"/></td><td class="mono">${esc(contractIdFor(c))}</td><td>${esc(c.name||'')}</td><td>${esc(c.type||'')}</td><td>${esc(c.vendor||'')}</td><td>${esc(c.end_date||'')}</td><td class="mono">${fmtMoney(c.cost||0,CURRENCY)}</td><td><div class="row-actions"><button class="btn sm" onclick="restoreContract(${c.id})">♻ RESTORE</button><button class="btn sm danger" onclick="permaDeleteContract(${c.id})">Delete</button></div></td></tr>`).join('');
   document.getElementById('ctTrashEmpty').style.display=list.length?'none':'block';
+  trashN.contracts=list.length; setTimeout(drawTrashView,0);
   const chkAll=document.getElementById('ctTrashChkAll');
   if(chkAll){ chkAll.checked=false; chkAll.onchange=()=>{ document.querySelectorAll('.ct-trash-chk').forEach(c=>c.checked=chkAll.checked); updateContractTrashSelBtns(); }; }
   updateContractTrashSelBtns();
 }
-function updateContractTrashSelBtns(){
-  const n=document.querySelectorAll('.ct-trash-chk:checked').length;
-  const rb=document.getElementById('ctTrashRestoreSelBtn'), db=document.getElementById('ctTrashDelSelBtn');
-  if(rb) rb.disabled = n===0;
-  if(db) db.disabled = n===0;
-}
+function updateContractTrashSelBtns(){ updateTrashSelBtns(); }
 window.restoreContract=async(id)=>{
   const r=await api('/api/contracts/'+id+'/restore',{method:'POST'});
   if(r&&r.ok){toast('♻ RESTORED');loadContractsTrash();loadContracts();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'restore failed'));}
@@ -3420,28 +3446,6 @@ window.permaDeleteContract=async(id)=>{
   const r=await api('/api/contracts/'+id+'/permanent',{method:'DELETE'});
   if(r&&r.ok){toast('🗑 DELETED PERMANENTLY');loadContractsTrash();}else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'delete failed'));}
 };
-async function restoreSelectedContractsTrash(){
-  const ids=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
-  if(!ids.length)return;
-  if(!await uiConfirm(`Restore ${ids.length} contract(s)?`))return;
-  await Promise.all(ids.map(id=>api('/api/contracts/'+id+'/restore',{method:'POST'})));
-  toast('♻ '+ids.length+' RESTORED');
-  loadContractsTrash(); loadContracts();
-}
-async function deleteSelectedContractsTrash(){
-  const ids=[...document.querySelectorAll('.ct-trash-chk:checked')].map(c=>parseInt(c.dataset.id));
-  if(!ids.length)return;
-  if(!await uiConfirm(`Permanently delete ${ids.length} contract(s)? This cannot be undone.`))return;
-  await Promise.all(ids.map(id=>api('/api/contracts/'+id+'/permanent',{method:'DELETE'})));
-  toast('🗑 '+ids.length+' DELETED PERMANENTLY');
-  loadContractsTrash();
-}
-async function emptyContractsTrash(){
-  if(!await uiConfirm('Permanently delete ALL contracts in Trash? This cannot be undone.'))return;
-  const r=await api('/api/contracts/trash/empty',{method:'POST'});
-  if(r&&r.ok){const j=await r.json();toast('🗑 TRASH EMPTIED ('+j.deleted+')');loadContractsTrash();}
-  else if(r){const j=await r.json().catch(()=>({}));toast('✕ '+(j.error||'failed'));}
-}
 
 // ---------- Product Catalog page: Categories / Manufacturers / Models ----------
 async function loadCatalog(){
@@ -3457,14 +3461,14 @@ async function loadCatCategories(){
   // each category shows the icon (or photo) its assets get in the list, and
   // clicking it lets you choose another or upload a product photo
   window.__CATS=list;
-  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button><span>${esc(c.name)}</span></div></td><td class="col-del"><button class="btn sm ghost" onclick="openCatLook(${c.id})">Icon / photo</button> ${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('catBody').innerHTML=list.map(c=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Change icon or photo" onclick="openCatLook(${c.id})">${window.catLookHTML?catLookHTML(c):''}</button><span>${esc(c.name)}</span></div></td><td class="col-del"><button class="ibtn" title="Icon or photo" aria-label="Icon or photo" onclick="openCatLook(${c.id})">🖼</button><button class="ibtn" title="Extra fields for this category" aria-label="Extra fields" onclick='openFieldsEditor({category:${esc(JSON.stringify(c.name))},space_id:null,title:${esc(JSON.stringify(c.name+": fields"))}})'>☰</button>${catActions('categories',c)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   if(window.loadCategoryIcons)loadCategoryIcons();
   document.getElementById('catCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadCatManufacturers(){
   const r=await api('/api/manufacturers'); const list=r?await r.json():[];
   window.__MFRS=list;
-  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Logo" onclick="openBrandLogo(${m.id})">${window.brandTile?brandTile(m):''}</button><span class="cat-name"><span>${esc(m.name)}</span>${m.website?`<a class="cat-site" href="${esc(m.website)}" target="_blank" rel="noopener noreferrer">${esc(m.website.replace(/^https?:\/\//,''))}</a>`:''}</span></div></td><td class="col-del"><button class="btn sm ghost" onclick="openBrandLogo(${m.id})">Logo</button> ${catActions('manufacturers',m)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('mfrCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Logo" onclick="openBrandLogo(${m.id})">${window.brandTile?brandTile(m):''}</button><span class="cat-name"><span>${esc(m.name)}</span>${m.website?`<a class="cat-site" href="${esc(m.website)}" target="_blank" rel="noopener noreferrer">${esc(m.website.replace(/^https?:\/\//,''))}</a>`:`<a class="cat-site cat-site-add" href="#" onclick="event.preventDefault();editCatalogItem('manufacturers','${m.id}')">＋ Add website</a>`}</span></div></td><td class="col-del"><button class="ibtn" title="Logo" aria-label="Logo" onclick="openBrandLogo(${m.id})">🖼</button>${catActions('manufacturers',m)}</td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   CAT_MFRS=list;
   document.getElementById('mfrCatCount').textContent=list.length?`(${list.length})`:'';
   const sel=document.getElementById('modMfrSelect');
@@ -3474,7 +3478,7 @@ async function loadCatManufacturers(){
 async function loadCatModels(){
   const r=await api('/api/models'); const list=r?await r.json():[];
   window.__MODELS=list;
-  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button><span>${esc(m.name)}</span></div></td><td>${esc(m.manufacturer||'—')}</td><td class="col-del"><button class="btn sm ghost" onclick="openModelPhoto(${m.id})">Photo</button> ${catActions('models',m)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
+  document.getElementById('modCatBody').innerHTML=list.map(m=>`<tr><td><div class="cat-cell"><button type="button" class="cat-look" title="Product photo" onclick="openModelPhoto(${m.id})">${window.modelTile?modelTile(m):''}</button><span class="cat-name"><span>${esc(m.name)}</span>${m.manufacturer?`<span class="cat-site mfr-sub">${esc(m.manufacturer)}</span>`:''}</span></div></td><td>${esc(m.manufacturer||'—')}</td><td class="col-del"><button class="ibtn" title="Product photo" aria-label="Product photo" onclick="openModelPhoto(${m.id})">🖼</button>${catActions('models',m)}</td></tr>`).join('')||'<tr><td colspan=3 class="muted">none yet</td></tr>';
   CAT_MODELS=list;
   document.getElementById('modCatCount').textContent=list.length?`(${list.length})`:'';
 }
@@ -3483,8 +3487,8 @@ async function loadCatModels(){
 let CAT_ROWS={}, CAT_MFRS=[], CAT_MODELS=[];
 function catActions(kind,row){
   CAT_ROWS[kind+':'+row.id]=row;
-  return `<button class="btn sm ghost" onclick="editCatalogItem('${kind}','${row.id}')">EDIT</button>`
-       + ` <button class="btn sm danger" onclick="delCatalogItem('${kind}','${row.id}')">DEL</button>`;
+  return `<button class="ibtn" title="Edit" aria-label="Edit" onclick="editCatalogItem('${kind}','${row.id}')">✎</button>`
+       + `<button class="ibtn danger" title="Delete" aria-label="Delete" onclick="delCatalogItem('${kind}','${row.id}')">🗑</button>`;
 }
 
 const CAT_LABELS={
@@ -3498,7 +3502,8 @@ function editCatalogItem(kind,id){
   const row=CAT_ROWS[kind+':'+id]; if(!row) return;
   const [title,label,hint]=CAT_LABELS[kind]||['ENTRY','Name',''];
   const g=x=>document.getElementById(x);
-  g('catEditTitle').textContent='RENAME '+title;
+  g('catEditTitle').textContent=(kind==='manufacturers'?'EDIT ':'RENAME ')+title;
+  const sw=g('catEditSiteWrap'); if(sw){ sw.style.display=kind==='manufacturers'?'':'none'; g('catEditSite').value=row.website||''; }
   g('catEditLabel').textContent=label;
   g('catEditHint').textContent=hint;
   g('catEditName').value=row.name||'';
@@ -3524,7 +3529,15 @@ async function saveCatalogEdit(){
   if(!name){toast('✕ name required');return;}
   const body={id:id,name:name};
   if(kind==='models') body.manufacturer_id=document.getElementById('catEditMfr').value||null;
+  const row=CAT_ROWS[kind+':'+id]||{};
+  const site=kind==='manufacturers'?document.getElementById('catEditSite').value.trim():null;
+  if(kind==='manufacturers') body.website=site;
   const r=await api('/api/'+kind,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  // a new website: fetch the brand's logo from it, the same as the Logo dialog
+  if(r&&r.ok&&kind==='manufacturers'&&site&&site!==(row.website||'')){
+    api('/api/img/brand/'+encodeURIComponent(id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({website:site})})
+      .then(()=>{loadCatManufacturers(); if(window.loadBrandLogos)loadBrandLogos();}).catch(()=>{});
+  }
   const j=r?await r.json().catch(()=>({})):{};
   if(r&&r.ok){
     m.classList.remove('show');
@@ -3548,7 +3561,7 @@ async function delCatalogItem(kind,id){
 window.delCatalogItem=delCatalogItem;
 document.getElementById('catAdd').onclick=async()=>{
   const el=document.getElementById('catInput'); const n=el.value.trim(); if(!n)return;
-  const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
+  const r=await api('/api/categories',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,space_id:(window.currentSpace&&currentSpace())||null})});
   if(r&&r.ok){el.value='';loadCatCategories();}
 };
 document.getElementById('mfrCatAdd').onclick=async()=>{
@@ -3596,17 +3609,18 @@ async function loadDirectory(){
 }
 async function loadDirDepartments(){
   const r=await api('/api/departments'); const list=r?await r.json():[];
-  document.getElementById('depBody').innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('departments','${d.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('depBody').innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('departments','${d.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   document.getElementById('depCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadDirLocations(){
   const r=await api('/api/locations'); const list=r?await r.json():[];
-  document.getElementById('dirLocBody').innerHTML=list.map(l=>`<tr><td>${esc(l.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('locations','${l.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  const ps=document.getElementById('dirLocParent'); if(ps){const cur=ps.value; ps.innerHTML='<option value="0">Top level</option>'+list.map(l=>`<option value="${l.id}" ${String(l.id)===cur?'selected':''}>${esc(l.path||l.name)}</option>`).join('');}
+  document.getElementById('dirLocBody').innerHTML=list.map(l=>`<tr><td><span style="padding-left:${(l.depth||0)*18}px">${l.depth?'<span class="muted">└ </span>':''}${esc(l.name)}</span>${l.kind?` <span class="muted" style="font-size:11.5px">${esc(l.kind)}</span>`:''}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('locations','${l.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   document.getElementById('dirLocCount').textContent=list.length?`(${list.length})`:'';
 }
 async function loadDirDesignations(){
   const r=await api('/api/designations'); const list=r?await r.json():[];
-  document.getElementById('desBody').innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('designations','${d.id}')">DEL</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
+  document.getElementById('desBody').innerHTML=list.map(d=>`<tr><td>${esc(d.name)}</td><td class="col-del"><button class="btn sm danger" onclick="delDirItem('designations','${d.id}')">Delete</button></td></tr>`).join('')||'<tr><td colspan=2 class="muted">none yet</td></tr>';
   document.getElementById('desCount').textContent=list.length?`(${list.length})`:'';
 }
 async function delDirItem(kind,id){
@@ -3622,8 +3636,9 @@ document.getElementById('depAdd').onclick=async()=>{
 };
 document.getElementById('dirLocAdd').onclick=async()=>{
   const el=document.getElementById('dirLocInput'); const n=el.value.trim(); if(!n)return;
-  const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n})});
-  if(r&&r.ok){el.value='';loadDirLocations();}
+  const parent=(document.getElementById('dirLocParent')||{}).value||0, kind=(document.getElementById('dirLocKind')||{}).value||'';
+  const r=await api('/api/locations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:n,parent_id:parent,kind})});
+  if(r&&r.ok){el.value='';loadDirLocations();}else if(r){toast('✕ '+await apiError(r));}
 };
 document.getElementById('desAdd').onclick=async()=>{
   const el=document.getElementById('desInput'); const n=el.value.trim(); if(!n)return;
@@ -3674,7 +3689,7 @@ async function loadTickets(){
   const st=document.getElementById('tkStatus').value;
   const users=await getUsersCached();
   const assignOpts=(sel)=>'<option value="">— Unassigned —</option>'+users.map(u=>`<option ${u.username===sel?'selected':''}>${esc(u.username)}</option>`).join('');
-  const r=await api('/api/tickets?status='+encodeURIComponent(st)+'&q='+encodeURIComponent(q)); if(!r)return;
+  const r=await api('/api/tickets?status='+encodeURIComponent(st)+'&q='+encodeURIComponent(q)+(window.spaceQuery?spaceQuery('&'):'')); if(!r)return;
   const list=await r.json();
   const now=new Date();
   const rowHtml=t=>{
@@ -3732,6 +3747,9 @@ async function openTicket(id){
         <div class="field2" style="grid-column:1/-1"><label>Assigned to</label>
           <select id="tkAssignee"><option value="">-- unassigned --</option></select>
         </div>
+        ${(window.SPACES||[]).length>1?`<div class="field2" style="grid-column:1/-1"><label>Department</label>
+          <select id="tkSpaceUpd">${window.SPACES.filter(s=>s.can_edit!==false||String(s.id)===String(t.SpaceID||1)).map(s=>`<option value="${s.id}" ${String(s.id)===String(t.SpaceID||1)?'selected':''}>${esc(s.name)}</option>`).join('')}</select>
+        </div>`:''}
       </div>
     </div>`:''}
 
@@ -3903,6 +3921,7 @@ async function saveTicketEdits(){
   // assignee travels with the rest: the standalone ASSIGN button and its
   // separate request are gone, so one save does the whole queue.
   if(as)payload.assignee=as.value;
+  const sp=document.getElementById('tkSpaceUpd'); if(sp)payload.SpaceID=parseInt(sp.value,10);
   // The subject box only exists for an admin; a tickets-write user is saving
   // status and priority on their own, so don't demand a field they can't see.
   if(document.getElementById('tkeSubject')&&!payload.subject){toast('✕ SUBJECT REQUIRED');return;}
@@ -3940,6 +3959,7 @@ async function openNewTicket(){
        <div class="field2"><label>REQUESTER</label><input id="t_requester" value="${window.sessionUser||''}" placeholder="Name"></div>
        <div class="field2"><label>PRIORITY</label><select id="t_priority">${PRIORITIES.map(s=>`<option ${s==='Normal'?'selected':''}>${s}</option>`).join('')}</select></div>
        <div class="field2"><label>CATEGORY</label><select id="t_category">${TICKET_CATEGORIES.map(c=>`<option>${c}</option>`).join('')}</select></div>
+       ${(window.SPACES||[]).length>1?`<div class="field2"><label>DEPARTMENT</label><select id="t_space">${window.SPACES.filter(s=>s.can_edit!==false).map(s=>`<option value="${s.id}" ${String(s.id)===String(currentSpace()||'')?'selected':''}>${esc(s.name)}</option>`).join('')}</select></div>`:''}
        <div class="field2"><label>ASSIGNEE</label><input id="t_assignee" placeholder="leave blank = auto-assign"></div>
        <div class="field2"><label>SLA (hours) <span style="color:var(--mut);font-weight:400">(auto from priority)</span></label><input id="t_sla" type="number" value="24" min="0"></div>
      </div>
@@ -3965,6 +3985,8 @@ async function saveNewTicket(){
     asset_id:document.getElementById('t_asset').value.trim()||null,
     source:'Web'
   };
+  const spEl=document.getElementById('t_space'); if(spEl)body.SpaceID=parseInt(spEl.value,10);
+  else if(window.currentSpace&&currentSpace())body.SpaceID=parseInt(currentSpace(),10);
   try{
     const r=await api('/api/tickets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(r&&r.ok){document.getElementById('tkFormModal').classList.remove('show');toast('✓ TICKET CREATED');loadTickets();}
@@ -4079,7 +4101,7 @@ function toggleContractRowMenu(e,id){
   if(rowMenuAssetId===('ct'+id) && menu.style.display!=='none'){ menu.style.display='none'; rowMenuAssetId=null; return; }
   rowMenuAssetId='ct'+id;
   menu.innerHTML=`
-    <button onclick="closeRowMenu();openContractModal(${id})">EDIT</button>
+    <button onclick="closeRowMenu();openContractModal(${id})">Edit</button>
     <button onclick="closeRowMenu();printContract(${id})">PRINT</button>
     <div class="row-menu-sep"></div>
     <button class="danger" onclick="closeRowMenu();deleteContractRow(${id})">DELETE</button>`;

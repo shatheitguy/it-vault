@@ -634,6 +634,10 @@
           </div>
         </div>`;
       if (pending) { const rd = new FileReader(); rd.onload = () => { const i = document.getElementById('apPrev'); if (i) i.src = rd.result; }; rd.readAsDataURL(pending); }
+      // tap the picture to see it full size
+      const shown = box.querySelector('.pic-slot img');
+      if (shown) { shown.parentElement.classList.add('zoomable'); shown.parentElement.title = 'View photo';
+        shown.parentElement.onclick = () => window.openPhotoViewer(shown.src, (a && a.Name) || 'Photo'); }
       box.querySelector('input[type=file]').addEventListener('change', async e => {
         const f = e.target.files[0]; if (!f) return;
         if (!id) { pending = f; draw(); return; }          // a new asset: sent once it is saved
@@ -662,3 +666,15 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadLooks); else loadLooks();
 })();
+
+/* A picture, full size, over the page. Click anywhere or press Esc to close. */
+window.openPhotoViewer = function (src, title) {
+  if (!src) return;
+  const v = document.createElement('div');
+  v.className = 'photo-viewer';
+  v.innerHTML = `<figure><img src="${String(src).replace(/"/g, '&quot;')}" alt=""><figcaption>${String(title || '').replace(/[<>&]/g, '')}</figcaption></figure><button type="button" class="pv-x" aria-label="Close">✕</button>`;
+  const close = () => { v.remove(); document.removeEventListener('keydown', esc); };
+  const esc = e => { if (e.key === 'Escape') close(); };
+  v.addEventListener('click', close); document.addEventListener('keydown', esc);
+  document.body.appendChild(v);
+};

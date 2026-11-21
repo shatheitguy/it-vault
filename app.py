@@ -1281,7 +1281,7 @@ def _security_headers(resp):
 # The app's own scripts and styles. index.html and login.html reference them
 # with ?v=<a fingerprint of the file> (see _shell_html), so a URL only ever
 # means one version of the file and the browser may keep it for good.
-SHELL_ASSETS = ("/app.js", "/redesign.js", "/style.css", "/redesign.css")
+SHELL_ASSETS = ("/app.js", "/redesign.js", "/spaces.js", "/style.css", "/redesign.css")
 
 @app.after_request
 def _no_cache(resp):
@@ -1868,10 +1868,88 @@ def init_db():
                   "first-run setup wizard will create the admin", flush=True)
     c.commit(); c.close()
 
+class _KnownColumnsCursor:
+    """The migration adds each column with a plain ALTER and shrugs off the
+    "duplicate column" error once it exists. On some MariaDB builds each of
+    those no-op ALTERs still takes seconds, which made every start-up take
+    minutes. This cursor reads the existing columns once and answers an
+    ADD COLUMN for one that is already there with the very same error,
+    without asking the database. Everything else passes straight through."""
+    _ADD = re.compile(r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ADD\s+COLUMN\s+(?:IF\s+NOT\s+EXISTS\s+)?`?(\w+)`?", re.I)
+    # The same goes for the defaults and types it re-applies on every start:
+    # each one is skipped only when the column is already exactly that.
+    _SETDEF = re.compile(r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+ALTER\s+COLUMN\s+`?(\w+)`?\s+SET\s+DEFAULT\s+(.+?)\s*$", re.I)
+    _MODIFY = re.compile(r"^\s*ALTER\s+TABLE\s+`?(\w+)`?\s+MODIFY\s+(?:COLUMN\s+)?`?(\w+)`?\s+(\w+(?:\(\s*\d+(?:\s*,\s*\d+)?\s*\))?)"
+                         r"(\s+NOT\s+NULL|\s+NULL)?(?:\s+DEFAULT\s+(.+?))?\s*$", re.I)
+
+    def __init__(self, cur):
+        self._cur = cur
+        self._cols = {}
+        try:
+            cur.execute("SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT "
+                        "FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()")
+            for r in cur.fetchall():
+                if not isinstance(r, dict):
+                    r = dict(zip(("TABLE_NAME", "COLUMN_NAME", "COLUMN_TYPE", "IS_NULLABLE", "COLUMN_DEFAULT"), r))
+                self._cols[(str(r["TABLE_NAME"]).lower(), str(r["COLUMN_NAME"]).lower())] = r
+        except Exception:
+            self._cols = {}             # can't tell: every ALTER runs as before
+
+    @staticmethod
+    def _norm_default(v):
+        """'x', x, NULL, CURRENT_TIMESTAMP(), as information_schema and SQL spell them."""
+        if v is None:
+            return None
+        v = str(v).strip()
+        if v.upper() == "NULL":
+            return None
+        if v.lower().startswith("current_timestamp"):
+            return "current_timestamp"
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+            v = v[1:-1]
+        return v
+
+    def _already(self, q):
+        m = self._SETDEF.match(q)
+        if m:
+            col = self._cols.get((m.group(1).lower(), m.group(2).lower()))
+            return bool(col) and self._norm_default(col.get("COLUMN_DEFAULT")) == self._norm_default(m.group(3))
+        m = self._MODIFY.match(q)
+        if m:
+            col = self._cols.get((m.group(1).lower(), m.group(2).lower()))
+            if not col:
+                return False
+            want_type = re.sub(r"\s+", "", m.group(3)).lower()
+            if str(col.get("COLUMN_TYPE") or "").replace(" ", "").lower() != want_type:
+                return False
+            want_null = "NO" if (m.group(4) or "").strip().upper() == "NOT NULL" else "YES"
+            if str(col.get("IS_NULLABLE") or "").upper() != want_null:
+                return False
+            return self._norm_default(col.get("COLUMN_DEFAULT")) == self._norm_default(m.group(5))
+        return False
+
+    def execute(self, query, args=None):
+        if not isinstance(query, str) or args:
+            return self._cur.execute(query, args)
+        m = self._ADD.match(query)
+        single = m and query.upper().count(" ADD ") == 1
+        if single and (m.group(1).lower(), m.group(2).lower()) in self._cols:
+            raise pymysql.err.OperationalError(1060, "Duplicate column name '%s'" % m.group(2))
+        if self._cols and self._already(query):
+            return 0
+        res = self._cur.execute(query, args)
+        if single:
+            self._cols[(m.group(1).lower(), m.group(2).lower())] = {}
+        return res
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
+
+
 def migrate_schema():
     """Add new columns for the Customization engine / Profile / User Settings without dropping data."""
 
-    c = conn(); cur = c.cursor()
+    c = conn(); cur = _KnownColumnsCursor(c.cursor())
 
     # Acknowledgement links used to carry their whole payload in the query
     # string: a couple of hundred characters of base64 and a signature. Mail
@@ -2303,6 +2381,71 @@ def migrate_schema():
     )""")
     try:
         cur.execute("ALTER TABLE Manufacturers ADD COLUMN website VARCHAR(255) DEFAULT ''")
+    except Exception:
+        pass
+    # ---- departments ("spaces"): IT, Facilities, Fleet... each with its own
+    # asset ID prefix, categories, fields and staff. Every install starts with
+    # one, IT, which every existing asset belongs to.
+    cur.execute("""CREATE TABLE IF NOT EXISTS Spaces (
+        id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(80) NOT NULL, prefix VARCHAR(12) NOT NULL,
+        color VARCHAR(9) DEFAULT '', icon VARCHAR(20) DEFAULT 'box', template VARCHAR(20) DEFAULT '',
+        next_no INT DEFAULT 1001, sort INT DEFAULT 0, created_at DATETIME NULL
+    )""")
+    cur.execute("SELECT COUNT(*) AS n FROM Spaces")
+    if not (cur.fetchone() or {}).get("n"):
+        cur.execute("INSERT INTO Spaces (id, name, prefix, color, icon, template, next_no, created_at) "
+                    "VALUES (1, 'IT', 'IT', '', 'laptop', 'it', 1001, NOW())")
+    for col, typ in (("SpaceID", "INT DEFAULT 1"), ("Extra", "TEXT NULL")):
+        try:
+            cur.execute(f"ALTER TABLE Assets ADD COLUMN {col} {typ}")
+        except Exception:
+            pass
+    try:
+        cur.execute("UPDATE Assets SET SpaceID=1 WHERE SpaceID IS NULL OR SpaceID=0")
+    except Exception:
+        pass
+    # tickets belong to a department too: each team works its own queue
+    try:
+        cur.execute("ALTER TABLE Tickets ADD COLUMN SpaceID INT DEFAULT 1")
+    except Exception:
+        pass
+    try:
+        cur.execute("UPDATE Tickets SET SpaceID=1 WHERE SpaceID IS NULL OR SpaceID=0")
+    except Exception:
+        pass
+    try:
+        cur.execute("ALTER TABLE Categories ADD COLUMN space_id INT NULL")
+    except Exception:
+        pass
+    try:
+        cur.execute("ALTER TABLE Users ADD COLUMN spaces VARCHAR(255) DEFAULT ''")
+    except Exception:
+        pass
+    # extra fields an asset asks for, by department and/or item category
+    cur.execute("""CREATE TABLE IF NOT EXISTS FieldDefs (
+        id INT AUTO_INCREMENT PRIMARY KEY, space_id INT NULL, category VARCHAR(160) NULL,
+        fkey VARCHAR(40) NOT NULL, label VARCHAR(120) NOT NULL, ftype VARCHAR(12) DEFAULT 'text',
+        options TEXT, required TINYINT DEFAULT 0, sort INT DEFAULT 0
+    )""")
+    # preventive maintenance: what has to be done to an asset, how often
+    cur.execute("""CREATE TABLE IF NOT EXISTS MaintPlans (
+        id INT AUTO_INCREMENT PRIMARY KEY, asset_id VARCHAR(40) NOT NULL, title VARCHAR(160) NOT NULL,
+        every_n INT DEFAULT 3, every_unit VARCHAR(8) DEFAULT 'months', last_done DATE NULL, next_due DATE NULL,
+        notes TEXT, active TINYINT DEFAULT 1, reminded_for DATE NULL, created_by VARCHAR(80), created_at DATETIME NULL,
+        KEY ix_asset (asset_id), KEY ix_due (next_due)
+    )""")
+    # locations as a tree: site > building > floor > room. A name is unique
+    # under its parent, not across the install -- "Room 101" exists in
+    # every building.
+    try:
+        cur.execute("ALTER TABLE Locations ADD COLUMN kind VARCHAR(12) DEFAULT ''")
+    except Exception:
+        pass
+    try:
+        cur.execute("SHOW INDEX FROM Locations WHERE Key_name='name'")
+        if cur.fetchone():
+            cur.execute("ALTER TABLE Locations DROP INDEX name")
+            cur.execute("ALTER TABLE Locations ADD UNIQUE KEY uq_loc (name, parent_id)")
     except Exception:
         pass
     # When the asset came back, so the countdown above has a start
@@ -3432,8 +3575,10 @@ def list_assets():
     # from its own cache, with no network at all -- which is the whole point
     # of scanning a tag in a store room with no signal.
     sql = ("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS)
-           + ", InvoiceFile, UpdatedAt, PublicCode FROM Assets WHERE is_deleted=0")
+           + ", InvoiceFile, UpdatedAt, PublicCode, SpaceID, Extra FROM Assets WHERE is_deleted=0")
     where = []; params = []
+    sc, sp = _space_sql(request.args.get("space"))
+    if sc: where.append(sc); params += sp
     if sf: where.append("Status=%s"); params.append(sf)
     if q:
         if cf in COLUMNS:
@@ -3447,7 +3592,7 @@ def list_assets():
     else:
         sql += " ORDER BY AssetTag='', AssetTag, Name"
     cur.execute(sql, params); rows = cur.fetchall(); c.close()
-    return jsonify([row_to_dict(r) for r in rows])
+    return jsonify([_with_extra(row_to_dict(r), r) for r in rows])
 
 @app.route("/api/assets/resolve/<path:ref>")
 @auth_required(module="assets", level="read")
@@ -3483,10 +3628,24 @@ def resolve_asset(ref):
     return jsonify(row_to_dict(row))
 
 
-def _next_asset_tag(cur):
-    cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,4) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP '^IT-[0-9]+$'")
-    n = (cur.fetchone() or {}).get("n") or 1000
-    return f"IT-{n + 1}"
+def _space_row(cur, space_id):
+    try:
+        cur.execute("SELECT * FROM Spaces WHERE id=%s", [int(space_id or 1)])
+        return cur.fetchone()
+    except Exception:
+        return None
+
+def _next_asset_tag(cur, space_id=1):
+    """The next free ID in this department: its prefix, then the next number
+    after the highest one in use (and never below the start it was given).
+    IT-1001, FM-1001, VH-1001 each count on their own."""
+    sp = _space_row(cur, space_id) or {"prefix": "IT", "next_no": 1001}
+    prefix = re.sub(r"[^A-Z0-9]", "", str(sp.get("prefix") or "IT").upper())[:12] or "IT"
+    cur.execute("SELECT MAX(CAST(SUBSTRING(AssetTag,%s) AS UNSIGNED)) AS n FROM Assets WHERE AssetTag REGEXP %s",
+                [len(prefix) + 2, "^" + prefix + "-[0-9]+$"])
+    n = (cur.fetchone() or {}).get("n") or 0
+    n = max(int(n), int(sp.get("next_no") or 1001) - 1)
+    return f"{prefix}-{n + 1}"
 
 def _next_contract_tag(cur):
     cur.execute("SELECT MAX(CAST(SUBSTRING(contract_tag,4) AS UNSIGNED)) AS n FROM Contracts WHERE contract_tag REGEXP '^CT-[0-9]+$'")
@@ -3514,11 +3673,610 @@ def next_emp_code():
     c.close()
     return jsonify({"code": code})
 
+# ---------- departments ("spaces"), extra fields, maintenance plans ----------
+LOCATION_KINDS = ("site", "building", "floor", "room", "area")
+FIELD_TYPES = ("text", "number", "date", "choice", "checkbox", "textarea")
+PLAN_UNITS = ("days", "weeks", "months", "years")
+
+def _space_entries(raw):
+    """Parse a user's departments: "1,3:r" -> {1: "w", 3: "r"}.
+    A bare id is a department they work in (with their own role); ":r" makes
+    them a viewer there, whatever their role elsewhere. Empty = every one."""
+    out = {}
+    if isinstance(raw, dict):
+        items = [f"{k}:{v}" for k, v in raw.items()]
+    elif isinstance(raw, str):
+        items = raw.split(",")
+    else:
+        items = list(raw or [])
+    for x in items:
+        x = str(x).strip()
+        sid, _, mode = x.partition(":")
+        if sid.strip().isdigit():
+            out[int(sid)] = "r" if mode.strip().lower() in ("r", "read", "view", "viewer") else "w"
+    return out
+
+def _clean_spaces_value(v):
+    """A user's departments as stored: "1,3:r" -- empty means all of them."""
+    e = _space_entries(v)
+    return ",".join(f"{i}:r" if e[i] == "r" else str(i) for i in sorted(e))
+
+def _clean_space_id(v):
+    try:
+        return max(1, int(v or 1))
+    except Exception:
+        return 1
+
+def _allowed_spaces():
+    """None = every department (admins, and anyone not limited to some);
+    else the set of department ids this account may see."""
+    role = session.get("role")
+    user = session.get("user")
+    if not user:
+        row = _resolve_session_from_api_key()
+        if not row:
+            return set()
+        role, user = row["role"], row.get("username") or row.get("user")
+    if role == ROLE_ADMIN:
+        return None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT spaces FROM Users WHERE username=%s", [user])
+        raw = ((cur.fetchone() or {}).get("spaces") or "").strip(); c.close()
+    except Exception:
+        return None
+    ids = set(_space_entries(raw))
+    return ids or None
+
+def _readonly_spaces():
+    """Departments this account may only look at (a viewer there)."""
+    if session.get("role") == ROLE_ADMIN:
+        return set()
+    user = session.get("user")
+    if not user:
+        row = _resolve_session_from_api_key()
+        if not row or row.get("role") == ROLE_ADMIN:
+            return set()
+        user = row.get("username") or row.get("user")
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT spaces FROM Users WHERE username=%s", [user])
+        raw = (cur.fetchone() or {}).get("spaces") or ""; c.close()
+    except Exception:
+        return set()
+    return {i for i, m in _space_entries(raw).items() if m == "r"}
+
+def _space_allowed(space_id):
+    allowed = _allowed_spaces()
+    return allowed is None or int(space_id) in allowed
+
+def _space_writable(space_id):
+    """May this account change things in this department?"""
+    return _space_allowed(space_id) and int(space_id) not in _readonly_spaces()
+
+_VIEWER_MSG = "You can only view this department -- ask an admin to make you an editor there."
+
+def _space_sql(selected=None):
+    """SQL limiting Assets to the department asked for ("" / "all" = every
+    one this account may see) and never past what it may see."""
+    allowed = _allowed_spaces()
+    sel = None
+    if selected not in (None, "", "all"):
+        try: sel = int(selected)
+        except Exception: sel = None
+    if sel is not None:
+        if allowed is not None and sel not in allowed:
+            return "1=0", []
+        return "SpaceID=%s", [sel]
+    if allowed is None:
+        return "", []
+    return "SpaceID IN (" + ",".join(["%s"] * len(allowed)) + ")", list(allowed)
+
+def _extra_of(row):
+    raw = (row or {}).get("Extra")
+    if isinstance(raw, dict): return raw
+    try:
+        v = json.loads(raw or "{}")
+        return v if isinstance(v, dict) else {}
+    except Exception:
+        return {}
+
+def _with_extra(d, row):
+    d["Extra"] = _extra_of(row)
+    try: d["SpaceID"] = int(row.get("SpaceID") or 1)
+    except Exception: d["SpaceID"] = 1
+    return d
+
+def _field_defs(cur, space_id, category):
+    """The extra fields an asset of this department and category asks for:
+    the department's own, then the category's (a category's field with the
+    same key wins)."""
+    cur.execute("""SELECT * FROM FieldDefs
+                   WHERE (space_id IS NULL OR space_id=%s)
+                     AND (category IS NULL OR category='' OR category=%s)
+                   ORDER BY (category IS NULL OR category='') DESC, sort, id""", [int(space_id or 1), category or ""])
+    out = {}
+    for r in cur.fetchall():
+        out[r["fkey"]] = r
+    return list(out.values())
+
+def _clean_extra(cur, space_id, category, extra):
+    """Keeps the values for the fields this asset has, in the shape each one
+    is; refuses a missing required one. Values for fields no longer defined
+    are kept rather than thrown away -- typed data is never dropped."""
+    extra = extra if isinstance(extra, dict) else {}
+    defs = _field_defs(cur, space_id, category)
+    out = {str(k)[:40]: (str(v)[:2000] if v is not None else "") for k, v in extra.items()}
+    for d in defs:
+        k = d["fkey"]; v = out.get(k, "")
+        if d["ftype"] == "checkbox":
+            out[k] = "1" if str(v).lower() in ("1", "true", "on", "yes") else ""
+        elif d["ftype"] == "number" and v != "":
+            try: float(v)
+            except Exception: return None, f"{d['label']} must be a number."
+        elif d["ftype"] == "date" and v != "":
+            try: datetime.strptime(str(v)[:10], "%Y-%m-%d"); out[k] = str(v)[:10]
+            except Exception: return None, f"{d['label']} must be a date."
+        elif d["ftype"] == "choice" and v != "":
+            opts = [o.strip() for o in _opts_text(d.get("options")).split(",") if o.strip()]
+            if opts and v not in opts:
+                return None, f"{d['label']} must be one of: {', '.join(opts)}."
+        if d.get("required") and d["ftype"] != "checkbox" and not str(out.get(k, "")).strip():
+            return None, f"{d['label']} is required for this kind of asset."
+    return out, None
+
+def _location_tree(rows):
+    """Each place with its full path, in tree order: HQ › Floor 2 › Room 204."""
+    by = {r["id"]: r for r in rows}
+    def path(r, seen=()):
+        p = by.get(r.get("parent_id") or 0)
+        if p and p["id"] not in seen:
+            return path(p, seen + (r["id"],)) + " › " + r["name"]
+        return r["name"]
+    def depth(r, seen=()):
+        p = by.get(r.get("parent_id") or 0)
+        return 1 + depth(p, seen + (r["id"],)) if p and p["id"] not in seen else 0
+    for r in rows:
+        r["path"] = path(r); r["depth"] = depth(r)
+    return sorted(rows, key=lambda r: r["path"].lower())
+
+def _plan_next(last, n, unit):
+    from datetime import date
+    d = last if isinstance(last, date) else datetime.strptime(str(last)[:10], "%Y-%m-%d").date()
+    n = max(1, int(n or 1))
+    if unit == "days": return d + timedelta(days=n)
+    if unit == "weeks": return d + timedelta(weeks=n)
+    months = n * (12 if unit == "years" else 1)
+    y, m = divmod(d.month - 1 + months, 12)
+    import calendar
+    day = min(d.day, calendar.monthrange(d.year + y, m + 1)[1])
+    return d.replace(year=d.year + y, month=m + 1, day=day)
+
+# ready-made departments: prefix, look, categories (with icons) and the
+# extra fields each category asks for
+SPACE_TEMPLATES = {
+    "it": {"name": "IT", "prefix": "IT", "icon": "laptop", "color": "#3b9eff",
+           "categories": {"Laptop": "laptop", "Desktop": "desktop", "Monitor": "monitor", "Mobile Phone": "smartphone",
+                          "Tablet": "tablet", "Printer": "printer", "Router": "router", "Switch": "switch",
+                          "Access Point": "wifi", "Firewall": "shield", "Server": "server", "UPS": "battery"},
+           "fields": {"": [("os", "Operating system", "choice", "Windows,macOS,Linux,iOS,Android,Other", 0)],
+                      "Laptop": [("ram", "RAM (GB)", "number", "", 0), ("storage", "Storage", "text", "", 0)],
+                      "Desktop": [("ram", "RAM (GB)", "number", "", 0), ("storage", "Storage", "text", "", 0)],
+                      "Mobile Phone": [("imei", "IMEI", "text", "", 1), ("phone_no", "Phone number", "text", "", 0)],
+                      "Router": [("ip", "IP address", "text", "", 0)], "Switch": [("ip", "IP address", "text", "", 0)],
+                      "Server": [("ip", "IP address", "text", "", 0), ("rack", "Rack / U", "text", "", 0)]}},
+    "facilities": {"name": "Facilities", "prefix": "FM", "icon": "box", "color": "#2ecc71",
+           "categories": {"Air Conditioner": "box", "Generator": "battery", "Elevator": "box", "Fire Extinguisher": "shield",
+                          "Water Heater": "box", "Pump": "box", "CCTV Camera": "camera", "Lighting": "box"},
+           "fields": {"": [("capacity", "Capacity / rating", "text", "", 0)],
+                      "Air Conditioner": [("tonnage", "Tonnage", "number", "", 0), ("refrigerant", "Refrigerant", "text", "", 0)],
+                      "Generator": [("kva", "Rating (kVA)", "number", "", 1), ("fuel", "Fuel", "choice", "Diesel,Petrol,Gas", 0)],
+                      "Fire Extinguisher": [("ext_type", "Type", "choice", "CO2,Powder,Foam,Water", 1), ("expiry", "Refill / expiry date", "date", "", 1)]},
+           "plans": {"Air Conditioner": ("Filter clean and service", 3, "months"), "Generator": ("Service and load test", 6, "months"),
+                     "Fire Extinguisher": ("Inspection", 12, "months"), "Elevator": ("Statutory inspection", 12, "months")}},
+    "furniture": {"name": "Furniture", "prefix": "FR", "icon": "box", "color": "#b07d4f",
+           "categories": {"Desk": "box", "Chair": "box", "Cabinet": "box", "Table": "box", "Sofa": "box", "Shelf": "box"},
+           "fields": {"": [("material", "Material", "text", "", 0), ("color", "Colour", "text", "", 0)]}},
+    "vehicles": {"name": "Vehicles", "prefix": "VH", "icon": "box", "color": "#ffb454",
+           "categories": {"Car": "box", "Van": "box", "Truck": "box", "Bus": "box", "Forklift": "box", "Motorcycle": "box"},
+           "fields": {"": [("plate", "Plate number", "text", "", 1), ("vin", "VIN / chassis", "text", "", 0),
+                           ("mileage", "Mileage (km)", "number", "", 0), ("reg_expiry", "Registration expiry", "date", "", 0),
+                           ("insurance_expiry", "Insurance expiry", "date", "", 0), ("fuel", "Fuel", "choice", "Petrol,Diesel,Electric,Hybrid", 0)]},
+           "plans": {"*": ("Service", 6, "months")}},
+    "tools": {"name": "Tools & Equipment", "prefix": "EQ", "icon": "box", "color": "#e74c3c",
+           "categories": {"Power Tool": "box", "Hand Tool": "box", "Ladder": "box", "Test Equipment": "box", "Projector": "projector"},
+           "fields": {"": [("calibration_due", "Calibration due", "date", "", 0)]},
+           "plans": {"Test Equipment": ("Calibration", 12, "months"), "Ladder": ("Safety inspection", 6, "months")}},
+    "medical": {"name": "Medical", "prefix": "MD", "icon": "box", "color": "#e84393",
+           "categories": {"Monitor": "monitor", "Defibrillator": "battery", "Infusion Pump": "box", "Bed": "box", "Wheelchair": "box"},
+           "fields": {"": [("model_no", "Model number", "text", "", 0), ("calibration_due", "Calibration due", "date", "", 0),
+                           ("risk", "Risk class", "choice", "I,IIa,IIb,III", 0)]},
+           "plans": {"*": ("Preventive maintenance", 6, "months")}},
+    "blank": {"name": "", "prefix": "", "icon": "box", "color": "", "categories": {}, "fields": {}},
+}
+
+def _seed_space(cur, sid, tpl):
+    t = SPACE_TEMPLATES.get(tpl) or {}
+    for cat, icon in (t.get("categories") or {}).items():
+        cur.execute("SELECT id FROM Categories WHERE name=%s", [cat])
+        row = cur.fetchone()
+        if row:
+            continue                     # a category another department already has stays shared
+        cur.execute("INSERT INTO Categories (name, icon, space_id) VALUES (%s,%s,%s)", [cat, icon if icon != "box" else "", sid])
+    for cat, fields in (t.get("fields") or {}).items():
+        for i, (k, label, ftype, opts, req) in enumerate(fields):
+            cur.execute("INSERT INTO FieldDefs (space_id, category, fkey, label, ftype, options, required, sort) "
+                        "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", [sid, cat or None, k, label, ftype, opts, req, i])
+
+def _space_json(r, counts=None):
+    return {"id": r["id"], "name": r["name"], "prefix": r["prefix"], "color": r.get("color") or "",
+            "icon": r.get("icon") or "box", "template": r.get("template") or "", "next_no": r.get("next_no") or 1001,
+            "assets": (counts or {}).get(r["id"], 0)}
+
+@app.route("/api/space-templates")
+@auth_required()
+def space_templates():
+    return jsonify([{"key": k, "name": v["name"] or "Blank", "prefix": v["prefix"], "icon": v["icon"], "color": v["color"],
+                     "categories": list((v.get("categories") or {}).keys())} for k, v in SPACE_TEMPLATES.items()])
+
+@app.route("/api/spaces", methods=["GET", "POST"])
+@auth_required()
+def spaces_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "GET":
+        cur.execute("SELECT * FROM Spaces ORDER BY sort, id"); rows = cur.fetchall()
+        cur.execute("SELECT SpaceID, COUNT(*) AS n FROM Assets WHERE is_deleted=0 GROUP BY SpaceID")
+        counts = {r["SpaceID"]: r["n"] for r in cur.fetchall()}; c.close()
+        allowed = _allowed_spaces(); ro = _readonly_spaces()
+        out = []
+        for r in rows:
+            if allowed is None or r["id"] in allowed:
+                j = _space_json(r, counts); j["can_edit"] = r["id"] not in ro
+                out.append(j)
+        return jsonify(out)
+    if session.get("role") != ROLE_ADMIN:
+        c.close(); return jsonify({"error": "Only an admin can add a department."}), 403
+    d = request.get_json(force=True) or {}
+    tpl = d.get("template") if d.get("template") in SPACE_TEMPLATES else "blank"
+    t = SPACE_TEMPLATES[tpl]
+    name = (d.get("name") or t["name"]).strip()[:80]
+    prefix = re.sub(r"[^A-Z0-9]", "", (d.get("prefix") or t["prefix"]).upper())[:12]
+    if not name or not prefix:
+        c.close(); return jsonify({"error": "A department needs a name and an ID prefix (letters or digits)."}), 400
+    cur.execute("SELECT id FROM Spaces WHERE prefix=%s OR name=%s", [prefix, name])
+    if cur.fetchone():
+        c.close(); return jsonify({"error": "Another department already has that name or prefix."}), 400
+    cur.execute("INSERT INTO Spaces (name, prefix, color, icon, template, next_no, created_at) VALUES (%s,%s,%s,%s,%s,%s,NOW())",
+                [name, prefix, (d.get("color") or t["color"] or "")[:9], (d.get("icon") or t["icon"] or "box")[:20], tpl,
+                 _num(d.get("next_no"), 1001, field="Next number", lo=1)])
+    sid = cur.lastrowid
+    _seed_space(cur, sid, tpl)
+    c.commit(); c.close()
+    audit(session.get("user"), "SPACE", str(sid), f"added department {name} ({prefix}) from {tpl}")
+    return jsonify({"ok": True, "id": sid})
+
+@app.route("/api/spaces/<int:sid>", methods=["PUT", "DELETE"])
+@auth_required([ROLE_ADMIN])
+def space_one(sid):
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM Spaces WHERE id=%s", [sid]); row = cur.fetchone()
+    if not row:
+        c.close(); return jsonify({"error": "not found"}), 404
+    if request.method == "DELETE":
+        cur.execute("SELECT COUNT(*) AS n FROM Assets WHERE SpaceID=%s", [sid])
+        if (cur.fetchone() or {}).get("n") or sid == 1:
+            c.close(); return jsonify({"error": "Move or delete its assets first (the first department always stays)."}), 400
+        cur.execute("DELETE FROM FieldDefs WHERE space_id=%s", [sid])
+        cur.execute("UPDATE Categories SET space_id=NULL WHERE space_id=%s", [sid])
+        cur.execute("DELETE FROM Spaces WHERE id=%s", [sid]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    name = (d.get("name") or row["name"]).strip()[:80]
+    prefix = re.sub(r"[^A-Z0-9]", "", (d.get("prefix") or row["prefix"]).upper())[:12]
+    if not name or not prefix:
+        c.close(); return jsonify({"error": "A department needs a name and an ID prefix."}), 400
+    cur.execute("SELECT id FROM Spaces WHERE (prefix=%s OR name=%s) AND id<>%s", [prefix, name, sid])
+    if cur.fetchone():
+        c.close(); return jsonify({"error": "Another department already has that name or prefix."}), 400
+    cur.execute("UPDATE Spaces SET name=%s, prefix=%s, color=%s, icon=%s, next_no=%s WHERE id=%s",
+                [name, prefix, (d.get("color", row.get("color")) or "")[:9], (d.get("icon", row.get("icon")) or "box")[:20],
+                 _num(d.get("next_no"), row.get("next_no") or 1001, field="Next number", lo=1), sid])
+    c.commit(); c.close()
+    audit(session.get("user"), "SPACE", str(sid), f"updated department {name} ({prefix})")
+    return jsonify({"ok": True})
+
+@app.route("/api/fields", methods=["GET", "POST"])
+@auth_required(module="assets", level="read")
+def fields_api():
+    c = conn(); cur = c.cursor()
+    if request.method == "GET":
+        if request.args.get("for_asset"):
+            defs = _field_defs(cur, request.args.get("space") or 1, request.args.get("category") or "")
+        else:
+            cur.execute("SELECT * FROM FieldDefs ORDER BY space_id, category, sort, id"); defs = cur.fetchall()
+        c.close()
+        return jsonify([{"id": d["id"], "space_id": d["space_id"], "category": d["category"] or "", "key": d["fkey"],
+                         "label": d["label"], "type": d["ftype"], "options": d["options"] or "",
+                         "required": bool(d["required"])} for d in defs])
+    if session.get("role") not in (ROLE_ADMIN, ROLE_EDIT):
+        c.close(); return jsonify({"error": "Fields are set up by admins and editors."}), 403
+    d = request.get_json(force=True) or {}
+    label = (d.get("label") or "").strip()[:120]
+    key = re.sub(r"[^a-z0-9_]", "", (d.get("key") or label).lower().replace(" ", "_"))[:40]
+    ftype = d.get("type") if d.get("type") in FIELD_TYPES else "text"
+    if not label or not key:
+        c.close(); return jsonify({"error": "Give the field a name."}), 400
+    cur.execute("INSERT INTO FieldDefs (space_id, category, fkey, label, ftype, options, required, sort) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+                [_num(d.get("space_id"), None, field="Department"), (d.get("category") or None), key, label, ftype,
+                 _opts_text(d.get("options")), 1 if d.get("required") else 0, _num(d.get("sort"), 0, field="Order")])
+    c.commit(); fid = cur.lastrowid; c.close()
+    return jsonify({"ok": True, "id": fid})
+
+@app.route("/api/fields/<int:fid>", methods=["PUT", "DELETE"])
+@auth_required([ROLE_ADMIN, ROLE_EDIT])
+def field_one(fid):
+    c = conn(); cur = c.cursor()
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM FieldDefs WHERE id=%s", [fid]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    ftype = d.get("type") if d.get("type") in FIELD_TYPES else "text"
+    cur.execute("UPDATE FieldDefs SET label=%s, ftype=%s, options=%s, required=%s, sort=%s WHERE id=%s",
+                [(d.get("label") or "").strip()[:120], ftype, _opts_text(d.get("options")), 1 if d.get("required") else 0,
+                 int(d.get("sort") or 0), fid])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+def _plan_json(p, asset=None):
+    from datetime import date
+    nd = p.get("next_due")
+    days = (nd - date.today()).days if isinstance(nd, date) else None
+    out = {"id": p["id"], "asset_id": p["asset_id"], "title": p["title"], "every_n": p["every_n"], "every_unit": p["every_unit"],
+           "last_done": str(p["last_done"] or ""), "next_due": str(nd or ""), "days_left": days,
+           "notes": p.get("notes") or "", "active": bool(p.get("active"))}
+    if asset:
+        out.update({"asset_name": asset.get("Name") or "", "asset_tag": asset.get("AssetTag") or "",
+                    "asset_type": asset.get("Type") or "", "location": asset.get("Location") or ""})
+    return out
+
+@app.route("/api/assets/<a_id>/plans", methods=["GET", "POST"])
+@auth_required(module="assets", level="read")
+def asset_plans(a_id):
+    c = conn(); cur = c.cursor()
+    if request.method == "POST":
+        if not _module_write_allowed("assets"):
+            c.close(); return jsonify({"error": "You can look at assets but not change them."}), 403
+        d = request.get_json(force=True) or {}
+        title = (d.get("title") or "").strip()[:160]
+        unit = d.get("every_unit") if d.get("every_unit") in PLAN_UNITS else "months"
+        n = _num(d.get("every_n"), 1, field="Every", lo=1)
+        if not title:
+            c.close(); return jsonify({"error": "Say what has to be done, e.g. Filter clean."}), 400
+        start = (d.get("last_done") or "").strip()[:10] or datetime.now().strftime("%Y-%m-%d")
+        try: nxt = d.get("next_due") or _plan_next(start, n, unit).isoformat()
+        except Exception:
+            c.close(); return jsonify({"error": "Dates are YYYY-MM-DD."}), 400
+        cur.execute("INSERT INTO MaintPlans (asset_id, title, every_n, every_unit, last_done, next_due, notes, active, created_by, created_at) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,1,%s,NOW())",
+                    [a_id, title, n, unit, d.get("last_done") or None, nxt, (d.get("notes") or "")[:2000], session.get("user")])
+        c.commit(); c.close()
+        return jsonify({"ok": True})
+    cur.execute("SELECT * FROM MaintPlans WHERE asset_id=%s ORDER BY active DESC, next_due", [a_id])
+    rows = cur.fetchall(); c.close()
+    return jsonify([_plan_json(r) for r in rows])
+
+@app.route("/api/plans/<int:pid>", methods=["PUT", "DELETE"])
+@auth_required(module="assets", level="write")
+def plan_one(pid):
+    c = conn(); cur = c.cursor()
+    if request.method == "DELETE":
+        cur.execute("DELETE FROM MaintPlans WHERE id=%s", [pid]); c.commit(); c.close()
+        return jsonify({"ok": True})
+    d = request.get_json(force=True) or {}
+    cur.execute("SELECT * FROM MaintPlans WHERE id=%s", [pid]); p = cur.fetchone()
+    if not p:
+        c.close(); return jsonify({"error": "not found"}), 404
+    unit = d.get("every_unit") if d.get("every_unit") in PLAN_UNITS else p["every_unit"]
+    n = _num(d.get("every_n"), p["every_n"] or 1, field="Every", lo=1)
+    cur.execute("UPDATE MaintPlans SET title=%s, every_n=%s, every_unit=%s, next_due=%s, notes=%s, active=%s WHERE id=%s",
+                [(d.get("title") or p["title"])[:160], n, unit, d.get("next_due") or p["next_due"],
+                 d.get("notes", p.get("notes") or "")[:2000], 1 if d.get("active", p["active"]) else 0, pid])
+    c.commit(); c.close()
+    return jsonify({"ok": True})
+
+@app.route("/api/plans/<int:pid>/done", methods=["POST"])
+@auth_required(module="assets", level="write")
+def plan_done(pid):
+    """Done: written to the asset's maintenance log, and the next one booked."""
+    d = request.get_json(force=True) or {}
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT * FROM MaintPlans WHERE id=%s", [pid]); p = cur.fetchone()
+    if not p:
+        c.close(); return jsonify({"error": "not found"}), 404
+    when = (d.get("date") or datetime.now().strftime("%Y-%m-%d"))[:10]
+    try: nxt = _plan_next(when, p["every_n"], p["every_unit"]).isoformat()
+    except Exception:
+        c.close(); return jsonify({"error": "Dates are YYYY-MM-DD."}), 400
+    try: cost = float(d.get("cost") or 0)
+    except Exception: cost = 0
+    cur.execute("INSERT INTO Maintenance (asset_id, date, mtype, cost, note) VALUES (%s,%s,%s,%s,%s)",
+                [p["asset_id"], when, p["title"][:80], cost, (d.get("note") or "Planned maintenance")[:2000]])
+    cur.execute("UPDATE MaintPlans SET last_done=%s, next_due=%s, reminded_for=NULL WHERE id=%s", [when, nxt, pid])
+    c.commit(); c.close()
+    audit(session.get("user"), "MAINTENANCE", p["asset_id"], f"{p['title']} done {when}; next {nxt}")
+    return jsonify({"ok": True, "next_due": nxt})
+
+@app.route("/api/maint/due")
+@auth_required(module="assets", level="read")
+def maint_due():
+    """Every planned job due within ?days= (default 30) or overdue, in the
+    departments this account can see."""
+    try: days = max(0, min(365, int(request.args.get("days") or 30)))
+    except Exception: days = 30
+    sc, sp = _space_sql(request.args.get("space"))
+    c = conn(); cur = c.cursor()
+    cur.execute("SELECT p.*, a.Name, a.AssetTag, a.Type, a.Location FROM MaintPlans p JOIN Assets a ON a._id=p.asset_id "
+                "WHERE p.active=1 AND a.is_deleted=0 AND p.next_due IS NOT NULL AND p.next_due <= CURDATE() + INTERVAL %s DAY"
+                + (" AND a." + sc if sc else "") + " ORDER BY p.next_due", [days] + sp)
+    rows = cur.fetchall(); c.close()
+    return jsonify([_plan_json(r, r) for r in rows])
+
+def notify_maintenance_due():
+    """Once a day: one message listing what falls due in the next 7 days or is
+    overdue, each job mentioned once per due date."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT p.id, p.title, p.next_due, a.Name, a.AssetTag FROM MaintPlans p JOIN Assets a ON a._id=p.asset_id "
+                    "WHERE p.active=1 AND a.is_deleted=0 AND p.next_due <= CURDATE() + INTERVAL 7 DAY "
+                    "AND (p.reminded_for IS NULL OR p.reminded_for <> p.next_due)")
+        rows = cur.fetchall()
+        if rows:
+            lines = [f"- {r['title']}: {r['Name']} ({r['AssetTag']}), due {r['next_due']}" for r in rows]
+            send_notification(f"IT-Vault: {len(rows)} maintenance job{'s' if len(rows) != 1 else ''} due",
+                              "Planned maintenance due in the next 7 days or overdue:\n\n" + "\n".join(lines), kind="maint.due")
+            for r in rows:
+                cur.execute("UPDATE MaintPlans SET reminded_for=next_due WHERE id=%s", [r["id"]])
+            c.commit()
+        c.close()
+    except Exception as e:
+        print("[itvault] maintenance reminder error:", e)
+
+class BadInput(ValueError):
+    """A value from the request that can't be used: answered with a 400 that
+    says which one, never a 500 and never silently replaced."""
+
+def _num(v, default, cast=int, field="value", lo=None):
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return default
+    if isinstance(v, bool):
+        raise BadInput(f"{field} must be a number.")
+    try:
+        n = cast(v) if cast is float else int(float(v)) if isinstance(v, str) and "." in v else cast(v)
+    except (TypeError, ValueError):
+        raise BadInput(f"{field} must be a number.")
+    if lo is not None and n < lo:
+        raise BadInput(f"{field} must be at least {lo}.")
+    return n
+
+def _opts_text(v):
+    """Choice options as stored: "a, b, c" (a list is accepted too)."""
+    if isinstance(v, (list, tuple)):
+        v = ", ".join(str(x) for x in v)
+    return ("" if v is None else str(v))[:2000]
+
+@app.errorhandler(BadInput)
+def _bad_input(e):
+    return jsonify({"error": str(e)}), 400
+
+def _open_workbook(raw):
+    """An uploaded spreadsheet, or a BadInput saying it isn't one."""
+    try:
+        return load_workbook(io.BytesIO(raw), data_only=True)
+    except Exception:
+        raise BadInput("That file isn't a readable Excel workbook (.xlsx). Save it as .xlsx or .csv and try again.")
+
+@app.before_request
+def _json_must_be_object():
+    """Every write endpoint takes a JSON object. A list, string or number
+    body used to reach code that called .get() on it and fail with a 500."""
+    if request.method not in ("POST", "PUT", "PATCH") or not (request.path or "").startswith("/api/"):
+        return None
+    ct = (request.content_type or "").lower()
+    if ct.startswith("multipart/") or ct.startswith("application/x-www-form-urlencoded"):
+        return None
+    if (request.content_length or 0) > 2 * 1024 * 1024:
+        return None
+    raw = request.get_data(cache=True) or b""
+    if not raw.strip():
+        return None
+    try:
+        body = json.loads(raw)
+    except Exception:
+        return None     # not JSON at all: the endpoint decides
+    if body is not None and not isinstance(body, dict):
+        return jsonify({"error": "Send a JSON object, like {\"name\": \"...\"}."}), 400
+    return None
+
+@app.before_request
+def _guard_ticket_space():
+    m = re.match(r"^/api/tickets/(\d+)(?:/|$)", request.path or "")
+    if not m or not (session.get("user") or request.headers.get("X-Api-Key")):
+        return None
+    allowed = _allowed_spaces()
+    if allowed is None:
+        return None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT SpaceID FROM Tickets WHERE id=%s", [int(m.group(1))]); r = cur.fetchone(); c.close()
+    except Exception:
+        return None
+    if r and int(r.get("SpaceID") or 1) not in allowed:
+        return jsonify({"error": "not found"}), 404
+    return None
+
+@app.before_request
+def _guard_space_viewer():
+    """A viewer in a department can open its assets, tickets and plans but
+    not change them."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    path = request.path or ""
+    q = None
+    m = re.match(r"^/api/assets/([0-9a-f]{32})(?:/|$)", path)
+    if m: q = ("SELECT SpaceID FROM Assets WHERE _id=%s", m.group(1))
+    m = m or re.match(r"^/api/tickets/(\d+)(?:/|$)", path)
+    if m and not q: q = ("SELECT SpaceID FROM Tickets WHERE id=%s", int(m.group(1)))
+    m2 = re.match(r"^/api/plans/(\d+)(?:/|$)", path)
+    if m2: q = ("SELECT a.SpaceID FROM MaintPlans p JOIN Assets a ON a._id=p.asset_id WHERE p.id=%s", int(m2.group(1)))
+    if not q or not (session.get("user") or request.headers.get("X-Api-Key") or request.cookies.get("itguy_api_key")):
+        return None
+    ro = _readonly_spaces()
+    if not ro:
+        return None
+    try:
+        c = conn(); cur = c.cursor(); cur.execute(q[0], [q[1]]); r = cur.fetchone(); c.close()
+    except Exception:
+        return None
+    if r and int(r.get("SpaceID") or 1) in ro:
+        return jsonify({"error": _VIEWER_MSG}), 403
+    return None
+
+@app.route("/api/portal/departments")
+def portal_departments():
+    """The departments a portal visitor can raise a request with (name only)."""
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT id, name, color FROM Spaces ORDER BY sort, id"); rows = cur.fetchall(); c.close()
+    except Exception:
+        rows = []
+    return jsonify([{"id": r["id"], "name": r["name"], "color": r.get("color") or ""} for r in rows])
+
+@app.before_request
+def _guard_asset_space():
+    """An asset in a department this account cannot see is treated as not
+    there, on every /api/assets/<id>/... and picture route."""
+    m = re.match(r"^/api/(?:assets|img/asset)/([0-9a-f]{32})(?:/|$)", request.path or "")
+    if not m:
+        return None
+    if not (session.get("user") or request.headers.get("X-Api-Key") or request.cookies.get("itguy_api_key")):
+        return None
+    allowed = _allowed_spaces()
+    if allowed is None:
+        return None
+    try:
+        c = conn(); cur = c.cursor()
+        cur.execute("SELECT SpaceID FROM Assets WHERE _id=%s", [m.group(1)]); r = cur.fetchone(); c.close()
+    except Exception:
+        return None
+    if r and int(r.get("SpaceID") or 1) not in allowed:
+        return jsonify({"error": "not found"}), 404
+    return None
+
 @app.route("/api/assets/next-tag")
 @auth_required(module="assets", level="read")
 def next_asset_tag():
     c = conn(); cur = c.cursor()
-    tag = _next_asset_tag(cur)
+    tag = _next_asset_tag(cur, request.args.get("space") or 1)
     c.close()
     return jsonify({"tag": tag})
 
@@ -3537,7 +4295,9 @@ def _resolve_employee_name(cur, employee_id):
 @auth_required(module="assets", level="write")
 @feature_required("assets.create")
 def create_asset():
-    data = request.get_json(force=True)
+    data = request.get_json(force=True) or {}
+    if not str(data.get("Name") or "").strip():
+        return jsonify({"error": "An asset needs a name."}), 400
     serial = (data.get("Serial") or "").strip()
     c = conn(); cur = c.cursor()
     if serial:
@@ -3547,8 +4307,14 @@ def create_asset():
             c.close()
             return jsonify({"error": f"Serial '{serial}' is already used by asset '{dup.get('Name') or dup['_id']}' -- no duplicate added"}), 409
     a_id = uuid.uuid4().hex
+    space_id = _clean_space_id(data.get("SpaceID"))
+    if not _space_writable(space_id):
+        c.close(); return jsonify({"error": "You do not have access to that department."}), 403
+    extra, err = _clean_extra(cur, space_id, data.get("Type"), data.get("Extra"))
+    if err:
+        c.close(); return jsonify({"error": err}), 400
     if not (data.get("AssetTag") or "").strip():
-        data["AssetTag"] = _next_asset_tag(cur)
+        data["AssetTag"] = _next_asset_tag(cur, space_id)
     if data.get("Status") == "Checked-Out" and (data.get("EmployeeID") or "").strip():
         data["ReceivedBy"] = _resolve_employee_name(cur, data["EmployeeID"])
         data["NotesReceived"] = datetime.now().strftime("%Y-%m-%d")
@@ -3556,7 +4322,9 @@ def create_asset():
     vals = [a_id] + [coerce_val(col, data.get(col)) for col in COLUMNS] + [_now, _now]
     cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
     ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
-    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); c.commit()
+    cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals)
+    cur.execute("UPDATE Assets SET SpaceID=%s, Extra=%s WHERE _id=%s", [space_id, json.dumps(extra), a_id])
+    c.commit()
     # Minted now rather than when a label is first printed, so every asset has
     # a public address from the moment it exists and the column never has holes.
     try:
@@ -3576,7 +4344,7 @@ def get_asset(a_id):
     cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
     row = cur.fetchone(); c.close()
     if not row: return jsonify({"error": "not found"}), 404
-    return jsonify(row_to_dict(row))
+    return jsonify(_with_extra(row_to_dict(row), row))
 
 
 @app.route("/api/assets/<a_id>", methods=["PUT"])
@@ -3585,6 +4353,18 @@ def get_asset(a_id):
 def update_asset(a_id):
     data = request.get_json(force=True)
     c = conn(); cur = c.cursor()
+    # department and extra fields: checked and written alongside the rest
+    if "SpaceID" in data or "Extra" in data:
+        cur.execute("SELECT SpaceID, Type, Extra FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
+        cur_row = cur.fetchone() or {}
+        sid = _clean_space_id(data.get("SpaceID", cur_row.get("SpaceID")))
+        if not _space_writable(sid):
+            c.close(); return jsonify({"error": "You do not have access to that department."}), 403
+        ex = data.get("Extra") if "Extra" in data else _extra_of(cur_row)
+        extra, err = _clean_extra(cur, sid, data.get("Type", cur_row.get("Type")), ex)
+        if err:
+            c.close(); return jsonify({"error": err}), 400
+        cur.execute("UPDATE Assets SET SpaceID=%s, Extra=%s WHERE _id=%s", [sid, json.dumps(extra), a_id])
     # capture old values for history
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + " FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
     old = cur.fetchone()
@@ -3738,9 +4518,12 @@ def restore_asset(a_id):
 @auth_required(module="assets", level="read")
 def trash_assets():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=1")
+    # only the departments this account may see
+    _sc, _sp = _space_sql(None)
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SpaceID FROM Assets WHERE is_deleted=1"
+                + (" AND " + _sc if _sc else ""), _sp)
     rows = cur.fetchall(); c.close()
-    return jsonify([row_to_dict(r) for r in rows])
+    return jsonify([dict(row_to_dict(r), SpaceID=r.get("SpaceID") or 1) for r in rows])
 
 def _purge_asset_row(cur, a_id, invoice_file):
     cur.execute("DELETE FROM Maintenance WHERE asset_id=%s", [a_id])
@@ -3770,8 +4553,12 @@ def permanent_delete_asset(a_id):
 @feature_required("assets.trash")
 def empty_trash():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Name, Serial, InvoiceFile FROM Assets WHERE is_deleted=1")
-    rows = cur.fetchall()
+    # empties only what this account could delete one by one: the
+    # departments it may see and is an editor in
+    cur.execute("SELECT _id, Name, Serial, InvoiceFile, SpaceID FROM Assets WHERE is_deleted=1")
+    _allowed = _allowed_spaces(); _ro = _readonly_spaces()
+    rows = [r for r in cur.fetchall()
+            if (_allowed is None or int(r.get("SpaceID") or 1) in _allowed) and int(r.get("SpaceID") or 1) not in _ro]
     for r in rows:
         _purge_asset_row(cur, r["_id"], r.get("InvoiceFile"))
     c.commit(); c.close()
@@ -3901,6 +4688,10 @@ def manufacturers_api():
                 return jsonify({"ok": True, "id": mid, "logo_error": str(e)})
         return jsonify({"ok": True, "id": mid, "logo": logo})
     if request.method == "PUT":
+        d = request.get_json(force=True, silent=True) or {}
+        if isinstance(d, dict) and "website" in d and d.get("id"):
+            cur.execute("UPDATE Manufacturers SET website=%s WHERE id=%s", [_clean_site(d.get("website")), d.get("id")])
+            c.commit()
         c.close()
         return _catalog_rename_request("manufacturers")
     if request.method == "DELETE":
@@ -3913,14 +4704,17 @@ def manufacturers_api():
 def categories_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
-        cur.execute("SELECT id, name, icon, photo_v, (photo IS NOT NULL) AS has_photo FROM Categories ORDER BY name"); rows = cur.fetchall(); c.close()
-        return jsonify([{"id": r["id"], "name": r["name"], "icon": r.get("icon") or "",
+        cur.execute("SELECT id, name, icon, photo_v, (photo IS NOT NULL) AS has_photo, space_id FROM Categories ORDER BY name"); rows = cur.fetchall(); c.close()
+        return jsonify([{"id": r["id"], "name": r["name"], "icon": r.get("icon") or "", "space_id": r.get("space_id"),
                          "photo": (f"/api/categories/{r['id']}/photo?v={r.get('photo_v') or 0}" if r.get("has_photo") else "")}
                         for r in rows])
     if request.method == "POST":
-        n = (request.get_json(force=True).get("name") or "").strip()
+        _d = request.get_json(force=True) or {}
+        n = (_d.get("name") or "").strip()
         if not n: return jsonify({"error": "name required"}), 400
-        cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [n]); c.commit(); c.close()
+        try: _sid = int(_d.get("space_id")) if _d.get("space_id") else None
+        except Exception: _sid = None
+        cur.execute("INSERT IGNORE INTO Categories (name, space_id) VALUES (%s,%s)", [n, _sid]); c.commit(); c.close()
         return jsonify({"ok": True})
     if request.method == "PUT":
         c.close()
@@ -4361,7 +5155,7 @@ def import_excel():
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
     f = request.files["file"]
-    wb = load_workbook(io.BytesIO(f.read()), data_only=True); ws = wb.active
+    wb = _open_workbook(f.read()); ws = wb.active
     data = list(ws.iter_rows(values_only=True))
     if not data:
         return jsonify({"error": "empty"}), 400
@@ -4465,7 +5259,7 @@ def import_catalog():
         text = raw.decode("utf-8-sig", errors="replace")
         rows = list(_csv.reader(_io.StringIO(text)))
     else:
-        wb = load_workbook(io.BytesIO(raw), data_only=True); ws = wb.active
+        wb = _open_workbook(raw); ws = wb.active
         rows = [list(r) for r in ws.iter_rows(values_only=True)]
     if not rows:
         return jsonify({"error": "empty file"}), 400
@@ -4524,7 +5318,7 @@ def import_directory():
         text = raw.decode("utf-8-sig", errors="replace")
         rows = list(_csv.reader(_io.StringIO(text)))
     else:
-        wb = load_workbook(io.BytesIO(raw), data_only=True); ws = wb.active
+        wb = _open_workbook(raw); ws = wb.active
         rows = [list(r) for r in ws.iter_rows(values_only=True)]
     if not rows:
         return jsonify({"error": "empty file"}), 400
@@ -4564,7 +5358,9 @@ def import_directory():
 @feature_required("assets.export")
 def export_excel():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=0 ORDER BY Name")
+    _sc, _sp = _space_sql(request.args.get("space"))
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=0"
+                + (" AND " + _sc if _sc else "") + " ORDER BY Name", _sp)
     rows = cur.fetchall(); c.close()
     wb = Workbook(); ws = wb.active; ws.title = "Assets"; ws.append(COLUMNS)
     for r in rows: ws.append([r.get(col, "") for col in COLUMNS])
@@ -4598,7 +5394,7 @@ def import_contracts_excel():
     if "file" not in request.files:
         return jsonify({"error": "no file"}), 400
     f = request.files["file"]
-    wb = load_workbook(io.BytesIO(f.read()), data_only=True); ws = wb.active
+    wb = _open_workbook(f.read()); ws = wb.active
     data = list(ws.iter_rows(values_only=True))
     if not data:
         return jsonify({"error": "empty"}), 400
@@ -4660,9 +5456,10 @@ def _valid_role(name):
 @auth_required([ROLE_ADMIN])
 def list_users():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT username, role, display, email, totp_enabled, email_otp_enabled FROM Users ORDER BY role, username"); rows = cur.fetchall(); c.close()
+    cur.execute("SELECT username, role, display, email, totp_enabled, email_otp_enabled, IFNULL(spaces,'') AS spaces FROM Users ORDER BY role, username"); rows = cur.fetchall(); c.close()
     return jsonify([{"username": r["username"], "role": r["role"], "display": r["display"], "email": r.get("email", ""),
-                     "totp_enabled": bool(r.get("totp_enabled")), "email_otp_enabled": bool(r.get("email_otp_enabled"))} for r in rows])
+                     "totp_enabled": bool(r.get("totp_enabled")), "email_otp_enabled": bool(r.get("email_otp_enabled")),
+                     "spaces": r.get("spaces") or ""} for r in rows])
 
 @app.route("/api/users", methods=["POST"])
 @auth_required([ROLE_ADMIN])
@@ -4674,8 +5471,8 @@ def create_user():
     c = conn(); cur = c.cursor()
     cur.execute("SELECT username FROM Users WHERE username=%s", [u])
     if cur.fetchone(): c.close(); return jsonify({"error": "user exists"}), 409
-    cur.execute("INSERT INTO Users (username, password, role, display, email) VALUES (%s,%s,%s,%s,%s)",
-                (u, hash_pw(pw), role, disp, em)); c.commit(); c.close()
+    cur.execute("INSERT INTO Users (username, password, role, display, email, spaces) VALUES (%s,%s,%s,%s,%s,%s)",
+                (u, hash_pw(pw), role, disp, em, _clean_spaces_value(d.get("spaces")))); c.commit(); c.close()
     return jsonify({"ok": True})
 
 @app.route("/api/users/<u>", methods=["PUT"])
@@ -4693,6 +5490,7 @@ def update_user(u):
     if "display" in d: sets.append("display=%s"); vals.append(d["display"])
     if "email" in d: sets.append("email=%s"); vals.append(d["email"].strip())
     if d.get("password"): sets.append("password=%s"); vals.append(hash_pw(d["password"]))
+    if "spaces" in d: sets.append("spaces=%s"); vals.append(_clean_spaces_value(d.get("spaces")))
     if sets:
         cur.execute("UPDATE Users SET " + ", ".join(sets) + " WHERE username=%s", vals + [u]); c.commit()
     c.close(); return jsonify({"ok": True})
@@ -5056,7 +5854,14 @@ def profile_avatar():
     data = f.read()
     if len(data) > 400 * 1024:
         return jsonify({"error": "image too large (max 400KB)"}), 400
-    b64 = "data:" + (f.mimetype or "image/png") + ";base64," + base64.b64encode(data).decode()
+    # the type comes from the bytes, not from what the browser claimed
+    if data[:8] == b"\x89PNG\r\n\x1a\n": mime = "image/png"
+    elif data[:3] == b"\xff\xd8\xff": mime = "image/jpeg"
+    elif data[:6] in (b"GIF87a", b"GIF89a"): mime = "image/gif"
+    elif data[:4] == b"RIFF" and data[8:12] == b"WEBP": mime = "image/webp"
+    else:
+        return jsonify({"error": "That isn't a picture -- use a PNG, JPG, GIF or WEBP."}), 400
+    b64 = "data:" + mime + ";base64," + base64.b64encode(data).decode()
     c = conn(); cur = c.cursor()
     cur.execute("UPDATE Users SET avatar=%s WHERE username=%s", (b64, session["user"]))
     c.commit(); c.close()
@@ -6334,7 +7139,7 @@ def settings():
                           unifi_user=%s, unifi_pass=%s, unifi_is_os=%s, unifi_verify_ssl=%s WHERE id=1""",
                         (bool(d.get("unifi_enabled", cur0.get("unifi_enabled", False))),
                          (d.get("unifi_host", cur0.get("unifi_host","")) or "").strip()[:200],
-                         int(d.get("unifi_port") or cur0.get("unifi_port") or 443),
+                         _num(d.get("unifi_port"), cur0.get("unifi_port") or 443, field="UniFi port", lo=1),
                          (d.get("unifi_site", cur0.get("unifi_site","default")) or "default").strip()[:80],
                          (d.get("unifi_user", cur0.get("unifi_user","")) or "").strip()[:120],
                          d.get("unifi_pass", cur0.get("unifi_pass","")) if d.get("unifi_pass") else cur0.get("unifi_pass",""),
@@ -6491,7 +7296,7 @@ def contracts_api():
                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
+                     _num(d.get("cost"), 0, float, field="Cost"), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note","")))
         c.commit(); c.close()
         if (d.get("employee_id") or "").strip():
@@ -6505,7 +7310,7 @@ def contracts_api():
                        employee_id=%s, location=%s, department=%s, license_key=%s, note=%s, expiry_notified_at='', updated_at=NOW() WHERE id=%s""",
                     (d.get("name",""), d.get("vendor",""), d.get("vendor_email","").strip() if d.get("vendor_email") else "",
                      d.get("type",""), d.get("start_date",""), d.get("end_date",""),
-                     float(d.get("cost") or 0), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
+                     _num(d.get("cost"), 0, float, field="Cost"), d.get("billing_period") or "One-Time", tag, d.get("asset_id") or None, d.get("employee_id") or "",
                      d.get("location") or "", d.get("department") or "", d.get("license_key") or "", d.get("note",""), cid))
         c.commit(); c.close()
         new_emp = (d.get("employee_id") or "").strip()
@@ -6555,13 +7360,20 @@ def empty_contracts_trash():
 def locations_api():
     c = conn(); cur = c.cursor()
     if request.method == "GET":
-        cur.execute("SELECT * FROM Locations ORDER BY name"); rows = cur.fetchall(); c.close()
-        return jsonify([dict(r) for r in rows])
+        cur.execute("SELECT * FROM Locations ORDER BY name"); rows = [dict(r) for r in cur.fetchall()]; c.close()
+        return jsonify(_location_tree(rows))
     if request.method == "POST":
         d = request.get_json(force=True)
-        cur.execute("INSERT IGNORE INTO Locations (name, parent_id) VALUES (%s,%s)", (d.get("name","").strip(), int(d.get("parent_id") or 0)))
+        name = (d.get("name") or "").strip()[:160]
+        if not name:
+            c.close(); return jsonify({"error": "Give the location a name"}), 400
+        kind = d.get("kind") if d.get("kind") in LOCATION_KINDS else ""
+        cur.execute("INSERT IGNORE INTO Locations (name, parent_id, kind) VALUES (%s,%s,%s)", (name, _num(d.get("parent_id"), 0, field="Parent location"), kind))
         c.commit(); c.close(); return jsonify({"ok": True})
     lid = (request.get_json(force=True) or {}).get("id")
+    cur.execute("SELECT COUNT(*) AS n FROM Locations WHERE parent_id=%s", [lid])
+    if (cur.fetchone() or {}).get("n"):
+        c.close(); return jsonify({"error": "Remove the places inside it first."}), 400
     cur.execute("DELETE FROM Locations WHERE id=%s", [lid]); c.commit(); c.close(); return jsonify({"ok": True})
 
 # ---------- ticketing (osTicket-style) ----------
@@ -6599,16 +7411,19 @@ def sla_hours_for(priority):
     mapping = {"Low": s.get("sla_low", 72), "Normal": s.get("sla_normal", 24), "High": s.get("sla_high", 8), "Urgent": s.get("sla_urgent", 4), "Emergency": 2}
     return mapping.get(priority, 24)
 
-def auto_assign_ticket(category):
-    """Round-robin auto-assignment based on category. Returns username or None."""
+def auto_assign_ticket(category, space_id=1):
+    """Round-robin auto-assignment, among the staff who work this ticket's
+    department (an account limited to other departments never gets it).
+    Returns username or None."""
     c = conn(); cur = c.cursor()
     cur.execute("SELECT auto_assign_roundrobin FROM Settings WHERE id=1")
     s = cur.fetchone() or {}
     if not s.get("auto_assign_roundrobin"):
         c.close(); return None
     # Get users with role admin or read-write (editor)
-    cur.execute("SELECT username FROM Users WHERE role IN (%s,%s) ORDER BY username", (ROLE_ADMIN, ROLE_EDIT))
-    users = [r["username"] for r in cur.fetchall()]
+    cur.execute("SELECT username, IFNULL(spaces,'') AS spaces FROM Users WHERE role IN (%s,%s) ORDER BY username", (ROLE_ADMIN, ROLE_EDIT))
+    users = [r["username"] for r in cur.fetchall()
+             if not r["spaces"].strip() or str(int(space_id or 1)) in r["spaces"].split(",")]
     if not users:
         c.close(); return None
     # Round-robin: assign to user with fewest open tickets
@@ -6750,6 +7565,8 @@ def tickets_api():
         sql = "SELECT t.*, (SELECT COUNT(*) FROM TicketReplies r WHERE r.ticket_id=t.id) AS reply_count FROM Tickets t"
         where=[]; params=[]
         if st: where.append("t.status=%s"); params.append(st)
+        _sc, _sp = _space_sql(request.args.get("space"))
+        if _sc: where.append("t." + _sc); params += _sp
         if q:
             where.append("(t.subject LIKE %s OR t.code LIKE %s OR t.requester LIKE %s OR t.assignee LIKE %s)")
             params += [f"%{q}%"]*4
@@ -6759,6 +7576,11 @@ def tickets_api():
         return jsonify([dict(r) for r in rows])
     # POST: create ticket
     d = request.get_json(force=True)
+    if not str(d.get("subject") or "").strip():
+        c.close(); return jsonify({"error": "A ticket needs a subject."}), 400
+    t_space = _clean_space_id(d.get("SpaceID") or d.get("space_id") or request.args.get("space"))
+    if not _space_writable(t_space):
+        c.close(); return jsonify({"error": "You do not have access to that department."}), 403
     subject = d.get("subject","").strip()
     requester = d.get("requester","")
     description = d.get("description","")
@@ -6775,11 +7597,11 @@ def tickets_api():
     code = ticket_code()
     priority = d.get("priority","Normal") or "Normal"
     category = d.get("category","") or ""
-    sla_hours = int(d.get("sla_hours") or sla_hours_for(priority))
+    sla_hours = _num(d.get("sla_hours"), None, field="SLA hours", lo=0) or sla_hours_for(priority)
     # auto-assign if round-robin enabled and no assignee specified
     assignee = d.get("assignee") or None
     if not assignee:
-        assignee = auto_assign_ticket(category)
+        assignee = auto_assign_ticket(category, t_space)
     # auto due_date from SLA hours if not specified
     due_date = _clean_due(d.get("due_date"))
     if due_date is None:
@@ -6794,6 +7616,7 @@ def tickets_api():
                  requester, d.get("requester_email",""), assignee, d.get("asset_id") or None,
                  due_date, sla_hours, category, d.get("source","Web"), session.get("user","?")))
     tid = cur.lastrowid
+    cur.execute("UPDATE Tickets SET SpaceID=%s WHERE id=%s", [t_space, tid])
     c.commit(); c.close()
     # notify after commit
     ticket = {"id": tid, "code": code, "subject": d.get("subject",""), "priority": priority, "requester": d.get("requester",""), "requester_email": d.get("requester_email",""), "category": category}
@@ -6863,7 +7686,11 @@ def _portal_create_ticket():
     priority = d.get("priority") if d.get("priority") in PRIORITIES else "Normal"
     category = d.get("category","") or ""
     sla_hours = sla_hours_for(priority)
-    assignee = auto_assign_ticket(category)
+    try: p_space = int(d.get("space_id") or 1)
+    except Exception: p_space = 1
+    cur.execute("SELECT id FROM Spaces WHERE id=%s", [p_space])
+    if not cur.fetchone(): p_space = 1
+    assignee = auto_assign_ticket(category, p_space)
     from datetime import datetime, timedelta
     due_date = (datetime.now() + timedelta(hours=sla_hours)).strftime("%Y-%m-%d %H:%M:%S")
     cur.execute("""INSERT INTO Tickets (code, subject, description, priority, status, requester, requester_email, assignee, due_date, sla_hours, category, source, created_by)
@@ -6872,6 +7699,7 @@ def _portal_create_ticket():
                  requester, (d.get("requester_email") or "").strip(),
                  assignee, due_date, sla_hours, category))
     tid = cur.lastrowid
+    cur.execute("UPDATE Tickets SET SpaceID=%s WHERE id=%s", [p_space, tid])
     # A photo that fails validation must not cost the visitor their ticket --
     # the text is the part nobody can reconstruct, so it is committed either
     # way and the rejected files come back as warnings.
@@ -6970,7 +7798,7 @@ def ticket_detail(ticket_id):
     if request.method == "PUT":
         # Assigning is queue work too -- there is a dedicated "Assign to IT"
         # control for it -- so it sits with status and priority.
-        _queue_only = {"status", "priority", "assignee"}
+        _queue_only = {"status", "priority", "assignee", "SpaceID"}
         # force=True like the update below: without it a text/plain body
         # read as "no fields" here and was still applied in full there
         _touched = {k for k in (request.get_json(force=True, silent=True) or {}).keys()}
@@ -6996,6 +7824,16 @@ def ticket_detail(ticket_id):
             if d["due_date"] is None:
                 c.close()
                 return jsonify({"error": "Due date must be a date, like 2026-12-31."}), 400
+        if "SpaceID" in d:
+            _to = _clean_space_id(d.get("SpaceID"))
+            cur.execute("SELECT id FROM Spaces WHERE id=%s", [_to])
+            if not cur.fetchone() or not _space_writable(_to):
+                c.close(); return jsonify({"error": "You can't move tickets into that department."}), 403
+            d["SpaceID"] = _to
+            if int(before.get("SpaceID") or 1) != _to:
+                fields.append("SpaceID=%s"); params.append(_to)
+                _ticket_hist(cur, ticket_id, session.get("user") or "?", "department",
+                             str(before.get("SpaceID") or 1), str(_to))
         for f in ["subject","description","priority","status","requester","requester_email","assignee","asset_id","due_date","sla_hours","category"]:
             if f in d:
                 fields.append(f"{f}=%s"); params.append(None if (d[f] in ("", None) and f in ("assignee","asset_id")) else d[f])
@@ -7786,6 +8624,7 @@ NOTIFY_TYPES = [
     ("ticket.replied",    "Ticket reply added",                "notify_on_reply"),
     ("ticket.resolved",   "Ticket resolved or closed",         "notify_on_resolve"),
     ("sla.breach",        "SLA breached",                      "sla_breach_notify"),
+    ("maint.due",         "Planned maintenance due",           None),
     ("heartbeat.down",    "Monitor down or recovered",         None),
     ("contract.expiring", "Contract or warranty expiring",     None),
     ("backup.failed",     "Scheduled backup failed",           None),
@@ -8240,7 +9079,7 @@ def maintenance(a_id):
         d = request.get_json(force=True)
         cur.execute("INSERT INTO Maintenance (asset_id, date, mtype, cost, note, by_user) VALUES (%s,%s,%s,%s,%s,%s)",
                     (a_id, (d.get("date") or nowstr()), d.get("mtype", "Repair"),
-                     float(d.get("cost") or 0), (d.get("note") or "").strip(), session.get("user")))
+                     _num(d.get("cost"), 0, float, field="Cost"), (d.get("note") or "").strip(), session.get("user")))
         # logging a maintenance record puts the asset under maintenance
         cur.execute("SELECT * FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
         arow = cur.fetchone()
@@ -8302,7 +9141,9 @@ def clear_audit_log():
 @auth_required()
 def dashboard():
     c = conn(); cur = c.cursor()
-    cur.execute("SELECT _id, Status, PurchaseDate, WarrantyMonths, Type, Location FROM Assets WHERE is_deleted=0"); rows = cur.fetchall()
+    _sc, _sp = _space_sql(request.args.get("space"))
+    cur.execute("SELECT _id, Status, PurchaseDate, WarrantyMonths, Type, Location FROM Assets WHERE is_deleted=0"
+                + (" AND " + _sc if _sc else ""), _sp); rows = cur.fetchall()
     today = datetime.now().date()
     total = len(rows)
     checked_out = sum(1 for r in rows if r["Status"] == "Checked-Out")
@@ -12801,7 +13642,7 @@ def index():
 
 
 _SHELL_CACHE = {}
-_SHELL_REF = re.compile(r"""(/(?:app|redesign)\.js|/(?:style|redesign)\.css)\?(?:v|nocache)=[^"']*""")
+_SHELL_REF = re.compile(r"""(/(?:app|redesign|spaces)\.js|/(?:style|redesign)\.css)\?(?:v|nocache)=[^"']*""")
 
 def _asset_version(path):
     try:
@@ -12834,7 +13675,7 @@ def _shell_html(name):
 def static_files(p):
     if p in ("login.html", "index.html"):
         return _shell_html(p)          # with fingerprinted script/style URLs
-    if p in ("style.css", "app.js", "redesign.css", "redesign.js"):
+    if p in ("style.css", "app.js", "redesign.css", "redesign.js", "spaces.js"):
         return send_from_directory(BASE, p)
     return jsonify({"error": "not found"}), 404
 
@@ -13077,6 +13918,7 @@ def _returned_release_loop():
             notify_sla_breaches()
         except Exception as e:
             print("[itvault] SLA breach check error:", e, flush=True)
+        notify_maintenance_due()
         time.sleep(3600)  # hourly: a day-level setting does not need more
 
 _returned_release_started = False

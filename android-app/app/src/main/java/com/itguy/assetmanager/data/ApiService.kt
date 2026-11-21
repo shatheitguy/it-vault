@@ -35,7 +35,16 @@ interface ApiService {
     suspend fun listAssets(@Query("q") q: String? = null, @Query("order") order: String? = null): Response<List<Asset>>
 
     @GET("api/assets/next-tag")
-    suspend fun nextAssetTag(): Response<NextTagResponse>
+    suspend fun nextAssetTag(@Query("space") space: Int? = null): Response<NextTagResponse>
+
+    /** The departments this account works in (viewers get can_edit=false). */
+    @GET("api/spaces")
+    suspend fun spaces(): Response<List<SpaceItem>>
+
+    /** The extra fields an asset of this department and category has. */
+    @GET("api/fields")
+    suspend fun assetFields(@Query("space") space: Int, @Query("category") category: String,
+                            @Query("for_asset") forAsset: Int = 1): Response<List<FieldDef>>
 
     @GET("api/assets/{id}")
     suspend fun getAsset(@Path("id") id: String): Response<Asset>
