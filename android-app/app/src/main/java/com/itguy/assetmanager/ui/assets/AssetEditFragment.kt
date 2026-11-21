@@ -380,7 +380,35 @@ class AssetEditFragment : Fragment() {
         }
     }
 
+    // The built-in fields this asset's department switched off: hidden, not
+    // cleared, so a save still sends what they hold.
+    private fun applyHiddenFields() {
+        if (_b == null) return
+        val off = spaceOf(current.SpaceID)?.hidden_fields.orEmpty().toSet()
+        fun show(v: View?, on: Boolean) { v?.visibility = if (on) View.VISIBLE else View.GONE }
+        fun box(v: View) = v.parent?.parent as? View                  // TextInputLayout around an EditText
+        fun labelBefore(v: View): View? { val p = v.parent as? ViewGroup ?: return null; val i = p.indexOfChild(v); return if (i > 0) p.getChildAt(i - 1) else null }
+        fun card(v: View): View? { var x: View? = v; while (x != null && x !is com.google.android.material.card.MaterialCardView) x = x.parent as? View; return x }
+        fun section(v: View, on: Boolean) { val c = card(v) ?: return; show(c, on); show(labelBefore(c), on) }
+        show(box(b.fSerial), "Serial" !in off)
+        show(box(b.fMacAddress), "MacAddress" !in off)
+        show(b.fLocation, "Location" !in off); show(labelBefore(b.fLocation), "Location" !in off)
+        section(b.fManufacturer, "Brand" !in off)
+        section(b.photoTile, "Photo" !in off)
+        show(box(b.fPurchaseDate), "PurchaseDate" !in off)
+        show(box(b.fWarrantyMonths), "WarrantyMonths" !in off)
+        show(box(b.fPrice), "Price" !in off)
+        section(b.fPurchaseDate, !(off.containsAll(listOf("PurchaseDate", "WarrantyMonths", "Price"))))
+        val assign = "Assignment" !in off
+        show(b.fEmployeeID, assign); show(labelBefore(b.fEmployeeID), assign)
+        show(b.checkOutBtn.parent as? View, assign)
+        show(box(b.fReceivedBy), assign); show(box(b.fNotesReceived), assign)
+        section(b.fNote, "Note" !in off)
+        section(b.invoicePickBtn, "Invoice" !in off)
+    }
+
     private fun refreshExtraFields() {
+        applyHiddenFields()
         val space = current.SpaceID ?: 1
         val cat = spinnerText(b.fType).ifBlank { current.Type }
         if (extraFor == space to cat) return

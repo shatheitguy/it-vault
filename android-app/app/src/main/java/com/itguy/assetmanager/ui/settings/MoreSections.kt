@@ -241,7 +241,7 @@ object MoreSections {
     // ============================================================ Import, export & trash
     private fun data() = Section("data", "Import, export & trash", "Excel in and out, deleted contracts", R.drawable.ic_backup, groups = listOf(
         Group("Assets", subtitle = "Excel (.xlsx) or CSV with the same columns as the export", custom = { h ->
-            ioButtons(h, "api/export", "assets.xlsx", "api/import") }),
+            ioButtons(h, "api/export", "assets.xlsx", "api/import", byDepartment = true) }),
         Group("Contracts", custom = { h -> ioButtons(h, "api/contracts/export", "contracts.xlsx", "api/contracts/import") }),
         Group("Directory", subtitle = "Import staff from a sheet", custom = { h -> ioButtons(h, null, "", "api/directory/import") }),
         Group("Product Catalog", subtitle = "Columns: Category, Manufacturer, Model", custom = { h -> ioButtons(h, null, "", "api/catalog/import") }),
@@ -258,24 +258,52 @@ object MoreSections {
         }
     }
 
-    private fun ioButtons(h: GroupHost, exportPath: String?, exportName: String, importPath: String) {
+    // Which department an asset export or import is for: every one (export
+    // only), or one. With a single department there is nothing to ask.
+    private fun pickDepartment(h: GroupHost, forImport: Boolean, onPicked: (Int?) -> Unit) = h.launch {
+        val all = Net.getArray("api/spaces").map { it.asJsonObject }
+        val choices = if (forImport) all.filter { !it.has("can_edit") || it.bool("can_edit") } else all
+        if (all.size < 2 || choices.isEmpty()) { onPicked(null); return@launch }
+        val labels = (if (forImport) emptyList() else listOf("All departments")) + choices.map { "${it.str("name")}  (${it.str("prefix")}-…)" }
+        BrandDialog(h.context).setTitle(if (forImport) "Import into which department?" else "Export which department?")
+            .setItems(labels.toTypedArray()) { _, which ->
+                if (!forImport && which == 0) onPicked(null) else onPicked(choices[which - (if (forImport) 0 else 1)].int("id"))
+            }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun ioButtons(h: GroupHost, exportPath: String?, exportName: String, importPath: String, byDepartment: Boolean = false) {
         val ctx = h.context
         val btns = mutableListOf<View>()
-        if (exportPath != null) btns += pillButton(ctx, "Export", false).apply { setOnClickListener { h.launch {
+        if (exportPath != null) btns += pillButton(ctx, "Export", false).apply { setOnClickListener {
+            if (byDepartment) pickDepartment(h, false) { sid -> exportNow(h, exportPath + (sid?.let { "?space=$it" } ?: ""), exportName) }
+            else exportNow(h, exportPath, exportName) } }
+        btns += pillButton(ctx, "Import from a file", true).apply { setOnClickListener {
+            if (byDepartment) pickDepartment(h, true) { sid -> importNow(h, importPath, sid) } else importNow(h, importPath, null) } }
+        h.body.addView(buttonRow(ctx, btns))
+    }
+
+    private fun exportNow(h: GroupHost, exportPath: String, exportName: String) {
+        val ctx = h.context
+        h.launch {
             val f = download(ctx, exportPath, exportName)
             val uri = FileProvider.getUriForFile(ctx, ctx.packageName + ".fileprovider", f)
             ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
                 type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }, "Save or send $exportName").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            h.say("Exported $exportName") } } }
-        btns += pillButton(ctx, "Import from a file", true).apply { setOnClickListener { h.pickFile("*/*") { uri -> h.launch {
+            h.say("Exported $exportName") }
+    }
+
+    private fun importNow(h: GroupHost, importPath: String, space: Int?) {
+        val ctx = h.context
+        h.pickFile("*/*") { uri -> h.launch {
             h.say("Importing…")
-            val r = Net.postParts(importPath, listOf(Net.filePart(ctx, uri, "file")))
+            val parts = listOf(Net.filePart(ctx, uri, "file")) + (space?.let { listOf(Net.textPart("space", it.toString())) } ?: emptyList())
+            val r = Net.postParts(importPath, parts)
             h.say(r.str("message").ifBlank {
-                listOf("added" to r.int("added", -1), "updated" to r.int("updated", -1), "imported" to r.int("imported", -1), "skipped" to r.int("skipped", -1))
-                    .filter { it.second >= 0 }.joinToString(", ") { "${it.second} ${it.first}" }.ifBlank { "Imported" } }) } } } }
-        h.body.addView(buttonRow(ctx, btns))
+                listOf("added" to r.int("added", -1), "updated" to r.int("updated", -1), "imported" to r.int("imported", -1), "skipped" to r.int("skipped", -1),
+                       "need a required field" to r.int("incomplete", -1))
+                    .filter { it.second > 0 || (it.second == 0 && it.first == "added") }.joinToString(", ") { "${it.second} ${it.first}" }.ifBlank { "Imported" } }) } }
     }
 
     private fun contractTrash(h: GroupHost) {

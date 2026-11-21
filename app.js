@@ -1227,6 +1227,7 @@ async function openModal(id,prefill){
       </div>
     </div>`;
   warrantyHint();
+  if(window.applyHiddenFields){ const sp=document.getElementById('f_SpaceID'); window.applyHiddenFields(sp&&sp.value?Number(sp.value):(a&&a.SpaceID)||1); }
   const histWrap=document.getElementById('histWrap');
   if(histWrap)histWrap.style.display=id?'':'none';
   document.getElementById('maintWrap').style.display=id?'':'none';
@@ -2576,17 +2577,18 @@ document.getElementById('saveBtn').onclick=saveModal;
 document.getElementById('cancelBtn').onclick=closeModal;
 const naTop=document.getElementById('navAdd'); if(naTop) naTop.onclick=()=>openModal();
 document.getElementById('addBtn2').onclick=()=>openModal();
-const ni2=document.getElementById('navImport'); if(ni2) ni2.onclick=()=>document.getElementById('file').click();
-document.getElementById('importBtn2').onclick=()=>document.getElementById('file').click();
+const pickImportFile=()=>{ if(window.openImportDialog) openImportDialog(()=>document.getElementById('file').click()); else document.getElementById('file').click(); };
+const ni2=document.getElementById('navImport'); if(ni2) ni2.onclick=pickImportFile;
+document.getElementById('importBtn2').onclick=pickImportFile;
 document.getElementById('exportBtn2').onclick=doExport;
 document.getElementById('file').onchange=async()=>{
   const inp=document.getElementById('file');
   const file=inp.files[0]; if(!file)return;
-  const fd=new FormData(); fd.append('file',file);
+  const fd=new FormData(); fd.append('file',file); if(window.IMPORT_SPACE) fd.append('space',window.IMPORT_SPACE);
   const r=await api('/api/import',{method:'POST',body:fd});
   inp.value='';
   const j=r?await r.json().catch(()=>({})):{};
-  if(r&&r.ok){ toast(`✓ imported: ${j.added||0} added, ${j.updated||0} updated`+(j.skipped?`, ${j.skipped} skipped (in Trash or empty)`:'')); load(); loadDashboard(); }
+  if(r&&r.ok){ toast(`✓ imported: ${j.added||0} added, ${j.updated||0} updated`+(j.skipped?`, ${j.skipped} skipped (in Trash, empty, or a department you can't edit)`:'')+(j.incomplete?` · ${j.incomplete} need a required field filled in`:'')); load(); loadDashboard(); if(window.loadSpaces)loadSpaces(); }
   else { toast('✕ '+(j.error||'import failed')); }
 };
 document.getElementById('ctImportBtn').onclick=()=>document.getElementById('ctFile').click();
@@ -4373,7 +4375,7 @@ document.getElementById('logoutBtn').onclick=async()=>{ try{ await api('/api/log
 document.getElementById('navSettings').onclick=()=>showPage('page-usettings');
 document.getElementById('navBackup').onclick=()=>openBackup();
 const ni3=document.getElementById('navImport'); if(ni3) ni3.onclick=()=>showPage('page-import');
-const ne=document.getElementById('navExport'); if(ne) ne.onclick=()=>window.location='/api/export';
+const ne=document.getElementById('navExport'); if(ne) ne.onclick=doExport;
 const na2=document.getElementById('navAdd'); if(na2) na2.onclick=()=>openModal();
 document.getElementById('navHome').onclick=()=>showPage('page-dashboard');
 document.getElementById('dashEditLayout').onclick=()=>setEditLayout(true);
@@ -4539,7 +4541,7 @@ function bringToFront(m){
   const box=m.querySelector('.modal-box');
   if(box) box.style.zIndex=200;
 }
-function doExport(){window.location='/api/export';}
+function doExport(){ if(window.openExportDialog) openExportDialog(); else window.location='/api/export'; }
 
 /* =========================================================================
    THEME ENGINE + CUSTOMIZATION / PROFILE / USER SETTINGS PAGES

@@ -6,6 +6,7 @@ itvault_config.json
 *.env
 backups/
 invoices/
+files/
 logo.png
 logs/
 

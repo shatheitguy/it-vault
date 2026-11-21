@@ -61,6 +61,8 @@ data class SpaceItem(
     val prefix: String? = null,
     val color: String? = null,
     val can_edit: Boolean = true,
+    // built-in asset fields this department switched off (Departments > Fields)
+    val hidden_fields: List<String>? = null,
 )
 
 /** An extra field an asset of this department + category carries. */

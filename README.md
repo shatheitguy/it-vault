@@ -69,6 +69,17 @@ A template sets up the ID prefix, item categories and their fields; nothing else
 - **Fields that follow the item category.** A Generator asks for its kVA rating,
   a Vehicle for its plate. Add your own per department or per category: text,
   number, date, choice or checkbox, required or optional.
+- **Only the fields a department uses.** *Departments → Fields* lists the built-in
+  fields (serial, MAC address, location, brand and model, photo, purchase,
+  warranty, price, assignment, note, invoice) with a switch each. Switch one off
+  and it leaves that department's asset form; anything already saved in it is kept.
+- **A folder per department.** Every photo, invoice, signed handover and ticket
+  attachment is also written as a real file to `files/<Department>/Photos`,
+  `Invoices`, `Signed` and `Tickets/<ticket>` in the data folder. The database
+  stays the original; the folders follow when an asset moves or is renamed.
+- **Import and export by department.** Export one department or all, with each
+  asset's department and its extra fields as columns. Import into the
+  department you pick, or let an *Asset Department* column decide per row.
 - **Categories per department.** In the **Product Catalog**, set each item category
   to *Every department* or to one department only. The asset form then offers
   only the categories of the department the asset is in, on the web and on Android.

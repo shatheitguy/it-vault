@@ -128,6 +128,7 @@ def main():
     _app.start_heartbeat_runner()    # runs IT-Vault's own checks
     _app.start_contract_expiry_scheduler()
     _app.start_returned_release_scheduler()
+    _app.start_department_files()      # each department's files, in its own folder
     # WhatsApp linked before: reconnect now, so the first signed copy after a
     # restart doesn't wait for someone to open Settings
     _app.wa.resume()

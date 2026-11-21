@@ -2404,6 +2404,11 @@ def migrate_schema():
         cur.execute("UPDATE Assets SET SpaceID=1 WHERE SpaceID IS NULL OR SpaceID=0")
     except Exception:
         pass
+    # the built-in asset fields a department does not use (hidden on its form, never deleted)
+    try:
+        cur.execute("ALTER TABLE Spaces ADD COLUMN hidden_fields VARCHAR(400) DEFAULT ''")
+    except Exception:
+        pass
     # tickets belong to a department too: each team works its own queue
     try:
         cur.execute("ALTER TABLE Tickets ADD COLUMN SpaceID INT DEFAULT 1")
@@ -3907,10 +3912,35 @@ def _seed_space(cur, sid, tpl):
             cur.execute("INSERT INTO FieldDefs (space_id, category, fkey, label, ftype, options, required, sort) "
                         "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)", [sid, cat or None, k, label, ftype, opts, req, i])
 
+# The built-in asset fields a department may switch off. Asset ID, name,
+# category and status always stay: everything else in the app hangs off them.
+# Hiding only takes a field off that department's form; what is already
+# stored in it stays, and comes back if the field is switched on again.
+BUILTIN_FIELDS = [("Serial", "Serial number"), ("MacAddress", "MAC address"), ("Location", "Location"),
+                  ("Brand", "Brand and model"), ("Photo", "Photo"), ("PurchaseDate", "Purchase date"),
+                  ("WarrantyMonths", "Warranty"), ("Price", "Price"), ("Assignment", "Who has it (assignment)"),
+                  ("Note", "Note"), ("Invoice", "Invoice or proof")]
+_BUILTIN_KEYS = [k for k, _ in BUILTIN_FIELDS]
+
+def _clean_hidden(v):
+    if isinstance(v, str):
+        v = v.split(",")
+    if not isinstance(v, (list, tuple)):
+        raise BadInput("hidden_fields must be a list.")
+    want = {str(x).strip() for x in v}
+    return ",".join(k for k in _BUILTIN_KEYS if k in want)
+
 def _space_json(r, counts=None):
     return {"id": r["id"], "name": r["name"], "prefix": r["prefix"], "color": r.get("color") or "",
             "icon": r.get("icon") or "box", "template": r.get("template") or "", "next_no": r.get("next_no") or 1001,
-            "assets": (counts or {}).get(r["id"], 0)}
+            "assets": (counts or {}).get(r["id"], 0),
+            "hidden_fields": [k for k in (r.get("hidden_fields") or "").split(",") if k]}
+
+@app.route("/api/asset-builtins")
+@auth_required()
+def asset_builtins():
+    """The built-in asset fields a department can switch off, with their labels."""
+    return jsonify([{"key": k, "label": l} for k, l in BUILTIN_FIELDS])
 
 @app.route("/api/space-templates")
 @auth_required()
@@ -3977,9 +4007,10 @@ def space_one(sid):
     cur.execute("SELECT id FROM Spaces WHERE (prefix=%s OR name=%s) AND id<>%s", [prefix, name, sid])
     if cur.fetchone():
         c.close(); return jsonify({"error": "Another department already has that name or prefix."}), 400
-    cur.execute("UPDATE Spaces SET name=%s, prefix=%s, color=%s, icon=%s, next_no=%s WHERE id=%s",
+    hidden = _clean_hidden(d["hidden_fields"]) if "hidden_fields" in d else (row.get("hidden_fields") or "")
+    cur.execute("UPDATE Spaces SET name=%s, prefix=%s, color=%s, icon=%s, next_no=%s, hidden_fields=%s WHERE id=%s",
                 [name, prefix, (d.get("color", row.get("color")) or "")[:9], (d.get("icon", row.get("icon")) or "box")[:20],
-                 _num(d.get("next_no"), row.get("next_no") or 1001, field="Next number", lo=1), sid])
+                 _num(d.get("next_no"), row.get("next_no") or 1001, field="Next number", lo=1), hidden, sid])
     c.commit(); c.close()
     audit(session.get("user"), "SPACE", str(sid), f"updated department {name} ({prefix})")
     return jsonify({"ok": True})
@@ -4371,6 +4402,9 @@ def update_asset(a_id):
         if err:
             c.close(); return jsonify({"error": err}), 400
         cur.execute("UPDATE Assets SET SpaceID=%s, Extra=%s WHERE _id=%s", [sid, json.dumps(extra), a_id])
+        space_written = True
+    else:
+        space_written = False
     # capture old values for history
     cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + " FROM Assets WHERE _id=%s AND is_deleted=0", [a_id])
     old = cur.fetchone()
@@ -4446,6 +4480,12 @@ def update_asset(a_id):
     # partial body; now it can.
     written = [col for col in COLUMNS if col in data]
     if not written:
+        # only the department or the extra fields: those were written above,
+        # and need keeping too (this used to close without a commit)
+        if space_written:
+            cur.execute("UPDATE Assets SET UpdatedAt=NOW() WHERE _id=%s", [a_id])
+            c.commit(); c.close()
+            return jsonify({"ok": True})
         c.close()
         return jsonify({"ok": True, "unchanged": True})
     sets = ", ".join(f"`{col}`=%s" for col in written)
@@ -5201,8 +5241,34 @@ def import_excel():
     if not data:
         return jsonify({"error": "empty"}), 400
     header = [str(h).strip() if h else "" for h in data[0]]
-    c = conn(); cur = c.cursor(); added = updated = skipped = 0
+    c = conn(); cur = c.cursor(); added = updated = skipped = incomplete = 0
     seen_types = set()
+    # Which department new rows go into: the one picked in the dialog, or a
+    # row's own "Asset Department" cell (name or ID prefix) when the sheet has one.
+    cur.execute("SELECT id, name, prefix FROM Spaces"); _spaces = cur.fetchall()
+    _by_name = {}
+    for s_ in _spaces:
+        _by_name[str(s_["name"]).strip().lower()] = s_["id"]; _by_name[str(s_["prefix"]).strip().lower()] = s_["id"]
+    if request.form.get("space"):
+        target = _num(request.form.get("space"), 1, int, "Department", 1)
+        if target not in {s_["id"] for s_ in _spaces}:
+            c.close(); return jsonify({"error": "No such department."}), 400
+    else:
+        _ok = [s_["id"] for s_ in _spaces if _space_writable(s_["id"])]
+        target = 1 if _space_writable(1) else (_ok[0] if _ok else 1)
+    if not _space_writable(target):
+        c.close(); return jsonify({"error": _VIEWER_MSG}), 403
+    _dept_col = next((h for h in header if h.lower() in ("asset department", "department (it-vault)")), None)
+    _hdr_lower = {h.lower(): h for h in header if h}
+    def _row_extra(rec, sid, typ):
+        # a department's extra fields, by their label or their key
+        ex = {}
+        for d in _field_defs(cur, sid, typ):
+            for nm in (d["label"], d["fkey"]):
+                h = _hdr_lower.get(str(nm).lower())
+                if h and _cell(rec.get(h)):
+                    ex[d["fkey"]] = _cell(rec.get(h)); break
+        return ex
     # A sheet only says something about the cells it fills in. This used to
     # write every column of a matched asset from an 8-key row, so re-importing
     # a short list blanked the employee, model, price, warranty and tag of
@@ -5239,17 +5305,35 @@ def import_excel():
                 if v:
                     row[col] = v
                     break
+        sid = target
+        if _dept_col and _cell(rec.get(_dept_col)):
+            sid = _by_name.get(_cell(rec.get(_dept_col)).lower())
+            if not sid or not _space_writable(sid):
+                skipped += 1; continue          # a department that isn't there, or one this account only views
         t = row.get("Type", "")
         if t and t not in seen_types:
             seen_types.add(t)
-            cur.execute("INSERT IGNORE INTO Categories (name) VALUES (%s)", [t])
+            cur.execute("INSERT IGNORE INTO Categories (name, space_id) VALUES (%s, %s)", [t, sid])
         serial = row.get("Serial", "")
         if serial:
             cur.execute("SELECT * FROM Assets WHERE LOWER(Serial)=%s ORDER BY is_deleted LIMIT 1", [serial.lower()])
             ex = cur.fetchone()
             if ex and ex.get("is_deleted"):
                 skipped += 1; continue          # in the Trash: restore it first
+            if ex and not _space_writable(ex.get("SpaceID") or 1):
+                skipped += 1; continue          # its department is one this account only views
             if ex:
+                # extra-field cells fill in, never blank, what the asset has
+                _xn = _row_extra(rec, ex.get("SpaceID") or 1, row.get("Type") or ex.get("Type"))
+                _xchg = False
+                if _xn:
+                    _xo = _extra_of(ex)
+                    _xm = {**_xo, **_xn}
+                    if _xm != _xo:
+                        cur.execute("UPDATE Assets SET Extra=%s WHERE _id=%s", [json.dumps(_xm), ex["_id"]])
+                        cur.execute("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) VALUES (%s, NOW(), %s, %s, %s, %s)",
+                                    [ex["_id"], who, "Extra", json.dumps(_xo), json.dumps(_xm)])
+                        _xchg = True
                 old = row_to_dict(ex)
                 changes = [(col, str(old.get(col) or ""), row[col]) for col in row
                            if col != "Serial" and row[col] != str(old.get(col) or "")]
@@ -5260,18 +5344,25 @@ def import_excel():
                     cur.executemany("INSERT INTO History (asset_id, ts, user, field, old_val, new_val) "
                                     "VALUES (%s, NOW(), %s, %s, %s, %s)",
                                     [(ex["_id"], who, col, o, n) for col, o, n in changes])
+                if changes or _xchg:
                     updated += 1
                 continue
         if not row.get("Name") and not serial:
             skipped += 1; continue
         row.setdefault("Status", "Available")
         if not row.get("AssetTag"):
-            row["AssetTag"] = _next_asset_tag(cur)
+            row["AssetTag"] = _next_asset_tag(cur, sid)
+        # its extra fields: kept even when a required one is missing (typed
+        # data is never dropped); the asset form asks for it on the next save
+        _xr = _row_extra(rec, sid, row.get("Type"))
+        _xc, _xe = _clean_extra(cur, sid, row.get("Type"), _xr)
+        if _xe:
+            incomplete += 1
         a_id = uuid.uuid4().hex
         _now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        vals = [a_id] + [coerce_val(col, row.get(col, "")) for col in COLUMNS] + [_now, _now]
-        cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt"
-        ph = ", ".join(["%s"] * (len(COLUMNS) + 3))
+        vals = [a_id] + [coerce_val(col, row.get(col, "")) for col in COLUMNS] + [_now, _now, sid, json.dumps(_xc if _xc is not None else _xr)]
+        cols = "_id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", created_at, UpdatedAt, SpaceID, Extra"
+        ph = ", ".join(["%s"] * (len(COLUMNS) + 5))
         cur.execute(f"INSERT INTO Assets ({cols}) VALUES ({ph})", vals); added += 1
         # imported assets get a public address too, or their first printed
         # label would be the thing that decides whether they have one
@@ -5280,8 +5371,8 @@ def import_excel():
         except Exception:
             pass
     c.commit(); c.close()
-    audit(session.get("user"), "IMPORT", "", f"{added} added, {updated} updated, {skipped} skipped")
-    return jsonify({"ok": True, "added": added, "updated": updated, "skipped": skipped})
+    audit(session.get("user"), "IMPORT", "", f"{added} added, {updated} updated, {skipped} skipped (department {target})")
+    return jsonify({"ok": True, "added": added, "updated": updated, "skipped": skipped, "incomplete": incomplete})
 
 @app.route("/api/catalog/import", methods=["POST"])
 @auth_required([ROLE_ADMIN, ROLE_EDIT])
@@ -5400,15 +5491,34 @@ def import_directory():
 def export_excel():
     c = conn(); cur = c.cursor()
     _sc, _sp = _space_sql(request.args.get("space"))
-    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile FROM Assets WHERE is_deleted=0"
+    cur.execute("SELECT _id, " + ", ".join(f"`{col}`" for col in COLUMNS) + ", InvoiceFile, SpaceID, Extra FROM Assets WHERE is_deleted=0"
                 + (" AND " + _sc if _sc else "") + " ORDER BY Name", _sp)
-    rows = cur.fetchall(); c.close()
-    wb = Workbook(); ws = wb.active; ws.title = "Assets"; ws.append(COLUMNS)
-    for r in rows: ws.append([r.get(col, "") for col in COLUMNS])
+    rows = cur.fetchall()
+    cur.execute("SELECT id, name FROM Spaces"); names = {s_["id"]: s_["name"] for s_ in cur.fetchall()}
+    # the extra fields of the departments in this export, one column each
+    sids = sorted({r.get("SpaceID") or 1 for r in rows})
+    xcols = []
+    if sids:
+        cur.execute("SELECT fkey, label FROM FieldDefs WHERE space_id IS NULL OR space_id IN (" + ",".join(["%s"] * len(sids))
+                    + ") ORDER BY space_id, category, sort, id", sids)
+        seen = set()
+        for d in cur.fetchall():
+            if d["fkey"] not in seen:
+                seen.add(d["fkey"]); xcols.append((d["fkey"], d["label"] or d["fkey"]))
+    c.close()
+    wb = Workbook(); ws = wb.active; ws.title = "Assets"
+    ws.append(COLUMNS + ["Asset Department"] + [l for _k, l in xcols])
+    for r in rows:
+        ex = _extra_of(r)
+        ws.append([r.get(col, "") for col in COLUMNS] + [names.get(r.get("SpaceID") or 1, "")] + [ex.get(k, "") for k, _l in xcols])
     buf = io.BytesIO(); wb.save(buf); data = buf.getvalue()
+    one = request.args.get("space")
+    fname = "assets_export.xlsx"
+    if one and str(one).isdigit() and int(one) in names:
+        fname = "assets_%s.xlsx" % re.sub(r"[^A-Za-z0-9]+", "_", names[int(one)]).strip("_").lower()
     return Response(data,
                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    headers={"Content-Disposition": "attachment; filename=assets_export.xlsx"})
+                    headers={"Content-Disposition": "attachment; filename=" + fname})
 
 CONTRACT_EXPORT_COLS = ["name", "type", "vendor", "start_date", "end_date", "cost", "employee_id", "location", "department", "license_key", "note"]
 CONTRACT_EXPORT_LABELS = {"name": "Name", "type": "Type", "vendor": "Vendor", "start_date": "Start Date",
@@ -13979,6 +14089,216 @@ def start_contract_expiry_scheduler():
     t = threading.Thread(target=_contract_expiry_loop, daemon=True)
     t.start()
 
+# ---------- each department's files, as real files in its own folder ----------
+# Photos, invoices, signed handovers and ticket attachments are kept in the
+# database (and the invoice volume) as they always were: that copy is the
+# original and survives a container update. This writes a second, browsable
+# copy of each into the department's folder:
+#
+#   files/<Department>/Photos/<asset ID> - <name>.<ext>
+#   files/<Department>/Invoices/<asset ID> - <name>.<ext>
+#   files/<Department>/Signed/<asset ID> - <name> - signed.pdf
+#   files/<Department>/Tickets/<ticket code>/<attachment>
+#
+# A manifest remembers what was written for what, so a moved asset's files
+# move with it, a renamed department's folder follows the name, and nothing
+# this did not write is ever touched.
+FILES_DIR = os.environ.get("ITVAULT_FILES_DIR") or os.path.join(DATA_DIR, "files")
+_FILES_MANIFEST = ".itvault-files.json"
+_files_lock = threading.Lock()
+_files_dirty = threading.Event()
+
+def _safe_name(s, fallback="untitled"):
+    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", str(s or "")).strip().strip(".").strip()
+    s = re.sub(r"\s+", " ", s)[:80].strip()
+    return s or fallback
+
+def _dept_folder(sp):
+    return _safe_name(sp.get("name"), "Department %s" % sp.get("id"))
+
+def _inside_files(p):
+    root = os.path.realpath(FILES_DIR)
+    p = os.path.realpath(p)
+    return p == root or p.startswith(root + os.sep)
+
+def _files_write(rel, data):
+    full = os.path.join(FILES_DIR, rel)
+    if not _inside_files(full):
+        return False
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    tmp = full + ".part"
+    with open(tmp, "wb") as fp:
+        fp.write(data)
+    os.replace(tmp, full)
+    return True
+
+def _files_remove(rel):
+    full = os.path.join(FILES_DIR, rel)
+    if _inside_files(full) and os.path.isfile(full):
+        try:
+            os.remove(full)
+        except Exception:
+            pass
+
+_IMG_EXT = {"image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/webp": "webp", "image/gif": "gif"}
+
+def sync_department_files():
+    """Bring every department folder up to date with the database. Cheap when
+    nothing changed: it compares fingerprints, and only reads a file's bytes
+    when that file is new or different."""
+    if not _files_lock.acquire(blocking=False):
+        _files_dirty.set()                # one is running: run again after it
+        return
+    try:
+        os.makedirs(FILES_DIR, exist_ok=True)
+        mpath = os.path.join(FILES_DIR, _FILES_MANIFEST)
+        try:
+            with open(mpath, encoding="utf-8") as fp:
+                old = json.load(fp)
+            if not isinstance(old, dict):
+                old = {}
+        except Exception:
+            old = {}
+        new = {}
+        c = conn(); cur = c.cursor()
+        try:
+            cur.execute("SELECT id, name FROM Spaces")
+            folders = {r["id"]: _dept_folder(r) for r in cur.fetchall()}
+            for f in folders.values():
+                for sub in ("Photos", "Invoices", "Signed", "Tickets"):
+                    os.makedirs(os.path.join(FILES_DIR, f, sub), exist_ok=True)
+            home = lambda sid: folders.get(sid) or folders.get(1) or "IT"
+
+            cur.execute("SELECT a._id, a.AssetTag, a.Name, a.SpaceID, a.InvoiceFile, a.ReceivedBy, a.EmployeeID, "
+                        "MD5(IFNULL(a.SignatureData,'')) AS sig, (a.SignatureData IS NOT NULL AND a.SignatureData<>'') AS signed, "
+                        "i.v AS pv, i.mime AS pmime FROM Assets a LEFT JOIN CatalogImages i ON i.kind='asset' AND i.ref=a._id "
+                        "AND i.img IS NOT NULL WHERE a.is_deleted=0")
+            for a in cur.fetchall():
+                base = "%s - %s" % (_safe_name(a.get("AssetTag"), "no ID"), _safe_name(a.get("Name"), "unnamed"))
+                folder = home(a.get("SpaceID"))
+                aid = a["_id"]
+                # photo
+                if a.get("pv") is not None:
+                    ext = _IMG_EXT.get((a.get("pmime") or "").lower(), "png")
+                    rel = os.path.join(folder, "Photos", base + "." + ext)
+                    key = "photo:" + aid; fpv = "%s|%s" % (a["pv"], rel)
+                    if (old.get(key) or {}).get("fp") != fpv or not os.path.isfile(os.path.join(FILES_DIR, rel)):
+                        cur.execute("SELECT img FROM CatalogImages WHERE kind='asset' AND ref=%s", [aid])
+                        row = cur.fetchone()
+                        if row and row.get("img"):
+                            _files_write(rel, bytes(row["img"]))
+                    new[key] = {"fp": fpv, "path": rel}
+                # invoice
+                inv = a.get("InvoiceFile")
+                src = os.path.join(INVOICE_DIR, os.path.basename(inv)) if inv else ""
+                if inv and os.path.isfile(src):
+                    ext = inv.rsplit(".", 1)[-1].lower() if "." in inv else "bin"
+                    rel = os.path.join(folder, "Invoices", base + "." + ext)
+                    st = os.stat(src); key = "invoice:" + aid
+                    fpv = "%s|%s|%s|%s" % (inv, st.st_size, int(st.st_mtime), rel)
+                    if (old.get(key) or {}).get("fp") != fpv or not os.path.isfile(os.path.join(FILES_DIR, rel)):
+                        with open(src, "rb") as fp:
+                            _files_write(rel, fp.read())
+                    new[key] = {"fp": fpv, "path": rel}
+                # the signed handover, as the PDF the signer was sent
+                if a.get("signed"):
+                    rel = os.path.join(folder, "Signed", base + " - signed.pdf")
+                    key = "signed:" + aid
+                    fpv = "%s|%s|%s|%s" % (a["sig"], a.get("ReceivedBy") or "", a.get("EmployeeID") or "", rel)
+                    if (old.get(key) or {}).get("fp") != fpv or not os.path.isfile(os.path.join(FILES_DIR, rel)):
+                        cur.execute("SELECT * FROM Assets WHERE _id=%s", [aid]); full = cur.fetchone()
+                        if full and full.get("EmployeeID"):
+                            cur.execute("SELECT EmployeeName, Department, Designation, Email FROM Employees WHERE EmployeeID=%s",
+                                        [full["EmployeeID"]])
+                            full.update({k: v or "" for k, v in (cur.fetchone() or {}).items()})
+                        try:
+                            pdf = _build_signed_asset_pdf(full, full.get("ReceivedBy") or "", full.get("SignatureData") or "")
+                            if pdf:
+                                _files_write(rel, pdf)
+                        except Exception as e:
+                            print("[itvault] department files: signed PDF for %s: %s" % (a.get("AssetTag"), e), flush=True)
+                    new[key] = {"fp": fpv, "path": rel}
+
+            # ticket attachments
+            try:
+                cur.execute("SELECT x.id, x.filename, x.size, t.code, t.SpaceID FROM TicketAttachments x "
+                            "JOIN Tickets t ON t.id=x.ticket_id")
+                for x in cur.fetchall():
+                    rel = os.path.join(home(x.get("SpaceID")), "Tickets", _safe_name(x.get("code"), "ticket"),
+                                       "%s - %s" % (x["id"], _safe_name(x.get("filename"), "attachment")))
+                    key = "ticket:%s" % x["id"]; fpv = "%s|%s" % (x.get("size"), rel)
+                    if (old.get(key) or {}).get("fp") != fpv or not os.path.isfile(os.path.join(FILES_DIR, rel)):
+                        cur.execute("SELECT data FROM TicketAttachments WHERE id=%s", [x["id"]]); row = cur.fetchone()
+                        if row and row.get("data") is not None:
+                            _files_write(rel, bytes(row["data"]))
+                    new[key] = {"fp": fpv, "path": rel}
+            except Exception as e:
+                print("[itvault] department files: tickets:", e, flush=True)
+        finally:
+            c.close()
+
+        # what moved, was renamed or is gone: take the old copy away
+        keep = {v["path"] for v in new.values()}
+        for v in old.values():
+            p = (v or {}).get("path")
+            if p and p not in keep:
+                _files_remove(p)
+                d = os.path.dirname(os.path.join(FILES_DIR, p))
+                # a ticket's own folder, once empty
+                if os.path.basename(os.path.dirname(d)) == "Tickets":
+                    try:
+                        os.rmdir(d)
+                    except Exception:
+                        pass
+        tmp = mpath + ".part"
+        with open(tmp, "w", encoding="utf-8") as fp:
+            json.dump(new, fp)
+        os.replace(tmp, mpath)
+    except Exception as e:
+        print("[itvault] department files:", e, flush=True)
+    finally:
+        _files_lock.release()
+    if _files_dirty.is_set():
+        _files_dirty.clear()
+        sync_department_files()
+
+def _files_loop():
+    time.sleep(5)
+    while True:
+        sync_department_files()
+        _files_dirty.wait(600)            # a change wakes it; otherwise every 10 minutes
+        _files_dirty.clear()
+        time.sleep(2)                     # let a burst of saves settle first
+
+_files_thread_started = False
+def start_department_files():
+    global _files_thread_started
+    if _files_thread_started:
+        return
+    _files_thread_started = True
+    threading.Thread(target=_files_loop, name="department-files", daemon=True).start()
+
+_FILES_TOUCH = ("/api/assets", "/api/img/asset", "/api/sign", "/sign", "/api/tickets", "/api/portal", "/api/spaces",
+                "/api/import", "/api/restore", "/api/backup")
+
+@app.after_request
+def _files_after_write(resp):
+    """Any change that can touch a file wakes the folder sync."""
+    try:
+        if request.method not in ("GET", "HEAD", "OPTIONS") and resp.status_code < 400 \
+                and request.path.startswith(_FILES_TOUCH):
+            _files_dirty.set()
+    except Exception:
+        pass
+    return resp
+
+@app.route("/api/department-files")
+@auth_required([ROLE_ADMIN])
+def department_files_info():
+    """Where the department folders are, for the Departments page."""
+    return jsonify({"path": os.path.abspath(FILES_DIR)})
+
+
 def warn_if_invoices_missing():
     """Say so when the invoice files are not where the database expects them.
 
@@ -14032,6 +14352,7 @@ if __name__ == "__main__":
     start_backup_scheduler()
     start_contract_expiry_scheduler()
     start_returned_release_scheduler()
+    start_department_files()
     wa.resume()
     print("IT-Vault (MariaDB) -> http://localhost:5000  (admin: %s)" % ADMIN_USER)
     app.run(host="0.0.0.0", port=5000, debug=False)

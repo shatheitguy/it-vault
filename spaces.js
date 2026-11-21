@@ -96,6 +96,7 @@
       ff.insertBefore(box, ff.firstChild);
       box.querySelectorAll('input[name=f_space]').forEach(r => r.onchange = async () => {
         $('f_SpaceID').value = r.value;
+        window.applyHiddenFields(Number(r.value));
         // the category list follows the department
         if (typeof loadCategoryOptions === 'function') { const ty = $('f_Type'); await loadCategoryOptions(ty ? ty.value : ''); }
         if (!id) {   // a new asset takes the next ID of the department it goes into
@@ -266,7 +267,11 @@
           <button class="btn sm ghost" data-fields="${s.id}">Fields</button>
           ${isAdmin() ? `<button class="btn sm ghost" data-edit="${s.id}">Edit</button>${s.id !== 1 && !s.assets ? `<button class="btn sm danger" data-del="${s.id}">Delete</button>` : ''}` : ''}
         </div>`).join('')}</div>
-      ${isAdmin() ? '<div class="m-actions" style="justify-content:flex-start"><button class="btn" id="spAdd">＋ Add a department</button></div>' : ''}`;
+      ${isAdmin() ? '<div class="m-actions" style="justify-content:flex-start"><button class="btn" id="spAdd">＋ Add a department</button></div>' : ''}
+      <p class="sec-hint sp-files" id="spFiles"></p>`;
+    if (isAdmin()) fetch('/api/department-files').then(r => r.ok ? r.json() : null).then(j => {
+      const e = $('spFiles'); if (j && e) e.innerHTML = `📁 Every department's photos, invoices, signed handovers and ticket attachments are also saved as files, one folder per department, in <code>${h(j.path)}</code>.`;
+    }).catch(() => {});
     p.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => spaceDialog(spaceById(b.dataset.edit)));
     p.querySelectorAll('[data-fields]').forEach(b => b.onclick = () => openFieldsEditor({ space_id: Number(b.dataset.fields), title: spaceById(b.dataset.fields).name + ': fields on every asset' }));
     p.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
@@ -314,8 +319,13 @@
   // ---------------------------------------------------------------- the field editor
   window.openFieldsEditor = async function (o) {
     const wrap = document.createElement('div'); wrap.className = 'modal show ui-dialog';
+    const deptMode = o.space_id != null && !o.category;
     wrap.innerHTML = `<div class="modal-box fl-dialog" role="dialog" aria-modal="true"><h3>${h(o.title || 'Fields')}</h3>
-      <p class="sec-hint" style="margin:0 0 10px">${o.category ? `Every <b>${h(o.category)}</b> asks for these, on top of its department's own.` : 'Every asset in this department asks for these.'} Required ones must be filled in before the asset saves.</p>
+      ${deptMode ? `<div class="fl-sec">BUILT-IN FIELDS</div>
+      <p class="sec-hint" style="margin:0 0 8px">Switch off the ones this department doesn't use. They leave its asset form; anything already saved in them is kept.</p>
+      <div id="flBuiltins" class="fl-builtins"></div>
+      <div class="fl-sec">EXTRA FIELDS</div>` : ''}
+      <p class="sec-hint" style="margin:0 0 10px">${o.category ? `Every <b>${h(o.category)}</b> asks for these, on top of its department's own.` : 'Your own fields, on every asset in this department.'} Required ones must be filled in before the asset saves.</p>
       <div id="flList"></div>
       <div class="fl-add">
         <input id="flLabel" placeholder="Field name, e.g. Plate number">
@@ -327,6 +337,7 @@
       <div class="m-actions"><button class="btn ghost" data-x>Done</button></div></div>`;
     document.body.appendChild(wrap);
     $('flType').onchange = () => { $('flOpts').style.display = $('flType').value === 'choice' ? '' : 'none'; };
+    if (deptMode) drawBuiltins(o.space_id);
     const draw = async () => {
       let all = []; try { all = await (await fetch('/api/fields')).json(); } catch (e) {}
       const mine = all.filter(f => (o.category ? f.category === o.category : !f.category) && (o.space_id == null ? f.space_id == null : f.space_id === o.space_id));
@@ -342,6 +353,85 @@
     };
     wrap.addEventListener('click', e => { if (e.target === wrap || e.target.closest('[data-x]')) wrap.remove(); });
     draw();
+  };
+
+  // ---------------------------------------------------------------- built-in fields per department
+  let BUILTINS = null;
+  async function builtins() {
+    if (!BUILTINS) { try { BUILTINS = await (await fetch('/api/asset-builtins')).json(); } catch (e) { BUILTINS = []; } }
+    return BUILTINS;
+  }
+  const ALWAYS = [['AssetTag', 'Asset ID'], ['Name', 'Name'], ['Type', 'Item category'], ['Status', 'Status']];
+  async function drawBuiltins(sid) {
+    const box = $('flBuiltins'); if (!box) return;
+    const list = await builtins();
+    const sp = spaceById(sid) || {}; const off = new Set(sp.hidden_fields || []);
+    box.innerHTML = ALWAYS.map(([k, l]) => `<div class="fl-bi"><span>${h(l)}</span><em>always</em></div>`).join('')
+      + list.map(f => `<label class="fl-bi toggle"><span>${h(f.label)}</span><input type="checkbox" data-bk="${h(f.key)}" ${off.has(f.key) ? '' : 'checked'}></label>`).join('');
+    box.querySelectorAll('input[data-bk]').forEach(cb => cb.onchange = async () => {
+      const hidden = [...box.querySelectorAll('input[data-bk]')].filter(x => !x.checked).map(x => x.dataset.bk);
+      const r = await fetch('/api/spaces/' + sid, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden_fields: hidden }) });
+      if (r.ok) { await loadSpaces(); say(cb.checked ? 'Shown on ' + (sp.name || 'its') + ' assets' : 'Hidden on ' + (sp.name || 'its') + ' assets'); }
+      else { cb.checked = !cb.checked; say(await errOf(r), false); }
+    });
+  }
+
+  // On the asset form: take off the built-in fields its department switched
+  // off. Hidden, not removed, so a save still sends what they hold.
+  window.applyHiddenFields = function (sid) {
+    const sp = spaceById(sid) || {}; const off = new Set(sp.hidden_fields || []);
+    const f2 = id => { const e = $(id); return e ? e.closest('.field2') : null; };
+    const box = id => { const e = $(id); return e ? e.closest('.invbox') : null; };
+    const map = {
+      Serial: [f2('f_Serial')], MacAddress: [f2('f_MacAddress')], Location: [f2('f_Location')],
+      Brand: [document.querySelector('#formFields .refbox')], Photo: [$('assetPhotoBox')],
+      PurchaseDate: [f2('f_PurchaseDate')], WarrantyMonths: [f2('f_WarrantyMonths')], Price: [f2('f_Price')],
+      Assignment: ['f_EmployeeID', 'f_RequestedBy', 'f_ReceivedBy', 'f_NotesReceived', 'f_EmpDepartment', 'f_EmpDesignation'].map(f2),
+      Note: [box('f_Note')], Invoice: [box('f_InvoiceFile')],
+    };
+    Object.entries(map).forEach(([k, els]) => els.forEach(el => { if (el) el.classList.toggle('bi-off', off.has(k)); }));
+    // a section whose every field is off goes too
+    document.querySelectorAll('#formFields .invbox').forEach(b => {
+      const g = b.querySelector('.grid2'); if (!g) return;
+      const fields = [...g.children].filter(x => x.classList.contains('field2'));
+      b.classList.toggle('bi-off', fields.length > 0 && fields.every(x => x.classList.contains('bi-off')));
+    });
+  };
+
+  // ---------------------------------------------------------------- import / export: which department
+  function pickDialog(o) {
+    const wrap = document.createElement('div'); wrap.className = 'modal show ui-dialog';
+    wrap.innerHTML = `<div class="modal-box ie-dialog" role="dialog" aria-modal="true"><h3>${h(o.title)}</h3>
+      <p class="sec-hint" style="margin:0 0 12px">${o.hint}</p>
+      <div class="ie-list">${o.choices.map((c, i) => `<label class="ie-opt"><input type="radio" name="ieSp" value="${h(c.value)}" ${c.value === o.selected || (!o.selected && i === 0) ? 'checked' : ''}>
+        <span>${c.color ? `<i class="sp-dot" style="background:${h(c.color)}"></i>` : ''}<b>${h(c.label)}</b>${c.sub ? `<em>${h(c.sub)}</em>` : ''}</span></label>`).join('')}</div>
+      ${o.note ? `<p class="sec-hint" style="margin:12px 0 0">${o.note}</p>` : ''}
+      <div class="m-actions"><button class="btn ghost" data-x>Cancel</button><button class="btn" data-ok>${h(o.ok)}</button></div></div>`;
+    document.body.appendChild(wrap);
+    wrap.addEventListener('click', e => {
+      if (e.target === wrap || e.target.closest('[data-x]')) return wrap.remove();
+      if (!e.target.closest('[data-ok]')) return;
+      const v = (wrap.querySelector('input[name=ieSp]:checked') || {}).value || '';
+      wrap.remove(); o.done(v);
+    });
+  }
+  window.openExportDialog = function () {
+    const sps = window.SPACES || [];
+    if (sps.length < 2) { window.location = '/api/export'; return; }
+    pickDialog({ title: 'Export assets', ok: 'Export', selected: String(cur || ''),
+      hint: 'Which department\'s assets go into the spreadsheet? It carries each asset\'s department and its extra fields as columns.',
+      choices: [{ value: '', label: 'All departments', sub: sps.reduce((n, s) => n + (s.assets || 0), 0) + ' assets' }]
+        .concat(sps.map(s => ({ value: String(s.id), label: s.name, sub: (s.assets || 0) + ' assets · ' + s.prefix, color: s.color || 'var(--accent)' }))),
+      done: v => { window.location = '/api/export' + (v ? '?space=' + encodeURIComponent(v) : ''); } });
+  };
+  window.openImportDialog = function (pickFile) {
+    const sps = (window.SPACES || []).filter(s => s.can_edit !== false);
+    if ((window.SPACES || []).length < 2 || sps.length < 1) { window.IMPORT_SPACE = ''; pickFile(); return; }
+    pickDialog({ title: 'Import assets', ok: 'Choose file…', selected: String(cur && sps.some(s => String(s.id) === String(cur)) ? cur : sps[0].id),
+      hint: 'New assets from the sheet go into this department and get its asset IDs.',
+      note: 'A sheet with an <b>Asset Department</b> column puts each row in the department it names instead. Columns named like a department\'s extra fields (e.g. <i>Rating (kVA)</i>) fill those in.',
+      choices: sps.map(s => ({ value: String(s.id), label: s.name, sub: s.prefix + '-…', color: s.color || 'var(--accent)' })),
+      done: v => { window.IMPORT_SPACE = v; pickFile(); } });
   };
 
   // ---------------------------------------------------------------- Users: which departments
