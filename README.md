@@ -3,6 +3,7 @@
 <img src="docs/img/it-vault-logo.png" alt="IT-Vault — discover, manage, secure" width="360">
 
 
+[![GitHub stars](https://img.shields.io/github/stars/shatheitguy/it-vault?style=flat&logo=github&label=stars&color=f1ff2e)](https://github.com/shatheitguy/it-vault/stargazers)
 [![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-f1ff2e.svg)](LICENSE)
 [![Image](https://img.shields.io/badge/ghcr.io-it--vault-f1ff2e.svg)](https://github.com/shatheitguy/it-vault/pkgs/container/itvault)
 [![Site](https://img.shields.io/badge/site-shatheitguy.github.io%2Fit--vault-f1ff2e.svg)](https://shatheitguy.github.io/it-vault/)
@@ -34,6 +35,9 @@ app and a native Android app that do the same things.
 - **Secure by default:** 2FA (authenticator app, or codes by email and WhatsApp),
   per-feature roles, rate limits, and a full audit log.
 
+If IT-Vault saves you time, a **[star on GitHub](https://github.com/shatheitguy/it-vault/stargazers)** helps
+others find it.
+
 ## Android app
 
 A native Android app that does **everything the web does**: assets with their photos
@@ -56,14 +60,15 @@ Once installed, the app updates itself from **Settings → Check for updates**.
 IT-Vault started as an IT register; since 2.10.0 it runs every department from
 one install. **Departments**, in the sidebar, adds one from a template, or a blank one.
 A template sets up the ID prefix, item categories and their fields; nothing else.
+It books no maintenance: you add schedules yourself, when you want them.
 
-| Template | Asset IDs | Item categories | Fields and schedules it adds |
+| Template | Asset IDs | Item categories | Fields it adds |
 |---|---|---|---|
 | IT | `IT-1001` | Laptop, Desktop, Monitor, Mobile Phone, Printer, Switch, Server, UPS… | RAM, storage, IMEI, IP address, rack |
-| Facilities | `FM-1001` | Air Conditioner, Generator, Elevator, Fire Extinguisher, Pump, CCTV… | kVA and fuel, tonnage, extinguisher expiry; generator service every 6 months |
-| Vehicles | `VH-1001` | Car, Van, Truck, Bus, Forklift, Motorcycle | Plate, VIN, mileage, registration and insurance expiry; service every 6 months |
+| Facilities | `FM-1001` | Air Conditioner, Generator, Elevator, Fire Extinguisher, Pump, CCTV… | kVA and fuel, tonnage, extinguisher expiry |
+| Vehicles | `VH-1001` | Car, Van, Truck, Bus, Forklift, Motorcycle | Plate, VIN, mileage, registration and insurance expiry |
 | Furniture | `FR-1001` | Desk, Chair, Cabinet, Table, Sofa, Shelf | Material, colour |
-| Tools & Equipment | `EQ-1001` | Power Tool, Hand Tool, Ladder, Test Equipment, Projector | Calibration due; yearly calibration, ladder checks |
+| Tools & Equipment | `EQ-1001` | Power Tool, Hand Tool, Ladder, Test Equipment, Projector | Calibration due |
 | Medical | `MD-1001` | Monitor, Defibrillator, Infusion Pump, Bed, Wheelchair | Model number, calibration due, risk class |
 
 - **Fields that follow the item category.** A Generator asks for its kVA rating,
@@ -102,6 +107,9 @@ A template sets up the ID prefix, item categories and their fields; nothing else
   Lost & Found and the catalog all follow it, and the server refuses anything
   outside it even if the screen is bypassed. Admins have every department, and
   every backup carries departments, roles and who can reach what.
+- **A tidy Product Catalog.** One tab each for Categories, Brands, Models and
+  Contract types, with a search box and cards. On Models, one brand dropdown both
+  filters the list and picks the brand a new model is added to.
 - **Trash follows the same rules.** You only see, restore and empty what's in
   departments you edit.
 

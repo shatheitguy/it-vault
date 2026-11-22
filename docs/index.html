@@ -216,6 +216,10 @@
   }
   .top nav a:hover{color:var(--text);border-bottom-color:var(--accent)}
   @media (max-width:760px){ .top nav a.hide-sm{display:none} }
+  .top nav a.gh-star{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--rule);border-radius:999px;padding:4px 11px;color:var(--text)}
+  .top nav a.gh-star:hover{border-color:var(--accent)}
+  .gh-star .gh-ic{color:var(--accent);font-size:14px;line-height:1}
+  .gh-star .gh-n{font-variant-numeric:tabular-nums;border-left:1px solid var(--rule);padding-left:7px;margin-left:1px}
 
   /* ---- hero ---- */
   .hero{padding:64px 0 12px}
@@ -729,7 +733,7 @@
       <a href="#database" class="hide-sm">Database</a>
       <a href="#agents" class="hide-sm">Agents</a>
       <a href="#install">Install</a>
-      <a href="https://github.com/shatheitguy/it-vault">GitHub&nbsp;&#8599;</a>
+      <a class="gh-star" href="https://github.com/shatheitguy/it-vault" title="Star IT-Vault on GitHub"><span class="gh-ic" aria-hidden="true">&#9733;</span>Star<span class="gh-n" id="ghStars" hidden></span></a>
     </nav>
   </div>
 </header>
@@ -965,7 +969,7 @@
         <span class="fld">Departments</span>
         <div class="cell">
           <h3>Not just IT: every department, one app</h3>
-          <p>Start Facilities, Vehicles, Furniture, Tools or Medical from a template. Each department numbers its own assets, offers only its own item categories and the fields they need, books preventive maintenance when you ask it to, and keeps its own ticket queue. Each person is an editor in some departments and a viewer in others; viewers can look but not change, and the server enforces it. Switch off the built-in fields a department never uses, import and export one department at a time, and find every photo, invoice and signed handover in that department's own folder.</p>
+          <p>Start Facilities, Vehicles, Furniture, Tools or Medical from a template. Each department numbers its own assets, offers only its own item categories and the fields they need, books preventive maintenance only when you ask it to, and keeps its own ticket queue. Each person is an editor in some departments and a viewer in others; viewers can look but not change, and the server enforces it. Switch off the built-in fields a department never uses, import and export one department at a time, and find every photo, invoice and signed handover in that department's own folder.</p>
           <div class="tags"><span>FM-1001</span><span>Templates</span><span>Fields per category</span><span>Planned maintenance</span><span>Building › floor › room</span><span>Categories per department</span><span>A folder per department</span><span>Editor &middot; Viewer</span></div>
         </div>
 
@@ -1021,15 +1025,15 @@
         <span class="fld">Access</span>
         <div class="cell">
           <h3>Roles down to the module</h3>
-          <p>Build your own roles: this person sees assets only, that one gets tickets and the directory but never Settings. On top of that, choose per department who edits and who only views. Every change lands in an audit log with who and when.</p>
+          <p>Build your own roles: this person sees assets only, that one gets tickets and the directory but never Settings. On top of that, choose per department who can change and who can only look; labels, invoices, scans and the catalog all follow it, and the server refuses the rest. Every change lands in an audit log with who and when.</p>
           <div class="tags"><span>Per-module rights</span><span>Per-department roles</span><span>2FA</span><span>Audit log</span></div>
         </div>
 
         <span class="fld">Data</span>
         <div class="cell">
           <h3>Backups you can restore, by scope</h3>
-          <p>Export everything, or just configuration, or just assets &mdash; an "everything" archive carries the uploaded logo and letterhead too. Restore reverts a scope to that point in time rather than merging.</p>
-          <div class="tags"><span>Scoped archives</span><span>Scheduled</span><span>Restore in place</span></div>
+          <p>Export everything, or just configuration, or just assets &mdash; an "everything" archive carries the uploaded logo and letterhead too. Every scope brings back the departments, their fields, and who can reach which one. Restore reverts a scope to that point in time rather than merging.</p>
+          <div class="tags"><span>Scoped archives</span><span>Scheduled</span><span>Departments and roles</span><span>Restore in place</span></div>
         </div>
 
         <span class="fld">On the go</span>
@@ -1311,7 +1315,7 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
         <li><b>Photos and logos</b>Product photos and brand logos on every asset, also offline.</li>
         <li><b>Every Settings section</b>Users and roles, WhatsApp linking, 2FA, branding, LDAP, UniFi and more.</li>
         <li><b>Departments</b>New assets and tickets ask for the department; the asset ID and the extra fields follow it.</li>
-        <li><b>Product Catalog</b>Category icons, model photos, and brand logos found on the brand's website.</li>
+        <li><b>Product Catalog</b>Category icons, categories per department, model photos, and brand logos found on the brand's website.</li>
         <li><b>Imports and exports</b>Excel in and out for assets, contracts, the directory and the catalog.</li>
         <li><b>Offline first</b>Work with no signal; changes sync when you're back.</li>
       </ul>
@@ -1340,6 +1344,7 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
     </p>
     <div class="foot-links">
       <a href="https://github.com/shatheitguy/it-vault">Source</a>
+      <a href="https://github.com/shatheitguy/it-vault/stargazers">&#9733; Star on GitHub</a>
       <a href="https://github.com/shatheitguy/it-vault/releases">Releases</a>
       <a href="https://github.com/shatheitguy/it-vault/releases/latest/download/IT-Vault.apk">Android APK</a>
       <a href="https://github.com/shatheitguy/it-vault/pkgs/container/itvault">Container image</a>
@@ -1452,6 +1457,23 @@ cp .env.example .env    <span class="sig"># optional: fill in DB_HOST, DB_USER, 
       }
     });
   }());
+</script>
+<script>
+/* The Star button shows the repository's star count once there is one;
+   if GitHub can't be reached it stays a plain Star link. */
+(function(){
+  var el = document.getElementById('ghStars');
+  if(!el) return;
+  fetch('https://api.github.com/repos/shatheitguy/it-vault')
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(j){
+      var n = j && j.stargazers_count;
+      if(typeof n !== 'number' || n < 1) return;
+      el.textContent = n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1).replace(/\.0$/, '') + 'k' : String(n);
+      el.hidden = false;
+    })
+    .catch(function(){});
+}());
 </script>
 <script>
 /* The version badge in the header reads the newest GitHub release, so the site
