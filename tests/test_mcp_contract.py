@@ -127,8 +127,7 @@ readme = read(os.path.join(ROOT, "mcp", "README.md"))
 for runtime, needle in (("Hermes", "~/.hermes/config.yaml"),
                         ("OpenClaw", "~/.openclaw/openclaw.json"),
                         ("ZeroClaw", "~/.zeroclaw/config.toml"),
-                        ("AI Desktop", "ai_desktop_config.json"),
-                        ("AI Code", "ai mcp add"),
+                        ("Desktop AI apps", '"mcpServers"'),
                         ("ChatGPT", "Add custom connector")):
     check("  %-15s has its own config" % runtime, needle in readme)
 missing_docs = sorted(set(re.findall(r"ITVAULT_[A-Z_]+", src)) -

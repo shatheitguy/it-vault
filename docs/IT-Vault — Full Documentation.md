@@ -608,9 +608,9 @@ permissions of the user that key belongs to, and nothing more**. Two switches
 narrow it further: `ITVAULT_MCP_READONLY=1` refuses every write whatever the
 key could do, and `trash_asset` needs `ITVAULT_MCP_ALLOW_DELETE=1`.
 
-Wiring for Hermes, OpenClaw, ZeroClaw, AI Desktop, AI Code and ChatGPT
+Wiring for Hermes, OpenClaw, ZeroClaw, desktop AI apps and ChatGPT
 is in `mcp/README.md`. Clients that connect over the network rather than
-spawning a process (ChatGPT, AI's custom connectors) use the HTTP
+spawning a process (hosted custom connectors such as ChatGPT) use the HTTP
 transport, which refuses to bind anywhere but loopback without a bearer token.
 
 ---

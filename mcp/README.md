@@ -134,10 +134,10 @@ args = []
 env = { ITVAULT_URL = "http://itvault.lan:5000", ITVAULT_API_KEY = "paste-the-key" }
 ```
 
-### AI Desktop
+### Desktop AI apps
 
-`ai_desktop_config.json` — on Windows `%APPDATA%\AI\`, on macOS
-`~/Library/Application Support/AI/`:
+Most desktop AI assistants that speak MCP read an `mcpServers` block like this
+from their own config file:
 
 ```json
 {
@@ -154,32 +154,17 @@ env = { ITVAULT_URL = "http://itvault.lan:5000", ITVAULT_API_KEY = "paste-the-ke
 }
 ```
 
-Restart AI Desktop; the tools appear under the tools icon. If `command`
-cannot be found, give the absolute path — a desktop app does not inherit the
-PATH your shell has (`where itvault-mcp` / `which itvault-mcp` tells you it).
+Restart the app; the tools appear with its other tools. If `command` cannot be
+found, give the absolute path — a desktop app does not inherit the PATH your
+shell has (`where itvault-mcp` / `which itvault-mcp` tells you it).
 
-### AI Code
+### Hosted AI apps — as a custom connector
 
-One command, from anywhere:
-
-```bash
-ai mcp add it-vault   --env ITVAULT_URL=http://itvault.lan:5000   --env ITVAULT_API_KEY=your-key   -- itvault-mcp
-```
-
-Add `-s user` to make it available in every project rather than this one.
-`ai mcp list` shows whether it connected.
-
-### AI (ai.ai and the desktop app) — as a connector
-
-The Connectors dialog you see in AI has two halves, and only one of them
-is yours to fill:
-
-- **Add** (top right) — a custom connector, which is what you want. AI
-  dials your MCP server **from Provider's cloud**, so `localhost` is no use
-  here: it has to be reachable over the public internet on HTTPS.
-- **Discover / Directory** — a catalogue Provider curates. Nothing you write
-  puts an entry there; it is a submission and a review. Same for ChatGPT's
-  app directory. Everything below is the first half, which works today.
+Hosted assistants (ChatGPT and others) dial your MCP server **from their own
+cloud**, so `localhost` is no use here: it has to be reachable over the public
+internet on HTTPS. Their connector directories are curated by the vendor;
+nothing you write puts an entry there. Everything below is the custom
+connector route, which works today.
 
 Run the HTTP transport with a token:
 
@@ -197,7 +182,7 @@ Cloudflare:
 cloudflared tunnel --url http://127.0.0.1:8787
 ```
 
-Then **Settings → Connectors → Add custom connector**, paste
+Then, in the app's connector settings, choose **Add custom connector**, paste
 `https://your-name/mcp`, and give it the token:
 
 - If your organisation has the **Request headers** section in that dialog,
